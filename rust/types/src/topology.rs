@@ -27,26 +27,26 @@
 //! };
 //!
 //! let config = MultiCloudMultiRegionConfiguration::new(
-//!     RegionName::new("aws-us-east-1"),
+//!     RegionName::new("aws-us-east-1").unwrap(),
 //!     vec![
 //!         ProviderRegion::new(
-//!             RegionName::new("aws-us-east-1"),
+//!             RegionName::new("aws-us-east-1").unwrap(),
 //!             "aws",
 //!             "us-east-1",
 //!             (),
 //!         ),
 //!         ProviderRegion::new(
-//!             RegionName::new("gcp-europe-west1"),
+//!             RegionName::new("gcp-europe-west1").unwrap(),
 //!             "gcp",
 //!             "europe-west1",
 //!             (),
 //!         ),
 //!     ],
 //!     vec![Topology::new(
-//!         TopologyName::new("global"),
+//!         TopologyName::new("global").unwrap(),
 //!         vec![
-//!             RegionName::new("aws-us-east-1"),
-//!             RegionName::new("gcp-europe-west1"),
+//!             RegionName::new("aws-us-east-1").unwrap(),
+//!             RegionName::new("gcp-europe-west1").unwrap(),
 //!         ],
 //!     )],
 //! );
@@ -83,6 +83,37 @@ use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
 
+/// Maximum length for region and topology names.
+const MAX_NAME_LENGTH: usize = 32;
+
+/// Errors that can occur when creating a [`RegionName`] or [`TopologyName`].
+#[derive(Clone, Debug, Eq, Error, PartialEq)]
+pub enum NameError {
+    /// The name is empty.
+    #[error("name cannot be empty")]
+    Empty,
+    /// The name exceeds the maximum allowed length.
+    #[error("name exceeds maximum length of {MAX_NAME_LENGTH} characters: {0} characters")]
+    TooLong(usize),
+    /// The name contains non-ASCII characters.
+    #[error("name contains non-ASCII characters")]
+    NonAscii,
+}
+
+/// Validates that a name is a non-empty string of at most 32 ASCII characters.
+fn validate_name(name: &str) -> Result<(), NameError> {
+    if name.is_empty() {
+        return Err(NameError::Empty);
+    }
+    if !name.is_ascii() {
+        return Err(NameError::NonAscii);
+    }
+    if name.len() > MAX_NAME_LENGTH {
+        return Err(NameError::TooLong(name.len()));
+    }
+    Ok(())
+}
+
 /// Finds duplicate values in a slice by extracting a key from each item.
 ///
 /// Returns a sorted, deduplicated list of keys that appear more than once.
@@ -118,22 +149,41 @@ where
 /// ```
 /// use chroma_types::RegionName;
 ///
-/// let name = RegionName::new("aws-us-east-1");
+/// let name = RegionName::new("aws-us-east-1").unwrap();
 /// assert_eq!(name.as_str(), "aws-us-east-1");
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(transparent)]
 pub struct RegionName(String);
 
 impl RegionName {
     /// Creates a new region name.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`NameError`] if the name:
+    /// - Is empty
+    /// - Exceeds 32 characters
+    /// - Contains non-ASCII characters
+    pub fn new(name: impl Into<String>) -> Result<Self, NameError> {
+        let name = name.into();
+        validate_name(&name)?;
+        Ok(Self(name))
     }
 
     /// Returns the region name as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for RegionName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        RegionName::new(s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -153,22 +203,41 @@ impl std::fmt::Display for RegionName {
 /// ```
 /// use chroma_types::TopologyName;
 ///
-/// let name = TopologyName::new("global");
+/// let name = TopologyName::new("global").unwrap();
 /// assert_eq!(name.as_str(), "global");
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize)]
 #[serde(transparent)]
 pub struct TopologyName(String);
 
 impl TopologyName {
     /// Creates a new topology name.
-    pub fn new(name: impl Into<String>) -> Self {
-        Self(name.into())
+    ///
+    /// # Errors
+    ///
+    /// Returns a [`NameError`] if the name:
+    /// - Is empty
+    /// - Exceeds 32 characters
+    /// - Contains non-ASCII characters
+    pub fn new(name: impl Into<String>) -> Result<Self, NameError> {
+        let name = name.into();
+        validate_name(&name)?;
+        Ok(Self(name))
     }
 
     /// Returns the topology name as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for TopologyName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        TopologyName::new(s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -186,7 +255,7 @@ impl std::fmt::Display for TopologyName {
 /// use chroma_types::{ProviderRegion, RegionName};
 ///
 /// let region = ProviderRegion::new(
-///     RegionName::new("aws-us-east-1"),
+///     RegionName::new("aws-us-east-1").unwrap(),
 ///     "aws",
 ///     "us-east-1",
 ///     (),
@@ -220,7 +289,7 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Pr
     /// use chroma_types::{ProviderRegion, RegionName};
     ///
     /// let region = ProviderRegion::new(
-    ///     RegionName::new("gcp-europe-west1"),
+    ///     RegionName::new("gcp-europe-west1").unwrap(),
     ///     "gcp",
     ///     "europe-west1",
     ///     (),
@@ -269,10 +338,10 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Pr
 /// use chroma_types::{Topology, TopologyName, RegionName};
 ///
 /// let topology = Topology::new(
-///     TopologyName::new("us-multi-az"),
+///     TopologyName::new("us-multi-az").unwrap(),
 ///     vec![
-///         RegionName::new("aws-us-east-1"),
-///         RegionName::new("aws-us-west-2"),
+///         RegionName::new("aws-us-east-1").unwrap(),
+///         RegionName::new("aws-us-west-2").unwrap(),
 ///     ],
 /// );
 /// assert_eq!(topology.name().as_str(), "us-multi-az");
@@ -295,8 +364,8 @@ impl Topology {
     /// use chroma_types::{Topology, TopologyName, RegionName};
     ///
     /// let topology = Topology::new(
-    ///     TopologyName::new("global"),
-    ///     vec![RegionName::new("aws-us-east-1")],
+    ///     TopologyName::new("global").unwrap(),
+    ///     vec![RegionName::new("aws-us-east-1").unwrap()],
     /// );
     /// ```
     pub fn new(name: TopologyName, regions: Vec<RegionName>) -> Self {
@@ -328,9 +397,9 @@ impl Topology {
 /// };
 ///
 /// let config = MultiCloudMultiRegionConfiguration::new(
-///     RegionName::new("aws-us-east-1"),
+///     RegionName::new("aws-us-east-1").unwrap(),
 ///     vec![ProviderRegion::new(
-///         RegionName::new("aws-us-east-1"),
+///         RegionName::new("aws-us-east-1").unwrap(),
 ///         "aws",
 ///         "us-east-1",
 ///         (),
@@ -514,25 +583,25 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
     ///
     /// // Valid configuration
     /// let config = MultiCloudMultiRegionConfiguration::new(
-    ///     RegionName::new("aws-us-east-1"),
+    ///     RegionName::new("aws-us-east-1").unwrap(),
     ///     vec![ProviderRegion::new(
-    ///         RegionName::new("aws-us-east-1"),
+    ///         RegionName::new("aws-us-east-1").unwrap(),
     ///         "aws",
     ///         "us-east-1",
     ///         (),
     ///     )],
     ///     vec![Topology::new(
-    ///         TopologyName::new("default"),
-    ///         vec![RegionName::new("aws-us-east-1")],
+    ///         TopologyName::new("default").unwrap(),
+    ///         vec![RegionName::new("aws-us-east-1").unwrap()],
     ///     )],
     /// );
     /// assert!(config.is_ok());
     ///
     /// // Invalid configuration - preferred region doesn't exist
     /// let config = MultiCloudMultiRegionConfiguration::<()>::new(
-    ///     RegionName::new("nonexistent"),
+    ///     RegionName::new("nonexistent").unwrap(),
     ///     vec![ProviderRegion::new(
-    ///         RegionName::new("aws-us-east-1"),
+    ///         RegionName::new("aws-us-east-1").unwrap(),
     ///         "aws",
     ///         "us-east-1",
     ///         (),
@@ -611,11 +680,11 @@ mod tests {
     use super::*;
 
     fn region_name(s: impl Into<String>) -> RegionName {
-        RegionName::new(s)
+        RegionName::new(s).expect("test region name should be valid")
     }
 
     fn topology_name(s: impl Into<String>) -> TopologyName {
-        TopologyName::new(s)
+        TopologyName::new(s).expect("test topology name should be valid")
     }
 
     fn provider_region(
@@ -623,25 +692,33 @@ mod tests {
         provider: impl Into<String>,
         region: impl Into<String>,
     ) -> ProviderRegion<()> {
-        ProviderRegion::new(RegionName::new(name), provider, region, ())
+        ProviderRegion::new(
+            RegionName::new(name).expect("test region name should be valid"),
+            provider,
+            region,
+            (),
+        )
     }
 
     fn topology(name: impl Into<String>, regions: Vec<&str>) -> Topology {
         Topology::new(
-            TopologyName::new(name),
-            regions.into_iter().map(RegionName::new).collect(),
+            TopologyName::new(name).expect("test topology name should be valid"),
+            regions
+                .into_iter()
+                .map(|s| RegionName::new(s).expect("test region name should be valid"))
+                .collect(),
         )
     }
 
     #[test]
     fn region_name_as_str() {
-        let name = RegionName::new("aws-us-east-1");
+        let name = RegionName::new("aws-us-east-1").expect("valid name");
         assert_eq!(name.as_str(), "aws-us-east-1");
     }
 
     #[test]
     fn region_name_display() {
-        let name = RegionName::new("aws-us-east-1");
+        let name = RegionName::new("aws-us-east-1").expect("valid name");
         assert_eq!(format!("{}", name), "aws-us-east-1");
     }
 
@@ -663,7 +740,7 @@ mod tests {
 
     #[test]
     fn region_name_serde_roundtrip() {
-        let name = RegionName::new("aws-us-east-1");
+        let name = RegionName::new("aws-us-east-1").expect("valid name");
         let json = serde_json::to_string(&name).unwrap();
         assert_eq!(json, "\"aws-us-east-1\"");
         let deserialized: RegionName = serde_json::from_str(&json).unwrap();
@@ -672,13 +749,13 @@ mod tests {
 
     #[test]
     fn topology_name_as_str() {
-        let name = TopologyName::new("global");
+        let name = TopologyName::new("global").expect("valid name");
         assert_eq!(name.as_str(), "global");
     }
 
     #[test]
     fn topology_name_display() {
-        let name = TopologyName::new("global");
+        let name = TopologyName::new("global").expect("valid name");
         assert_eq!(format!("{}", name), "global");
     }
 
@@ -700,7 +777,7 @@ mod tests {
 
     #[test]
     fn topology_name_serde_roundtrip() {
-        let name = TopologyName::new("global");
+        let name = TopologyName::new("global").expect("valid name");
         let json = serde_json::to_string(&name).unwrap();
         assert_eq!(json, "\"global\"");
         let deserialized: TopologyName = serde_json::from_str(&json).unwrap();
@@ -1040,36 +1117,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_preferred_region_string() {
-        let config = MultiCloudMultiRegionConfiguration::new(
-            region_name(""),
-            vec![provider_region("aws-us-east-1", "aws", "us-east-1")],
-            vec![],
-        );
-
-        let err = config.unwrap_err();
-        assert!(err.duplicate_region_names().is_empty());
-        assert!(err.duplicate_topology_names().is_empty());
-        assert!(err.unknown_topology_regions().is_empty());
-        assert_eq!(err.unknown_preferred_region(), Some(&region_name("")));
-    }
-
-    #[test]
-    fn empty_region_name_is_valid_if_defined() {
-        let config = MultiCloudMultiRegionConfiguration::new(
-            region_name(""),
-            vec![provider_region("", "aws", "us-east-1")],
-            vec![],
-        );
-
-        assert!(
-            config.is_ok(),
-            "Empty region name should be valid if defined: {:?}",
-            config
-        );
-    }
-
-    #[test]
     fn multiple_validation_errors() {
         let config = MultiCloudMultiRegionConfiguration::new(
             region_name("nonexistent-preferred"),
@@ -1164,20 +1211,6 @@ mod tests {
     }
 
     #[test]
-    fn display_empty_string_names() {
-        let error = ValidationError::new(
-            vec![region_name("")],
-            vec![topology_name("")],
-            vec![region_name("")],
-            Some(region_name("")),
-        );
-        assert_eq!(
-            error.to_string(),
-            "duplicate region names: ; duplicate topology names: ; unknown topology regions: ; unknown preferred region: "
-        );
-    }
-
-    #[test]
     fn display_special_characters() {
         let error = ValidationError::new(
             vec![
@@ -1191,30 +1224,6 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "duplicate region names: region-with-dash_and_underscore, region with spaces; duplicate topology names: topo.dot; unknown topology regions: region\nwith\nnewlines"
-        );
-    }
-
-    #[test]
-    fn display_unicode_characters() {
-        let error = ValidationError::new(
-            vec![region_name("region-🌍")],
-            vec![topology_name("拓扑名")],
-            vec![region_name("регион-с-кириллицей")],
-            Some(region_name("preferred-🌐")),
-        );
-        assert_eq!(
-            error.to_string(),
-            "duplicate region names: region-🌍; duplicate topology names: 拓扑名; unknown topology regions: регион-с-кириллицей; unknown preferred region: preferred-🌐"
-        );
-    }
-
-    #[test]
-    fn display_long_names() {
-        let long_prefix = "very_long_region_name_that_contains_many_characters_and_pushes_the_boundary_of_reasonableness";
-        let error = ValidationError::new(vec![region_name(long_prefix)], vec![], vec![], None);
-        assert_eq!(
-            error.to_string(),
-            format!("duplicate region names: {}", long_prefix)
         );
     }
 
@@ -1273,5 +1282,208 @@ mod tests {
         let debug_str = format!("{:?}", config);
         assert!(debug_str.contains("MultiCloudMultiRegionConfiguration"));
         assert!(debug_str.contains("aws-us-east-1"));
+    }
+
+    #[test]
+    fn region_name_valid() {
+        assert!(RegionName::new("aws-us-east-1").is_ok());
+        assert!(RegionName::new("a").is_ok());
+        // 32 chars exactly
+        assert!(RegionName::new("12345678901234567890123456789012").is_ok());
+    }
+
+    #[test]
+    fn region_name_empty() {
+        let result = RegionName::new("");
+        assert!(result.is_err());
+        println!(
+            "region_name_empty error: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert!(matches!(result, Err(NameError::Empty)));
+    }
+
+    #[test]
+    fn region_name_too_long() {
+        // 33 chars
+        let result = RegionName::new("123456789012345678901234567890123");
+        assert!(result.is_err());
+        println!(
+            "region_name_too_long error: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert!(matches!(result, Err(NameError::TooLong(33))));
+    }
+
+    #[test]
+    fn region_name_non_ascii() {
+        let result = RegionName::new("region-🌍");
+        assert!(result.is_err());
+        println!(
+            "region_name_non_ascii error: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert!(matches!(result, Err(NameError::NonAscii)));
+    }
+
+    #[test]
+    fn topology_name_valid() {
+        assert!(TopologyName::new("global").is_ok());
+        assert!(TopologyName::new("a").is_ok());
+        // 32 chars exactly
+        assert!(TopologyName::new("12345678901234567890123456789012").is_ok());
+    }
+
+    #[test]
+    fn topology_name_empty() {
+        let result = TopologyName::new("");
+        assert!(result.is_err());
+        println!(
+            "topology_name_empty error: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert!(matches!(result, Err(NameError::Empty)));
+    }
+
+    #[test]
+    fn topology_name_too_long() {
+        // 33 chars
+        let result = TopologyName::new("123456789012345678901234567890123");
+        assert!(result.is_err());
+        println!(
+            "topology_name_too_long error: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert!(matches!(result, Err(NameError::TooLong(33))));
+    }
+
+    #[test]
+    fn topology_name_non_ascii() {
+        let result = TopologyName::new("拓扑名");
+        assert!(result.is_err());
+        println!(
+            "topology_name_non_ascii error: {:?}",
+            result.as_ref().unwrap_err()
+        );
+        assert!(matches!(result, Err(NameError::NonAscii)));
+    }
+
+    #[test]
+    fn name_error_display_empty() {
+        let err = NameError::Empty;
+        assert_eq!(err.to_string(), "name cannot be empty");
+    }
+
+    #[test]
+    fn name_error_display_too_long() {
+        let err = NameError::TooLong(50);
+        assert_eq!(
+            err.to_string(),
+            "name exceeds maximum length of 32 characters: 50 characters"
+        );
+    }
+
+    #[test]
+    fn name_error_display_non_ascii() {
+        let err = NameError::NonAscii;
+        assert_eq!(err.to_string(), "name contains non-ASCII characters");
+    }
+
+    #[test]
+    fn region_name_deserialize_valid() {
+        let json = "\"aws-us-east-1\"";
+        let name: RegionName = serde_json::from_str(json).unwrap();
+        assert_eq!(name.as_str(), "aws-us-east-1");
+    }
+
+    #[test]
+    fn region_name_deserialize_empty() {
+        let json = "\"\"";
+        let result: Result<RegionName, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        println!("region_name_deserialize_empty error: {}", err_msg);
+        assert!(
+            err_msg.contains("name cannot be empty"),
+            "Expected error message to contain 'name cannot be empty', got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn region_name_deserialize_too_long() {
+        let json = "\"123456789012345678901234567890123\"";
+        let result: Result<RegionName, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        println!("region_name_deserialize_too_long error: {}", err_msg);
+        assert!(
+            err_msg.contains("name exceeds maximum length"),
+            "Expected error message to contain 'name exceeds maximum length', got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn region_name_deserialize_non_ascii() {
+        let json = "\"region-🌍\"";
+        let result: Result<RegionName, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        println!("region_name_deserialize_non_ascii error: {}", err_msg);
+        assert!(
+            err_msg.contains("non-ASCII"),
+            "Expected error message to contain 'non-ASCII', got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn topology_name_deserialize_valid() {
+        let json = "\"global\"";
+        let name: TopologyName = serde_json::from_str(json).unwrap();
+        assert_eq!(name.as_str(), "global");
+    }
+
+    #[test]
+    fn topology_name_deserialize_empty() {
+        let json = "\"\"";
+        let result: Result<TopologyName, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        println!("topology_name_deserialize_empty error: {}", err_msg);
+        assert!(
+            err_msg.contains("name cannot be empty"),
+            "Expected error message to contain 'name cannot be empty', got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn topology_name_deserialize_too_long() {
+        let json = "\"123456789012345678901234567890123\"";
+        let result: Result<TopologyName, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        println!("topology_name_deserialize_too_long error: {}", err_msg);
+        assert!(
+            err_msg.contains("name exceeds maximum length"),
+            "Expected error message to contain 'name exceeds maximum length', got: {}",
+            err_msg
+        );
+    }
+
+    #[test]
+    fn topology_name_deserialize_non_ascii() {
+        let json = "\"拓扑名\"";
+        let result: Result<TopologyName, _> = serde_json::from_str(json);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        println!("topology_name_deserialize_non_ascii error: {}", err_msg);
+        assert!(
+            err_msg.contains("non-ASCII"),
+            "Expected error message to contain 'non-ASCII', got: {}",
+            err_msg
+        );
     }
 }
