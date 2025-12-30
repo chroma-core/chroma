@@ -1,9 +1,9 @@
 CREATE TABLE IF NOT EXISTS fragments (
-    collection_id STRING(36) NOT NULL,
+    log_id STRING(36) NOT NULL,
     ident STRING(36) NOT NULL,
     path STRING(64) NOT NULL,
     position_start INT64 NOT NULL,
     position_limit INT64 NOT NULL,
     num_bytes INT64 NOT NULL,
     setsum STRING(64) NOT NULL,
-) PRIMARY KEY (collection_id, ident);
+) PRIMARY KEY (log_id, ident);
