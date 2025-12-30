@@ -165,7 +165,7 @@ impl MigrationDir {
         let manifest_filename = self.manifest_filename();
         let manifest_file = self.get_file(manifest_filename).ok_or_else(|| {
             GetSourceMigrationsError::ManifestValidationError(format!(
-                "{} file not found - run: cargo run --bin spanner_migration -- --generate-sum",
+                "{} file not found - run: cargo run --bin spanner_migration -- generate-sum",
                 manifest_filename
             ))
         })?;
@@ -219,7 +219,7 @@ impl MigrationDir {
                 }
                 None => {
                     return Err(GetSourceMigrationsError::ManifestValidationError(format!(
-                        "Migration file {} listed in manifest but not found, you might have to regenerate {} with: cargo run --bin spanner_migration -- --generate-sum",
+                        "Migration file {} listed in manifest but not found, you might have to regenerate {} with: cargo run --bin spanner_migration -- generate-sum",
                         filename, self.manifest_filename()
                     )));
                 }
@@ -305,8 +305,7 @@ impl MigrationDir {
             "# Format: {filename} {running_sha256_hash}".to_string(),
             "# This file protects against merge conflicts and forgotten migration files."
                 .to_string(),
-            "# Run `cargo run --bin spanner_migration -- --generate-sum` to regenerate."
-                .to_string(),
+            "# Run `cargo run --bin spanner_migration -- generate-sum` to regenerate.".to_string(),
             String::new(),
         ];
 
