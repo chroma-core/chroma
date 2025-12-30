@@ -8165,7 +8165,6 @@ dependencies = [
  "google-cloud-gax",
  "google-cloud-googleapis",
  "google-cloud-spanner",
- "hex",
  "regex",
  "rust-embed",
  "serde",

@@ -22,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|a| a == "--generate-sum") {
         println!("Generating migrations.sum files...");
         for dir in MIGRATION_DIRS.iter() {
-            let manifest_content = dir.generate_manifest();
+            let manifest_content = dir.generate_manifest()?;
             let manifest_path = "migrations/migrations.sum";
             std::fs::write(manifest_path, manifest_content)?;
             println!("  Wrote {}", manifest_path);

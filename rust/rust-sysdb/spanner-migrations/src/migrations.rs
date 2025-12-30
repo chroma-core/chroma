@@ -52,6 +52,10 @@ fn validate_sha256_hash(hash: &str, context: &str) -> Result<(), GetSourceMigrat
     Ok(())
 }
 
+fn format_sha256_hash(hash: &[u8]) -> String {
+    hash.iter().map(|byte| format!("{:02x}", byte)).collect()
+}
+
 pub enum MigrationDir {
     SpannerSysDb,
 }
@@ -73,10 +77,13 @@ pub enum GetSourceMigrationsError {
 impl MigrationDir {
     /// Returns SQL migration file names only
     fn sql_migration_files(&self) -> Vec<String> {
-        self.iter()
+        let mut files: Vec<String> = self
+            .iter()
             .filter(|name| name.ends_with(".sql"))
             .map(|name| name.to_string())
-            .collect()
+            .collect();
+        files.sort();
+        files
     }
 
     pub fn as_str(&self) -> &str {
@@ -207,12 +214,15 @@ impl MigrationDir {
         Ok(())
     }
 
-    pub fn get_source_migrations(&self) -> Result<Vec<Migration>, GetSourceMigrationsError> {
+    /// Shared method to convert migration files to Migration structs with rolling hashes
+    fn create_migrations_from_files(&self) -> Result<Vec<Migration>, GetSourceMigrationsError> {
         let mut migrations = Vec::new();
+        let mut previous_hash: Option<Vec<u8>> = None;
 
         for migration_name in self.sql_migration_files() {
             let (version, _) = Self::parse_migration_filename(&migration_name)
                 .map_err(GetSourceMigrationsError::ParseMigrationFilenameError)?;
+
             let sql = match self.get_file(&migration_name) {
                 Some(sql) => str::from_utf8(&sql.data)
                     .map_err(|_| {
@@ -231,42 +241,31 @@ impl MigrationDir {
                     ))
                 }
             };
+
             let mut hasher = Sha256::new();
+            if let Some(prev_hash) = &previous_hash {
+                hasher.update(prev_hash);
+            }
             hasher.update(sql.as_bytes());
-            let hash = format!("{:x}", hasher.finalize());
+            let rolling_hash = hasher.finalize();
+            let rolling_hash_hex = format_sha256_hash(&rolling_hash);
+            previous_hash = Some(rolling_hash.to_vec());
+
             migrations.push(Migration::new(
                 self.as_str().to_string(),
                 migration_name.to_string(),
                 version,
                 sql,
-                hash,
+                rolling_hash_hex,
             ));
         }
 
-        migrations.sort_by(|a, b| a.version.cmp(&b.version));
+        Ok(migrations)
+    }
 
-        let mut previous_hash: Option<Vec<u8>> = None;
-        for migration in migrations.iter_mut() {
-            let mut hasher = Sha256::new();
+    pub fn get_source_migrations(&self) -> Result<Vec<Migration>, GetSourceMigrationsError> {
+        let migrations = self.create_migrations_from_files()?;
 
-            // Add previous hash if it exists
-            if let Some(prev_hash) = &previous_hash {
-                hasher.update(prev_hash);
-            }
-
-            // Add current SQL
-            hasher.update(migration.sql.as_bytes());
-
-            let rolling_hash = hasher.finalize();
-            let rolling_hash_hex = format!("{:x}", rolling_hash);
-
-            // Store this hash as previous for next iteration
-            previous_hash = Some(rolling_hash.to_vec());
-
-            migration.hash = rolling_hash_hex;
-        }
-
-        // Validate against manifest
         let manifest = self.load_manifest()?;
         self.validate_manifest(&migrations, &manifest)?;
 
@@ -274,7 +273,7 @@ impl MigrationDir {
     }
 
     /// Generate manifest content for all migrations (for updating migrations.sum)
-    pub fn generate_manifest(&self) -> String {
+    pub fn generate_manifest(&self) -> Result<String, GetSourceMigrationsError> {
         let mut lines = vec![
             "# Spanner migrations manifest - DO NOT EDIT MANUALLY".to_string(),
             "# Format: {filename} {running_sha256_hash}".to_string(),
@@ -285,42 +284,18 @@ impl MigrationDir {
             String::new(),
         ];
 
-        let mut entries: Vec<(String, String)> = Vec::new();
-        let mut previous_hash: Option<Vec<u8>> = None;
+        let migrations = self.create_migrations_from_files()?;
 
-        for migration_name in self.sql_migration_files() {
-            if let Some(file) = self.get_file(&migration_name) {
-                if let Ok(sql) = str::from_utf8(&file.data) {
-                    let sql = sql.replace(
-                        str::from_utf8(&[13]).expect("CR is valid ASCII character"),
-                        "",
-                    );
+        let rolling_hashes: Vec<(String, String)> = migrations
+            .into_iter()
+            .map(|m| (m.filename, m.hash))
+            .collect();
 
-                    let mut hasher = Sha256::new();
-
-                    if let Some(prev_hash) = &previous_hash {
-                        hasher.update(prev_hash);
-                    }
-
-                    hasher.update(sql.as_bytes());
-
-                    let rolling_hash = hasher.finalize();
-                    let rolling_hash_hex = format!("{:x}", rolling_hash);
-
-                    previous_hash = Some(rolling_hash.to_vec());
-
-                    entries.push((migration_name.to_string(), rolling_hash_hex));
-                }
-            }
-        }
-
-        // Sort by filename for consistent output
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-        for (filename, hash) in entries {
+        for (filename, hash) in rolling_hashes {
             lines.push(format!("{} {}", filename, hash));
         }
 
-        lines.join("\n")
+        Ok(lines.join("\n"))
     }
 }
 
@@ -349,3 +324,48 @@ static MIGRATION_FILENAME_REGEX: LazyLock<Regex> =
 #[include = "*.sql"]
 #[include = "migrations.sum"]
 struct SpannerSysDbMigrationsFolder;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_sha256_hash_produces_64_char_hex() {
+        let empty_hash = [
+            0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f,
+            0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b,
+            0x78, 0x52, 0xb8, 0x55,
+        ];
+
+        let result = format_sha256_hash(&empty_hash);
+
+        assert_eq!(result.len(), 64);
+
+        assert!(result.chars().all(|c| c.is_ascii_hexdigit()));
+
+        assert_eq!(
+            result,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn test_format_sha256_hash_with_different_values() {
+        let test_hash = [
+            0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+            0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b,
+            0x1c, 0x1d, 0x1e, 0x1f,
+        ];
+
+        let result = format_sha256_hash(&test_hash);
+
+        assert_eq!(result.len(), 64);
+
+        assert!(result.chars().all(|c| c.is_ascii_hexdigit()));
+
+        assert_eq!(
+            result,
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        );
+    }
+}
