@@ -6,4 +6,4 @@ CREATE TABLE IF NOT EXISTS manifests (
     writer STRING(64) NOT NULL,
     initial_offset INT64 NOT NULL,
     initial_seq_no INT64 NOT NULL,
-) PRIMARY KEY (id);
+) PRIMARY KEY (collection_id);
