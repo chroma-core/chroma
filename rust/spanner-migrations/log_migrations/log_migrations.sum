@@ -3,6 +3,6 @@
 # This file protects against merge conflicts and forgotten migration files.
 # Run `cargo run --bin spanner_migration -- --generate-sum` to regenerate.
 
-0001-create_manifests_table.spanner.sql 9c6a870f2a41cadb29b4ce9f624cf028d8c721634fdff5d2c1095706fe8ba126
-0002-create_fragments_table.spanner.sql 441664551c31f881f4bba06cf4dccba930f39bfc0ecf951f6c12047e2d6b69ba
-0003-create_fragment_regions_table.spanner.sql 99cb2cd9a8a037ca18e5bd90abbb14c9b03fcde57e0bc22919a44dd61ce6e06c
+0001-create_manifests_table.spanner.sql 2e2295b6a3d1676d2845ae1b5bb09fa8ce328add9b9181561bc33b971fabfa39
+0002-create_fragments_table.spanner.sql 1768d8e3b20795adc17799e8ee4531c9f5383f2e8c131ab3d82ebc2ab220176e
+0003-create_fragment_regions_table.spanner.sql 40374647bdda9fb5765a87956edb08901643d12832a99d17e7499a693451d9b7
