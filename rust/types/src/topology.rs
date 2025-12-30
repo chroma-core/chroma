@@ -532,38 +532,41 @@ impl ValidationError {
         let mut parts = Vec::new();
 
         if !self.duplicate_region_names.is_empty() {
-            let names: Vec<&str> = self
-                .duplicate_region_names
-                .iter()
-                .map(|n| n.as_str())
-                .collect();
-            parts.push(format!("duplicate region names: {}", names.join(", ")));
+            parts.push(format!(
+                "duplicate region names: {}",
+                format_name_list(&self.duplicate_region_names)
+            ));
         }
 
         if !self.duplicate_topology_names.is_empty() {
-            let names: Vec<&str> = self
-                .duplicate_topology_names
-                .iter()
-                .map(|n| n.as_str())
-                .collect();
-            parts.push(format!("duplicate topology names: {}", names.join(", ")));
+            parts.push(format!(
+                "duplicate topology names: {}",
+                format_name_list(&self.duplicate_topology_names)
+            ));
         }
 
         if !self.unknown_topology_regions.is_empty() {
-            let names: Vec<&str> = self
-                .unknown_topology_regions
-                .iter()
-                .map(|n| n.as_str())
-                .collect();
-            parts.push(format!("unknown topology regions: {}", names.join(", ")));
+            parts.push(format!(
+                "unknown topology regions: {}",
+                format_name_list(&self.unknown_topology_regions)
+            ));
         }
 
         if let Some(ref name) = self.unknown_preferred_region {
-            parts.push(format!("unknown preferred region: {}", name.as_str()));
+            parts.push(format!("unknown preferred region: {}", name));
         }
 
         parts.join("; ")
     }
+}
+
+/// Formats a slice of displayable items as a comma-separated string.
+fn format_name_list<T: std::fmt::Display>(names: &[T]) -> String {
+    names
+        .iter()
+        .map(|n| n.to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>>
