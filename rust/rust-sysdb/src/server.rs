@@ -74,7 +74,7 @@ impl SysdbService {
 
         tracing::info!("Sysdb service listening on {}", addr);
 
-        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         // TODO(Sanket): More sophisticated is_ready logic.
         health_reporter

@@ -2243,7 +2243,7 @@ impl LogServerWrapper {
         let addr = format!("[::]:{}", log_server.config.port).parse().unwrap();
         println!("Log listening on {}", addr);
 
-        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
             .set_serving::<chroma_types::chroma_proto::log_service_server::LogServiceServer<Self>>()
             .await;

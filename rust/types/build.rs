@@ -21,9 +21,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         proto_paths.push("idl/chromadb/proto/debug.proto");
     }
 
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .emit_rerun_if_changed(true)
-        .compile(&proto_paths, &["idl/"])?;
+        .compile_protos(&proto_paths, &["idl/"])?;
 
     // Note: Operator constants are now generated via bin/generate_operator_constants.sh
     // and committed to git as rust/types/src/functions.rs.

@@ -202,6 +202,7 @@ impl MigrationRunner {
             statements: vec![sql.to_string()],
             operation_id: String::new(),
             proto_descriptors: Vec::new(),
+            throughput_mode: false,
         };
 
         let mut operation = self
