@@ -1053,14 +1053,17 @@ impl LogServer {
         if let Some(cache) = self.cache.as_ref() {
             let mut cache_collections_to_purge = Vec::with_capacity(after.len());
             let before = rollup.rollups;
-            for (collection_id, after_state) in after.into_iter() {
-                let Some(before_state) = before.get(&collection_id) else {
-                    continue;
-                };
-                if before_state.reinsert_count / self.config.reinsert_threshold
-                    != after_state.reinsert_count / self.config.reinsert_threshold
-                {
-                    cache_collections_to_purge.push(collection_id);
+            // Guard against division by zero if reinsert_threshold is misconfigured to 0.
+            if self.config.reinsert_threshold > 0 {
+                for (collection_id, after_state) in after.into_iter() {
+                    let Some(before_state) = before.get(&collection_id) else {
+                        continue;
+                    };
+                    if before_state.reinsert_count / self.config.reinsert_threshold
+                        != after_state.reinsert_count / self.config.reinsert_threshold
+                    {
+                        cache_collections_to_purge.push(collection_id);
+                    }
                 }
             }
             for collection_id in cache_collections_to_purge {
