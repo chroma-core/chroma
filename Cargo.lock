@@ -9665,6 +9665,7 @@ dependencies = [
  "chroma-storage",
  "chroma-types",
  "futures",
+ "gcloud-gax",
  "gcloud-spanner",
  "guacamole",
  "opentelemetry",
