@@ -241,9 +241,6 @@ mod tests {
         ];
         let results = write_quorum(futures, 2, TEST_TIMEOUT).await;
         assert_eq!(results.len(), 3);
-        println!("results[0] = {:?}", results[0]);
-        println!("results[1] = {:?}", results[1]);
-        println!("results[2] = {:?}", results[2]);
         // The first two futures return errors.
         assert!(results[0].as_ref().unwrap().is_err());
         assert!(results[1].as_ref().unwrap().is_err());
@@ -292,11 +289,6 @@ mod tests {
         ];
         let results = write_quorum(futures, 3, TEST_TIMEOUT).await;
         assert_eq!(results.len(), 5);
-        println!("results[0] = {:?}", results[0]);
-        println!("results[1] = {:?}", results[1]);
-        println!("results[2] = {:?}", results[2]);
-        println!("results[3] = {:?}", results[3]);
-        println!("results[4] = {:?}", results[4]);
         // All futures should have completed (no None values).
         assert!(results[0].is_some(), "future 0 should complete");
         assert!(results[1].is_some(), "future 1 should complete");
