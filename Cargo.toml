@@ -32,8 +32,8 @@ opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = { version = "55.1", features = ["async"] }
 pin-project = "1.1.10"
-prost = "0.13"
-prost-types = "0.13.5"
+prost = "0.14"
+prost-types = "0.14"
 regex = "1.11.1"
 regex-syntax = "0.8.5"
 roaring = "0.10.6"
@@ -47,9 +47,9 @@ tantivy = "0.22.0"
 thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util", "signal"] }
 tokio-util = "0.7.12"
-tonic = "0.12"
-tonic-health = "0.12.3"
-tower = { version = "0.4.13", features = ["discover"] }
+tonic = "0.14"
+tonic-health = "0.14"
+tower = { version = "0.5.2", features = ["discover"] }
 backon = "1.3.0"
 tracing = { version = "0.1" }
 tracing-bunyan-formatter = "0.3"

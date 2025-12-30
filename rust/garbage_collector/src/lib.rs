@@ -64,7 +64,7 @@ impl chroma_types::chroma_proto::garbage_collector_server::GarbageCollector
 }
 
 pub async fn garbage_collector_service_entrypoint() -> Result<(), Box<dyn std::error::Error>> {
-    let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_not_serving::<GarbageCollectorServer<GarbageCollectorService>>()
         .await;

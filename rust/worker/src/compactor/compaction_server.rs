@@ -28,7 +28,7 @@ impl CompactionServer {
         let addr = format!("[::]:{}", self.port).parse().unwrap();
         tracing::info!("Compaction server listening at {addr}");
 
-        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
             .set_not_serving::<CompactorServer<Self>>()
             .await;
