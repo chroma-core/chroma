@@ -31,6 +31,47 @@ pub struct MigrationRunner {
     database_path: String,
 }
 
+// TODO(tanujnay112): Remove this backwards compatibility migration once all systems are updated
+#[derive(Clone, Copy)]
+struct LegacyHashMapping {
+    old_hash: &'static str,
+    new_hash: &'static str,
+}
+
+/// Legacy hash mappings for backwards compatibility
+static LEGACY_HASH_MAPPINGS: std::sync::LazyLock<
+    std::collections::HashMap<&'static str, LegacyHashMapping>,
+> = std::sync::LazyLock::new(|| {
+    std::collections::HashMap::from([
+        // Technically not needed but doesn't hurt
+        (
+            "0001-create_tenants.spanner.sql",
+            LegacyHashMapping {
+                old_hash: "87dbaa652753aba0730b9b784a2974f0b23c2017b562ec9f0b01663d9c840321",
+                new_hash: "87dbaa652753aba0730b9b784a2974f0b23c2017b562ec9f0b01663d9c840321",
+            },
+        ),
+        (
+            "0002-create_databases.spanner.sql",
+            LegacyHashMapping {
+                old_hash: "167906c4b0c6de55f535925908bbb8130a1492741f4584b4987f97c0a4fd8818",
+                new_hash: "e07d1f1b3d7c9ac2d7df289b7da4b46602c350a3b7589444cde87ece30db4fa8",
+            },
+        ),
+    ])
+});
+
+/// Migrates old individual file hashes to new rolling hash format
+fn remap_legacy_hashes(migrations: &mut [Migration]) {
+    for migration in migrations.iter_mut() {
+        if let Some(mapping) = LEGACY_HASH_MAPPINGS.get(migration.filename.as_str()) {
+            if migration.hash == mapping.old_hash {
+                migration.hash = mapping.new_hash.to_string();
+            }
+        }
+    }
+}
+
 impl MigrationRunner {
     pub fn new(client: Client, admin_client: AdminClient, database_path: String) -> Self {
         Self {
@@ -38,6 +79,53 @@ impl MigrationRunner {
             admin_client,
             database_path,
         }
+    }
+
+    // TODO(tanujnay112): Remove this method after all legacy hashes are migrated
+    pub async fn migrate_legacy_hashes(&self) -> Result<usize, MigrationError> {
+        let mut total_updated = 0;
+        tracing::info!("Starting legacy hash migration process");
+
+        for (filename, mapping) in LEGACY_HASH_MAPPINGS.iter() {
+            // Use read_write_transaction to execute UPDATE and get affected rows count
+            let (_, updated_rows) = self
+                .client
+                .read_write_transaction(|tx| Box::pin(async move {
+                    let mut stmt = Statement::new(
+                        "UPDATE migrations SET checksum = @new_hash WHERE filename = @filename AND checksum = @old_hash",
+                    );
+                    stmt.add_param("new_hash", &(mapping.new_hash.to_string()));
+                    stmt.add_param("filename", &(filename.to_string()));
+                    stmt.add_param("old_hash", &(mapping.old_hash.to_string()));
+
+                    let affected_rows = tx
+                        .update(stmt)
+                        .await
+                        .map_err(|e| tonic::Status::internal(e.to_string()))?;
+
+                    Ok(affected_rows)
+                }))
+                .await
+                .map_err(|e: google_cloud_spanner::client::Error| MigrationError::ClientError(e.to_string()))?;
+
+            total_updated += updated_rows;
+
+            if updated_rows > 0 {
+                tracing::info!(
+                    "Updated {} rows for migration {} from old hash {} to new hash {}",
+                    updated_rows,
+                    filename,
+                    mapping.old_hash,
+                    mapping.new_hash
+                );
+            }
+        }
+
+        tracing::info!(
+            "Total rows updated during legacy hash migration: {}",
+            total_updated
+        );
+        Ok(total_updated as usize)
     }
 
     pub async fn apply_all_migrations(&self) -> Result<(), MigrationError> {
@@ -61,6 +149,12 @@ impl MigrationRunner {
                 );
                 self.apply_migration(&migration).await?;
             }
+        }
+
+        // TODO(tanujnay112): Remove once legacy hash migration is no longer needed
+        // Technically an error here need not error the process.
+        if let Err(e) = self.migrate_legacy_hashes().await {
+            tracing::warn!("Legacy hash migration failed. This may be acceptable if it has already run. Error: {}", e);
         }
         self.client.clone().close().await;
         Ok(())
@@ -225,6 +319,8 @@ impl MigrationRunner {
 
             result.push(Migration::new(dir, filename, version as i32, sql, hash));
         }
+
+        remap_legacy_hashes(&mut result);
 
         Ok(result)
     }
