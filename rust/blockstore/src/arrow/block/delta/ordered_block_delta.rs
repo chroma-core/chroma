@@ -96,7 +96,7 @@ impl OrderedBlockDelta {
 
     pub fn copy_to_end<K: ArrowWriteableKey, V: ArrowWriteableValue>(&mut self) {
         // Copy remaining rows
-        if let Some(old_block) = self.old_block.as_ref() {
+        if let Some(old_block) = self.old_block.take() {
             #[cfg(debug_assertions)]
             let mut last_key = None;
 
