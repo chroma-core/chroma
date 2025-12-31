@@ -299,7 +299,7 @@ impl MigrationDir {
     }
 
     /// Generate manifest content for all migrations.
-    pub fn generate_manifest(&self) -> String {
+    pub fn generate_manifest(&self) -> Result<String, GetSourceMigrationsError> {
         let mut lines = vec![
             "# Spanner migrations manifest - DO NOT EDIT MANUALLY".to_string(),
             "# Format: {filename} {running_sha256_hash}".to_string(),

@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let root = args.root.as_deref().unwrap_or(".");
         println!("Generating migrations.sum files...");
         for dir in MIGRATION_DIRS.iter() {
-            let manifest_content = dir.generate_manifest();
+            let manifest_content = dir.generate_manifest()?;
             let manifest_path = std::path::Path::new(root)
                 .join(dir.folder_name())
                 .join(dir.manifest_filename());
@@ -143,8 +143,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let slug = args.slug.as_deref();
 
     if let Some(slug_val) = slug {
-        let known_slugs: Vec<&str> = MIGRATION_DIRS.iter().map(|d| d.migration_slug()).collect();
-        if !known_slugs.contains(&slug_val) {
+        let slug_exists = MIGRATION_DIRS
+            .iter()
+            .any(|d| d.migration_slug() == slug_val);
+        if !slug_exists {
+            let known_slugs: Vec<&str> =
+                MIGRATION_DIRS.iter().map(|d| d.migration_slug()).collect();
             return Err(format!(
                 "Unknown migration slug '{}'. Available slugs are: {}",
                 slug_val,
