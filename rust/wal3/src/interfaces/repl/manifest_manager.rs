@@ -889,4 +889,375 @@ mod tests {
 
         println!("test_k8s_integration_init_with_nondefault_manifest: passed");
     }
+
+    // ==================== Concurrent operations tests ====================
+
+    // Test concurrent publish_fragment calls from multiple tasks.
+    #[tokio::test]
+    async fn test_k8s_integration_publish_fragment_concurrent() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let client = Arc::new(client);
+        let mut handles = vec![];
+
+        for i in 0..5 {
+            let client = Arc::clone(&client);
+            let handle = tokio::spawn(async move {
+                let manager = ManifestManager::new(client, log_id);
+                let pointer = FragmentUuid::generate();
+                let path = format!("path/fragment_{}.parquet", i);
+                manager
+                    .publish_fragment(&pointer, &path, 10, 100, make_setsum((i + 1) as u8))
+                    .await
+            });
+            handles.push(handle);
+        }
+
+        let mut positions = vec![];
+        for handle in handles {
+            let result = handle.await.expect("task panicked");
+            match result {
+                Ok(pos) => positions.push(pos.offset()),
+                Err(e) => println!("publish_fragment failed: {:?}", e),
+            }
+        }
+
+        // All positions should be unique (serialized by Spanner transactions).
+        positions.sort();
+        let unique_positions: std::collections::HashSet<_> = positions.iter().collect();
+        assert_eq!(
+            positions.len(),
+            unique_positions.len(),
+            "all positions should be unique: {:?}",
+            positions
+        );
+
+        println!(
+            "test_k8s_integration_publish_fragment_concurrent: positions={:?}",
+            positions
+        );
+    }
+
+    // ==================== Error path tests ====================
+
+    // Test that init fails when called twice with the same log_id.
+    #[tokio::test]
+    async fn test_k8s_integration_init_duplicate() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+
+        let result1 = ManifestManager::init(&client, log_id, &manifest).await;
+        assert!(result1.is_ok(), "first init should succeed");
+
+        let result2 = ManifestManager::init(&client, log_id, &manifest).await;
+        assert!(
+            result2.is_err(),
+            "second init should fail for duplicate log_id"
+        );
+
+        println!(
+            "test_k8s_integration_init_duplicate: second init error={:?}",
+            result2.err()
+        );
+    }
+
+    // Test publish_fragment with enumeration_offset near i64::MAX causing overflow.
+    #[tokio::test]
+    async fn test_k8s_integration_publish_with_overflow() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        // Create manifest with enumeration_offset near i64::MAX.
+        let manifest = Manifest {
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset((i64::MAX - 10) as u64)),
+            initial_seq_no: None,
+            writer: "test-writer".to_string(),
+        };
+
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let pointer = FragmentUuid::generate();
+
+        // Try to publish a fragment that would overflow enumeration_offset.
+        let result = manager
+            .publish_fragment(&pointer, "path", 100, 100, Setsum::default())
+            .await;
+
+        match result {
+            Err(Error::LogFull) => {
+                println!("test_k8s_integration_publish_with_overflow: correctly returned LogFull");
+            }
+            other => panic!("expected LogFull, got {:?}", other),
+        }
+    }
+
+    // ==================== Snapshot operation tests ====================
+
+    // Test snapshot_load returns internal error (not implemented).
+    #[tokio::test]
+    async fn test_k8s_integration_snapshot_load_returns_internal() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let pointer = crate::SnapshotPointer {
+            setsum: Setsum::default(),
+            path_to_snapshot: "test/path".to_string(),
+            depth: 0,
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(100),
+            num_bytes: 1000,
+        };
+
+        let result =
+            <ManifestManager as ManifestPublisher<FragmentUuid>>::snapshot_load(&manager, &pointer)
+                .await;
+
+        match result {
+            Err(Error::Internal { .. }) => {
+                println!(
+                    "test_k8s_integration_snapshot_load_returns_internal: correctly returned Internal"
+                );
+            }
+            other => panic!("expected Internal error, got {:?}", other),
+        }
+    }
+
+    // Test snapshot_install returns internal error (not implemented).
+    #[tokio::test]
+    async fn test_k8s_integration_snapshot_install_returns_internal() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let snapshot = crate::Snapshot {
+            path: "test/snapshot".to_string(),
+            depth: 0,
+            setsum: Setsum::default(),
+            writer: "test-writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![],
+        };
+
+        let result = manager.snapshot_install(&snapshot).await;
+
+        match result {
+            Err(Error::Internal { .. }) => {
+                println!(
+                    "test_k8s_integration_snapshot_install_returns_internal: correctly returned Internal"
+                );
+            }
+            other => panic!("expected Internal error, got {:?}", other),
+        }
+    }
+
+    // Test snapshot_load via ManifestConsumer trait.
+    #[tokio::test]
+    async fn test_k8s_integration_snapshot_load_consumer_returns_internal() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let pointer = crate::SnapshotPointer {
+            setsum: Setsum::default(),
+            path_to_snapshot: "test/path".to_string(),
+            depth: 0,
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(100),
+            num_bytes: 1000,
+        };
+
+        use crate::interfaces::ManifestConsumer;
+        let result =
+            <ManifestManager as ManifestConsumer<FragmentUuid>>::snapshot_load(&manager, &pointer)
+                .await;
+
+        match result {
+            Err(Error::Internal { .. }) => {
+                println!("test_k8s_integration_snapshot_load_consumer_returns_internal: correctly returned Internal");
+            }
+            other => panic!("expected Internal error, got {:?}", other),
+        }
+    }
+
+    // ==================== Garbage collection stub tests ====================
+
+    // Test garbage_applies_cleanly returns Ok(true).
+    #[tokio::test]
+    async fn test_k8s_integration_garbage_applies_cleanly() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let garbage = crate::Garbage::empty();
+
+        let result = manager.garbage_applies_cleanly(&garbage).await;
+        assert!(
+            result.is_ok(),
+            "garbage_applies_cleanly failed: {:?}",
+            result
+        );
+        assert!(
+            result.unwrap(),
+            "garbage_applies_cleanly should return true"
+        );
+
+        println!("test_k8s_integration_garbage_applies_cleanly: passed");
+    }
+
+    // Test apply_garbage returns Ok(()).
+    #[tokio::test]
+    async fn test_k8s_integration_apply_garbage() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let garbage = crate::Garbage::empty();
+
+        let result = manager.apply_garbage(garbage).await;
+        assert!(result.is_ok(), "apply_garbage failed: {:?}", result);
+
+        println!("test_k8s_integration_apply_garbage: passed");
+    }
+
+    // Test compute_garbage returns Ok(None).
+    #[tokio::test]
+    async fn test_k8s_integration_compute_garbage() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let options = crate::GarbageCollectionOptions::default();
+        let first_to_keep = LogPosition::from_offset(0);
+
+        let result = manager.compute_garbage(&options, first_to_keep).await;
+        assert!(result.is_ok(), "compute_garbage failed: {:?}", result);
+        assert!(
+            result.unwrap().is_none(),
+            "compute_garbage should return None"
+        );
+
+        println!("test_k8s_integration_compute_garbage: passed");
+    }
+
+    // ==================== Setsum consistency tests ====================
+
+    // Test that publish_fragment correctly accumulates setsum in manifest.
+    #[tokio::test]
+    async fn test_k8s_integration_publish_updates_manifest_setsum() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+
+        // Publish first fragment with known setsum.
+        let setsum1 = make_setsum(1);
+        let pointer1 = FragmentUuid::generate();
+        manager
+            .publish_fragment(&pointer1, "path1", 5, 100, setsum1)
+            .await
+            .expect("first publish failed");
+
+        // Load and verify setsum equals setsum1.
+        let (loaded1, _) = ManifestManager::load(&client, log_id)
+            .await
+            .expect("load failed")
+            .expect("manifest should exist");
+        assert_eq!(
+            loaded1.setsum, setsum1,
+            "manifest setsum should equal first fragment setsum"
+        );
+
+        // Publish second fragment with another setsum.
+        let setsum2 = make_setsum(2);
+        let pointer2 = FragmentUuid::generate();
+        manager
+            .publish_fragment(&pointer2, "path2", 5, 100, setsum2)
+            .await
+            .expect("second publish failed");
+
+        // Load and verify setsum equals setsum1 + setsum2.
+        let (loaded2, _) = ManifestManager::load(&client, log_id)
+            .await
+            .expect("load failed")
+            .expect("manifest should exist");
+        let expected_setsum = setsum1 + setsum2;
+        assert_eq!(
+            loaded2.setsum, expected_setsum,
+            "manifest setsum should equal sum of fragment setsums"
+        );
+
+        println!(
+            "test_k8s_integration_publish_updates_manifest_setsum: final setsum={}",
+            loaded2.setsum.hexdigest()
+        );
+    }
+
+    // Test manifest_head with ETag witness returns error (only Position is supported).
+    #[tokio::test]
+    async fn test_k8s_integration_manifest_head_etag_witness() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let witness = ManifestWitness::ETag(crate::interfaces::ETag("test-etag".to_string()));
+
+        let result = manager.manifest_head(&witness).await;
+        match result {
+            Err(Error::Internal { .. }) => {
+                println!(
+                    "test_k8s_integration_manifest_head_etag_witness: correctly returned Internal"
+                );
+            }
+            other => panic!("expected Internal error, got {:?}", other),
+        }
+    }
 }
