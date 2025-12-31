@@ -367,16 +367,16 @@ def CloudClient(
         api_key: The api key to use for this client.
     """
 
-    required_args = [
-        CloudClientArg(name="api_key", env_var="CHROMA_API_KEY", value=api_key),
-    ]
+    required_args = {
+       "api_key": CloudClientArg(name="api_key", env_var="CHROMA_API_KEY", value=api_key),
+    }
 
     # If api_key is not provided, try to load it from the environment variable
-    if not all([arg.value for arg in required_args]):
-        for arg in required_args:
+    if not all([arg.value for arg in required_args.values()]):
+        for arg in required_args.values():
             arg.value = arg.value or os.environ.get(arg.env_var)
 
-    missing_args = [arg for arg in required_args if arg.value is None]
+    missing_args = [arg for arg in required_args.values() if arg.value is None]
     if missing_args:
         raise ValueError(
             f"Missing required arguments: {', '.join([arg.name for arg in missing_args])}. "
@@ -393,7 +393,7 @@ def CloudClient(
     database = database or os.environ.get("CHROMA_DATABASE")
     if database is not None:
         database = str(database)
-    api_key = str(api_key)
+    api_key = str(required_args["api_key"].value)
     cloud_host = str(cloud_host)
     cloud_port = int(cloud_port)
     enable_ssl = bool(enable_ssl)
