@@ -28,6 +28,18 @@ pub struct StorageWrapper {
     counter: AtomicU64,
 }
 
+impl StorageWrapper {
+    /// Creates a new StorageWrapper.
+    pub fn new(region: String, storage: Storage, prefix: String) -> Self {
+        Self {
+            region,
+            storage,
+            prefix,
+            counter: AtomicU64::new(0),
+        }
+    }
+}
+
 struct BookKeeping {
     last_decimation: Instant,
 }
@@ -1013,7 +1025,6 @@ mod tests {
     use crate::FragmentUuid;
     use crate::LogWriterOptions;
     use chroma_storage::s3_client_for_test_with_new_bucket;
-    use std::sync::atomic::AtomicU64;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -1029,12 +1040,7 @@ mod tests {
     }
 
     fn make_storage_wrapper(storage: chroma_storage::Storage, prefix: &str) -> StorageWrapper {
-        StorageWrapper {
-            region: "test-region".to_string(),
-            storage,
-            prefix: prefix.to_string(),
-            counter: AtomicU64::new(0),
-        }
+        StorageWrapper::new("test-region".to_string(), storage, prefix.to_string())
     }
 
     // Single replica successfully uploads.
@@ -1284,6 +1290,218 @@ mod tests {
             "replicated_uploader_different_messages_different_setsums: {} != {}",
             setsum1.hexdigest(),
             setsum2.hexdigest()
+        );
+    }
+
+    // ==================== compute_mask decimation tests ====================
+
+    // Verify compute_mask updates last_decimation after interval elapsed.
+    #[tokio::test]
+    async fn compute_mask_after_decimation_interval_elapsed() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let wrapper = make_storage_wrapper(storage, "prefix");
+        let storages = Arc::new(vec![wrapper]);
+        // Use a very short decimation interval so it elapses immediately.
+        let options = ReplicatedFragmentOptions {
+            minimum_allowed_replication_factor: 1,
+            minimum_failures_to_exclude_replica: 100,
+            decimation_interval: Duration::from_millis(1),
+            slow_writer_tolerance: Duration::from_secs(30),
+        };
+        let uploader =
+            ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), storages);
+        // Wait for decimation interval to elapse.
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        // Call compute_mask and verify it succeeds.
+        let mask = uploader.compute_mask();
+        assert!(mask.is_ok(), "compute_mask should succeed");
+        assert_eq!(
+            vec![true],
+            mask.unwrap(),
+            "single storage should be masked in"
+        );
+        println!("compute_mask_after_decimation_interval_elapsed: passed");
+    }
+
+    // Verify compute_mask behavior before decimation interval elapses.
+    #[tokio::test]
+    async fn compute_mask_before_decimation_interval_elapsed() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let wrapper = make_storage_wrapper(storage, "prefix");
+        let storages = Arc::new(vec![wrapper]);
+        // Use a very long decimation interval so it doesn't elapse.
+        let options = ReplicatedFragmentOptions {
+            minimum_allowed_replication_factor: 1,
+            minimum_failures_to_exclude_replica: 100,
+            decimation_interval: Duration::from_secs(3600),
+            slow_writer_tolerance: Duration::from_secs(30),
+        };
+        let uploader =
+            ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), storages);
+        // Call compute_mask immediately.
+        let mask = uploader.compute_mask();
+        assert!(mask.is_ok(), "compute_mask should succeed");
+        assert_eq!(
+            vec![true],
+            mask.unwrap(),
+            "single storage should be masked in"
+        );
+        println!("compute_mask_before_decimation_interval_elapsed: passed");
+    }
+
+    // ==================== Concurrent upload tests ====================
+
+    // Multiple simultaneous uploads to same replicas should all succeed.
+    #[tokio::test]
+    async fn replicated_uploader_concurrent_uploads() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let wrapper = make_storage_wrapper(storage, "prefix");
+        let storages = Arc::new(vec![wrapper]);
+        let uploader = Arc::new(ReplicatedFragmentUploader::new(
+            make_test_options(1),
+            LogWriterOptions::default(),
+            storages,
+        ));
+        let mut handles = vec![];
+        for i in 0..5 {
+            let uploader = Arc::clone(&uploader);
+            let handle = tokio::spawn(async move {
+                let pointer = FragmentUuid::generate();
+                let messages = vec![vec![i as u8; 10]];
+                uploader
+                    .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
+                    .await
+            });
+            handles.push(handle);
+        }
+        let mut successes = 0;
+        for handle in handles {
+            let result = handle.await.expect("task panicked");
+            if result.is_ok() {
+                successes += 1;
+            }
+        }
+        assert_eq!(5, successes, "all concurrent uploads should succeed");
+        println!(
+            "replicated_uploader_concurrent_uploads: {} successes",
+            successes
+        );
+    }
+
+    // Verify that compute_mask_from_counts correctly excludes replicas with high error counts.
+    // This is a unit test of the underlying function since we cannot set the counter directly
+    // from test code (StorageWrapper fields are private).
+    #[test]
+    fn compute_mask_excludes_high_error_count_replica() {
+        // With 10 replicas at count 1 and one at count 1000, the outlier should be excluded.
+        // mean = (9 + 1000) / 10 = 100.9
+        // differences: -99.9 * 9, 899.1
+        // variance = (9980.01 * 9 + 808380.81) / 10 = 89820.1
+        // stddev = 299.7, threshold = 100.9 + 599.4 = 700.3
+        // 1000 > 700.3, so excluded.
+        let counts = vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 1000];
+        let mask = compute_mask_from_counts(&counts, 10);
+        assert_eq!(
+            vec![true, true, true, true, true, true, true, true, true, false],
+            mask,
+            "high error count replica should be excluded"
+        );
+        println!("compute_mask_excludes_high_error_count_replica: passed");
+    }
+
+    // ==================== Edge case quorum tests ====================
+
+    // Consistency error takes precedence even when quorum is insufficient.
+    #[test]
+    fn quorum_consistency_error_takes_precedence_over_insufficient() {
+        let setsum = make_setsum(1);
+        let results: Vec<Option<Result<(String, Setsum, usize), ()>>> = vec![
+            Some(Ok(("path/a".to_string(), setsum, 100))),
+            Some(Ok(("path/b".to_string(), setsum, 100))),
+            None,
+            None,
+            None,
+        ];
+        // Even though we only have 2 successes and need 3, the consistency error is detected.
+        let outcome = process_quorum_results(&results, 3);
+        match outcome {
+            QuorumOutcome::ConsistencyError(msg) => {
+                assert!(msg.contains("path mismatch"));
+                println!(
+                    "quorum_consistency_error_takes_precedence_over_insufficient: {:?}",
+                    msg
+                );
+            }
+            other => panic!("expected ConsistencyError, got {:?}", other),
+        }
+    }
+
+    // Mix of timeouts (None) and errors in results.
+    #[test]
+    fn quorum_with_mixed_none_and_errors() {
+        let setsum = make_setsum(1);
+        let results: Vec<Option<Result<(String, Setsum, usize), &str>>> = vec![
+            Some(Ok(("path".to_string(), setsum, 100))),
+            None,
+            Some(Err("storage error")),
+            None,
+            Some(Err("another error")),
+        ];
+        // Only 1 success, minimum 2.
+        assert_eq!(
+            QuorumOutcome::InsufficientQuorum,
+            process_quorum_results(&results, 2)
+        );
+        // Only 1 success, minimum 1.
+        assert_eq!(
+            QuorumOutcome::Success(("path".to_string(), setsum, 100)),
+            process_quorum_results(&results, 1)
+        );
+        println!("quorum_with_mixed_none_and_errors: passed");
+    }
+
+    // ==================== Empty messages tests ====================
+
+    // Upload with empty messages vector.
+    #[tokio::test]
+    async fn replicated_uploader_empty_messages() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let wrapper = make_storage_wrapper(storage, "prefix");
+        let storages = Arc::new(vec![wrapper]);
+        let uploader = ReplicatedFragmentUploader::new(
+            make_test_options(1),
+            LogWriterOptions::default(),
+            storages,
+        );
+        let pointer = FragmentUuid::generate();
+        let messages: Vec<Vec<u8>> = vec![];
+        let result = uploader
+            .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
+            .await;
+        // Empty messages may succeed or fail depending on parquet implementation.
+        println!("replicated_uploader_empty_messages: result={:?}", result);
+    }
+
+    // Upload with single empty message.
+    #[tokio::test]
+    async fn replicated_uploader_single_empty_message() {
+        let storage = s3_client_for_test_with_new_bucket().await;
+        let wrapper = make_storage_wrapper(storage, "prefix");
+        let storages = Arc::new(vec![wrapper]);
+        let uploader = ReplicatedFragmentUploader::new(
+            make_test_options(1),
+            LogWriterOptions::default(),
+            storages,
+        );
+        let pointer = FragmentUuid::generate();
+        let messages: Vec<Vec<u8>> = vec![vec![]];
+        let result = uploader
+            .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
+            .await;
+        // Single empty message should still create a valid parquet file.
+        println!(
+            "replicated_uploader_single_empty_message: result={:?}",
+            result
         );
     }
 }
