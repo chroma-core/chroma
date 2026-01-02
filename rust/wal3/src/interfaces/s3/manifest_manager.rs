@@ -500,23 +500,6 @@ impl ManifestManager {
             retry_count += 1;
         }
     }
-
-    async fn manifest_init(&self, initial: &Manifest) -> Result<(), Error> {
-        let payload = serde_json::to_string(initial)
-            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
-            .into_bytes();
-        self.storage
-            .put_bytes(
-                &crate::manifest::manifest_path(&self.prefix),
-                payload,
-                PutOptions::default()
-                    .with_priority(StorageRequestPriority::P0)
-                    .with_mode(PutMode::IfNotExist),
-            )
-            .await
-            .map_err(Arc::new)?;
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
