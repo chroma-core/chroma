@@ -4,5 +4,5 @@
 # Run `cargo run --bin spanner_migration -- generate-sum` to regenerate.
 
 0001-create_manifests_table.spanner.sql f035d1216ff440fbf43c6337039143b6de805c91a01ae25b6440b329381eaf5a
-0002-create_fragments_table.spanner.sql 90d6b4637a38e6902e715b0f7e1ac98de22da83af2fb01e4fa27b771015a84ba
-0003-create_fragment_regions_table.spanner.sql 23a78b1e511fed034aeb58c9bf2f4652433eea5f102ffbb09a296890d1d350b3
+0002-create_fragments_table.spanner.sql 1867b6d5b9189b59a9ca83faeafe337883924315b50d5302c2058534fabe6d55
+0003-create_fragment_regions_table.spanner.sql dbc683e9c0b7ac9295e233beec807998b1b0dc274185c5c40585af088221d4f0
