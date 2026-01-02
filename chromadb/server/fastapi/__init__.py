@@ -626,7 +626,7 @@ class FastAPI(Server):
         tenant: str,
     ) -> None:
         # NOTE(rescrv, iron will auth):  Implemented.
-        self.auth_request(
+        await self.auth_request(
             request.headers,
             AuthzAction.DELETE_DATABASE,
             tenant,
