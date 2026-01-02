@@ -114,7 +114,7 @@ impl WorkerServer {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
 
-        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
             .layer(chroma_tracing::GrpcServerTraceLayer)

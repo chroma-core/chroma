@@ -74,7 +74,7 @@ impl SysdbService {
 
         tracing::info!("Sysdb service listening on {}", addr);
 
-        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         // TODO(Sanket): More sophisticated is_ready logic.
         health_reporter
@@ -82,25 +82,27 @@ impl SysdbService {
             .await;
 
         let backends = self.backends.clone();
-        Server::builder()
-            .layer(chroma_tracing::GrpcServerTraceLayer)
-            .add_service(health_service)
-            .add_service(SysDbServer::new(self))
-            .serve_with_shutdown(addr, async move {
-                // TODO(Sanket): Drain existing requests before shutting down.
-                select! {
-                    _ = sigterm.recv() => {
-                        backends.close().await;
-                        tracing::info!("Received SIGTERM, shutting down server");
+        Box::pin(
+            Server::builder()
+                .layer(chroma_tracing::GrpcServerTraceLayer)
+                .add_service(health_service)
+                .add_service(SysDbServer::new(self))
+                .serve_with_shutdown(addr, async move {
+                    // TODO(Sanket): Drain existing requests before shutting down.
+                    select! {
+                        _ = sigterm.recv() => {
+                            backends.close().await;
+                            tracing::info!("Received SIGTERM, shutting down server");
+                        }
+                        _ = sigint.recv() => {
+                            backends.close().await;
+                            tracing::info!("Received SIGINT, shutting down server");
+                        }
                     }
-                    _ = sigint.recv() => {
-                        backends.close().await;
-                        tracing::info!("Received SIGINT, shutting down server");
-                    }
-                }
-            })
-            .await
-            .expect("Server failed");
+                }),
+        )
+        .await
+        .expect("Server failed");
     }
 }
 
