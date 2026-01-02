@@ -423,7 +423,8 @@ impl Manifest {
     /// Once upon a time there was more parallelism in wal3 and this was a more interesting.  Now
     /// it mostly returns true unless internal invariants are violated.
     pub fn can_apply_fragment(&self, fragment: &Fragment) -> bool {
-        Some(fragment.seq_no) == self.next_fragment_seq_no()
+        (Some(fragment.seq_no) == self.next_fragment_seq_no()
+            || matches!(fragment.seq_no, FragmentIdentifier::Uuid(_)))
             && fragment.start.offset() < fragment.limit.offset()
     }
 
@@ -622,14 +623,16 @@ impl Manifest {
                 ),
             ));
         }
-        if garbage.fragments_to_drop_limit
-            <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
+        if !garbage.fragments_are_uuids
+            && FragmentIdentifier::from(garbage.fragments_to_drop_limit)
+                <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
             && !garbage
                 .snapshots_to_drop
                 .iter()
                 .any(|snap| self.snapshots.contains(snap))
             && garbage.snapshots_to_make.is_empty()
         {
+            eprintln!("FINDME {}:{}", file!(), line!());
             return Ok(None);
         }
         let mut setsum_to_discard = Setsum::default();
@@ -639,8 +642,8 @@ impl Manifest {
                 garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
             )));
         }
-        if garbage.fragments_to_drop_limit == FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0))
-        {
+        if garbage.fragments_to_drop_limit == FragmentSeqNo::ZERO && !garbage.fragments_are_uuids {
+            eprintln!("FINDME {}:{}", file!(), line!());
             return Ok(None);
         }
         let mut new = self.clone();
@@ -653,19 +656,8 @@ impl Manifest {
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        // TODO(mcmr.wal3.gc): This garbage collection loop only handles SeqNo variants. If Uuid
-        // variants need garbage collection, this logic will need to be extended to handle them
-        // explicitly.
-        let start = garbage
-            .fragments_to_drop_start
-            .as_seq_no()
-            .unwrap_or(FragmentSeqNo::ZERO)
-            .as_u64();
-        let limit = garbage
-            .fragments_to_drop_limit
-            .as_seq_no()
-            .unwrap_or(FragmentSeqNo::ZERO)
-            .as_u64();
+        let start = garbage.fragments_to_drop_start.as_u64();
+        let limit = garbage.fragments_to_drop_limit.as_u64();
         for seq_no in start..limit {
             if let Some(index) = new.fragments.iter().position(|f| {
                 f.seq_no == FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(seq_no))
@@ -673,6 +665,18 @@ impl Manifest {
                 setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
             }
+        }
+        if garbage.fragments_are_uuids {
+            let mut acc = Setsum::default();
+            new.fragments.retain(|frag| {
+                if frag.limit <= garbage.first_to_keep {
+                    acc += frag.setsum;
+                    false
+                } else {
+                    true
+                }
+            });
+            setsum_to_discard += acc;
         }
         let mut root_setsum = Setsum::default();
         if let Some(snap) = garbage.snapshot_for_root.as_ref() {
@@ -692,7 +696,7 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
+        new.initial_seq_no = Some(FragmentIdentifier::from(garbage.fragments_to_drop_limit));
         new.scrub()?;
 
         // Sanity check that new manifest contains valid range of logs
@@ -1387,8 +1391,9 @@ mod tests {
         let garbage = Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(100),
             snapshot_for_root: None,
@@ -1416,8 +1421,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(10),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1428,7 +1434,7 @@ mod tests {
         if let Err(crate::Error::GarbageCollection(msg)) = result {
             println!("GarbageCollection error message: {msg}");
             assert!(msg.contains("Garbage has start > limit"));
-            assert!(msg.contains("SeqNo(FragmentSeqNo(10)) > SeqNo(FragmentSeqNo(5))"));
+            assert!(msg.contains("FragmentSeqNo(10) > FragmentSeqNo(5)"));
         } else {
             panic!("Expected GarbageCollection error, got {:?}", result);
         }
@@ -1438,8 +1444,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1453,8 +1460,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1500,8 +1508,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089257)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089266)), // Equal to initial_seq_no
+            fragments_to_drop_start: FragmentSeqNo::from_u64(3089257),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(3089266), // Equal to initial_seq_no
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::from_hexdigest(
                 "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",
             )
@@ -1518,7 +1527,7 @@ mod tests {
 
         // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
         let garbage_below_initial = Garbage {
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089265)), // Less than initial_seq_no
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(3089265), // Less than initial_seq_no
             ..garbage.clone()
         };
 

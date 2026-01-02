@@ -9,6 +9,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 futures = { workspace = true }
 google-cloud-spanner = { workspace = true }
+google-cloud-gax = { workspace = true }
 opentelemetry = { workspace = true }
 parquet = { workspace = true }
 serde = { workspace = true }
@@ -27,7 +28,6 @@ chroma-config = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]
-google-cloud-gax = { workspace = true }
 guacamole = { version = "0.11", default-features = false }
 proptest = { workspace = true }
 rand = { workspace = true }

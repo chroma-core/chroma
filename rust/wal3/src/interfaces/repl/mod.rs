@@ -10,10 +10,30 @@ use crate::{Error, FragmentUuid, LogWriterOptions, Manifest};
 
 use super::batch_manager::BatchManager;
 use super::{FragmentManagerFactory, ManifestManagerFactory};
-use fragment_manager::{
-    FragmentReader, ReplicatedFragmentOptions, ReplicatedFragmentUploader, StorageWrapper,
-};
+use fragment_manager::{FragmentReader, ReplicatedFragmentUploader};
 use manifest_manager::ManifestManager;
+
+pub use fragment_manager::{ReplicatedFragmentOptions, StorageWrapper};
+
+/// Creates replicated fragment and manifest manager factories.
+pub fn create_repl_factories(
+    write_options: LogWriterOptions,
+    repl_options: ReplicatedFragmentOptions,
+    storages: Arc<Vec<StorageWrapper>>,
+    spanner: Arc<Client>,
+    log_id: Uuid,
+) -> (
+    ReplicatedFragmentManagerFactory,
+    ReplicatedManifestManagerFactory,
+) {
+    let fragment_manager_factory = ReplicatedFragmentManagerFactory {
+        write: write_options.clone(),
+        repl: repl_options.clone(),
+        storages,
+    };
+    let manifest_manager_factory = ReplicatedManifestManagerFactory { spanner, log_id };
+    (fragment_manager_factory, manifest_manager_factory)
+}
 
 pub struct ReplicatedFragmentManagerFactory {
     write: LogWriterOptions,
@@ -338,7 +358,14 @@ mod tests {
             .expect("open_publisher failed");
         let pointer = FragmentUuid::generate();
         let result = publisher
-            .publish_fragment(&pointer, "test/path.parquet", 10, 100, Setsum::default())
+            .publish_fragment(
+                &pointer,
+                &[],
+                "test/path.parquet",
+                10,
+                100,
+                Setsum::default(),
+            )
             .await;
 
         assert!(

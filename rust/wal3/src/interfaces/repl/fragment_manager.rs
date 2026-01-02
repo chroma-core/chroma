@@ -12,7 +12,9 @@ use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
 use crate::interfaces::{FragmentConsumer, FragmentUploader};
-use crate::{fragment_path, Error, Fragment, FragmentUuid, LogPosition, LogWriterOptions};
+use crate::{
+    fragment_path, Error, Fragment, FragmentIdentifier, FragmentUuid, LogPosition, LogWriterOptions,
+};
 
 #[derive(Clone, Debug)]
 pub struct ReplicatedFragmentOptions {
@@ -346,7 +348,7 @@ impl FragmentConsumer for FragmentReader {
     ) -> Result<Option<Fragment>, Error> {
         let mut err: Option<Error> = None;
         for storage in self.storages.iter() {
-            match crate::interfaces::s3::read_fragment(
+            match read_fragment_uuid(
                 &storage.storage,
                 &storage.prefix,
                 path,
@@ -375,6 +377,47 @@ impl FragmentConsumer for FragmentReader {
             Ok(None)
         }
     }
+}
+
+/// Read a fragment with a UUID-based path (for repl storage).
+async fn read_fragment_uuid(
+    storage: &Storage,
+    prefix: &str,
+    path: &str,
+    starting_log_position: Option<LogPosition>,
+) -> Result<Option<Fragment>, Error> {
+    let seq_no = crate::parse_fragment_path(path)
+        .ok_or_else(|| Error::MissingFragmentSequenceNumber(path.to_string()))?;
+    let FragmentIdentifier::Uuid(_) = seq_no else {
+        return Err(Error::internal(file!(), line!()));
+    };
+    let (setsum, data, num_bytes) =
+        match crate::interfaces::s3::read_parquet(storage, prefix, path, starting_log_position)
+            .await
+        {
+            Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
+            Err(Error::StorageError(storage_err)) => {
+                if matches!(&*storage_err, StorageError::NotFound { .. }) {
+                    return Ok(None);
+                }
+                return Err(Error::StorageError(storage_err));
+            }
+            Err(e) => return Err(e),
+        };
+    if data.is_empty() {
+        return Err(Error::CorruptFragment(path.to_string()));
+    }
+    let start = LogPosition::from_offset(data.iter().map(|(p, _)| p.offset()).min().unwrap_or(0));
+    let limit =
+        LogPosition::from_offset(data.iter().map(|(p, _)| p.offset() + 1).max().unwrap_or(0));
+    Ok(Some(Fragment {
+        path: path.to_string(),
+        seq_no,
+        start,
+        limit,
+        num_bytes,
+        setsum,
+    }))
 }
 
 #[cfg(test)]

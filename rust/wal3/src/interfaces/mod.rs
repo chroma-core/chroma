@@ -186,6 +186,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     async fn publish_fragment(
         &self,
         pointer: &FP,
+        regions: &[&str],
         path: &str,
         messages_len: u64,
         num_bytes: u64,

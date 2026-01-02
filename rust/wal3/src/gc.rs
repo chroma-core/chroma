@@ -28,8 +28,10 @@ pub struct Garbage {
     pub snapshots_to_drop: Vec<SnapshotPointer>,
     pub snapshots_to_make: Vec<Snapshot>,
     pub snapshot_for_root: Option<SnapshotPointer>,
-    pub fragments_to_drop_start: FragmentIdentifier,
-    pub fragments_to_drop_limit: FragmentIdentifier,
+    pub fragments_to_drop_start: FragmentSeqNo,
+    pub fragments_to_drop_limit: FragmentSeqNo,
+    #[serde(default)]
+    pub fragments_are_uuids: bool,
     #[serde(
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"
@@ -44,11 +46,17 @@ impl Garbage {
             snapshots_to_drop: Vec::new(),
             snapshots_to_make: Vec::new(),
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
+            fragments_to_drop_start: FragmentSeqNo::ZERO,
+            fragments_to_drop_limit: FragmentSeqNo::ZERO,
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         }
+    }
+
+    pub fn check_invariants_for_repl(&self) -> Result<(), Error> {
+        // TODO(rescrv, mcmr):  Scrub more.
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -90,9 +98,13 @@ impl Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::ZERO),
+            fragments_to_drop_start: FragmentSeqNo::ZERO,
+            fragments_to_drop_limit: FragmentSeqNo::ZERO,
             setsum_to_discard: Setsum::default(),
+            fragments_are_uuids: manifest
+                .fragments
+                .iter()
+                .all(|f| matches!(f.seq_no, FragmentIdentifier::Uuid(_))),
             first_to_keep,
         };
         let mut first = true;
@@ -250,26 +262,14 @@ impl Garbage {
         }
     }
 
-    // TODO(mcmr.wal3.gc): This method silently produces an empty range when
-    // fragments_to_drop_start or fragments_to_drop_limit are Uuid variants. If UUID-based garbage
-    // collection is needed, this will need to track a Vec<FragmentIdentifier> or similar structure
-    // instead of a range.
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
         let prefix = Arc::new(prefix.to_string());
         let mut paths = vec![];
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        let start = self
-            .fragments_to_drop_start
-            .as_seq_no()
-            .unwrap_or(FragmentSeqNo::ZERO)
-            .as_u64();
-        let limit = self
-            .fragments_to_drop_limit
-            .as_seq_no()
-            .unwrap_or(FragmentSeqNo::ZERO)
-            .as_u64();
+        let start = self.fragments_to_drop_start.as_u64();
+        let limit = self.fragments_to_drop_limit.as_u64();
         paths.into_iter().chain((start..limit).map(move |seq_no| {
             prefixed_fragment_path(
                 &prefix,
@@ -294,19 +294,21 @@ impl Garbage {
         first: &mut bool,
         first_to_keep: &mut LogPosition,
     ) -> Result<Setsum, Error> {
-        if self.fragments_to_drop_limit != frag.seq_no && !*first {
-            return Err(Error::ScrubError(Box::new(ScrubError::Internal(
-                "fragment sequence numbers collected out of order".to_string(),
-            ))));
+        if let Some(seq_no) = frag.seq_no.as_seq_no() {
+            if FragmentIdentifier::from(self.fragments_to_drop_limit) != frag.seq_no && !*first {
+                return Err(Error::ScrubError(Box::new(ScrubError::Internal(
+                    "fragment sequence numbers collected out of order".to_string(),
+                ))));
+            }
+            if *first {
+                self.fragments_to_drop_start = seq_no;
+            }
+            self.fragments_to_drop_limit = seq_no.successor().ok_or_else(|| {
+                Error::ScrubError(Box::new(ScrubError::Internal(
+                    "fragment sequence number has no successor".to_string(),
+                )))
+            })?;
         }
-        if *first {
-            self.fragments_to_drop_start = frag.seq_no;
-        }
-        self.fragments_to_drop_limit = frag.seq_no.successor().ok_or_else(|| {
-            Error::ScrubError(Box::new(ScrubError::Internal(
-                "fragment sequence number has no successor".to_string(),
-            )))
-        })?;
         self.setsum_to_discard += frag.setsum;
         *first = false;
         *first_to_keep = frag.limit;
@@ -507,7 +509,7 @@ impl Garbage {
     // snapshot, recursively, until you find the first fragment.  That's your seq_no.
     pub fn bug_patch_construct_garbage_from_manifest(
         manifest: &Manifest,
-        seq_no: FragmentIdentifier,
+        seq_no: FragmentSeqNo,
         offset: LogPosition,
     ) -> Garbage {
         let mut garbage = Garbage {
@@ -517,6 +519,7 @@ impl Garbage {
             fragments_to_drop_start: seq_no,
             fragments_to_drop_limit: seq_no,
             setsum_to_discard: Setsum::default(),
+            fragments_are_uuids: false,
             first_to_keep: offset,
         };
         for snapshot in manifest.snapshots.iter() {
@@ -594,21 +597,20 @@ mod tests {
 
     #[test]
     fn case_seen_in_the_wild() {
-        let manifest_json =
-            include_str!("../tests/test_k8s_integration_AA_construct_garbage/MANIFEST");
+        let manifest_json = include_str!("../tests/s3_AA_construct_garbage/MANIFEST");
         let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
         let output = Garbage::bug_patch_construct_garbage_from_manifest(
             &manifest,
-            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(806913)),
+            FragmentSeqNo::from_u64(806913),
             LogPosition::from_offset(900883),
         );
         assert_eq!(
             output.fragments_to_drop_start,
-            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(806913))
+            FragmentSeqNo::from_u64(806913)
         );
         assert_eq!(
             output.fragments_to_drop_limit,
-            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(806913))
+            FragmentSeqNo::from_u64(806913)
         );
         assert_eq!(
             output.setsum_to_discard.hexdigest(),
@@ -618,5 +620,118 @@ mod tests {
         for snapshot in output.snapshots_to_drop.iter() {
             assert!(snapshot.limit <= output.first_to_keep);
         }
+    }
+
+    /// Deserialize from JSON to verify the stable format of Garbage.
+    #[test]
+    fn deserialize_garbage_from_json() {
+        let json = r#"{
+            "snapshots_to_drop": [
+                {
+                    "setsum": "25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792",
+                    "path_to_snapshot": "snapshot/SNAPSHOT.25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792",
+                    "depth": 1,
+                    "start": {"offset": 1},
+                    "limit": {"offset": 2379},
+                    "num_bytes": 3796051
+                }
+            ],
+            "snapshots_to_make": [
+                {
+                    "path": "snapshot/SNAPSHOT.abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+                    "depth": 2,
+                    "setsum": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+                    "writer": "garbage collection",
+                    "snapshots": [],
+                    "fragments": [
+                        {
+                            "path": "log/0/1",
+                            "seq_no": 1,
+                            "start": {"offset": 1},
+                            "limit": {"offset": 100},
+                            "num_bytes": 1024,
+                            "setsum": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+                        }
+                    ]
+                }
+            ],
+            "snapshot_for_root": {
+                "setsum": "1b5797c4029b6664a74ccebba552f95767a22731a375cdddc0538afd01e88116",
+                "path_to_snapshot": "snapshot/SNAPSHOT.1b5797c4029b6664a74ccebba552f95767a22731a375cdddc0538afd01e88116",
+                "depth": 1,
+                "start": {"offset": 2379},
+                "limit": {"offset": 4816},
+                "num_bytes": 3694483
+            },
+            "fragments_to_drop_start": 100,
+            "fragments_to_drop_limit": 200,
+            "setsum_to_discard": "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380",
+            "first_to_keep": {"offset": 900883}
+        }"#;
+
+        let garbage: Garbage = serde_json::from_str(json).unwrap();
+
+        // Verify snapshots_to_drop
+        assert_eq!(garbage.snapshots_to_drop.len(), 1);
+        assert_eq!(
+            garbage.snapshots_to_drop[0].setsum.hexdigest(),
+            "25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792"
+        );
+        assert_eq!(
+            garbage.snapshots_to_drop[0].path_to_snapshot,
+            "snapshot/SNAPSHOT.25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792"
+        );
+        assert_eq!(garbage.snapshots_to_drop[0].depth, 1);
+        assert_eq!(
+            garbage.snapshots_to_drop[0].start,
+            LogPosition::from_offset(1)
+        );
+        assert_eq!(
+            garbage.snapshots_to_drop[0].limit,
+            LogPosition::from_offset(2379)
+        );
+        assert_eq!(garbage.snapshots_to_drop[0].num_bytes, 3796051);
+
+        // Verify snapshots_to_make
+        assert_eq!(garbage.snapshots_to_make.len(), 1);
+        assert_eq!(
+            garbage.snapshots_to_make[0].setsum.hexdigest(),
+            "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+        );
+        assert_eq!(garbage.snapshots_to_make[0].depth, 2);
+        assert_eq!(garbage.snapshots_to_make[0].writer, "garbage collection");
+        assert_eq!(garbage.snapshots_to_make[0].fragments.len(), 1);
+        assert_eq!(
+            garbage.snapshots_to_make[0].fragments[0].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))
+        );
+
+        // Verify snapshot_for_root
+        let root = garbage.snapshot_for_root.as_ref().unwrap();
+        assert_eq!(
+            root.setsum.hexdigest(),
+            "1b5797c4029b6664a74ccebba552f95767a22731a375cdddc0538afd01e88116"
+        );
+        assert_eq!(root.start, LogPosition::from_offset(2379));
+        assert_eq!(root.limit, LogPosition::from_offset(4816));
+
+        // Verify fragment identifiers
+        assert_eq!(
+            garbage.fragments_to_drop_start,
+            FragmentSeqNo::from_u64(100)
+        );
+        assert_eq!(
+            garbage.fragments_to_drop_limit,
+            FragmentSeqNo::from_u64(200)
+        );
+
+        // Verify setsum_to_discard
+        assert_eq!(
+            garbage.setsum_to_discard.hexdigest(),
+            "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"
+        );
+
+        // Verify first_to_keep
+        assert_eq!(garbage.first_to_keep, LogPosition::from_offset(900883));
     }
 }
