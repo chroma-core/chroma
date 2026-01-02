@@ -47,11 +47,11 @@ use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     create_s3_factories, scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions,
-    CursorWitness, Fragment, FragmentManagerFactory, FragmentSeqNo, GarbageCollectionOptions,
-    Limits, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
-    ManifestAndWitness, ManifestManagerFactory, ManifestReader, MarkDirty as MarkDirtyTrait,
-    S3FragmentManagerFactory, S3FragmentPuller, S3ManifestManagerFactory, Snapshot, SnapshotCache,
-    SnapshotPointer,
+    CursorWitness, Fragment, FragmentConsumer, FragmentManagerFactory, FragmentSeqNo,
+    GarbageCollectionOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManagerFactory, ManifestReader,
+    MarkDirty as MarkDirtyTrait, S3FragmentManagerFactory, S3FragmentPuller,
+    S3ManifestManagerFactory, Snapshot, SnapshotCache, SnapshotPointer,
 };
 
 /// Concrete type alias for the LogWriter with S3 factories.
