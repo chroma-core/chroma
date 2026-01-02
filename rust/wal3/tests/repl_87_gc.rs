@@ -102,8 +102,9 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level(
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -204,8 +205,9 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -282,8 +284,9 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -360,8 +363,9 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep: LogPosition::from_offset(10),
     };
@@ -374,10 +378,7 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
     assert_eq!(setsum, dropped_setsum);
 
     // Test the garbage structure
-    assert_eq!(
-        garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
-    );
+    assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(2));
     assert_eq!(garbage.setsum_to_discard, setsum);
 }
 
@@ -442,8 +443,9 @@ async fn test_k8s_integration_drop_snapshot() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep: LogPosition::from_offset(35),
     };
@@ -463,10 +465,7 @@ async fn test_k8s_integration_drop_snapshot() {
     assert_eq!(total_setsum, dropped_setsum);
 
     // Test the garbage structure
-    assert_eq!(
-        garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3))
-    );
+    assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(3));
     assert_eq!(garbage.snapshots_to_drop.len(), 2);
     assert_eq!(garbage.snapshots_to_drop[0], nested_snapshot.to_pointer());
     assert_eq!(garbage.snapshots_to_drop[1], snapshot_ptr);
@@ -529,8 +528,9 @@ async fn test_k8s_integration_replace_snapshot_flat() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -551,10 +551,7 @@ async fn test_k8s_integration_replace_snapshot_flat() {
     assert_eq!(frag1_setsum, dropped_setsum);
 
     // Test the garbage structure
-    assert_eq!(
-        garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
-    );
+    assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(2));
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
     // Check the new snapshot contains the kept fragments
@@ -656,8 +653,9 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -678,10 +676,7 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
     assert_eq!(frag1_setsum, dropped_setsum);
 
     // Test the garbage structure
-    assert_eq!(
-        garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
-    );
+    assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(2));
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
     // Check the new snapshot contains the kept child snapshot and parent fragment
@@ -749,8 +744,9 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -771,10 +767,7 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
     assert_eq!(frag1_setsum + frag2_setsum, dropped_setsum);
 
     // Test the garbage structure
-    assert_eq!(
-        garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3))
-    );
+    assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(3));
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
     // Check the new snapshot contains only the kept fragment
@@ -867,8 +860,9 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
         snapshots_to_drop: vec![],
         snapshots_to_make: vec![],
         snapshot_for_root: None,
-        fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-        fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+        fragments_to_drop_limit: FragmentSeqNo::from_u64(1),
+        fragments_are_uuids: false,
         setsum_to_discard: Setsum::default(),
         first_to_keep,
     };
@@ -889,10 +883,7 @@ async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
     assert_eq!(frag1_setsum, dropped_setsum);
 
     // Test the garbage structure
-    assert_eq!(
-        garbage.fragments_to_drop_limit,
-        FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
-    );
+    assert_eq!(garbage.fragments_to_drop_limit, FragmentSeqNo::from_u64(2));
     assert_eq!(garbage.snapshots_to_make.len(), 1);
 
     // Check the new snapshot contains the right-most (kept) leaf snapshot and interior fragment

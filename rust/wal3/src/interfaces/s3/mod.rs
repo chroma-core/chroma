@@ -261,24 +261,12 @@ pub async fn read_parquet(
         .await
         .map_err(Arc::new)?;
     let num_bytes = parquet.len() as u64;
-    let (setsum, mut records, uses_relative_offsets) =
+    let (setsum, records, uses_relative_offsets) =
         super::checksum_parquet(&parquet, starting_log_position)?;
+    // checksum_parquet already returns absolute positions when starting_log_position is provided.
+    // Verify that the combination of inputs is valid.
     match (starting_log_position, uses_relative_offsets) {
-        (Some(starting_log_position), true) => {
-            for record in records.iter_mut() {
-                record.0 = LogPosition::from_offset(
-                    starting_log_position
-                        .offset()
-                        .checked_add(record.0.offset())
-                        .ok_or(Error::Overflow(format!(
-                            "log position overflow: {} + {}",
-                            starting_log_position.offset(),
-                            record.0.offset()
-                        )))?,
-                );
-            }
-            Ok((setsum, records, num_bytes))
-        }
+        (Some(_), true) => Ok((setsum, records, num_bytes)),
         (None, false) => Ok((setsum, records, num_bytes)),
         (Some(_), false) => Err(Error::internal(file!(), line!())),
         (None, true) => Err(Error::internal(file!(), line!())),

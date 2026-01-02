@@ -39,6 +39,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     async fn publish_fragment(
         &self,
         _pointer: &(FragmentSeqNo, LogPosition),
+        _regions: &[&str],
         _path: &str,
         _messages_len: u64,
         _num_bytes: u64,

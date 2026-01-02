@@ -152,8 +152,8 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
     let postconditions = [
         Condition::Garbage(GarbageCondition {
             first_to_keep: LogPosition::from_offset(2),
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(2),
             snapshot_for_root: Some(SnapshotCondition {
                 depth: 1,
                 start: LogPosition::from_offset(2),

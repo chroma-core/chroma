@@ -23,6 +23,10 @@ pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
+pub use interfaces::repl::{
+    create_repl_factories, ReplicatedFragmentManagerFactory, ReplicatedFragmentOptions,
+    ReplicatedManifestManagerFactory, StorageWrapper,
+};
 pub use interfaces::s3::{
     create_s3_factories, upload_parquet, ManifestManager, ManifestReader, S3FragmentManagerFactory,
     S3FragmentPuller, S3FragmentUploader, S3ManifestManagerFactory,
@@ -117,9 +121,11 @@ pub enum Error {
     #[error("replication batch too large: {messages_len} messages exceeds limit {limit}")]
     ReplicationBatchTooLarge { messages_len: u64, limit: u64 },
     #[error("spanner-related error: {0}")]
-    SpannerError(Arc<google_cloud_spanner::client::Error>),
+    SpannerError(#[from] Arc<google_cloud_spanner::client::Error>),
     #[error("spanner-row-related error: {0}")]
-    SpannerRowError(Arc<google_cloud_spanner::row::Error>),
+    SpannerRowError(#[from] Arc<google_cloud_spanner::row::Error>),
+    #[error("spanner-session-related error: {0}")]
+    SpannerSessionError(#[from] Arc<google_cloud_spanner::session::SessionError>),
     #[error("tonic-related error: {0}")]
     TonicError(#[from] tonic::Status),
 }
@@ -165,6 +171,7 @@ impl chroma_error::ChromaError for Error {
             Self::ReplicationBatchTooLarge { .. } => chroma_error::ErrorCodes::InvalidArgument,
             Self::SpannerError(_) => chroma_error::ErrorCodes::Internal,
             Self::SpannerRowError(_) => chroma_error::ErrorCodes::Internal,
+            Self::SpannerSessionError(_) => chroma_error::ErrorCodes::Internal,
             Self::TonicError(t) => t.code().into(),
         }
     }
@@ -179,6 +186,22 @@ impl From<google_cloud_spanner::client::Error> for Error {
 impl From<google_cloud_spanner::row::Error> for Error {
     fn from(err: google_cloud_spanner::row::Error) -> Self {
         Self::SpannerRowError(Arc::new(err))
+    }
+}
+
+impl From<google_cloud_spanner::session::SessionError> for Error {
+    fn from(err: google_cloud_spanner::session::SessionError) -> Self {
+        Self::SpannerSessionError(Arc::new(err))
+    }
+}
+
+impl google_cloud_gax::retry::TryAs<tonic::Status> for Error {
+    fn try_as(&self) -> Option<&tonic::Status> {
+        if let Self::TonicError(t) = self {
+            Some(t)
+        } else {
+            None
+        }
     }
 }
 

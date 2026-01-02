@@ -739,6 +739,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             .manifest_manager
             .publish_fragment(
                 &pointer,
+                &["dummy"],
                 &path,
                 messages_len as u64,
                 num_bytes as u64,
