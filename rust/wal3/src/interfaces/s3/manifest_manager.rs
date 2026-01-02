@@ -8,9 +8,9 @@ use chroma_storage::{
 use setsum::Setsum;
 
 use crate::gc::Garbage;
+use crate::interfaces::s3::read_fragment;
 use crate::interfaces::{ManifestPublisher, ManifestWitness};
 use crate::manifest::{Manifest, ManifestAndETag, Snapshot, SnapshotPointer};
-use crate::reader::read_fragment;
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
@@ -524,6 +524,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             &self.storage,
             &self.prefix,
             &unprefixed_fragment_path(next_seq_no_to_apply.into()),
+            None,
         )
         .await?;
         if let Some(fragment) = next_fragment {

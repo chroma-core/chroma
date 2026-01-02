@@ -1,15 +1,16 @@
 use std::sync::Arc;
 
-use tracing::Level;
-
 use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, Storage, StorageError,
 };
+use setsum::Setsum;
+use tracing::Level;
 
 use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
 use crate::{
-    Error, FragmentSeqNo, LogPosition, LogReaderOptions, LogWriterOptions, Manifest, MarkDirty,
-    Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
+    fragment_path, parse_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
+    LogPosition, LogReaderOptions, LogWriterOptions, Manifest, MarkDirty, Snapshot, SnapshotCache,
+    SnapshotPointer, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -18,7 +19,7 @@ pub mod manifest_manager;
 pub mod manifest_reader;
 
 pub use batch_manager::{upload_parquet, BatchManager};
-pub use fragment_puller::FragmentPuller;
+pub use fragment_puller::S3FragmentPuller;
 pub use manifest_manager::ManifestManager;
 pub use manifest_reader::ManifestReader;
 
@@ -66,7 +67,7 @@ pub struct S3FragmentManagerFactory {
 impl FragmentManagerFactory for S3FragmentManagerFactory {
     type FragmentPointer = (FragmentSeqNo, LogPosition);
     type Publisher = BatchManager;
-    type Consumer = FragmentPuller;
+    type Consumer = S3FragmentPuller;
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
         BatchManager::new(
@@ -79,7 +80,7 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        Ok(FragmentPuller::new(
+        Ok(S3FragmentPuller::new(
             self.read.clone(),
             Arc::clone(&self.storage),
             self.prefix.clone(),
@@ -243,4 +244,79 @@ pub async fn manifest_load(
             },
         }
     }
+}
+
+/// Reads a parquet fragment from storage and computes its setsum and records.
+async fn read_parquet(
+    storage: &Storage,
+    prefix: &str,
+    path: &str,
+    starting_log_position: Option<LogPosition>,
+) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+    let path = fragment_path(prefix, path);
+    let parquet = storage
+        .get(&path, GetOptions::new(StorageRequestPriority::P0))
+        .await
+        .map_err(Arc::new)?;
+    let num_bytes = parquet.len() as u64;
+    let (setsum, mut records, uses_relative_offsets) =
+        super::checksum_parquet(&parquet, starting_log_position)?;
+    match (starting_log_position, uses_relative_offsets) {
+        (Some(starting_log_position), true) => {
+            for record in records.iter_mut() {
+                record.0 = LogPosition::from_offset(
+                    starting_log_position
+                        .offset()
+                        .checked_add(record.0.offset())
+                        .ok_or(Error::Overflow(format!(
+                            "log position overflow: {} + {}",
+                            starting_log_position.offset(),
+                            record.0.offset()
+                        )))?,
+                );
+            }
+            Ok((setsum, records, num_bytes))
+        }
+        (None, false) => Ok((setsum, records, num_bytes)),
+        (Some(_), false) => Err(Error::internal(file!(), line!())),
+        (None, true) => Err(Error::internal(file!(), line!())),
+    }
+}
+
+async fn read_fragment(
+    storage: &Storage,
+    prefix: &str,
+    path: &str,
+    starting_log_position: Option<LogPosition>,
+) -> Result<Option<Fragment>, Error> {
+    let seq_no = parse_fragment_path(path)
+        .ok_or_else(|| Error::MissingFragmentSequenceNumber(path.to_string()))?;
+    let FragmentIdentifier::SeqNo(_) = seq_no else {
+        return Err(Error::internal(file!(), line!()));
+    };
+    let (setsum, data, num_bytes) =
+        match read_parquet(storage, prefix, path, starting_log_position).await {
+            Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
+            Err(Error::StorageError(storage)) => {
+                if matches!(&*storage, StorageError::NotFound { .. }) {
+                    return Ok(None);
+                }
+                return Err(Error::StorageError(storage));
+            }
+            Err(e) => return Err(e),
+        };
+    if data.is_empty() {
+        return Err(Error::CorruptFragment(path.to_string()));
+    }
+    let start = LogPosition::from_offset(data.iter().map(|(p, _)| p.offset()).min().unwrap_or(0));
+    let limit =
+        LogPosition::from_offset(data.iter().map(|(p, _)| p.offset() + 1).max().unwrap_or(0));
+    Ok(Some(Fragment {
+        path: path.to_string(),
+        seq_no,
+        start,
+        limit,
+        num_bytes,
+        setsum,
+    }))
 }

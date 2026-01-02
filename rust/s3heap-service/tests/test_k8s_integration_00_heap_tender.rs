@@ -4,16 +4,16 @@ use chroma_storage::Storage;
 use chroma_sysdb::{SysDb, TestSysDb};
 use chroma_types::{CollectionUuid, DirtyMarker};
 use wal3::{
-    create_factories, CursorStore, CursorStoreOptions, FragmentPuller, FragmentSeqNo, LogPosition,
-    LogReader, LogReaderOptions, LogWriter, LogWriterOptions, ManifestReader,
-    S3FragmentManagerFactory, S3ManifestManagerFactory,
+    create_factories, CursorStore, CursorStoreOptions, FragmentSeqNo, LogPosition, LogReader,
+    LogReaderOptions, LogWriter, LogWriterOptions, ManifestReader, S3FragmentManagerFactory,
+    S3FragmentPuller, S3ManifestManagerFactory,
 };
 
 use s3heap::{HeapPruner, HeapReader, HeapWriter};
 use s3heap_service::{HeapTender, HEAP_TENDER_CURSOR_NAME};
 
 /// Concrete type alias for the LogReader with S3 consumers.
-type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), FragmentPuller, ManifestReader>;
+type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), S3FragmentPuller, ManifestReader>;
 
 /// Concrete type alias for the LogWriter with S3 factories.
 type S3LogWriter =
