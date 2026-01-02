@@ -316,6 +316,8 @@ pub fn checksum_parquet(
 mod tests {
     use super::*;
 
+    const TEST_EPOCH_MICROS: u64 = 1234567890123456;
+
     /// Verifies checksum_parquet returns relative positions (0, 1, 2...) when called with None
     /// starting_log_position on a relative-offset parquet file.
     #[test]
@@ -325,8 +327,8 @@ mod tests {
         let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
 
         // Create a relative-offset parquet file
-        let (buffer, _setsum) =
-            construct_parquet(None, &messages).expect("construct_parquet should succeed");
+        let (buffer, _setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
 
         // Read with None starting_log_position
         let (setsum, records, uses_relative_offsets) =
@@ -358,8 +360,8 @@ mod tests {
         let starting_position = LogPosition::from_offset(100);
 
         // Create a relative-offset parquet file
-        let (buffer, setsum_from_writer) =
-            construct_parquet(None, &messages).expect("construct_parquet should succeed");
+        let (buffer, setsum_from_writer) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
 
         // Read with a starting_log_position - positions should be translated
         let (setsum_from_reader, records, uses_relative_offsets) =
@@ -411,8 +413,9 @@ mod tests {
         let write_position = LogPosition::from_offset(50);
 
         // Create an absolute-offset parquet file starting at offset 50
-        let (buffer, setsum_from_writer) = construct_parquet(Some(write_position), &messages)
-            .expect("construct_parquet should succeed");
+        let (buffer, setsum_from_writer) =
+            construct_parquet(Some(write_position), &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet should succeed");
 
         // Read with a different starting_log_position - should be ignored for absolute files
         let different_position = LogPosition::from_offset(999);
