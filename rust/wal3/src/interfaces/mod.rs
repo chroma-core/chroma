@@ -10,15 +10,19 @@ use chroma_storage::ETag;
 use chroma_types::Cmek;
 
 use crate::{
-    Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, GarbageCollectionOptions,
-    LogPosition, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
+    Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
+    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
 };
 
+pub mod batch_manager;
+pub mod repl;
 pub mod s3;
+
+pub use batch_manager::BatchManager;
 
 ////////////////////////////////////////// FragmentPointer /////////////////////////////////////////
 
-pub trait FragmentPointer: Clone + Send + 'static {
+pub trait FragmentPointer: Clone + Send + Sync + 'static {
     fn identifier(&self) -> FragmentIdentifier;
     fn bootstrap(position: LogPosition) -> Self
     where
@@ -35,6 +39,16 @@ impl FragmentPointer for (FragmentSeqNo, LogPosition) {
     }
 }
 
+impl FragmentPointer for FragmentUuid {
+    fn identifier(&self) -> FragmentIdentifier {
+        FragmentIdentifier::Uuid(*self)
+    }
+
+    fn bootstrap(_: LogPosition) -> Self {
+        FragmentUuid::generate()
+    }
+}
+
 ////////////////////////////////////// FragmentManagerFactory //////////////////////////////////////
 
 #[async_trait::async_trait]
@@ -45,6 +59,20 @@ pub trait FragmentManagerFactory {
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error>;
     async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
+}
+
+///////////////////////////////////////// FragmentUploader /////////////////////////////////////////
+
+#[async_trait::async_trait]
+pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
+    /// upload a parquet fragment
+    async fn upload_parquet(
+        &self,
+        pointer: &FP,
+        messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
+        epoch_micros: u64,
+    ) -> Result<(String, Setsum, usize), Error>;
 }
 
 ///////////////////////////////////////// FragmentPublisher ////////////////////////////////////////
@@ -89,6 +117,7 @@ pub trait FragmentPublisher: Send + Sync + 'static {
         pointer: &Self::FragmentPointer,
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
+        epoch_micros: u64,
     ) -> Result<(String, Setsum, usize), Error>;
 
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
@@ -137,10 +166,10 @@ pub trait ManifestManagerFactory {
 
 ////////////////////////////////////////// ManifestWitness /////////////////////////////////////////
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ManifestWitness {
     ETag(ETag),
-    // TODO(rescrv):  Spanner-specific type.
-    Timestamp(()),
+    Position(LogPosition),
 }
 
 ///////////////////////////////////////// ManifestPublisher ////////////////////////////////////////
@@ -150,7 +179,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Recover the manifest so that it can do work.
     async fn recover(&mut self) -> Result<(), Error>;
     /// Return a possibly-stale version of the manifest.
-    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error>;
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error>;
     /// Assign a timestamp for the next fragment that's going to be published on this manifest.
     fn assign_timestamp(&self, record_count: usize) -> Option<FP>;
     /// Publish a fragment previously assigned a timestamp using assign_timestamp.
@@ -177,7 +206,6 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
     async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error>;
     /// Manifest storers and accessors
-    async fn manifest_init(&self, initial: &Manifest) -> Result<(), Error>;
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
 
@@ -288,6 +316,8 @@ pub fn checksum_parquet(
 mod tests {
     use super::*;
 
+    const TEST_EPOCH_MICROS: u64 = 1234567890123456;
+
     /// Verifies checksum_parquet returns relative positions (0, 1, 2...) when called with None
     /// starting_log_position on a relative-offset parquet file.
     #[test]
@@ -297,8 +327,8 @@ mod tests {
         let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
 
         // Create a relative-offset parquet file
-        let (buffer, _setsum) =
-            construct_parquet(None, &messages).expect("construct_parquet should succeed");
+        let (buffer, _setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
 
         // Read with None starting_log_position
         let (setsum, records, uses_relative_offsets) =
@@ -330,8 +360,8 @@ mod tests {
         let starting_position = LogPosition::from_offset(100);
 
         // Create a relative-offset parquet file
-        let (buffer, setsum_from_writer) =
-            construct_parquet(None, &messages).expect("construct_parquet should succeed");
+        let (buffer, setsum_from_writer) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
 
         // Read with a starting_log_position - positions should be translated
         let (setsum_from_reader, records, uses_relative_offsets) =
@@ -383,8 +413,9 @@ mod tests {
         let write_position = LogPosition::from_offset(50);
 
         // Create an absolute-offset parquet file starting at offset 50
-        let (buffer, setsum_from_writer) = construct_parquet(Some(write_position), &messages)
-            .expect("construct_parquet should succeed");
+        let (buffer, setsum_from_writer) =
+            construct_parquet(Some(write_position), &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet should succeed");
 
         // Read with a different starting_log_position - should be ignored for absolute files
         let different_position = LogPosition::from_offset(999);

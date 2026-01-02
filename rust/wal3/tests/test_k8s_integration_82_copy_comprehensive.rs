@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Cursor, CursorName, CursorStoreOptions, LogPosition, LogReader,
+    create_s3_factories, Cursor, CursorName, CursorStoreOptions, LogPosition, LogReader,
     LogReaderOptions, LogWriter, LogWriterOptions, ManifestManagerFactory,
     S3ManifestManagerFactory, SnapshotOptions,
 };
@@ -33,7 +33,7 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -142,7 +142,7 @@ async fn test_k8s_integration_copy_at_specific_offset() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -239,7 +239,7 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
         .await
         .unwrap();
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -341,7 +341,7 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
     let prefix = "copy_empty_advanced_source";
     let writer = "writer";
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -459,7 +459,7 @@ async fn test_k8s_integration_copy_with_large_fragments() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

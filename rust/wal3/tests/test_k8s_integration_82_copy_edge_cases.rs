@@ -3,7 +3,7 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_factories, Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits,
+    create_s3_factories, Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits,
     LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, ManifestManagerFactory,
     S3ManifestManagerFactory, SnapshotOptions,
 };
@@ -27,7 +27,7 @@ async fn test_k8s_integration_copy_single_fragment() {
         .await
         .unwrap();
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -166,7 +166,7 @@ async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
     let prefix = "copy_gc_empty_source";
     let writer = "writer";
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -282,7 +282,7 @@ async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -386,7 +386,7 @@ async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
         },
         ..LogWriterOptions::default()
     };
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
@@ -477,7 +477,7 @@ async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
         .await
         .unwrap();
     let options = LogWriterOptions::default();
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),
