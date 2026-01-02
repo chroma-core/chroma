@@ -32,7 +32,6 @@ impl LogServer {
         let reader = Self::make_log_reader_with_defaults(
             std::sync::Arc::clone(&self.storage),
             path,
-            "scrub",
         )
         .await
         .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
