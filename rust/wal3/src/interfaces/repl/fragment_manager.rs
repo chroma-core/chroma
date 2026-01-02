@@ -5,12 +5,14 @@ use std::time::{Duration, Instant};
 use setsum::Setsum;
 use tracing::Level;
 
-use chroma_storage::Storage;
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage, StorageError,
+};
 use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
 use crate::interfaces::{FragmentConsumer, FragmentUploader};
-use crate::{Error, FragmentUuid, LogWriterOptions};
+use crate::{fragment_path, Error, Fragment, FragmentUuid, LogPosition, LogWriterOptions};
 
 #[derive(Clone, Debug)]
 pub struct ReplicatedFragmentOptions {
@@ -263,11 +265,116 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
     }
 }
 
-pub struct FragmentReader;
+pub struct FragmentReader {
+    storages: Arc<Vec<StorageWrapper>>,
+}
+
+impl FragmentReader {
+    pub fn new(storages: Arc<Vec<StorageWrapper>>) -> Self {
+        Self { storages }
+    }
+}
 
 #[async_trait::async_trait]
 impl FragmentConsumer for FragmentReader {
     type FragmentPointer = FragmentUuid;
+
+    async fn read_raw_bytes(&self, path: &str, _: LogPosition) -> Result<Arc<Vec<u8>>, Error> {
+        let mut err: Option<Error> = None;
+        for storage in self.storages.iter() {
+            let path = fragment_path(&storage.prefix, path);
+            match storage
+                .storage
+                .get(&path, GetOptions::new(StorageRequestPriority::P0))
+                .await
+            {
+                Ok(parquet) => return Ok(parquet),
+                Err(StorageError::NotFound { .. }) => {
+                    // TODO(rescrv, mcmr): Read repair.
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!("reading from region {} failed", storage.region);
+                    err = Some(Arc::new(e).into());
+                }
+            }
+        }
+        if let Some(err) = err {
+            Err(err)
+        } else {
+            Err(Error::internal(file!(), line!()))
+        }
+    }
+
+    async fn read_parquet(
+        &self,
+        path: &str,
+        fragment_first_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+        let mut err: Option<Error> = None;
+        for storage in self.storages.iter() {
+            match crate::interfaces::s3::read_parquet(
+                &storage.storage,
+                &storage.prefix,
+                path,
+                Some(fragment_first_log_position),
+            )
+            .await
+            {
+                Ok(parquet) => return Ok(parquet),
+                Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
+                    // TODO(rescrv, mcmr): Read repair.
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!("reading from region {} failed", storage.region);
+                    err = Some(e);
+                }
+            }
+        }
+        if let Some(err) = err {
+            Err(err)
+        } else {
+            Err(Error::internal(file!(), line!()))
+        }
+    }
+
+    async fn read_fragment(
+        &self,
+        path: &str,
+        fragment_first_log_position: LogPosition,
+    ) -> Result<Option<Fragment>, Error> {
+        let mut err: Option<Error> = None;
+        for storage in self.storages.iter() {
+            match crate::interfaces::s3::read_fragment(
+                &storage.storage,
+                &storage.prefix,
+                path,
+                Some(fragment_first_log_position),
+            )
+            .await
+            {
+                Ok(Some(fragment)) => return Ok(Some(fragment)),
+                Ok(None) => {
+                    // TODO(rescrv, mcmr): Read repair.
+                    continue;
+                }
+                Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
+                    // TODO(rescrv, mcmr): Read repair.
+                    continue;
+                }
+                Err(e) => {
+                    tracing::error!("reading from region {} failed", storage.region);
+                    err = Some(e);
+                }
+            }
+        }
+        if let Some(err) = err {
+            Err(err)
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[cfg(test)]

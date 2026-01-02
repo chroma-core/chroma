@@ -249,7 +249,7 @@ pub async fn manifest_load(
 }
 
 /// Reads a parquet fragment from storage and computes its setsum and records.
-async fn read_parquet(
+pub async fn read_parquet(
     storage: &Storage,
     prefix: &str,
     path: &str,
@@ -285,7 +285,7 @@ async fn read_parquet(
     }
 }
 
-async fn read_fragment(
+pub async fn read_fragment(
     storage: &Storage,
     prefix: &str,
     path: &str,

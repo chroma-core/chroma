@@ -38,7 +38,8 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        Ok(FragmentReader)
+        let storages = Arc::clone(&self.storages);
+        Ok(FragmentReader::new(storages))
     }
 }
 
