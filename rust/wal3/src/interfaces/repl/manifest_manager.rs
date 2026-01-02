@@ -331,13 +331,13 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     }
 
     /// Check if the garbge will apply "cleanly", that is without violating invariants.
-    async fn garbage_applies_cleanly(&self, garbage: &Garbage) -> Result<bool, Error> {
+    async fn garbage_applies_cleanly(&self, _: &Garbage) -> Result<bool, Error> {
         // TODO(rescrv, mcmr.gc):  Check that it applies cleanly.
         Ok(true)
     }
 
     /// Apply a garbage file to the manifest.
-    async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
+    async fn apply_garbage(&self, _: Garbage) -> Result<(), Error> {
         // TODO(rescrv, mcmr.gc):  Apply the garbage.
         Ok(())
     }
@@ -345,8 +345,8 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     /// Compute the garbage assuming at least log position will be kept.
     async fn compute_garbage(
         &self,
-        options: &GarbageCollectionOptions,
-        first_to_keep: LogPosition,
+        _: &GarbageCollectionOptions,
+        _: LogPosition,
     ) -> Result<Option<Garbage>, Error> {
         // TODO(rescrv, mcmr.gc):  Compute the garbage.
         Ok(None)
