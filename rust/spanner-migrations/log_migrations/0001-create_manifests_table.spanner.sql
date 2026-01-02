@@ -4,5 +4,5 @@ CREATE TABLE IF NOT EXISTS manifests (
     collected STRING(64) NOT NULL,
     acc_bytes INT64 NOT NULL,
     writer STRING(64) NOT NULL,
-    enumeration_offset INT64 NOT NULL,
+    enumeration_offset INT64 NOT NULL
 ) PRIMARY KEY (log_id);
