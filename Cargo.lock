@@ -8161,6 +8161,7 @@ version = "0.1.0"
 dependencies = [
  "chroma-config",
  "chroma-tracing",
+ "clap",
  "figment",
  "google-cloud-gax",
  "google-cloud-googleapis",

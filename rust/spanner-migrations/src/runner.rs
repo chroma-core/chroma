@@ -128,8 +128,13 @@ impl MigrationRunner {
         Ok(total_updated as usize)
     }
 
-    pub async fn apply_all_migrations(&self) -> Result<(), MigrationError> {
+    pub async fn apply_all_migrations(&self, slug: Option<&str>) -> Result<(), MigrationError> {
         for dir in MIGRATION_DIRS.iter() {
+            if let Some(slug) = slug {
+                if dir.migration_slug() != slug {
+                    continue;
+                }
+            }
             let applied_migrations = self.get_existing_migrations(dir).await?;
             let source_migrations = dir.get_source_migrations()?;
 
@@ -138,7 +143,7 @@ impl MigrationRunner {
             tracing::info!(
                 "Found {} unapplied migrations for {}",
                 unapplied.len(),
-                dir.as_str()
+                dir.migration_slug()
             );
 
             for migration in unapplied {
@@ -160,8 +165,13 @@ impl MigrationRunner {
         Ok(())
     }
 
-    pub async fn validate_all_migrations(&self) -> Result<(), MigrationError> {
+    pub async fn validate_all_migrations(&self, slug: Option<&str>) -> Result<(), MigrationError> {
         for dir in MIGRATION_DIRS.iter() {
+            if let Some(slug) = slug {
+                if dir.migration_slug() != slug {
+                    continue;
+                }
+            }
             let applied_migrations = self.get_existing_migrations(dir).await?;
             let source_migrations = dir.get_source_migrations()?;
 
@@ -276,7 +286,7 @@ impl MigrationRunner {
         let mut stmt = Statement::new(
             "SELECT dir, version, filename, sql, checksum FROM migrations WHERE dir = @dir ORDER BY version ASC",
         );
-        stmt.add_param("dir", &dir.as_str());
+        stmt.add_param("dir", &dir.migration_slug());
 
         let mut tx = self
             .client
