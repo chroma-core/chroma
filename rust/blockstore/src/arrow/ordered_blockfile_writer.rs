@@ -146,13 +146,6 @@ impl ArrowOrderedBlockfileWriter {
 
         self.complete_current_delta::<K, V>(&mut inner).await?;
 
-        for block in &inner.completed_blocks {
-            assert!(
-                block.get_size() <= self.root.max_block_size_bytes,
-                "Blocks should have been split properly"
-            );
-        }
-
         let mut blocks = Vec::with_capacity(inner.completed_blocks.len());
         for block in inner.completed_blocks {
             if block.len() > 0 || !self.root.sparse_index.remove_block(&block.id) {
@@ -306,8 +299,7 @@ impl ArrowOrderedBlockfileWriter {
             delta.get_size::<K, V>()
         };
 
-        let max_block_size_bytes = self.root.max_block_size_bytes;
-        if current_materialized_delta_size > max_block_size_bytes {
+        if current_materialized_delta_size > self.root.max_block_size_bytes {
             let (mut current_delta, current_end_key) = inner
                 .current_block_delta
                 .take()
@@ -324,6 +316,17 @@ impl ArrowOrderedBlockfileWriter {
                 )
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
 
+            if current_delta.get_size::<K, V>() > self.root.max_block_size_bytes {
+                let split_blocks = current_delta.split::<K, V>(self.root.max_block_size_bytes);
+                for (split_key, split_delta) in split_blocks {
+                    self.root
+                        .sparse_index
+                        .add_block(split_key, split_delta.id)
+                        .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+                    let block = self.block_manager.commit::<K, V>(split_delta).await;
+                    inner.completed_blocks.push(block);
+                }
+            }
             let block = self.block_manager.commit::<K, V>(current_delta).await;
             inner.completed_blocks.push(block);
             inner.current_block_delta = Some((new_delta, current_end_key));

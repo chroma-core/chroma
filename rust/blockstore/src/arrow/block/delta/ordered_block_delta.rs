@@ -127,10 +127,6 @@ impl OrderedBlockDelta {
         }
     }
 
-    pub fn len(&self) -> usize {
-        self.builder.len()
-    }
-
     fn copy_up_to<'me, K: ArrowReadableKey<'me>, V: ArrowReadableValue<'me>>(
         &'me mut self,
         excluded_prefix: &str,
