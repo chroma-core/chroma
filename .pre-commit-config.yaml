@@ -30,6 +30,9 @@ repos:
         args:
           - "--extend-ignore=E203,E501,E503"
           - "--max-line-length=88"
+          - "--ban-relative-imports=true"
+        additional_dependencies:
+          - flake8-tidy-imports>=4.10.0
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.10.0"
