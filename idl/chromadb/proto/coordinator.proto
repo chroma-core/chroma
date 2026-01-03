@@ -661,6 +661,12 @@ message FinishAttachedFunctionDeletionRequest {
 
 message FinishAttachedFunctionDeletionResponse {}
 
+message IncrementCompactionFailureCountRequest {
+  string collection_id = 1;
+}
+
+message IncrementCompactionFailureCountResponse {}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
@@ -707,4 +713,5 @@ service SysDB {
   rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
   rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
   rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
+  rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}
 }

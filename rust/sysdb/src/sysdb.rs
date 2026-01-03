@@ -348,6 +348,7 @@ impl SysDb {
                     lineage_file_path: None,
                     updated_at: SystemTime::now(),
                     database_id: DatabaseUuid::new(),
+                    compaction_failure_count: 0,
                 };
 
                 test_sysdb.add_collection(collection.clone());
@@ -693,6 +694,21 @@ impl SysDb {
             }
             SysDb::Test(client) => Ok(client.delete_collection_version(versions).await),
             SysDb::Sqlite(_) => todo!(),
+        }
+    }
+
+    /// Increment the compaction failure count for a collection.
+    pub async fn increment_compaction_failure_count(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), IncrementCompactionFailureCountError> {
+        match self {
+            SysDb::Grpc(grpc) => grpc.increment_compaction_failure_count(collection_id).await,
+            SysDb::Test(test) => {
+                test.increment_compaction_failure_count(collection_id);
+                Ok(())
+            }
+            SysDb::Sqlite(_) => Err(IncrementCompactionFailureCountError::Unimplemented),
         }
     }
 
@@ -1798,6 +1814,18 @@ impl GrpcSysDb {
         Ok(res.into_inner().collection_id_to_success)
     }
 
+    async fn increment_compaction_failure_count(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<(), IncrementCompactionFailureCountError> {
+        let req = chroma_proto::IncrementCompactionFailureCountRequest {
+            collection_id: collection_id.0.to_string(),
+        };
+
+        self.client.increment_compaction_failure_count(req).await?;
+        Ok(())
+    }
+
     async fn update_tenant(
         &mut self,
         tenant_id: String,
@@ -2241,6 +2269,26 @@ impl ChromaError for DeleteCollectionVersionError {
     fn code(&self) -> ErrorCodes {
         match self {
             DeleteCollectionVersionError::FailedToDeleteVersion(e) => e.code().into(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum IncrementCompactionFailureCountError {
+    #[error("Failed to increment compaction failure count: {0}")]
+    FailedToIncrement(#[from] tonic::Status),
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] sqlx::Error),
+    #[error("Unimplemented: increment_compaction_failure_count is not supported for SqliteSysDb")]
+    Unimplemented,
+}
+
+impl ChromaError for IncrementCompactionFailureCountError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            IncrementCompactionFailureCountError::FailedToIncrement(_) => ErrorCodes::Internal,
+            IncrementCompactionFailureCountError::Sqlite(_) => ErrorCodes::Internal,
+            IncrementCompactionFailureCountError::Unimplemented => ErrorCodes::Internal,
         }
     }
 }
