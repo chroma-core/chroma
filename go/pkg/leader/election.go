@@ -16,19 +16,20 @@ import (
 )
 
 // extractServiceName extracts the service name from a pod name.
-// The service name is expected to be the prefix before the last hyphen in the pod name.
-// For example, from pod name "chroma-query-abc123", it will return "chroma-query".
+// The service name is expected to be the prefix before the deployment hash suffix.
+// For example, from pod name "sysdb-7c85f55c69-z55lm", it will return "sysdb".
 func extractServiceName(podName string) string {
 	parts := strings.Split(podName, "-")
-	if len(parts) > 1 {
-		return strings.Join(parts[:len(parts)-1], "-")
+	if len(parts) > 2 {
+		// Remove the last two parts (replica set hash + pod hash)
+		return strings.Join(parts[:len(parts)-2], "-")
 	}
 	return podName
 }
 
 // AcquireLeaderLock starts leader election and runs the given function when leadership is acquired.
 // The context passed to onStartedLeading will be cancelled when leadership is lost.
-// The service name is automatically determined from the pod name by extracting the prefix before the last hyphen.
+// The service name is automatically determined from the pod name by extracting the base service name.
 // The lock name will be formatted as "{service-name}-leader".
 func AcquireLeaderLock(ctx context.Context, onStartedLeading func(context.Context)) {
 	podName, _ := os.LookupEnv("POD_NAME")
