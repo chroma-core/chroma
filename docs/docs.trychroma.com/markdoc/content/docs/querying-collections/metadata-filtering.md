@@ -224,7 +224,7 @@ An `$or` operator will return results that match any of the filters in the list.
 
 ```python
 {
-    "or": [
+    "$or": [
         {
             "metadata_field": {
                 <Operator>: <Value>
@@ -245,7 +245,7 @@ An `$or` operator will return results that match any of the filters in the list.
 
 ```typescript
 {
-    "or": [
+    "$or": [
         {
             metadata_field: { <Operator>: <Value> }
         },
