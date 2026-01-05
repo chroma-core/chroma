@@ -40,7 +40,7 @@ pub struct DistributedExecutorConfig {
     #[serde(default = "default_max_query_service_response_size_bytes")]
     pub max_query_service_response_size_bytes: usize,
     #[serde(default = "ClientSelectionConfig::default")]
-    pub client_selection_config: ClientSelectionConfig,
+    pub client_selection: ClientSelectionConfig,
     #[serde(default = "default_query_service_port")]
     pub port: u16,
 }
