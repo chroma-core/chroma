@@ -377,8 +377,11 @@ pub async fn standup_local_chroma(
     }
 
     Err(UtilsError::LocalConnect(
-        last_error.map(|e| e.to_string()).unwrap_or_else(|| "Health check failed".to_string())
-    ).into())
+        last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "Health check failed".to_string()),
+    )
+    .into())
 }
 
 pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
