@@ -93,7 +93,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
 
         let retry_config = &config.retry;
         let backoff = retry_config.into();
-        let client_selection_config = config.client_selection_config.clone();
+        let client_selection_config = config.client_selection.clone();
 
         Ok(Self {
             client_assigner,
