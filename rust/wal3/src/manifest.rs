@@ -632,7 +632,6 @@ impl Manifest {
                 .any(|snap| self.snapshots.contains(snap))
             && garbage.snapshots_to_make.is_empty()
         {
-            eprintln!("FINDME {}:{}", file!(), line!());
             return Ok(None);
         }
         let mut setsum_to_discard = Setsum::default();
@@ -643,7 +642,6 @@ impl Manifest {
             )));
         }
         if garbage.fragments_to_drop_limit == FragmentSeqNo::ZERO && !garbage.fragments_are_uuids {
-            eprintln!("FINDME {}:{}", file!(), line!());
             return Ok(None);
         }
         let mut new = self.clone();

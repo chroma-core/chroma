@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use wal3::{
     create_repl_factories, unprefixed_fragment_path, FragmentIdentifier, FragmentSeqNo, LogWriter,
-    LogWriterOptions, ManifestManager, SnapshotOptions, StorageWrapper, ThrottleOptions,
+    LogWriterOptions, ManifestManagerFactory, SnapshotOptions, StorageWrapper,
 };
 
 mod common;
@@ -43,7 +43,7 @@ async fn repl_97_destroy() {
         &prefix,
         writer,
         fragment_factory,
-        manifest_factory,
+        manifest_factory.clone(),
         None,
     )
     .await
@@ -75,18 +75,10 @@ async fn repl_97_destroy() {
         .await
         .expect("put_bytes should succeed");
 
-    // Use S3-based ManifestManager for destroy operation (destroy is storage-level).
-    let manifest_manager = ManifestManager::new(
-        ThrottleOptions::default(),
-        options.snapshot_manifest,
-        Arc::new(storage.clone()),
-        prefix.clone(),
-        writer.to_string(),
-        Arc::new(()),
-        Arc::new(()),
-    )
-    .await
-    .expect("ManifestManager::new should succeed");
+    let manifest_manager = manifest_factory
+        .open_publisher()
+        .await
+        .expect("open_publisher succeed");
 
     wal3::destroy(Arc::new(storage), &prefix, &manifest_manager)
         .await

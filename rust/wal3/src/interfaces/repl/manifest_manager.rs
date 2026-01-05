@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -6,6 +7,7 @@ use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::statement::Statement;
 use setsum::Setsum;
+use tonic::Code;
 use uuid::Uuid;
 
 use crate::interfaces::{ManifestConsumer, ManifestPublisher};
@@ -26,6 +28,11 @@ impl ManifestManager {
     }
 
     pub async fn init(spanner: &Client, log_id: Uuid, manifest: &Manifest) -> Result<(), Error> {
+        let enum_offset = manifest.fragments.iter().map(|f| f.limit).max().unwrap_or(
+            manifest
+                .initial_offset
+                .unwrap_or(LogPosition::from_offset(1)),
+        );
         let mut mutations = vec![insert(
             "manifests",
             &[
@@ -42,10 +49,7 @@ impl ManifestManager {
                 &manifest.collected.hexdigest(),
                 &(manifest.acc_bytes as i64),
                 &"spanner init",
-                &(manifest
-                    .initial_offset
-                    .unwrap_or(LogPosition::from_offset(1))
-                    .offset() as i64),
+                &(enum_offset.offset() as i64),
             ],
         )];
         // Also insert any fragments from the manifest.
@@ -75,7 +79,6 @@ impl ManifestManager {
                 ],
             ));
         }
-        println!("FINDME {}:{}", file!(), line!());
         spanner
             .read_write_transaction(|tx| {
                 let mutations = mutations.clone();
@@ -85,7 +88,6 @@ impl ManifestManager {
                 })
             })
             .await?;
-        println!("FINDME {}:{}", file!(), line!());
         Ok(())
     }
 
@@ -209,7 +211,11 @@ impl ManifestManager {
         }
         // Sort fragments by position_start for sequential ordering expected by scrub.
         fragments.sort_by_key(|f| f.start);
-        let initial_offset = fragments.iter().map(|f| f.start).min();
+        let initial_offset = fragments
+            .iter()
+            .map(|f| f.start)
+            .min()
+            .unwrap_or(LogPosition::from_offset(enumeration_offset));
         // Construct the manifest and witness.
         let manifest = Manifest {
             setsum,
@@ -217,8 +223,8 @@ impl ManifestManager {
             acc_bytes,
             snapshots: vec![],
             fragments,
-            initial_offset,
-            initial_seq_no: None,
+            initial_offset: Some(initial_offset),
+            initial_seq_no: Some(FragmentUuid::generate().into()),
             writer,
         };
         let manifest_witness =
@@ -276,129 +282,141 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         let pointer = pointer.to_string();
         let path = path.to_string();
         let regions: Vec<String> = regions.iter().map(|s| s.to_string()).collect();
-        println!("FINDME {}:{}", file!(), line!());
-        let res = self
-            .spanner
-            .read_write_transaction(|tx| {
-                let log_id = self.log_id.to_string();
-                let pointer = pointer.clone();
-                let path = path.clone();
-                let regions = regions.clone();
-                Box::pin(async move {
-                    let row = tx
-                        .read_row(
-                            "manifests",
-                            &["setsum", "enumeration_offset"],
-                            Key::new(&log_id),
-                        )
-                        .await?;
-                    let manifest_setsum = row
-                        .as_ref()
-                        .map(|x| x.column_by_name::<String>("setsum"))
-                        .transpose()?
-                        .ok_or_else(|| {
-                            google_cloud_spanner::client::Error::InvalidConfig(format!(
-                                "manifest not found for log_id: {}",
-                                log_id
-                            ))
-                        })?
-                        .clone();
-                    let Some(manifest_setsum) = Setsum::from_hexdigest(manifest_setsum.as_ref())
-                    else {
-                        return Err(google_cloud_spanner::client::Error::InvalidConfig(format!(
-                            "setsum not parseable for log_id: {}",
-                            log_id
-                        )));
-                    };
-                    let enumeration_offset = row
-                        .map(|x| x.column_by_name::<i64>("enumeration_offset"))
-                        .transpose()?
-                        .ok_or_else(|| {
-                            google_cloud_spanner::client::Error::InvalidConfig(format!(
-                                "manifest not found for log_id: {}",
-                                log_id
-                            ))
-                        })?;
-                    if enumeration_offset < 0 {
-                        return Ok(Err(Error::CorruptManifest(format!(
+        for _ in 0..3 {
+            let res = self
+                .spanner
+                .read_write_transaction(|tx| {
+                    let log_id = self.log_id.to_string();
+                    let pointer = pointer.clone();
+                    let path = path.clone();
+                    let regions = regions.clone();
+                    Box::pin(async move {
+                        let row = tx
+                            .read_row(
+                                "manifests",
+                                &["setsum", "enumeration_offset"],
+                                Key::new(&log_id),
+                            )
+                            .await?;
+                        let manifest_setsum = row
+                            .as_ref()
+                            .map(|x| x.column_by_name::<String>("setsum"))
+                            .transpose()?
+                            .ok_or_else(|| {
+                                google_cloud_spanner::client::Error::InvalidConfig(format!(
+                                    "manifest not found for log_id: {}",
+                                    log_id
+                                ))
+                            })?
+                            .clone();
+                        let Some(manifest_setsum) =
+                            Setsum::from_hexdigest(manifest_setsum.as_ref())
+                        else {
+                            return Err(google_cloud_spanner::client::Error::InvalidConfig(
+                                format!("setsum not parseable for log_id: {}", log_id),
+                            ));
+                        };
+                        let enumeration_offset = row
+                            .map(|x| x.column_by_name::<i64>("enumeration_offset"))
+                            .transpose()?
+                            .ok_or_else(|| {
+                                google_cloud_spanner::client::Error::InvalidConfig(format!(
+                                    "manifest not found for log_id: {}",
+                                    log_id
+                                ))
+                            })?;
+                        if enumeration_offset < 0 {
+                            return Ok(Err(Error::CorruptManifest(format!(
                             "negative enumeration_offset {enumeration_offset} for manifest {log_id}"
                         ))));
-                    }
-                    let enumeration_limit = match enumeration_offset.checked_add(messages_len_i64) {
-                        Some(limit) => limit,
-                        None => return Ok(Err(Error::LogFull)),
-                    };
-                    let num_bytes = match i64::try_from(num_bytes) {
-                        Ok(num_bytes) => num_bytes,
-                        Err(_) => {
-                            return Ok(Err(Error::ReplicationConsistencyError(format!(
-                                "num_bytes overflowed spanner range for manifest {log_id}"
-                            ))))
                         }
-                    };
-                    let updated_setsum = (manifest_setsum + setsum).hexdigest();
-                    // Read current acc_bytes to update it.
-                    let acc_bytes_row = tx
-                        .read_row("manifests", &["acc_bytes"], Key::new(&log_id))
-                        .await?;
-                    let current_acc_bytes = acc_bytes_row
-                        .as_ref()
-                        .map(|x| x.column_by_name::<i64>("acc_bytes"))
-                        .transpose()?
-                        .unwrap_or(0);
-                    let updated_acc_bytes = current_acc_bytes.saturating_add(num_bytes);
-                    let mut mutations = vec![
-                        insert(
-                            "fragments",
-                            &[
-                                "log_id",
-                                "ident",
-                                "path",
-                                "position_start",
-                                "position_limit",
-                                "num_bytes",
-                                "setsum",
-                            ],
-                            &[
-                                &log_id,
-                                &pointer,
-                                &path,
-                                &enumeration_offset,
-                                &enumeration_limit,
-                                &num_bytes,
-                                &setsum.hexdigest(),
-                            ],
-                        ),
-                        update(
-                            "manifests",
-                            &["log_id", "setsum", "enumeration_offset", "acc_bytes"],
-                            // NOTE(rescrv):  Pass in enumeration_limit so that we advance the enumeration offset.
-                            &[
-                                &log_id,
-                                &updated_setsum,
-                                &enumeration_limit,
-                                &updated_acc_bytes,
-                            ],
-                        ),
-                    ];
-                    for region in regions.iter() {
-                        mutations.push(insert(
-                            "fragment_regions",
-                            &["log_id", "ident", "region"],
-                            &[&log_id, &pointer, region],
-                        ));
-                    }
-                    tx.buffer_write(mutations);
-                    Ok::<Result<LogPosition, Error>, google_cloud_spanner::client::Error>(Ok(
-                        LogPosition::from_offset(enumeration_offset as u64),
-                    ))
+                        let enumeration_limit =
+                            match enumeration_offset.checked_add(messages_len_i64) {
+                                Some(limit) => limit,
+                                None => return Ok(Err(Error::LogFull)),
+                            };
+                        let num_bytes = match i64::try_from(num_bytes) {
+                            Ok(num_bytes) => num_bytes,
+                            Err(_) => {
+                                return Ok(Err(Error::ReplicationConsistencyError(format!(
+                                    "num_bytes overflowed spanner range for manifest {log_id}"
+                                ))))
+                            }
+                        };
+                        let updated_setsum = (manifest_setsum + setsum).hexdigest();
+                        // Read current acc_bytes to update it.
+                        let acc_bytes_row = tx
+                            .read_row("manifests", &["acc_bytes"], Key::new(&log_id))
+                            .await?;
+                        let current_acc_bytes = acc_bytes_row
+                            .as_ref()
+                            .map(|x| x.column_by_name::<i64>("acc_bytes"))
+                            .transpose()?
+                            .unwrap_or(0);
+                        let updated_acc_bytes = current_acc_bytes.saturating_add(num_bytes);
+                        let mut mutations = vec![
+                            insert(
+                                "fragments",
+                                &[
+                                    "log_id",
+                                    "ident",
+                                    "path",
+                                    "position_start",
+                                    "position_limit",
+                                    "num_bytes",
+                                    "setsum",
+                                ],
+                                &[
+                                    &log_id,
+                                    &pointer,
+                                    &path,
+                                    &enumeration_offset,
+                                    &enumeration_limit,
+                                    &num_bytes,
+                                    &setsum.hexdigest(),
+                                ],
+                            ),
+                            update(
+                                "manifests",
+                                &["log_id", "setsum", "enumeration_offset", "acc_bytes"],
+                                // NOTE(rescrv):  Pass in enumeration_limit so that we advance the enumeration offset.
+                                &[
+                                    &log_id,
+                                    &updated_setsum,
+                                    &enumeration_limit,
+                                    &updated_acc_bytes,
+                                ],
+                            ),
+                        ];
+                        for region in regions.iter() {
+                            mutations.push(insert(
+                                "fragment_regions",
+                                &["log_id", "ident", "region"],
+                                &[&log_id, &pointer, region],
+                            ));
+                        }
+                        tx.buffer_write(mutations);
+                        Ok::<Result<LogPosition, Error>, google_cloud_spanner::client::Error>(Ok(
+                            LogPosition::from_offset(enumeration_offset as u64),
+                        ))
+                    })
                 })
-            })
-            .await;
-        println!("FINDME {}:{}", file!(), line!());
-        let (_, log_position) = res?;
-        let log_position = log_position?;
-        Ok(log_position)
+                .await;
+            let (_, log_position) = match res {
+                Ok(x) => x,
+                Err(err) => {
+                    if let google_cloud_spanner::client::Error::GRPC(grpc) = &err {
+                        if grpc.code() == Code::Aborted {
+                            continue;
+                        }
+                    }
+                    return Err(err.into());
+                }
+            };
+            let log_position = log_position?;
+            return Ok(log_position);
+        }
+        Err(Error::Backoff)
     }
 
     /// Check if the garbge will apply "cleanly", that is without violating invariants.
@@ -443,21 +461,21 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             .read_write_transaction(|tx| {
                 let mut stmt1 = Statement::new(
                     "
-                    SELECT fragments.ident as ident, setsum, count(region) AS count
+                    SELECT fragments.ident, setsum, position_limit
                     FROM fragments
                         INNER JOIN fragment_regions
                         ON fragments.log_id = fragment_regions.log_id
                             AND fragments.ident = fragment_regions.ident
                     WHERE fragments.log_id = @log_id
                         AND fragments.position_limit <= @threshold
-                    GROUP BY fragments.ident, setsum
+                        AND fragment_regions.region = @local_region
                 ",
                 );
-                // TODO(rescrv, mcmr): Fill this in.
-                // stmt1.add_param("local_region", "");
                 let log_id = self.log_id.to_string();
                 stmt1.add_param("log_id", &log_id);
                 stmt1.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
+                // TODO(rescrv, mcmr):  dummy region.
+                stmt1.add_param("local_region", &"dummy");
                 let mut stmt2 = Statement::new(
                     "
                     SELECT collected
@@ -467,11 +485,27 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 ",
                 );
                 stmt2.add_param("log_id", &log_id);
+                let mut stmt3 = Statement::new(
+                    "
+                    SELECT fragments.ident, fragments.path, count(fragment_regions.region) as c
+                    FROM fragments
+                        INNER JOIN fragment_regions
+                        ON fragments.log_id = fragment_regions.log_id
+                            AND fragments.ident = fragment_regions.ident
+                    WHERE fragments.log_id = @log_id
+                        AND fragments.position_limit <= @threshold
+                    GROUP BY fragments.ident, fragments.path
+                    HAVING c <= 1
+                ",
+                );
+                stmt3.add_param("log_id", &log_id);
+                stmt3.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
+                // TODO(rescrv, mcmr):  dummy region.
+                stmt3.add_param("local_region", &"dummy");
                 Box::pin(async move {
-                    eprintln!("GC");
                     let mut query = tx.query(stmt2).await?;
                     let Some(row) = query.next().await? else {
-                        todo!();
+                        return Err(Error::UninitializedLog);
                     };
                     let collected = row.column_by_name::<String>("collected")?;
                     let collected = Setsum::from_hexdigest(&collected).ok_or_else(|| {
@@ -479,6 +513,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     })?;
                     let mut iter = tx.query(stmt1).await?;
                     let mut mutations = vec![];
+                    let mut selected: HashSet<String> = HashSet::default();
                     while let Some(row) = iter.next().await? {
                         let cur = row.column_by_name::<String>("setsum")?;
                         let cur = Setsum::from_hexdigest(&cur).ok_or_else(|| {
@@ -491,10 +526,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                             "fragment_regions",
                             Key::composite(&[&log_id, &ident, &"dummy"]),
                         ));
-                        if row.column_by_name::<i64>("count")? == 1 {
-                            eprintln!("DELETE {log_id} {ident}");
-                            mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
-                        }
+                        selected.insert(ident);
                     }
                     let collected = collected + acc;
                     mutations.push(update(
@@ -506,6 +538,13 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                             &"replicated manifest manager",
                         ],
                     ));
+                    let mut query = tx.query(stmt3).await?;
+                    while let Some(row) = query.next().await? {
+                        let ident = row.column_by_name::<String>("ident")?;
+                        if selected.contains(&ident) {
+                            mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
+                        }
+                    }
                     if acc == garbage.setsum_to_discard {
                         tx.buffer_write(mutations);
                         Ok::<_, Error>(())
@@ -541,10 +580,13 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     AND fragments.ident = fragment_regions.ident
             WHERE fragments.log_id = @log_id
                 AND fragments.position_limit <= @threshold
+                AND fragment_regions.region = @local_region
             ",
         );
         stmt1.add_param("log_id", &self.log_id.to_string());
         stmt1.add_param("threshold", &(first_to_keep.offset() as i64));
+        // TODO(rescrv, mcmr):  dummy region.
+        stmt1.add_param("local_region", &"dummy");
         let mut tx = self.spanner.read_only_transaction().await?;
         let mut iter = tx.query(stmt1).await?;
         let mut acc = Setsum::default();
@@ -555,48 +597,48 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 .ok_or_else(|| Error::CorruptGarbage(format!("invalid setsum hexdigest: {cur}")))?;
             acc += cur;
             let position_limit = row.column_by_name::<i64>("position_limit")?;
-            // NOTE(rescrv):  Use min here so that we only keep more data.
-            max_log_position = std::cmp::min(max_log_position, position_limit);
+            max_log_position = std::cmp::max(max_log_position, position_limit);
+        }
+        if max_log_position as u64 > first_to_keep.offset() {
+            todo!();
         }
         let mut stmt2 = Statement::new(
             "
-            SELECT COALESCE(MIN(position_start), @minimum)
+            SELECT COALESCE(MIN(position_start), @threshold), log_id
             FROM fragments
             WHERE log_id = @log_id
                 AND position_limit > @threshold
+            GROUP BY log_id
             LIMIT 1
 ",
         );
         stmt2.add_param("log_id", &self.log_id.to_string());
-        stmt2.add_param("minimum", &max_log_position);
         stmt2.add_param("threshold", &(first_to_keep.offset() as i64));
         let mut iter = tx.query(stmt2).await?;
-        if let Some(row) = iter.next().await? {
+        let first_to_keep = if let Some(row) = iter.next().await? {
             let mut min_position_start = row.column::<i64>(0)?;
             if min_position_start < 0 {
                 min_position_start = 0;
             }
-            let min_position_start = min_position_start as u64;
-            let first_to_keep =
-                LogPosition::from_offset(first_to_keep.offset().min(min_position_start));
-            if acc != Setsum::default() {
-                eprintln!("FINDME {}:{}", file!(), line!());
-                Ok(Some(Garbage {
-                    snapshots_to_drop: vec![],
-                    snapshots_to_make: vec![],
-                    snapshot_for_root: None,
-                    fragments_to_drop_start: FragmentSeqNo::ZERO,
-                    fragments_to_drop_limit: FragmentSeqNo::ZERO,
-                    setsum_to_discard: acc,
-                    fragments_are_uuids: true,
-                    first_to_keep,
-                }))
-            } else {
-                eprintln!("FINDME {}:{}", file!(), line!());
-                Ok(None)
-            }
+            LogPosition::from_offset(first_to_keep.offset().min(min_position_start as u64))
         } else {
-            eprintln!("FINDME {}:{}", file!(), line!());
+            if max_log_position < 0 {
+                max_log_position = 0;
+            }
+            LogPosition::from_offset(first_to_keep.offset().min(max_log_position as u64))
+        };
+        if acc != Setsum::default() {
+            Ok(Some(Garbage {
+                snapshots_to_drop: vec![],
+                snapshots_to_make: vec![],
+                snapshot_for_root: None,
+                fragments_to_drop_start: FragmentSeqNo::ZERO,
+                fragments_to_drop_limit: FragmentSeqNo::ZERO,
+                setsum_to_discard: acc,
+                fragments_are_uuids: true,
+                first_to_keep,
+            }))
+        } else {
             Ok(None)
         }
     }
@@ -1394,6 +1436,9 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
+        ManifestManager::init(&client, log_id, &Manifest::new_empty("test writer"))
+            .await
+            .unwrap();
         let manager = ManifestManager::new(Arc::new(client), log_id);
         let garbage = crate::Garbage::empty();
 

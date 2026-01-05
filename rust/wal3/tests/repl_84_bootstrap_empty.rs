@@ -76,7 +76,6 @@ async fn repl_84_bootstrap_empty() {
         LogReaderOptions::default(),
         reader_fragment_consumer,
         reader_manifest_consumer,
-        prefix.clone(),
     )
     .await
     .expect("LogReader::open should succeed");

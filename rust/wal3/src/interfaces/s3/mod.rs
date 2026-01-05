@@ -254,21 +254,19 @@ pub async fn read_parquet(
     prefix: &str,
     path: &str,
     starting_log_position: Option<LogPosition>,
-) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
     let path = fragment_path(prefix, path);
     let parquet = storage
         .get(&path, GetOptions::new(StorageRequestPriority::P0))
         .await
         .map_err(Arc::new)?;
     let num_bytes = parquet.len() as u64;
-    let (setsum, records, uses_relative_offsets) =
+    let (setsum, records, uses_relative_offsets, now_micros) =
         super::checksum_parquet(&parquet, starting_log_position)?;
-    // checksum_parquet already returns absolute positions when starting_log_position is provided.
-    // Verify that the combination of inputs is valid.
     match (starting_log_position, uses_relative_offsets) {
-        (Some(_), true) => Ok((setsum, records, num_bytes)),
-        (None, false) => Ok((setsum, records, num_bytes)),
+        (Some(_), true) => Ok((setsum, records, num_bytes, now_micros)),
         (Some(_), false) => Err(Error::internal(file!(), line!())),
+        (None, false) => Ok((setsum, records, num_bytes, now_micros)),
         (None, true) => Err(Error::internal(file!(), line!())),
     }
 }
@@ -286,7 +284,7 @@ pub async fn read_fragment(
     };
     let (setsum, data, num_bytes) =
         match read_parquet(storage, prefix, path, starting_log_position).await {
-            Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
+            Ok((setsum, data, num_bytes, _ts)) => (setsum, data, num_bytes),
             Err(Error::StorageError(storage)) => {
                 if matches!(&*storage, StorageError::NotFound { .. }) {
                     return Ok(None);

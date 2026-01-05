@@ -23,6 +23,7 @@ pub use batch_manager::BatchManager;
 ////////////////////////////////////////// FragmentPointer /////////////////////////////////////////
 
 pub trait FragmentPointer: Clone + Send + Sync + 'static {
+    fn try_create(ident: FragmentIdentifier, pos: LogPosition) -> Option<Self>;
     fn identifier(&self) -> FragmentIdentifier;
     fn bootstrap(position: LogPosition) -> Self
     where
@@ -30,6 +31,14 @@ pub trait FragmentPointer: Clone + Send + Sync + 'static {
 }
 
 impl FragmentPointer for (FragmentSeqNo, LogPosition) {
+    fn try_create(ident: FragmentIdentifier, pos: LogPosition) -> Option<Self> {
+        if let FragmentIdentifier::SeqNo(seq_no) = ident {
+            Some((seq_no, pos))
+        } else {
+            None
+        }
+    }
+
     fn identifier(&self) -> FragmentIdentifier {
         FragmentIdentifier::SeqNo(self.0)
     }
@@ -40,6 +49,14 @@ impl FragmentPointer for (FragmentSeqNo, LogPosition) {
 }
 
 impl FragmentPointer for FragmentUuid {
+    fn try_create(ident: FragmentIdentifier, _: LogPosition) -> Option<Self> {
+        if let FragmentIdentifier::Uuid(uuid) = ident {
+            Some(uuid)
+        } else {
+            None
+        }
+    }
+
     fn identifier(&self) -> FragmentIdentifier {
         FragmentIdentifier::Uuid(*self)
     }
@@ -142,7 +159,7 @@ pub trait FragmentConsumer: Send + Sync + 'static {
         &self,
         path: &str,
         fragment_first_log_position: LogPosition,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error>;
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
     async fn read_fragment(
         &self,
@@ -236,11 +253,15 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
 ///
 /// Returns `(setsum, records, uses_relative_offsets)` where `uses_relative_offsets` indicates
 /// whether the parquet file uses relative offsets (true) or absolute offsets (false).
+///
+/// The returned LogPositions are absolute.
+///
+/// Thus, you must provide a starting_log_position for relative logs and omit it for absolute ones.
 #[allow(clippy::type_complexity)]
 pub fn checksum_parquet(
     parquet: &[u8],
     starting_log_position: Option<LogPosition>,
-) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool), Error> {
+) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool, u64), Error> {
     let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(parquet))
         .map_err(|e| {
             Error::CorruptFragment(format!("failed to create parquet reader builder: {}", e))
@@ -251,6 +272,7 @@ pub fn checksum_parquet(
     let mut setsum = Setsum::default();
     let mut records = vec![];
     let mut uses_relative_offsets = false;
+    let mut epoch_micros_singleton = None;
     for batch in reader {
         let batch = batch
             .map_err(|e| Error::CorruptFragment(format!("failed to read parquet batch: {}", e)))?;
@@ -259,13 +281,18 @@ pub fn checksum_parquet(
         // - For relative offsets: offset_base is starting_log_position (or 0 if None), use raw
         //   offset for setsum (to match writer) and add offset_base for returned positions
         let (offset_column, offset_base) = if let Some(offset) = batch.column_by_name("offset") {
+            if starting_log_position.is_some() {
+                return Err(Error::internal(file!(), line!()));
+            }
             (offset.clone(), 0u64)
         } else if let Some(relative_offset) = batch.column_by_name("relative_offset") {
             // For relative offsets, use the starting position if provided, otherwise 0.
             // When starting_log_position is None, the returned positions will be relative
             // (0, 1, 2...) which is appropriate for read_fragment which derives start/limit.
             uses_relative_offsets = true;
-            let base = starting_log_position.map(|p| p.offset()).unwrap_or(0);
+            let Some(base) = starting_log_position.map(|p| p.offset()) else {
+                return Err(Error::internal(file!(), line!()));
+            };
             (relative_offset.clone(), base)
         } else {
             return Err(Error::CorruptFragment(
@@ -302,6 +329,12 @@ pub fn checksum_parquet(
                 Error::CorruptFragment(format!("offset overflow: {} + {}", raw_offset, offset_base))
             })?;
             let epoch_micros = epoch_micros.value(i);
+            if let Some(em) = epoch_micros_singleton {
+                if em != epoch_micros {
+                    todo!();
+                }
+            }
+            epoch_micros_singleton = Some(epoch_micros);
             let body = body.value(i);
             // Use raw_offset for setsum to match how the writer computed it.
             // The writer uses the offset value that gets stored in the file (relative or absolute).
@@ -310,7 +343,11 @@ pub fn checksum_parquet(
             records.push((LogPosition::from_offset(absolute_offset), body.to_vec()));
         }
     }
-    Ok((setsum, records, uses_relative_offsets))
+    if let Some(epoch_micros) = epoch_micros_singleton {
+        Ok((setsum, records, uses_relative_offsets, epoch_micros))
+    } else {
+        Ok((setsum, records, uses_relative_offsets, 0))
+    }
 }
 
 #[cfg(test)]
@@ -332,8 +369,9 @@ mod tests {
             .expect("construct_parquet should succeed");
 
         // Read with None starting_log_position
-        let (setsum, records, uses_relative_offsets) =
-            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+        let (setsum, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, Some(LogPosition::from_offset(42)))
+                .expect("checksum_parquet should succeed");
 
         println!(
             "checksum_parquet_with_none_starting_position_returns_relative_positions: \
@@ -346,9 +384,9 @@ mod tests {
         assert!(uses_relative_offsets, "should detect relative offsets");
         assert_eq!(records.len(), 3, "should have 3 records");
         // Positions should be 0, 1, 2 (relative)
-        assert_eq!(records[0].0.offset(), 0, "first position should be 0");
-        assert_eq!(records[1].0.offset(), 1, "second position should be 1");
-        assert_eq!(records[2].0.offset(), 2, "third position should be 2");
+        assert_eq!(records[0].0.offset(), 42, "first position should be 42");
+        assert_eq!(records[1].0.offset(), 43, "second position should be 43");
+        assert_eq!(records[2].0.offset(), 44, "third position should be 44");
     }
 
     /// Verifies checksum_parquet translates relative positions to absolute when given a
@@ -365,7 +403,7 @@ mod tests {
             .expect("construct_parquet should succeed");
 
         // Read with a starting_log_position - positions should be translated
-        let (setsum_from_reader, records, uses_relative_offsets) =
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
             checksum_parquet(&buffer, Some(starting_position))
                 .expect("checksum_parquet should succeed");
 
@@ -419,10 +457,8 @@ mod tests {
                 .expect("construct_parquet should succeed");
 
         // Read with a different starting_log_position - should be ignored for absolute files
-        let different_position = LogPosition::from_offset(999);
-        let (setsum_from_reader, records, uses_relative_offsets) =
-            checksum_parquet(&buffer, Some(different_position))
-                .expect("checksum_parquet should succeed");
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
 
         println!(
             "checksum_parquet_ignores_starting_position_for_absolute_offset_files: \

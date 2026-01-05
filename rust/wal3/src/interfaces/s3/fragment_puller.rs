@@ -36,7 +36,7 @@ impl FragmentConsumer for S3FragmentPuller {
         &self,
         path: &str,
         _: LogPosition,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         super::read_parquet(&self.storage, &self.prefix, path, None).await
     }
 

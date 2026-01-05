@@ -93,7 +93,6 @@ async fn repl_80_copy() {
         LogReaderOptions::default(),
         fragment_consumer,
         manifest_consumer,
-        prefix.clone(),
     )
     .await
     .expect("LogReader::open should succeed for source");
@@ -107,26 +106,35 @@ async fn repl_80_copy() {
     // Copy to a new target log using ReplicatedManifestManagerFactory for the target.
     let target_log_id = Uuid::new_v4();
     let target_prefix = format!("repl_80_copy_target/{}", target_log_id);
-    let target_manifest_factory =
-        ReplicatedManifestManagerFactory::new(Arc::clone(&client), target_log_id);
-
-    wal3::copy(
-        &Arc::new(storage.clone()),
-        &reader,
-        LogPosition::default(),
-        target_prefix.clone(),
-        target_manifest_factory,
-    )
-    .await
-    .expect("copy should succeed");
-
-    // Scrub the target copy using repl factories.
     let target_wrapper = StorageWrapper::new(
         "test-region".to_string(),
         storage.clone(),
         target_prefix.clone(),
     );
     let target_storages = Arc::new(vec![target_wrapper]);
+    let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
+        LogWriterOptions::default(),
+        default_repl_options(),
+        Arc::clone(&target_storages),
+        Arc::clone(&client),
+        target_log_id,
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should always succeed");
+
+    wal3::copy(
+        &reader,
+        LogPosition::default(),
+        &target_fragment_publisher,
+        target_manifest_factory,
+        None,
+    )
+    .await
+    .expect("copy should succeed");
+
+    // Scrub the target copy using repl factories.
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
@@ -146,7 +154,6 @@ async fn repl_80_copy() {
         LogReaderOptions::default(),
         target_fragment_consumer,
         target_manifest_consumer,
-        target_prefix,
     )
     .await
     .expect("LogReader::open should succeed for target");

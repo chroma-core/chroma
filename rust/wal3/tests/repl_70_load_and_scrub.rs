@@ -91,7 +91,6 @@ async fn repl_70_load_and_scrub() {
         LogReaderOptions::default(),
         fragment_consumer,
         manifest_consumer,
-        prefix.clone(),
     )
     .await
     .expect("LogReader::open should succeed");

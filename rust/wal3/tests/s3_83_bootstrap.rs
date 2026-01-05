@@ -62,7 +62,7 @@ async fn test_k8s_integration_83_bootstrap() {
         .await
         .unwrap();
     assert_eq!(1, scan.len());
-    let (_, records, _) = reader.read_parquet(&scan[0]).await.unwrap();
+    let (_, records, _, _) = reader.read_parquet(&scan[0]).await.unwrap();
     for (returned, expected) in std::iter::zip(records, messages) {
         assert_eq!(returned.1, expected);
     }

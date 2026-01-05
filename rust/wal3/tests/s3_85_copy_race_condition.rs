@@ -4,8 +4,8 @@ use tokio::sync::Barrier;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_s3_factories, LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions,
-    ManifestManagerFactory, S3ManifestManagerFactory, ThrottleOptions,
+    create_s3_factories, FragmentManagerFactory, LogPosition, LogReader, LogReaderOptions,
+    LogWriter, LogWriterOptions, ManifestManagerFactory, S3ManifestManagerFactory, ThrottleOptions,
 };
 
 #[tokio::test]
@@ -130,21 +130,25 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     }
 
     let target_prefix = format!("{}_target", prefix);
-    let target_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target_prefix.clone(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target_prefix.clone(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target_prefix.clone(),
+        &target_fragment_publisher,
         target_manifest_factory,
+        None,
     )
     .await
     .unwrap();

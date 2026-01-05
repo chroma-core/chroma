@@ -282,7 +282,6 @@ impl<
             options,
             fragment_consumer,
             manifest_consumer,
-            self.prefix.clone(),
         ))
     }
 
@@ -1428,8 +1427,9 @@ mod tests {
             .expect("construct_parquet with None should succeed");
 
         // Read back with checksum_parquet (no starting position)
-        let (setsum_from_reader, records, uses_relative_offsets) =
-            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, Some(LogPosition::from_offset(100)))
+                .expect("checksum_parquet should succeed");
 
         println!(
             "relative_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
@@ -1442,6 +1442,9 @@ mod tests {
             "should detect relative offsets in parquet"
         );
         assert_eq!(records.len(), 3, "should have 3 records");
+        assert_eq!(records[0].0.offset(), 100);
+        assert_eq!(records[1].0.offset(), 101);
+        assert_eq!(records[2].0.offset(), 102);
         assert_eq!(
             setsum_from_writer, setsum_from_reader,
             "writer and reader setsums should match for relative-offset files"
@@ -1461,9 +1464,8 @@ mod tests {
                 .expect("construct_parquet should succeed");
 
         // Read back with checksum_parquet
-        let (setsum_from_reader, records, uses_relative_offsets) =
-            checksum_parquet(&buffer, Some(starting_position))
-                .expect("checksum_parquet should succeed");
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
 
         println!(
             "absolute_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
