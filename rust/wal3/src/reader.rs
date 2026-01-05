@@ -141,25 +141,18 @@ pub struct LogReader<
     fragment_consumer: FC,
     manifest_consumer: MC,
     cache: Option<Arc<dyn SnapshotCache>>,
-    pub(crate) prefix: String,
 }
 
 impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
     LogReader<P, FC, MC>
 {
-    pub fn new(
-        options: LogReaderOptions,
-        fragment_consumer: FC,
-        manifest_consumer: MC,
-        prefix: String,
-    ) -> Self {
+    pub fn new(options: LogReaderOptions, fragment_consumer: FC, manifest_consumer: MC) -> Self {
         let cache = None;
         Self {
             _options: options,
             fragment_consumer,
             manifest_consumer,
             cache,
-            prefix,
         }
     }
 
@@ -167,7 +160,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
         options: LogReaderOptions,
         fragment_consumer: FC,
         manifest_consumer: MC,
-        prefix: String,
     ) -> Result<Self, Error> {
         let cache = None;
         Ok(Self {
@@ -175,7 +167,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
             fragment_consumer,
             manifest_consumer,
             cache,
-            prefix,
         })
     }
 
@@ -315,7 +306,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
     pub async fn read_parquet(
         &self,
         fragment: &Fragment,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         self.fragment_consumer
             .read_parquet(&fragment.path, fragment.start)
             .await
@@ -476,7 +467,7 @@ impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestR
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
-        Self::open(options, fragment_consumer, manifest_consumer, prefix).await
+        Self::open(options, fragment_consumer, manifest_consumer).await
     }
 }
 
@@ -3367,7 +3358,6 @@ mod tests {
         ) else {
             panic!("failed to get fragments");
         };
-        eprintln!("{fragments:?}");
         assert_eq!(fragments.len(), 2);
         assert_eq!(
             fragments[0],
@@ -3424,12 +3414,7 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(
-            options.clone(),
-            batch_manager,
-            manifest_manager,
-            prefix.clone(),
-        );
+        let reader = LogReader::new(options.clone(), batch_manager, manifest_manager);
 
         let (loaded_manifest, etag) = ManifestReader::load(&options.throttle, &storage, &prefix)
             .await
@@ -3474,7 +3459,7 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
         let fake_etag = chroma_storage::ETag("fake-etag-that-wont-match".to_string());
         let manifest_and_witness = ManifestAndWitness {
@@ -3521,7 +3506,7 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
         let fake_etag = chroma_storage::ETag("fake-etag".to_string());
         let manifest_and_witness = ManifestAndWitness {
@@ -3572,7 +3557,7 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
         let result = reader.manifest_and_witness().await.unwrap();
         assert!(
@@ -3619,7 +3604,7 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix);
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
         let result = reader.manifest_and_witness().await.unwrap();
         assert!(

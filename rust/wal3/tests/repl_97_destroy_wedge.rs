@@ -4,8 +4,8 @@ use chroma_storage::{s3_client_for_test_with_new_bucket, PutOptions};
 use uuid::Uuid;
 
 use wal3::{
-    create_repl_factories, Error, LogWriter, LogWriterOptions, ManifestManager, SnapshotOptions,
-    StorageWrapper, ThrottleOptions,
+    create_repl_factories, Error, LogWriter, LogWriterOptions, ManifestManagerFactory,
+    SnapshotOptions, StorageWrapper,
 };
 
 mod common;
@@ -43,7 +43,7 @@ async fn repl_97_destroy_wedge() {
         &prefix,
         writer,
         fragment_factory,
-        manifest_factory,
+        manifest_factory.clone(),
         None,
     )
     .await
@@ -69,19 +69,10 @@ async fn repl_97_destroy_wedge() {
         .await
         .expect("put_bytes should succeed");
 
-    // Use S3-based ManifestManager for destroy operation (destroy is storage-level).
-    let manifest_manager = ManifestManager::new(
-        ThrottleOptions::default(),
-        options.snapshot_manifest,
-        Arc::new(storage.clone()),
-        prefix.clone(),
-        writer.to_string(),
-        Arc::new(()),
-        Arc::new(()),
-    )
-    .await
-    .expect("ManifestManager::new should succeed");
-
+    let manifest_manager = manifest_factory
+        .open_publisher()
+        .await
+        .expect("open_publisher succeed");
     let result = wal3::destroy(Arc::new(storage), &prefix, &manifest_manager).await;
     assert!(
         matches!(result, Err(Error::GarbageCollection(_))),

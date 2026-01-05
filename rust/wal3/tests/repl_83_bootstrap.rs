@@ -82,7 +82,6 @@ async fn repl_83_bootstrap() {
         LogReaderOptions::default(),
         reader_fragment_consumer,
         reader_manifest_consumer,
-        prefix,
     )
     .await
     .expect("LogReader::open should succeed");
@@ -93,7 +92,7 @@ async fn repl_83_bootstrap() {
         .expect("scan should succeed");
     assert_eq!(1, scan.len(), "should have 1 fragment");
 
-    let (_, records, _) = reader
+    let (_, records, _, _) = reader
         .read_parquet(&scan[0])
         .await
         .expect("read_parquet should succeed");

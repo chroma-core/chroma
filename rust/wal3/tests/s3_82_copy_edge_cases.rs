@@ -3,9 +3,9 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_s3_factories, Cursor, CursorName, CursorStoreOptions, GarbageCollectionOptions, Limits,
-    LogPosition, LogReader, LogReaderOptions, LogWriter, LogWriterOptions, ManifestManagerFactory,
-    S3ManifestManagerFactory, SnapshotOptions,
+    create_s3_factories, Cursor, CursorName, CursorStoreOptions, FragmentManagerFactory,
+    GarbageCollectionOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
+    LogWriterOptions, ManifestManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -58,21 +58,25 @@ async fn test_k8s_integration_copy_single_fragment() {
     .await
     .unwrap();
     let target_prefix = "copy_single_fragment_target";
-    let target_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target_prefix.to_string(),
+        &target_fragment_publisher,
         target_manifest_factory,
+        None,
     )
     .await
     .unwrap();
@@ -117,21 +121,25 @@ async fn test_k8s_integration_copy_immediately_after_initialization() {
     .unwrap();
     let source_manifest = reader.manifest().await.unwrap().unwrap();
     let target_prefix = "copy_immediate_target";
-    let target_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target_prefix.to_string(),
+        &target_fragment_publisher,
         target_manifest_factory,
+        None,
     )
     .await
     .unwrap();
@@ -220,21 +228,25 @@ async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
         "All fragments should be garbage collected"
     );
     let target_prefix = "copy_gc_empty_target";
-    let target_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target_prefix.to_string(),
+        &target_fragment_publisher,
         target_manifest_factory,
+        None,
     )
     .await
     .unwrap();
@@ -323,21 +335,25 @@ async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
         "Should have multiple fragments"
     );
     let target_prefix = "copy_boundaries_target";
-    let target_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target_prefix.to_string(),
+        &target_fragment_publisher,
         target_manifest_factory,
+        None,
     )
     .await
     .unwrap();
@@ -421,21 +437,25 @@ async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
     let mid_fragment = &manifest_before.fragments[manifest_before.fragments.len() / 2];
     let mid_offset = mid_fragment.start + (mid_fragment.limit - mid_fragment.start) / 2;
     let target_prefix = "copy_partial_target";
-    let target_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target_fragment_publisher = target_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         mid_offset,
-        target_prefix.to_string(),
+        &target_fragment_publisher,
         target_manifest_factory,
+        None,
     )
     .await
     .unwrap();
@@ -511,40 +531,48 @@ async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
     .unwrap();
     let scrub_source = reader.scrub(Limits::default()).await.unwrap();
     let target1_prefix = "copy_multiple_target1";
-    let target1_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target1_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target1_fragment_factory, target1_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target1_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target1_fragment_publisher = target1_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target1_prefix.to_string(),
+        &target1_fragment_publisher,
         target1_manifest_factory,
+        None,
     )
     .await
     .unwrap();
     let target2_prefix = "copy_multiple_target2";
-    let target2_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: target2_prefix.to_string(),
-        writer: "copy".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (target2_fragment_factory, target2_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        target2_prefix.to_string(),
+        "copy".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let target2_fragment_publisher = target2_fragment_factory
+        .make_publisher()
+        .await
+        .expect("make_publisher should succeed");
     wal3::copy(
-        &storage,
         &reader,
         LogPosition::default(),
-        target2_prefix.to_string(),
+        &target2_fragment_publisher,
         target2_manifest_factory,
+        None,
     )
     .await
     .unwrap();

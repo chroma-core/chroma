@@ -35,10 +35,25 @@ pub fn create_repl_factories(
     (fragment_manager_factory, manifest_manager_factory)
 }
 
+#[derive(Clone)]
 pub struct ReplicatedFragmentManagerFactory {
     write: LogWriterOptions,
     repl: ReplicatedFragmentOptions,
     storages: Arc<Vec<StorageWrapper>>,
+}
+
+impl ReplicatedFragmentManagerFactory {
+    pub fn new(
+        write: LogWriterOptions,
+        repl: ReplicatedFragmentOptions,
+        storages: Arc<Vec<StorageWrapper>>,
+    ) -> Self {
+        Self {
+            write,
+            repl,
+            storages,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -63,6 +78,7 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
     }
 }
 
+#[derive(Clone)]
 pub struct ReplicatedManifestManagerFactory {
     spanner: Arc<Client>,
     log_id: Uuid,

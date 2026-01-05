@@ -24,6 +24,17 @@ pub struct ReplicatedFragmentOptions {
     pub slow_writer_tolerance: Duration,
 }
 
+impl Default for ReplicatedFragmentOptions {
+    fn default() -> Self {
+        Self {
+            minimum_allowed_replication_factor: 1,
+            minimum_failures_to_exclude_replica: 1,
+            decimation_interval: Duration::from_secs(30),
+            slow_writer_tolerance: Duration::from_secs(15),
+        }
+    }
+}
+
 pub struct StorageWrapper {
     #[allow(dead_code)]
     region: String,
@@ -312,7 +323,7 @@ impl FragmentConsumer for FragmentReader {
         &self,
         path: &str,
         fragment_first_log_position: LogPosition,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         let mut err: Option<Error> = None;
         for storage in self.storages.iter() {
             match crate::interfaces::s3::read_parquet(
@@ -395,7 +406,7 @@ async fn read_fragment_uuid(
         match crate::interfaces::s3::read_parquet(storage, prefix, path, starting_log_position)
             .await
         {
-            Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
+            Ok((setsum, data, num_bytes, _)) => (setsum, data, num_bytes),
             Err(Error::StorageError(storage_err)) => {
                 if matches!(&*storage_err, StorageError::NotFound { .. }) {
                     return Ok(None);

@@ -691,7 +691,6 @@ impl LogServer {
             self.config.reader.clone(),
             fragment_consumer,
             manifest_consumer,
-            prefix,
         ))
     }
 
@@ -717,7 +716,6 @@ impl LogServer {
             reader_options,
             fragment_consumer,
             manifest_consumer,
-            prefix,
         ))
     }
 
@@ -1133,7 +1131,7 @@ impl LogServer {
         let dirty_futures = dirty_fragments
             .iter()
             .map(|fragment| async {
-                let (_, records, _) = reader.read_parquet(fragment).await?;
+                let (_, records, _, _) = reader.read_parquet(fragment).await?;
                 let records = records
                     .into_iter()
                     .flat_map(|x| match serde_json::from_slice::<DirtyMarker>(&x.1) {
@@ -1650,21 +1648,31 @@ impl LogServer {
         // This is the existing compaction_offset, which is the next record to compact.
         let cursor = witness.map(|x| x.cursor.position);
         tracing::event!(Level::INFO, offset = ?cursor);
-        let target_manifest_factory = S3ManifestManagerFactory {
-            write: options,
-            read: self.config.reader.clone(),
-            storage: Arc::clone(&storage),
-            prefix: target_prefix.clone(),
-            writer: "copy".to_string(),
-            mark_dirty: Arc::new(()),
-            snapshot_cache: Arc::new(()),
-        };
+        let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+            options,
+            self.config.reader.clone(),
+            Arc::clone(&storage),
+            target_prefix.clone(),
+            "copy".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let target_fragment_publisher =
+            target_fragment_factory
+                .make_publisher()
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("Failed to create fragment publisher: {}", err),
+                    )
+                })?;
         wal3::copy(
-            &storage,
             &log_reader,
             cursor.unwrap_or(LogPosition::from_offset(1)),
-            target_prefix.clone(),
+            &target_fragment_publisher,
             target_manifest_factory,
+            None,
         )
         .await
         .map_err(|err| Status::new(err.code().into(), format!("Failed to copy log: {}", err)))?;
@@ -1853,7 +1861,7 @@ impl LogServer {
                 )
             })?;
         let mut markers = vec![];
-        for (_, records, _) in dirty_raw {
+        for (_, records, _, _) in dirty_raw {
             let records = records
                 .into_iter()
                 .map(|x| String::from_utf8(x.1))
