@@ -26,6 +26,7 @@ use std::fs;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::spawn;
 use tokio::task::JoinHandle;
@@ -104,8 +105,8 @@ pub enum UtilsError {
     InvalidName,
     #[error("Failed to find an available port")]
     PortSearch,
-    #[error("Failed to connect to a local Chroma server")]
-    LocalConnect,
+    #[error("Failed to connect to a local Chroma server: {0}")]
+    LocalConnect(String),
     #[error("Not a Chroma path")]
     NotChromaPath,
     #[error("Quota Error: {0}")]
@@ -362,11 +363,26 @@ pub async fn standup_local_chroma(
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     let admin_client = AdminClient::local(host);
-    admin_client
-        .healthcheck()
-        .await
-        .map_err(|_| UtilsError::LocalConnect)?;
-    Ok((admin_client, handle))
+
+    // Retry health check with backoff to handle server startup race
+    let mut last_error = None;
+    for attempt in 0..3 {
+        match admin_client.healthcheck().await {
+            Ok(_) => return Ok((admin_client, handle)),
+            Err(e) => {
+                last_error = Some(format!("Failed after {} attempts: {}", attempt + 1, e));
+                let delay = Duration::from_millis(100 * (1 << attempt)); // 100ms, 200ms, 400ms
+                tokio::time::sleep(delay).await;
+            }
+        }
+    }
+
+    Err(UtilsError::LocalConnect(
+        last_error
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "Health check failed".to_string()),
+    )
+        .into())
 }
 
 pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
