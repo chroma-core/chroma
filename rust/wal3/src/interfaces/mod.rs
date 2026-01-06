@@ -331,7 +331,10 @@ pub fn checksum_parquet(
             let epoch_micros = epoch_micros.value(i);
             if let Some(em) = epoch_micros_singleton {
                 if em != epoch_micros {
-                    todo!();
+                    return Err(Error::CorruptFragment(format!(
+                        "inconsistent epoch_micros: expected {} but found {}",
+                        em, epoch_micros
+                    )));
                 }
             }
             epoch_micros_singleton = Some(epoch_micros);

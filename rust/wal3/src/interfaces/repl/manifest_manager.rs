@@ -600,7 +600,11 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             max_log_position = std::cmp::max(max_log_position, position_limit);
         }
         if max_log_position as u64 > first_to_keep.offset() {
-            todo!();
+            return Err(Error::GarbageCollection(format!(
+                "max_log_position {} exceeds first_to_keep offset {}",
+                max_log_position,
+                first_to_keep.offset()
+            )));
         }
         let mut stmt2 = Statement::new(
             "
