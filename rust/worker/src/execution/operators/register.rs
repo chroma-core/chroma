@@ -5,7 +5,7 @@ use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
 use chroma_types::Schema;
-use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
+use chroma_types::{CollectionUuid, DatabaseName, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -41,6 +41,7 @@ impl RegisterOperator {
 /// * `log` - The log client.
 pub struct RegisterInput {
     tenant: String,
+    database_name: DatabaseName,
     collection_id: CollectionUuid,
     log_position: i64,
     collection_version: i32,
@@ -57,6 +58,7 @@ impl RegisterInput {
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
@@ -69,6 +71,7 @@ impl RegisterInput {
     ) -> Self {
         RegisterInput {
             tenant,
+            database_name,
             collection_id,
             log_position,
             collection_version,
@@ -151,7 +154,12 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         };
 
         let result = log
-            .update_collection_log_offset(&input.tenant, input.collection_id, input.log_position)
+            .update_collection_log_offset(
+                &input.tenant,
+                input.database_name.clone(),
+                input.collection_id,
+                input.log_position,
+            )
             .await;
 
         match result {
@@ -267,6 +275,7 @@ mod tests {
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
             tenant_1.clone(),
+            chroma_types::DatabaseName::new("database_1").unwrap(),
             collection_uuid_1,
             log_position,
             collection_version,

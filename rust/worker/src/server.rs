@@ -189,8 +189,11 @@ impl WorkerServer {
         &self,
         collection_and_segments: &CollectionAndSegments,
         batch_size: u32,
-    ) -> FetchLogOperator {
-        FetchLogOperator {
+    ) -> Result<FetchLogOperator, Status> {
+        let database_name =
+            chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
+                .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
+        Ok(FetchLogOperator {
             log_client: self.log.clone(),
             batch_size,
             // The collection log position is inclusive, and we want to start from the next log
@@ -200,7 +203,8 @@ impl WorkerServer {
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
             tenant: collection_and_segments.collection.tenant.clone(),
-        }
+            database_name,
+        })
     }
 
     async fn orchestrate_count(
@@ -213,7 +217,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let count_orchestrator = CountOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -243,7 +247,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let filter = get_inner
             .filter
@@ -300,7 +304,7 @@ impl WorkerServer {
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
 
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let filter = knn_inner
             .filter
@@ -483,7 +487,7 @@ impl WorkerServer {
     ) -> Result<RankOrchestratorOutput, Status> {
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let search_payload = SearchPayload::try_from(payload)?;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         // We return early on uninitialized collection, otherwise
         // the downstream will error due to missing dimension

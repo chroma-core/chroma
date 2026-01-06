@@ -1142,6 +1142,8 @@ pub enum ForkCollectionError {
     DuplicateSegment,
     #[error("Missing field: [{0}]")]
     Field(String),
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
     #[error("Collection forking is unsupported for local chroma")]
     Local,
     #[error(transparent)]
@@ -1162,6 +1164,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(e) => e.code(),
             ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(e) => e.code(),
             ForkCollectionError::SegmentConversionError(e) => e.code(),
@@ -1351,6 +1354,8 @@ pub enum AddCollectionRecordsError {
     Collection(#[from] GetCollectionError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1360,6 +1365,7 @@ impl ChromaError for AddCollectionRecordsError {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1437,6 +1443,8 @@ pub struct UpdateCollectionRecordsResponse {}
 pub enum UpdateCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1445,6 +1453,7 @@ impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1523,6 +1532,8 @@ pub struct UpsertCollectionRecordsResponse {}
 pub enum UpsertCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1531,6 +1542,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1607,6 +1619,8 @@ pub enum DeleteCollectionRecordsError {
     Get(#[from] ExecutorError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -1616,6 +1630,7 @@ impl ChromaError for DeleteCollectionRecordsError {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
             DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }

@@ -14,6 +14,7 @@ message Cmek {
 
 message PushLogsRequest {
   string collection_id = 1;
+  string database_name = 5;
   repeated OperationRecord records = 2;
   optional Cmek cmek = 3;  // Encryption key for log fragments
 }
@@ -25,6 +26,7 @@ message PushLogsResponse {
 
 message ScoutLogsRequest {
   string collection_id = 1;
+  string database_name = 5;
 }
 
 message ScoutLogsResponse {
@@ -40,6 +42,7 @@ message ScoutLogsResponse {
 
 message PullLogsRequest {
   string collection_id = 1;
+  string database_name = 5;
   // The offset of the first record to be returned.  This should match
   // PullLogsResponse.records[0].log_offset.
   int64 start_from_offset = 2;
@@ -60,6 +63,7 @@ message PullLogsResponse {
 message ForkLogsRequest {
   string source_collection_id = 1;
   string target_collection_id = 2;
+  string database_name = 5;
 }
 
 message ForkLogsResponse {
@@ -89,6 +93,7 @@ message GetAllCollectionInfoToCompactResponse {
 
 message UpdateCollectionLogOffsetRequest {
   string collection_id = 1;
+  string database_name = 5;
   // The offset of the last record that was compacted.
   int64 log_offset = 2;
 }
@@ -145,6 +150,7 @@ message ScrubLogRequest {
     string collection_id = 1;
     string dirty_log = 2;
   };
+  string database_name = 5;
   uint64 max_bytes_to_read = 3;
   uint32 max_files_to_read = 4;
 }
@@ -161,6 +167,7 @@ message GarbageCollectPhase2Request {
     string collection_id = 1;
     string dirty_log = 2;
   };
+  string database_name = 5;
 }
 
 message GarbageCollectPhase2Response {
@@ -172,6 +179,7 @@ message PurgeFromCacheRequest {
     string manifest_for_collection_id = 2;
     FragmentToEvict fragment = 3;
   };
+  string database_name = 5;
 }
 
 message FragmentToEvict {

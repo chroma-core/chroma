@@ -323,6 +323,7 @@ impl CompactionManager {
                     }
                     CompactionResponse::RequireCompactionOffsetRepair {
                         job_id: collection_id,
+                        database_name,
                         witnessed_offset_in_sysdb,
                     } => {
                         if *collection_id != resp.job_id {
@@ -331,6 +332,7 @@ impl CompactionManager {
                         } else {
                             self.scheduler.require_repair(
                                 chroma_types::CollectionUuid(resp.job_id.0),
+                                database_name.clone(),
                                 *witnessed_offset_in_sysdb,
                             );
                             self.scheduler.succeed_job(resp.job_id);

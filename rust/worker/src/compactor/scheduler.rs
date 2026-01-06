@@ -6,7 +6,7 @@ use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
-use chroma_types::{CollectionUuid, JobId};
+use chroma_types::{CollectionUuid, DatabaseName, JobId};
 use figment::providers::Env;
 use figment::Figment;
 use opentelemetry::metrics::Counter;
@@ -68,7 +68,7 @@ pub(crate) struct Scheduler {
     oneoff_collections: HashSet<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
     deleted_collections: HashSet<CollectionUuid>,
-    collections_needing_repair: HashMap<CollectionUuid, i64>,
+    collections_needing_repair: HashMap<CollectionUuid, (DatabaseName, i64)>,
     in_progress_jobs: HashMap<JobId, InProgressJob>,
     job_expiry_seconds: u64,
     max_failure_count: i32,
@@ -127,13 +127,23 @@ impl Scheduler {
         self.deleted_collections.drain().collect()
     }
 
-    pub(crate) fn drain_collections_requiring_repair(&mut self) -> Vec<(CollectionUuid, i64)> {
-        self.collections_needing_repair.drain().collect()
+    pub(crate) fn drain_collections_requiring_repair(
+        &mut self,
+    ) -> Vec<(DatabaseName, CollectionUuid, i64)> {
+        self.collections_needing_repair
+            .drain()
+            .map(|(k, (d, o))| (d, k, o))
+            .collect()
     }
 
-    pub(crate) fn require_repair(&mut self, collection_id: CollectionUuid, offset_in_sysdb: i64) {
+    pub(crate) fn require_repair(
+        &mut self,
+        collection_id: CollectionUuid,
+        database_name: DatabaseName,
+        offset_in_sysdb: i64,
+    ) {
         self.collections_needing_repair
-            .insert(collection_id, offset_in_sysdb);
+            .insert(collection_id, (database_name, offset_in_sysdb));
     }
 
     async fn get_collections_with_new_data(&mut self) -> Vec<CollectionInfo> {
@@ -794,7 +804,12 @@ mod tests {
             },
         );
         let _ = log
-            .update_collection_log_offset(&tenant_1, collection_uuid_1, 2)
+            .update_collection_log_offset(
+                &tenant_1,
+                chroma_types::DatabaseName::new("test_db").unwrap(),
+                collection_uuid_1,
+                2,
+            )
             .await;
 
         let mut sysdb = SysDb::Test(TestSysDb::new());
