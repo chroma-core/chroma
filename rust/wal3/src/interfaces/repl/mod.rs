@@ -10,9 +10,9 @@ use crate::{Error, FragmentUuid, LogWriterOptions, Manifest};
 
 use super::batch_manager::BatchManager;
 use super::{FragmentManagerFactory, ManifestManagerFactory};
-use fragment_manager::{FragmentReader, ReplicatedFragmentUploader};
 use manifest_manager::ManifestManager;
 
+pub use fragment_manager::{FragmentReader, ReplicatedFragmentUploader};
 pub use fragment_manager::{ReplicatedFragmentOptions, StorageWrapper};
 
 /// Creates replicated fragment and manifest manager factories.

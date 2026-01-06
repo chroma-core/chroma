@@ -42,10 +42,23 @@ pub struct CollectionRegisterInfo {
     pub collection_logical_size_bytes: u64,
 }
 
-impl From<&CollectionRegisterInfo> for chroma_types::CollectionFlushInfo {
-    fn from(info: &CollectionRegisterInfo) -> Self {
-        chroma_types::CollectionFlushInfo {
+/// Error when converting CollectionRegisterInfo to CollectionFlushInfo.
+#[derive(Debug, Error)]
+pub enum CollectionRegisterInfoConversionError {
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
+}
+
+impl TryFrom<&CollectionRegisterInfo> for chroma_types::CollectionFlushInfo {
+    type Error = CollectionRegisterInfoConversionError;
+
+    fn try_from(info: &CollectionRegisterInfo) -> Result<Self, Self::Error> {
+        let database_name =
+            chroma_types::DatabaseName::new(info.collection_info.collection.database.clone())
+                .ok_or(CollectionRegisterInfoConversionError::InvalidDatabaseName)?;
+        Ok(chroma_types::CollectionFlushInfo {
             tenant_id: info.collection_info.collection.tenant.clone(),
+            database_name,
             collection_id: info.collection_info.collection_id,
             log_position: info.collection_info.pulled_log_offset,
             collection_version: info.collection_info.collection.version,
@@ -56,7 +69,7 @@ impl From<&CollectionRegisterInfo> for chroma_types::CollectionFlushInfo {
                 .total_records_post_compaction,
             size_bytes_post_compaction: info.collection_logical_size_bytes,
             schema: info.collection_info.schema.clone(),
-        }
+        })
     }
 }
 
@@ -173,11 +186,24 @@ impl Orchestrator for RegisterOrchestrator {
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
         // Check if we have attached function context
-        let collection_flush_infos = self
+        let collection_flush_infos: Result<Vec<_>, _> = self
             .collection_register_infos
             .iter()
-            .map(|info| info.into())
+            .map(chroma_types::CollectionFlushInfo::try_from)
             .collect();
+        let collection_flush_infos = match collection_flush_infos {
+            Ok(infos) => infos,
+            Err(_) => {
+                self.terminate_with_result(
+                    Err(RegisterOrchestratorError::InvariantViolation(
+                        "Invalid database name in collection flush info",
+                    )),
+                    ctx,
+                )
+                .await;
+                return vec![];
+            }
+        };
         if let Some(function_context) = &self.function_context {
             vec![(
                 wrap(
@@ -214,6 +240,26 @@ impl Orchestrator for RegisterOrchestrator {
                 }
             };
 
+            let database_name = match chroma_types::DatabaseName::new(
+                output_collection_register_info
+                    .collection_info
+                    .collection
+                    .database
+                    .clone(),
+            ) {
+                Some(name) => name,
+                None => {
+                    self.terminate_with_result(
+                        Err(RegisterOrchestratorError::InvariantViolation(
+                            "Invalid database name",
+                        )),
+                        ctx,
+                    )
+                    .await;
+                    return vec![];
+                }
+            };
+
             vec![(
                 wrap(
                     RegisterOperator::new(),
@@ -223,6 +269,7 @@ impl Orchestrator for RegisterOrchestrator {
                             .collection
                             .tenant
                             .clone(),
+                        database_name,
                         output_collection_register_info
                             .collection_info
                             .collection_id,

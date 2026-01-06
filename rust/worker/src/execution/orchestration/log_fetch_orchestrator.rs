@@ -68,6 +68,8 @@ pub enum LogFetchOrchestratorError {
     GetCollectionAndSegments(#[from] GetCollectionAndSegmentsError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error("Invariant violation: {}", .0)]
     InvariantViolation(&'static str),
     #[error("Error materializing logs: {0}")]
@@ -113,6 +115,7 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::FetchLog(e) => e.should_trace_error(),
                 Self::GetCollectionAndSegments(e) => e.should_trace_error(),
                 Self::HnswSegment(e) => e.should_trace_error(),
+                Self::InvalidDatabaseName => true,
                 Self::InvariantViolation(_) => true,
                 Self::MaterializeLogs(e) => e.should_trace_error(),
                 Self::MetadataSegment(e) => e.should_trace_error(),
@@ -152,6 +155,7 @@ pub(crate) struct Success {
 #[derive(Debug)]
 pub(crate) struct RequireCompactionOffsetRepair {
     pub job_id: JobId,
+    pub database_name: chroma_types::DatabaseName,
     pub witnessed_offset_in_sysdb: i64,
 }
 
@@ -194,9 +198,14 @@ impl Success {
 }
 
 impl RequireCompactionOffsetRepair {
-    pub fn new(job_id: JobId, witnessed_offset_in_sysdb: i64) -> Self {
+    pub fn new(
+        job_id: JobId,
+        database_name: chroma_types::DatabaseName,
+        witnessed_offset_in_sysdb: i64,
+    ) -> Self {
         Self {
             job_id,
+            database_name,
             witnessed_offset_in_sysdb,
         }
     }
@@ -447,6 +456,17 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     .clone(),
             )
         } else {
+            let database_name = match chroma_types::DatabaseName::new(collection.database.clone()) {
+                Some(name) => name,
+                None => {
+                    self.terminate_with_result(
+                        Err(LogFetchOrchestratorError::InvalidDatabaseName),
+                        ctx,
+                    )
+                    .await;
+                    return;
+                }
+            };
             wrap(
                 Box::new(FetchLogOperator {
                     log_client: self.context.log.clone(),
@@ -457,6 +477,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     maximum_fetch_count: Some(self.context.max_compaction_size as u32),
                     collection_uuid: collection.collection_id,
                     tenant: collection.tenant.clone(),
+                    database_name,
                 }),
                 (),
                 ctx.receiver(),
@@ -694,9 +715,23 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                         return;
                     }
                 };
+                let database_name = match chroma_types::DatabaseName::new(
+                    collection_info.collection.database.clone(),
+                ) {
+                    Some(name) => name,
+                    None => {
+                        self.terminate_with_result(
+                            Err(LogFetchOrchestratorError::InvalidDatabaseName),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
+                };
                 self.terminate_with_result(
                     Ok(RequireCompactionOffsetRepair::new(
                         collection_info.collection_id.into(),
+                        database_name,
                         collection_info.pulled_log_offset,
                     )
                     .into()),

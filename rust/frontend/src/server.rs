@@ -1854,7 +1854,7 @@ async fn indexing_status(
     Ok(Json(
         server
             .frontend
-            .indexing_status(collection_id)
+            .indexing_status(database, collection_id)
             .meter(metering_context_container)
             .await?,
     ))
