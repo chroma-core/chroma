@@ -87,7 +87,7 @@ fn create_snapshot_for_split_test() -> (SnapshotPointer, Snapshot, MockSnapshotC
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_one_level() {
+async fn test_k8s_mcmr_integration_replace_snapshot_triggers_to_split_case_one_level() {
     // Set up test data that will trigger the to_split case
     let (nested_ptr, _, cache) = create_snapshot_for_split_test();
 
@@ -190,7 +190,7 @@ fn create_nested_snapshot_for_split_test(
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level() {
+async fn test_k8s_mcmr_integration_replace_snapshot_triggers_to_split_case_two_level() {
     // Set up test data that will trigger the to_split case
     let (parent_ptr, _parent_snapshot, cache) = create_nested_snapshot_for_split_test(1);
 
@@ -269,7 +269,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_two_level(
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_level() {
+async fn test_k8s_mcmr_integration_replace_snapshot_triggers_to_split_case_three_level() {
     // Set up test data that will trigger the to_split case
     let (parent_ptr, _parent_snapshot, cache) = create_nested_snapshot_for_split_test(2);
 
@@ -348,7 +348,7 @@ async fn test_k8s_integration_replace_snapshot_triggers_to_split_case_three_leve
 }
 
 #[test]
-fn test_k8s_integration_test_k8s_integration_drop_frag() {
+fn test_k8s_mcmr_integration_test_k8s_mcmr_integration_drop_frag() {
     let setsum =
         Setsum::from_hexdigest("1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
             .unwrap();
@@ -383,7 +383,7 @@ fn test_k8s_integration_test_k8s_integration_drop_frag() {
 }
 
 #[tokio::test]
-async fn test_k8s_integration_drop_snapshot() {
+async fn test_k8s_mcmr_integration_drop_snapshot() {
     let cache = MockSnapshotCache::default();
 
     // Create a snapshot with nested snapshots and fragments
@@ -472,7 +472,7 @@ async fn test_k8s_integration_drop_snapshot() {
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_flat() {
+async fn test_k8s_mcmr_integration_replace_snapshot_flat() {
     let cache = MockSnapshotCache::default();
 
     // Create fragments with different ranges
@@ -563,7 +563,7 @@ async fn test_k8s_integration_replace_snapshot_flat() {
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff() {
+async fn test_k8s_mcmr_integration_replace_snapshot_drops_snapshots_prior_to_cutoff() {
     let cache = MockSnapshotCache::default();
 
     // Create two child snapshots: one before cutoff (to be dropped), one after (to be kept)
@@ -688,7 +688,7 @@ async fn test_k8s_integration_replace_snapshot_drops_snapshots_prior_to_cutoff()
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff() {
+async fn test_k8s_mcmr_integration_replace_snapshot_drops_fragments_prior_to_cutoff() {
     let cache = MockSnapshotCache::default();
 
     // Create fragments: some before cutoff (to be dropped), some after (to be kept)
@@ -778,7 +778,7 @@ async fn test_k8s_integration_replace_snapshot_drops_fragments_prior_to_cutoff()
 }
 
 #[tokio::test]
-async fn test_k8s_integration_replace_snapshot_two_levels_rightmost_leaf() {
+async fn test_k8s_mcmr_integration_replace_snapshot_two_levels_rightmost_leaf() {
     let cache = MockSnapshotCache::default();
 
     // Create fragments for leaf snapshots
