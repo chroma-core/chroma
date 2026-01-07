@@ -286,4 +286,4 @@ sysdb_service:
       rest_port: 9020
       project: "local-project"
       instance: "test-instance"
-      database: "local-database"
+      database: "local-sysdb-database"
