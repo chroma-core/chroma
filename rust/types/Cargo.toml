@@ -28,6 +28,8 @@ regex = { workspace = true }
 regex-syntax = { workspace = true }
 utoipa = { workspace = true, optional = true }
 sprs = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-gax = { workspace = true }
 
 # (Cross-crate testing dependencies)
 proptest = { workspace = true, optional = true }

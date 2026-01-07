@@ -32,12 +32,14 @@ use crate::Schema;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
+use crate::SysDbError;
 use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
+use google_cloud_spanner::row::Row;
 use serde::Deserialize;
 use serde::Serialize;
 use std::time::SystemTimeError;
@@ -440,6 +442,43 @@ impl Database {
     #[getter]
     pub fn tenant(&self) -> &str {
         &self.tenant
+    }
+}
+
+impl From<Database> for crate::chroma_proto::Database {
+    fn from(d: Database) -> Self {
+        crate::chroma_proto::Database {
+            id: d.id.to_string(),
+            name: d.name,
+            tenant: d.tenant,
+        }
+    }
+}
+
+// ============================================================================
+// Row Conversion Implementations (DAO layer)
+// ============================================================================
+
+impl TryFrom<Row> for Database {
+    type Error = SysDbError;
+
+    fn try_from(row: Row) -> Result<Self, Self::Error> {
+        let id: String = row
+            .column_by_name("id")
+            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
+        let name: String = row
+            .column_by_name("name")
+            .map_err(|e| SysDbError::Internal(format!("failed to read 'name' column: {}", e)))?;
+        let tenant: String = row.column_by_name("tenant_id").map_err(|e| {
+            SysDbError::Internal(format!("failed to read 'tenant_id' column: {}", e))
+        })?;
+
+        Ok(Database {
+            id: Uuid::parse_str(&id)
+                .map_err(|e| SysDbError::Internal(format!("failed to parse 'id' column: {}", e)))?,
+            name,
+            tenant,
+        })
     }
 }
 

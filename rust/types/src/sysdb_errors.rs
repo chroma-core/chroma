@@ -4,6 +4,10 @@
 //! The server layer only sees `SysDbError`, not backend-specific errors.
 
 use chroma_error::{ChromaError, ErrorCodes};
+use google_cloud_gax::grpc::Status as GrpcStatus;
+use google_cloud_gax::retry::TryAs;
+use google_cloud_spanner::client::Error as SpannerClientError;
+use google_cloud_spanner::session::SessionError;
 use thiserror::Error;
 use tonic::Status;
 
@@ -15,7 +19,7 @@ use tonic::Status;
 pub enum SysDbError {
     /// Wraps Spanner-specific errors
     #[error("Spanner error: {0}")]
-    Spanner(String),
+    Spanner(#[from] SpannerClientError),
 
     /// Resource not found (tenant, database, collection, etc.)
     #[error("Not found: {0}")]
@@ -58,8 +62,36 @@ impl From<SysDbError> for Status {
             SysDbError::AlreadyExists(msg) => Status::already_exists(msg),
             SysDbError::InvalidArgument(msg) => Status::invalid_argument(msg),
             SysDbError::NotSupported(msg) => Status::unimplemented(msg),
-            SysDbError::Spanner(msg) => Status::internal(msg),
+            SysDbError::Spanner(err) => Status::internal(err.to_string()),
             SysDbError::Internal(msg) => Status::internal(msg),
+        }
+    }
+}
+
+impl From<GrpcStatus> for SysDbError {
+    fn from(status: GrpcStatus) -> Self {
+        // Convert GrpcStatus to SpannerClientError
+        SysDbError::Spanner(SpannerClientError::from(status))
+    }
+}
+
+impl From<SessionError> for SysDbError {
+    fn from(err: SessionError) -> Self {
+        // Convert SessionError to SpannerClientError
+        SysDbError::Spanner(SpannerClientError::from(err))
+    }
+}
+
+impl TryAs<GrpcStatus> for SysDbError {
+    fn try_as(&self) -> Option<&GrpcStatus> {
+        match self {
+            // For Spanner errors, delegate to SpannerClientError's TryAs implementation
+            // This allows Spanner to retry on abortable errors (e.g., transaction conflicts)
+            SysDbError::Spanner(err) => err.try_as(),
+            // Domain errors don't contain a GrpcStatus, so we return None.
+            // This means Spanner won't retry these errors, which is correct
+            // for domain errors like NotFound, AlreadyExists, etc.
+            _ => None,
         }
     }
 }

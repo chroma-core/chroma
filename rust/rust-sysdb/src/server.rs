@@ -43,9 +43,9 @@ use tonic::{transport::Server, Request, Response, Status};
 
 use crate::backend::{Assignable, BackendFactory, Runnable};
 use crate::config::SysDbServiceConfig;
-use crate::error::SysDbError;
 use crate::spanner::SpannerBackend;
 use crate::types as internal;
+use chroma_types::sysdb_errors::SysDbError;
 
 pub struct SysdbService {
     port: u16,

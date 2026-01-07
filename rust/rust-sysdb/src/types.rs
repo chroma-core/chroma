@@ -6,12 +6,11 @@
 //! - Backend-specific optimizations without affecting the API
 //! - Cleaner internal APIs that aren't tied to protobuf conventions
 
-use chroma_types::chroma_proto;
-use google_cloud_spanner::row::Row;
+use chroma_types::{chroma_proto, Database, Tenant};
 use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
-use crate::error::SysDbError;
+use chroma_types::sysdb_errors::SysDbError;
 
 // ============================================================================
 // Request Types (proto -> internal)
@@ -226,18 +225,6 @@ impl Runnable for GetDatabaseRequest {
 }
 
 // ============================================================================
-// Domain Types (internal)
-// ============================================================================
-
-/// Internal tenant representation.
-#[derive(Debug, Clone)]
-pub struct Tenant {
-    pub id: String,
-    pub name: String,
-    pub resource_name: Option<String>,
-}
-
-// ============================================================================
 // Response Types (internal -> proto)
 // ============================================================================
 
@@ -302,81 +289,5 @@ impl From<GetDatabaseResponse> for chroma_proto::GetDatabaseResponse {
         chroma_proto::GetDatabaseResponse {
             database: Some(r.database.into()),
         }
-    }
-}
-
-// ============================================================================
-// Domain Types -> Proto Conversions
-// ============================================================================
-
-impl From<Tenant> for chroma_proto::Tenant {
-    fn from(t: Tenant) -> Self {
-        chroma_proto::Tenant {
-            name: t.name,
-            resource_name: t.resource_name,
-        }
-    }
-}
-
-/// Internal database representation.
-#[derive(Debug, Clone)]
-pub struct Database {
-    pub id: String,
-    pub name: String,
-    pub tenant_id: String,
-}
-
-impl From<Database> for chroma_proto::Database {
-    fn from(d: Database) -> Self {
-        chroma_proto::Database {
-            id: d.id,
-            name: d.name,
-            tenant: d.tenant_id,
-        }
-    }
-}
-
-// ============================================================================
-// Row Conversion Implementations (DAO layer)
-// ============================================================================
-
-impl TryFrom<Row> for Tenant {
-    type Error = SysDbError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        let id: String = row
-            .column_by_name("id")
-            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
-
-        // resource_name can be NULL, so we handle the error as None
-        let resource_name: Option<String> = row.column_by_name("resource_name").ok();
-
-        Ok(Tenant {
-            id: id.clone(),
-            name: id, // In this schema, id IS the name
-            resource_name,
-        })
-    }
-}
-
-impl TryFrom<Row> for Database {
-    type Error = SysDbError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        let id: String = row
-            .column_by_name("id")
-            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
-        let name: String = row
-            .column_by_name("name")
-            .map_err(|e| SysDbError::Internal(format!("failed to read 'name' column: {}", e)))?;
-        let tenant_id: String = row.column_by_name("tenant_id").map_err(|e| {
-            SysDbError::Internal(format!("failed to read 'tenant_id' column: {}", e))
-        })?;
-
-        Ok(Database {
-            id,
-            name,
-            tenant_id,
-        })
     }
 }

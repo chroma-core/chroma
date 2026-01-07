@@ -281,6 +281,7 @@ impl TestSysDb {
             tenants.push(Tenant {
                 id: tenant_id,
                 last_compaction_time,
+                resource_name: None,
             });
         }
         Ok(tenants)
