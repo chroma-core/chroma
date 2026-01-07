@@ -1,6 +1,6 @@
 # Chroma Ruby Client
 
-A first-class Ruby client for Chroma's HTTP API. This gem targets parity with the Python client for HTTP operations.
+A first-class Ruby client for Chroma's HTTP API.
 
 ## Install
 
@@ -21,7 +21,7 @@ collection = client.get_or_create_collection(name: "docs")
 collection.add(
   ids: ["a", "b"],
   documents: ["hello world", "goodbye"],
-  embeddings: [[0.1, 0.2, 0.3], [0.0, 0.1, 0.0]]
+  embeddings: [[0.1, 0.2, 0.3], [0.0, 0.1, 0.0]],
 )
 
 results = collection.query(

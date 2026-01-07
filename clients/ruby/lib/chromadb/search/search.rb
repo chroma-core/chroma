@@ -4,11 +4,12 @@ require "set"
 module Chroma
   module Search
     class Search
-      attr_reader :where_clause, :rank_expression, :limit_config, :select_config
+      attr_reader :where_clause, :rank_expression, :group_by_config, :limit_config, :select_config
 
-      def initialize(where: nil, rank: nil, limit: nil, select: nil)
+      def initialize(where: nil, rank: nil, group_by: nil, limit: nil, select: nil)
         @where_clause = WhereExpression.from(where) if where
         @rank_expression = RankExpression.from(rank) if rank
+        @group_by_config = GroupBy.from(group_by) if group_by
         @limit_config = Limit.from(limit)
         @select_config = Select.from(select)
       end
@@ -19,6 +20,10 @@ module Chroma
 
       def rank(rank = nil)
         clone_with(rank: RankExpression.from(rank))
+      end
+
+      def group_by(group_by = nil)
+        clone_with(group_by: GroupBy.from(group_by))
       end
 
       def limit(limit = nil, offset = nil)
@@ -55,15 +60,20 @@ module Chroma
 
         payload["filter"] = @where_clause.to_h if @where_clause
         payload["rank"] = @rank_expression.to_h if @rank_expression
+        if @group_by_config && !@group_by_config.empty?
+          payload["group_by"] = @group_by_config.to_h
+        end
         payload
       end
 
       private
 
-      def clone_with(where: @where_clause, rank: @rank_expression, limit: @limit_config, select: @select_config)
+      def clone_with(where: @where_clause, rank: @rank_expression, group_by: @group_by_config,
+                     limit: @limit_config, select: @select_config)
         instance = self.class.allocate
         instance.instance_variable_set(:@where_clause, where)
         instance.instance_variable_set(:@rank_expression, rank)
+        instance.instance_variable_set(:@group_by_config, group_by)
         instance.instance_variable_set(:@limit_config, limit)
         instance.instance_variable_set(:@select_config, select)
         instance

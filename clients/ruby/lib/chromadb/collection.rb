@@ -489,6 +489,7 @@ module Chroma
         return Chroma::Search::Search.new(
           where: item[:where] || item["where"],
           rank: item[:rank] || item["rank"],
+          group_by: item[:group_by] || item["group_by"],
           limit: item[:limit] || item["limit"],
           select: item[:select] || item["select"],
         ).to_h
