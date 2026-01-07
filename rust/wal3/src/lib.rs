@@ -3,8 +3,10 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
-use setsum::Setsum;
 use uuid::Uuid;
+
+// Re-export Setsum publicly for downstream crates
+pub use setsum::Setsum;
 
 mod backoff;
 mod copy;
@@ -842,6 +844,200 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentIdentifier> {
 
 pub fn fragment_path(prefix: &str, path: &str) -> String {
     format!("{prefix}/{path}")
+}
+
+////////////////////////////////////////// LogWriterTrait //////////////////////////////////////////
+
+/// Trait that provides a type-erased interface to LogWriter.
+#[async_trait::async_trait]
+pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
+    /// Append a single message to the log.
+    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error>;
+
+    /// Append multiple messages to the log atomically.
+    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error>;
+
+    /// Returns a possibly-stale copy of the manifest with a witness for verification.
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error>;
+
+    /// Perform phase 1 of garbage collection: compute garbage.
+    async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error>;
+
+    /// Perform phase 2 of garbage collection: update the manifest.
+    async fn garbage_collect_phase2_update_manifest(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error>;
+
+    /// Perform phase 3 of garbage collection: delete garbage files.
+    async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error>;
+
+    /// Perform all three phases of garbage collection in sequence.
+    async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error>;
+}
+
+#[async_trait::async_trait]
+impl<
+        P: interfaces::FragmentPointer,
+        FP: interfaces::FragmentManagerFactory<FragmentPointer = P> + Send + Sync + 'static,
+        MP: interfaces::ManifestManagerFactory<FragmentPointer = P> + Send + Sync + 'static,
+    > LogWriterTrait for LogWriter<P, FP, MP>
+{
+    async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
+        LogWriter::append(self, message).await
+    }
+
+    async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
+        LogWriter::append_many(self, messages).await
+    }
+
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+        LogWriter::manifest_and_witness(self).await
+    }
+
+    async fn garbage_collect_phase1_compute_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<bool, Error> {
+        LogWriter::garbage_collect_phase1_compute_garbage(self, options, keep_at_least).await
+    }
+
+    async fn garbage_collect_phase2_update_manifest(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        LogWriter::garbage_collect_phase2_update_manifest(self, options).await
+    }
+
+    async fn garbage_collect_phase3_delete_garbage(
+        &self,
+        options: &GarbageCollectionOptions,
+    ) -> Result<(), Error> {
+        LogWriter::garbage_collect_phase3_delete_garbage(self, options).await
+    }
+
+    async fn garbage_collect(
+        &self,
+        options: &GarbageCollectionOptions,
+        keep_at_least: Option<LogPosition>,
+    ) -> Result<(), Error> {
+        LogWriter::garbage_collect(self, options, keep_at_least).await
+    }
+}
+
+////////////////////////////////////////// LogReaderTrait //////////////////////////////////////////
+
+/// Trait that provides a type-erased interface to LogReader.
+#[async_trait::async_trait]
+pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
+    /// Verify that the reader would read the same manifest as the one provided in
+    /// manifest_and_witness, but do it in a way that doesn't load the whole manifest.
+    async fn verify(&self, manifest_and_witness: &ManifestAndWitness) -> Result<bool, Error>;
+
+    /// Load and return the manifest.
+    async fn manifest(&self) -> Result<Option<Manifest>, Error>;
+
+    /// Load and return the manifest with its witness.
+    async fn manifest_and_witness(&self) -> Result<Option<ManifestAndWitness>, Error>;
+
+    /// Return the oldest timestamp in the log.
+    async fn oldest_timestamp(&self) -> Result<LogPosition, Error>;
+
+    /// Return the next write timestamp (the position where the next write will be placed).
+    async fn next_write_timestamp(&self) -> Result<LogPosition, Error>;
+
+    /// Scan fragments from a given position with limits.
+    async fn scan(&self, from: LogPosition, limits: reader::Limits)
+        -> Result<Vec<Fragment>, Error>;
+
+    /// Scan fragments using a cached manifest.
+    ///
+    /// This differs from scan in that it takes a loaded manifest.
+    async fn scan_with_cache(
+        &self,
+        manifest: &Manifest,
+        from: LogPosition,
+        limits: reader::Limits,
+        short_read: &mut bool,
+    ) -> Result<Vec<Fragment>, Error>;
+
+    /// Read a parquet fragment and return its contents.
+    async fn read_parquet(
+        &self,
+        fragment: &Fragment,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
+
+    /// Scrub the log to verify its integrity.
+    async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>>;
+}
+
+#[async_trait::async_trait]
+impl<
+        P: interfaces::FragmentPointer,
+        FC: interfaces::FragmentConsumer<FragmentPointer = P>,
+        MC: interfaces::ManifestConsumer<P>,
+    > LogReaderTrait for LogReader<P, FC, MC>
+{
+    async fn verify(&self, manifest_and_witness: &ManifestAndWitness) -> Result<bool, Error> {
+        LogReader::verify(self, manifest_and_witness).await
+    }
+
+    async fn manifest(&self) -> Result<Option<Manifest>, Error> {
+        LogReader::manifest(self).await
+    }
+
+    async fn manifest_and_witness(&self) -> Result<Option<ManifestAndWitness>, Error> {
+        LogReader::manifest_and_witness(self).await
+    }
+
+    async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
+        LogReader::oldest_timestamp(self).await
+    }
+
+    async fn next_write_timestamp(&self) -> Result<LogPosition, Error> {
+        LogReader::next_write_timestamp(self).await
+    }
+
+    async fn scan(
+        &self,
+        from: LogPosition,
+        limits: reader::Limits,
+    ) -> Result<Vec<Fragment>, Error> {
+        LogReader::scan(self, from, limits).await
+    }
+
+    async fn scan_with_cache(
+        &self,
+        manifest: &Manifest,
+        from: LogPosition,
+        limits: reader::Limits,
+        short_read: &mut bool,
+    ) -> Result<Vec<Fragment>, Error> {
+        LogReader::scan_with_cache(self, manifest, from, limits, short_read).await
+    }
+
+    async fn read_parquet(
+        &self,
+        fragment: &Fragment,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        LogReader::read_parquet(self, fragment).await
+    }
+
+    async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>> {
+        LogReader::scrub(self, limits).await
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
