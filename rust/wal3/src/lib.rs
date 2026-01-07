@@ -860,6 +860,12 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Returns a possibly-stale copy of the manifest with a witness for verification.
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error>;
 
+    /// Returns a reader for this log writer.
+    async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>>;
+
+    /// Returns a cursor store for this log writer.
+    fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore>;
+
     /// Perform phase 1 of garbage collection: compute garbage.
     async fn garbage_collect_phase1_compute_garbage(
         &self,
@@ -893,6 +899,9 @@ impl<
         FP: interfaces::FragmentManagerFactory<FragmentPointer = P> + Send + Sync + 'static,
         MP: interfaces::ManifestManagerFactory<FragmentPointer = P> + Send + Sync + 'static,
     > LogWriterTrait for LogWriter<P, FP, MP>
+where
+    FP::Consumer: 'static,
+    MP::Consumer: 'static,
 {
     async fn append(&self, message: Vec<u8>) -> Result<LogPosition, Error> {
         LogWriter::append(self, message).await
@@ -904,6 +913,15 @@ impl<
 
     async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
         LogWriter::manifest_and_witness(self).await
+    }
+
+    async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>> {
+        let reader = LogWriter::reader(self, options).await?;
+        Some(Arc::new(reader) as Arc<dyn LogReaderTrait>)
+    }
+
+    fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore> {
+        LogWriter::cursors(self, options)
     }
 
     async fn garbage_collect_phase1_compute_garbage(
