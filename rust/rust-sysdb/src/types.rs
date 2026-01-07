@@ -17,44 +17,46 @@ use chroma_types::sysdb_errors::SysDbError;
 // ============================================================================
 
 /// Validates that a string is a valid UUID.
-fn validate_uuid(id: &str, field_name: &str) -> Result<String, SysDbError> {
-    Uuid::parse_str(id).map_err(|_| {
-        SysDbError::InvalidArgument(format!(
-            "{} must be a valid UUID, got: '{}'",
-            field_name, id
-        ))
-    })?;
-    Ok(id.to_string())
+fn validate_uuid(id: &str) -> Result<Uuid, SysDbError> {
+    Uuid::parse_str(id).map_err(SysDbError::InvalidUuid)
 }
 
 /// Internal request for creating a tenant.
 #[derive(Debug, Clone)]
 pub struct CreateTenantRequest {
-    pub name: String,
+    pub id: Uuid,
 }
 
-impl From<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
-    fn from(req: chroma_proto::CreateTenantRequest) -> Self {
-        Self { name: req.name }
+impl TryFrom<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateTenantRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: validate_uuid(&req.name)?,
+        })
     }
 }
 
 /// Internal request for getting a tenant.
 #[derive(Debug, Clone)]
 pub struct GetTenantRequest {
-    pub name: String,
+    pub id: Uuid,
 }
 
-impl From<chroma_proto::GetTenantRequest> for GetTenantRequest {
-    fn from(req: chroma_proto::GetTenantRequest) -> Self {
-        Self { name: req.name }
+impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetTenantRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: validate_uuid(&req.name)?,
+        })
     }
 }
 
 /// Internal request for setting tenant resource name.
 #[derive(Debug, Clone)]
 pub struct SetTenantResourceNameRequest {
-    pub id: String,
+    pub id: Uuid,
     pub resource_name: String,
 }
 
@@ -62,9 +64,8 @@ impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNa
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::SetTenantResourceNameRequest) -> Result<Self, Self::Error> {
-        let id = validate_uuid(&req.id, "tenant id")?;
         Ok(Self {
-            id,
+            id: validate_uuid(&req.id)?,
             resource_name: req.resource_name,
         })
     }
@@ -73,20 +74,19 @@ impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNa
 /// Internal request for creating a database.
 #[derive(Debug, Clone)]
 pub struct CreateDatabaseRequest {
-    pub id: String,
+    pub id: Uuid,
     pub name: String,
-    pub tenant: String,
+    pub tenant_id: Uuid,
 }
 
 impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::CreateDatabaseRequest) -> Result<Self, Self::Error> {
-        let id = validate_uuid(&req.id, "database id")?;
         Ok(Self {
-            id,
+            id: validate_uuid(&req.id)?,
             name: req.name,
-            tenant: req.tenant,
+            tenant_id: validate_uuid(&req.tenant)?,
         })
     }
 }
@@ -95,15 +95,17 @@ impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
 #[derive(Debug, Clone)]
 pub struct GetDatabaseRequest {
     pub name: String,
-    pub tenant: String,
+    pub tenant_id: Uuid,
 }
 
-impl From<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
-    fn from(req: chroma_proto::GetDatabaseRequest) -> Self {
-        Self {
+impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetDatabaseRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
             name: req.name,
-            tenant: req.tenant,
-        }
+            tenant_id: validate_uuid(&req.tenant)?,
+        })
     }
 }
 

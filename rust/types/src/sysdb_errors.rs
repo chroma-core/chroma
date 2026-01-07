@@ -40,6 +40,14 @@ pub enum SysDbError {
     /// Internal/unexpected error
     #[error("Internal error: {0}")]
     Internal(String),
+
+    /// Invalid UUID
+    #[error("Invalid UUID: {0}")]
+    InvalidUuid(#[from] uuid::Error),
+
+    /// Failed to read column
+    #[error("Failed to read column: {0}")]
+    FailedToReadColumn(#[source] google_cloud_spanner::row::Error),
 }
 
 impl ChromaError for SysDbError {
@@ -51,6 +59,8 @@ impl ChromaError for SysDbError {
             SysDbError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
             SysDbError::NotSupported(_) => ErrorCodes::Internal,
             SysDbError::Internal(_) => ErrorCodes::Internal,
+            SysDbError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
+            SysDbError::FailedToReadColumn(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -64,6 +74,8 @@ impl From<SysDbError> for Status {
             SysDbError::NotSupported(msg) => Status::unimplemented(msg),
             SysDbError::Spanner(err) => Status::internal(err.to_string()),
             SysDbError::Internal(msg) => Status::internal(msg),
+            SysDbError::InvalidUuid(err) => Status::invalid_argument(err.to_string()),
+            SysDbError::FailedToReadColumn(msg) => Status::internal(msg.to_string()),
         }
     }
 }

@@ -1,6 +1,6 @@
 use google_cloud_spanner::row::Row;
 
-use crate::chroma_proto::{Tenant as ProtoTenant, TenantLastCompactionTime};
+use crate::chroma_proto::TenantLastCompactionTime;
 use crate::sysdb_errors::SysDbError;
 
 #[derive(Debug, Clone)]
@@ -28,18 +28,14 @@ impl TryFrom<Row> for Tenant {
     fn try_from(row: Row) -> Result<Self, Self::Error> {
         let id: String = row
             .column_by_name("id")
-            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
+            .map_err(SysDbError::FailedToReadColumn)?;
 
         // resource_name can be NULL, so we handle the error as None
         let resource_name: Option<String> = row.column_by_name("resource_name").ok();
 
-        let last_compaction_time: i64 =
-            row.column_by_name("last_compaction_time").map_err(|e| {
-                SysDbError::Internal(format!(
-                    "failed to read 'last_compaction_time' column: {}",
-                    e
-                ))
-            })?;
+        let last_compaction_time: i64 = row
+            .column_by_name("last_compaction_time")
+            .map_err(SysDbError::FailedToReadColumn)?;
 
         Ok(Tenant {
             id,
@@ -49,9 +45,9 @@ impl TryFrom<Row> for Tenant {
     }
 }
 
-impl From<Tenant> for ProtoTenant {
+impl From<Tenant> for crate::chroma_proto::Tenant {
     fn from(tenant: Tenant) -> Self {
-        ProtoTenant {
+        crate::chroma_proto::Tenant {
             name: tenant.id,
             resource_name: tenant.resource_name,
         }

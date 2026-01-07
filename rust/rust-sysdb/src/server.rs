@@ -139,7 +139,9 @@ impl SysDb for SysdbService {
         request: Request<GetDatabaseRequest>,
     ) -> Result<Response<GetDatabaseResponse>, Status> {
         let proto_req = request.into_inner();
-        let internal_req: internal::GetDatabaseRequest = proto_req.into();
+        let internal_req: internal::GetDatabaseRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
 
         let backend = internal_req.assign(&self.backends);
         let internal_resp = internal_req.run(backend).await?;
@@ -177,7 +179,9 @@ impl SysDb for SysdbService {
         request: Request<CreateTenantRequest>,
     ) -> Result<Response<CreateTenantResponse>, Status> {
         let proto_req = request.into_inner();
-        let internal_req: internal::CreateTenantRequest = proto_req.into();
+        let internal_req: internal::CreateTenantRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
 
         let backends = internal_req.assign(&self.backends);
         let resp = internal_req.run(backends).await?;
@@ -190,7 +194,9 @@ impl SysDb for SysdbService {
         request: Request<GetTenantRequest>,
     ) -> Result<Response<GetTenantResponse>, Status> {
         let proto_req = request.into_inner();
-        let internal_req: internal::GetTenantRequest = proto_req.into();
+        let internal_req: internal::GetTenantRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
 
         let backend = internal_req.assign(&self.backends);
         let internal_resp = internal_req.run(backend).await?;

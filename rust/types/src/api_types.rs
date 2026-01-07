@@ -465,17 +465,16 @@ impl TryFrom<Row> for Database {
     fn try_from(row: Row) -> Result<Self, Self::Error> {
         let id: String = row
             .column_by_name("id")
-            .map_err(|e| SysDbError::Internal(format!("failed to read 'id' column: {}", e)))?;
+            .map_err(SysDbError::FailedToReadColumn)?;
         let name: String = row
             .column_by_name("name")
-            .map_err(|e| SysDbError::Internal(format!("failed to read 'name' column: {}", e)))?;
-        let tenant: String = row.column_by_name("tenant_id").map_err(|e| {
-            SysDbError::Internal(format!("failed to read 'tenant_id' column: {}", e))
-        })?;
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let tenant: String = row
+            .column_by_name("tenant_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
 
         Ok(Database {
-            id: Uuid::parse_str(&id)
-                .map_err(|e| SysDbError::Internal(format!("failed to parse 'id' column: {}", e)))?,
+            id: Uuid::parse_str(&id).map_err(SysDbError::InvalidUuid)?,
             name,
             tenant,
         })
