@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    chromadb (0.1.0)
+    chromadb-experimental (0.2.0)
       base64 (~> 0.2)
       faraday (~> 2.0)
       json_schemer (~> 0.2)
@@ -134,7 +134,7 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
-  chromadb!
+  chromadb-experimental!
   rspec (~> 3.13)
   rubocop-rails-omakase (~> 1.1)
   webmock (~> 3.23)

@@ -13,3 +13,4 @@ lib/chromadb/openapi/README.md
 lib/chromadb/openapi/chromadb.gemspec
 lib/chromadb/openapi/docs/
 lib/chromadb/openapi/spec/
+*.gem

@@ -3,13 +3,13 @@
 require_relative "lib/chromadb/version"
 
 Gem::Specification.new do |spec|
-  spec.name = "chromadb"
+  spec.name = "chromadb-experimental"
   spec.version = Chroma::VERSION
   spec.authors = [ "Chroma Core" ]
   spec.email = [ "support@trychroma.com" ]
 
-  spec.summary = "Chroma Ruby client"
-  spec.description = "Ruby client for Chroma's HTTP API (dense + sparse embeddings)."
+  spec.summary = "Chroma Ruby client (experimental)"
+  spec.description = "Experimental Ruby client for Chroma"
   spec.homepage = "https://github.com/chroma-core/chroma"
   spec.license = "Apache-2.0"
 

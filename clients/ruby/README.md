@@ -5,9 +5,15 @@ A first-class Ruby client for Chroma's HTTP API.
 ## Install
 
 ```bash
-bundle add chromadb
+bundle add chromadb-experimental
 # or
-ruby -e "system('gem install chromadb')"
+ruby -e "system('gem install chromadb-experimental')"
+```
+
+Require stays `chromadb`:
+
+```ruby
+require "chromadb"
 ```
 
 ## Quick Start (Local)
