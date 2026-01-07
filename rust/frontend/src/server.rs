@@ -24,7 +24,7 @@ use chroma_types::{
     DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
     GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionRequest,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload, GetResponse,
-    GetTenantRequest, GetTenantResponse, InternalCollectionConfiguration,
+    GetTenantRequest, GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
     ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
     SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
@@ -135,6 +135,7 @@ pub struct Metrics {
     collection_delete: Counter<u64>,
     collection_count: Counter<u64>,
     collection_get: Counter<u64>,
+    collection_index_status: Counter<u64>,
     collection_query: Counter<u64>,
     collection_search: Counter<u64>,
     attach_function: Counter<u64>,
@@ -172,6 +173,7 @@ impl Metrics {
             collection_delete: meter.u64_counter("collection_delete").build(),
             collection_count: meter.u64_counter("collection_count").build(),
             collection_get: meter.u64_counter("collection_get").build(),
+            collection_index_status: meter.u64_counter("collection_index_status").build(),
             collection_query: meter.u64_counter("collection_query").build(),
             collection_search: meter.u64_counter("collection_search").build(),
             attach_function: meter.u64_counter("attach_function").build(),
@@ -305,6 +307,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
                 get(collection_count),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+                get(indexing_status),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
@@ -1779,6 +1785,61 @@ async fn collection_count(
             .meter(metering_context_container)
             .await?,
     ))
+}
+
+/// Retrieves the index status of a collection.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+    responses(
+        (status = 200, description = "Index status retrieved successfully", body = IndexStatusResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant ID"),
+        ("database" = String, Path, description = "Database name for the collection"),
+        ("collection_id" = String, Path, description = "Collection ID to get index status for")
+    )
+)]
+async fn indexing_status(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<IndexStatusResponse>, ServerError> {
+    server.metrics.collection_index_status.add(1, &[]);
+    tracing::info!(
+        name: "index_status",
+        tenant = tenant,
+        database = database,
+        collection_id = collection_id
+    );
+
+    let _guard = server.scorecard_request(&[
+        "op:indexing_status",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
+
+    // TODO(tanujnay112): Add authorization for indexing status
+    server
+        .authenticate_and_authorize_collection(
+            &headers,
+            AuthzAction::GetCollection,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        )
+        .await?;
+
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    Ok(Json(server.frontend.indexing_status(collection_id).await?))
 }
 
 /// Retrieves records from a collection by ID or metadata filter.
