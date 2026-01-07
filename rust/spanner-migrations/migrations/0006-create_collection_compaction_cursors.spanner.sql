@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS collection_compaction_cursors (
     oldest_version_ts TIMESTAMP,
     index_schema JSON NOT NULL,
     created_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
-    updated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true),
+    updated_at TIMESTAMP NOT NULL OPTIONS (allow_commit_timestamp=true)
 ) PRIMARY KEY (collection_id, region),
   INTERLEAVE IN PARENT collections
 
