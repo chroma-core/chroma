@@ -1,4 +1,4 @@
-use super::{AttachedFunctionUuid, CollectionUuid, ConversionError, Schema};
+use super::{AttachedFunctionUuid, CollectionUuid, ConversionError, DatabaseName, Schema};
 use crate::{
     chroma_proto::{self, FilePaths, FlushSegmentCompactionInfo},
     SegmentUuid,
@@ -17,6 +17,7 @@ pub struct SegmentFlushInfo {
 #[derive(Debug, Clone)]
 pub struct CollectionFlushInfo {
     pub tenant_id: String,
+    pub database_name: DatabaseName,
     pub collection_id: CollectionUuid,
     pub log_position: i64,
     pub collection_version: i32,

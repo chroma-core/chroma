@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName};
 use thiserror::Error;
 use tokio::time::{error::Elapsed, timeout};
 use tracing::Level;
@@ -31,7 +31,7 @@ pub struct RepairLogOffsets {
 
 #[derive(Clone, Debug)]
 pub struct RepairLogOffsetsInput {
-    pub log_offsets_to_repair: Vec<(CollectionUuid, i64)>,
+    pub log_offsets_to_repair: Vec<(DatabaseName, CollectionUuid, i64)>,
 }
 
 pub type RepairLogOffsetsOutput = ();
@@ -65,13 +65,17 @@ impl Operator<RepairLogOffsetsInput, RepairLogOffsetsOutput> for RepairLogOffset
         &self,
         input: &RepairLogOffsetsInput,
     ) -> Result<RepairLogOffsetsOutput, RepairLogOffsetsError> {
-        for (collection_id, offset) in input.log_offsets_to_repair.iter().cloned() {
+        for (database_name, collection_id, offset) in input.log_offsets_to_repair.iter().cloned() {
             tracing::event!(Level::INFO, name = "repairing log offset", collection_id =? collection_id, offset =? offset);
             timeout(
                 self.timeout,
                 self.log_client
                     .clone()
-                    .update_collection_log_offset_on_every_node(collection_id, offset),
+                    .update_collection_log_offset_on_every_node(
+                        database_name,
+                        collection_id,
+                        offset,
+                    ),
             )
             .await??;
         }

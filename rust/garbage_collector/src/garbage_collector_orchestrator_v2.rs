@@ -36,7 +36,7 @@ use chroma_system::{
     TaskMessage, TaskResult,
 };
 use chroma_types::chroma_proto::{CollectionVersionFile, VersionListForCollection};
-use chroma_types::{CollectionUuid, DeleteCollectionError};
+use chroma_types::{CollectionUuid, DatabaseName, DeleteCollectionError};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use futures::TryStreamExt;
@@ -515,10 +515,17 @@ impl GarbageCollectorOrchestrator {
                         "Expected log offset to be unsigned".to_string(),
                     )
                 })?;
+            let database_name = DatabaseName::new(self.database_name.clone().unwrap_or_default())
+                .ok_or(GarbageCollectorError::InvariantViolation(
+                "Expected database_name to be set".to_string(),
+            ))?;
             collections_to_garbage_collect.insert(
                 *collection_id,
                 // The minimum offset to keep is one after the minimum compaction offset
-                LogPosition::from_offset(min_compaction_log_offset) + 1u64,
+                (
+                    database_name,
+                    LogPosition::from_offset(min_compaction_log_offset) + 1u64,
+                ),
             );
         }
 

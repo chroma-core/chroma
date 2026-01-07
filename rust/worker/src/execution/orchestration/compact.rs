@@ -407,10 +407,14 @@ impl CompactionContext {
 
                 Ok(Success::new(materialized, collection_info.clone()).into())
             }
-            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => Ok(
-                RequireCompactionOffsetRepair::new(repair.job_id, repair.witnessed_offset_in_sysdb)
-                    .into(),
-            ),
+            LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
+                Ok(RequireCompactionOffsetRepair::new(
+                    repair.job_id,
+                    repair.database_name.clone(),
+                    repair.witnessed_offset_in_sysdb,
+                )
+                .into())
+            }
             LogFetchOrchestratorResponse::RequireFunctionBackfill(backfill) => {
                 if let Some(hnsw_index_uuid) = backfill.collection_info.hnsw_index_uuid {
                     self.hnsw_index_uuids.insert(hnsw_index_uuid);
@@ -739,6 +743,7 @@ impl CompactionContext {
             LogFetchOrchestratorResponse::RequireCompactionOffsetRepair(repair) => {
                 return Ok(CompactionResponse::RequireCompactionOffsetRepair {
                     job_id: repair.job_id,
+                    database_name: repair.database_name.clone(),
                     witnessed_offset_in_sysdb: repair.witnessed_offset_in_sysdb,
                 });
             }
@@ -879,6 +884,7 @@ pub enum CompactionResponse {
     },
     RequireCompactionOffsetRepair {
         job_id: JobId,
+        database_name: chroma_types::DatabaseName,
         witnessed_offset_in_sysdb: i64,
     },
 }
@@ -979,6 +985,7 @@ mod tests {
             maximum_fetch_count: None,
             collection_uuid: cas.collection.collection_id,
             tenant: cas.collection.tenant.clone(),
+            database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
         };
 
         let filter = Filter {
@@ -1101,6 +1108,7 @@ mod tests {
             maximum_fetch_count: None,
             collection_uuid: collection_id,
             tenant: old_cas.collection.tenant.clone(),
+            database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
         };
         let filter = Filter {
             query_ids: None,
@@ -1855,6 +1863,7 @@ mod tests {
             Ok(CompactionResponse::RequireCompactionOffsetRepair {
                 job_id,
                 witnessed_offset_in_sysdb,
+                database_name: _,
             }) => {
                 println!("Got expected RequireCompactionOffsetRepair response");
                 println!("Job ID: {:?}", job_id);

@@ -55,6 +55,7 @@ pub fn empty_fetch_log(collection_uuid: CollectionUuid) -> FetchLogOperator {
         maximum_fetch_count: Some(0),
         collection_uuid,
         tenant: "default_tenant".to_string(),
+        database_name: chroma_types::DatabaseName::new("bench_db").unwrap(),
     }
 }
 

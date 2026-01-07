@@ -143,6 +143,7 @@ impl ChromaGrpcClients {
             collection_id: collection_id.to_string(),
             records,
             cmek: None,
+            database_name: "test_db".to_string(),
         };
 
         let response = self.log_service.push_logs(push_req).await?;
