@@ -144,6 +144,16 @@ pub struct LogReader<
 }
 
 impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
+    std::fmt::Debug for LogReader<P, FC, MC>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogReader")
+            .field("_options", &self._options)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
     LogReader<P, FC, MC>
 {
     pub fn new(options: LogReaderOptions, fragment_consumer: FC, manifest_consumer: MC) -> Self {

@@ -1,11 +1,8 @@
 use chroma_types::Cmek;
 use setsum::Setsum;
 
-use crate::interfaces::{
-    FragmentConsumer, FragmentPointer, FragmentPublisher, ManifestConsumer, ManifestManagerFactory,
-};
-use crate::reader::LogReader;
-use crate::{Error, Limits, LogPosition, Manifest};
+use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestManagerFactory};
+use crate::{Error, Limits, LogPosition, LogReaderTrait, Manifest};
 
 /// Copy a log from one prefix to another.
 ///
@@ -13,12 +10,10 @@ use crate::{Error, Limits, LogPosition, Manifest};
 /// from the factory.
 pub async fn copy<
     P: FragmentPointer,
-    FC: FragmentConsumer<FragmentPointer = P>,
-    MC: ManifestConsumer<P>,
     FP: FragmentPublisher<FragmentPointer = P>,
     MF: ManifestManagerFactory<FragmentPointer = P>,
 >(
-    reader: &LogReader<P, FC, MC>,
+    reader: &dyn LogReaderTrait,
     offset: LogPosition,
     fragment_publisher: &FP,
     manifest_factory: MF,
