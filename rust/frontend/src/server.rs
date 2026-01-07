@@ -1822,11 +1822,10 @@ async fn indexing_status(
         format!("collection:{}", collection_id).as_str(),
     ])?;
 
-    // TODO(tanujnay112): Add authorization for indexing status
     server
         .authenticate_and_authorize_collection(
             &headers,
-            AuthzAction::GetCollection,
+            AuthzAction::Count,
             AuthzResource {
                 tenant: Some(tenant.clone()),
                 database: Some(database.clone()),
@@ -1836,10 +1835,30 @@ async fn indexing_status(
         )
         .await?;
 
+    let metering_context_container =
+        chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
+            tenant.clone(),
+            database.clone(),
+            collection_id.clone(),
+            ReadAction::Query,
+        ));
+
+    metering_context_container.enter();
+
+    chroma_metering::with_current(|context| {
+        context.start_request(Instant::now());
+    });
+
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
-    Ok(Json(server.frontend.indexing_status(collection_id).await?))
+    Ok(Json(
+        server
+            .frontend
+            .indexing_status(collection_id)
+            .meter(metering_context_container)
+            .await?,
+    ))
 }
 
 /// Retrieves records from a collection by ID or metadata filter.
