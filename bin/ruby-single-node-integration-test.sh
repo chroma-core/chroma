@@ -35,4 +35,4 @@ export CHROMA_SERVER_HTTP_PORT=8000
 cd "$ROOT_DIR/clients/ruby"
 
 bundle install
-bundle exec rspec
+bundle exec rspec --tag ~cloud

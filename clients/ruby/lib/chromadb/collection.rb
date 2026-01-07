@@ -176,7 +176,7 @@ module Chroma
       response = @client.transport.request(
         :post,
         "/tenants/#{path[:tenant]}/databases/#{path[:database]}/collections/#{path[:collection_id]}/fork",
-        json: { "name" => name },
+        json: { "new_name" => name },
       )
       @client.send(:build_collection, response)
     end

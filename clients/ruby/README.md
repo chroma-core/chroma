@@ -37,16 +37,22 @@ pp results.to_h
 ```ruby
 require "chromadb"
 
-client = Chroma::CloudClient.new(
-  api_key: ENV.fetch("CHROMA_API_KEY"),
-  tenant: ENV["CHROMA_TENANT"],
-  database: ENV["CHROMA_DATABASE"]
-)
+Chroma.configure do |config|
+  config.cloud_api_key = ENV.fetch("CHROMA_API_KEY")
+  # Optional when your API key spans multiple databases:
+  # config.cloud_tenant = ENV["CHROMA_TENANT"]
+  # config.cloud_database = ENV["CHROMA_DATABASE"]
+end
+
+client = Chroma::CloudClient.new
 
 client.heartbeat
 identity = client.get_user_identity
 pp identity
 ```
+
+Notes:
+- Cloud clients only require an API key. Host/port overrides are for non-default deployments.
 
 ## Embedding Functions (Explicit)
 
@@ -121,6 +127,48 @@ search = Chroma::Search::Search.new
 results = collection.search(search)
 pp results.rows
 ```
+
+## Rails initializer
+
+Add a Rails initializer to configure the cloud API key once for your app:
+
+```ruby
+# config/initializers/chromadb.rb
+Chroma.configure do |config|
+  config.cloud_api_key = Rails.application.credentials.dig(:chroma, :api_key) || ENV["CHROMA_API_KEY"]
+  config.cloud_tenant = Rails.application.credentials.dig(:chroma, :tenant)
+  config.cloud_database = Rails.application.credentials.dig(:chroma, :database)
+end
+```
+
+Then initialize a client anywhere in your app:
+
+```ruby
+client = Chroma::CloudClient.new
+```
+
+## Testing
+
+### Single-node integration tests
+
+Runs the Ruby test suite against a local single-node Chroma server.
+
+```bash
+bin/ruby-single-node-integration-test.sh
+```
+
+### Cloud integration tests
+
+Hits hosted Chroma and requires an API key plus explicit opt-in.
+
+```bash
+CHROMA_API_KEY=... bin/ruby-cloud-integration-test.sh
+```
+
+Notes:
+- The script accepts `RUBY_INTEGRATION_TEST_CHROMA_API_KEY` (CI secret) and maps it to `CHROMA_API_KEY`.
+- Cloud tests only run when `CHROMA_CLOUD_INTEGRATION_TESTS=1` (set by the script).
+- Optional overrides: `CHROMA_CLOUD_HOST`, `CHROMA_CLOUD_PORT`, `CHROMA_CLOUD_SSL`.
 
 ## Low-level OpenAPI client
 

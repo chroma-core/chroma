@@ -293,18 +293,21 @@ module Chroma
   end
 
   class CloudClient < Client
-    def initialize(cloud_host: "api.trychroma.com", cloud_port: 443, enable_ssl: true, headers: nil,
-                   tenant: nil, database: nil, api_key: nil, ssl_verify: true, timeout: nil)
-      api_key ||= ENV["CHROMA_API_KEY"]
+    def initialize(api_key: nil, headers: nil, tenant: nil, database: nil, ssl_verify: true, timeout: nil)
+      config = Chroma.configuration
+      api_key ||= config.cloud_api_key
       raise ArgumentError, "CHROMA_API_KEY is required for CloudClient" if api_key.nil? || api_key.empty?
+
+      tenant ||= config.cloud_tenant
+      database ||= config.cloud_database
 
       merged_headers = (headers || {}).dup
       merged_headers["x-chroma-token"] ||= api_key
 
       super(
-        host: cloud_host,
-        port: cloud_port,
-        ssl: enable_ssl,
+        host: config.cloud_host,
+        port: config.cloud_port,
+        ssl: config.cloud_ssl,
         headers: merged_headers,
         tenant: tenant,
         database: database,

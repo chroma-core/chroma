@@ -3,7 +3,7 @@
 require "spec_helper"
 require "securerandom"
 
-RSpec.describe "Chroma Ruby integration" do
+RSpec.describe "Chroma Ruby single-node integration" do
   before(:all) do
     host = ENV.fetch("CHROMA_SERVER_HOST", nil)
     skip("CHROMA_SERVER_HOST not set") unless host

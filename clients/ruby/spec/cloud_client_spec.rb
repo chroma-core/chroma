@@ -7,12 +7,14 @@ RSpec.describe Chroma::CloudClient do
     ENV["CHROMA_API_KEY"] = "test-token"
     ENV["CHROMA_TENANT"] = "tenant-123"
     ENV["CHROMA_DATABASE"] = "db-123"
+    Chroma.reset_configuration!
   end
 
   after do
     ENV.delete("CHROMA_API_KEY")
     ENV.delete("CHROMA_TENANT")
     ENV.delete("CHROMA_DATABASE")
+    Chroma.reset_configuration!
   end
 
   it "uses the API key header and env tenant for admin endpoints" do

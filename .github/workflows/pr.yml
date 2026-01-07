@@ -204,6 +204,8 @@ jobs:
     needs: change-detection
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'ruby-client')
     uses: ./.github/workflows/_ruby-client-tests.yml
+    secrets:
+      RUBY_INTEGRATION_TEST_CHROMA_API_KEY: ${{ secrets.RUBY_INTEGRATION_TEST_CHROMA_API_KEY }}
 
   rust-tests:
     name: Rust tests
