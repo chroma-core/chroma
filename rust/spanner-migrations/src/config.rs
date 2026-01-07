@@ -10,7 +10,7 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 // spanner-migration is in the chroma2 namespace on tilt
 const DEFAULT_CONFIG_PATH: &str = "../worker/chroma_config2.yaml";
 
-#[derive(Deserialize, Clone, Debug, Default)]
+#[derive(Copy, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum MigrationMode {
     Apply,
@@ -22,6 +22,10 @@ pub enum MigrationMode {
 #[derive(Deserialize)]
 pub struct MigrationConfig {
     pub spanner: SpannerConfig,
+    #[serde(default)]
+    // NOTE(rescrv):  Until we plumb everything we will just say that there are two spanner
+    // configs.
+    pub logdb_spanner: Option<SpannerConfig>,
     #[serde(default)]
     pub migration_mode: MigrationMode,
     #[serde(default = "MigrationConfig::default_service_name")]

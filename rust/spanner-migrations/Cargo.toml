@@ -3,6 +3,10 @@ name = "spanner-migrations"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "spanner_migrations"
+path = "src/lib.rs"
+
 [[bin]]
 name = "spanner_migration"
 path = "src/main.rs"
