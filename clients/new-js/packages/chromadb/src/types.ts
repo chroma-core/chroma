@@ -44,6 +44,9 @@ export interface EmbeddingFunctionMetadata {
 
   /** Organization ID for OpenAI */
   organizationId?: string;
+
+  /** The number of dimensions in the embedding vectors */
+  dimensions?: number;
 }
 
 /**
