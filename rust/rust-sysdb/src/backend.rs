@@ -62,9 +62,10 @@
 
 use crate::spanner::SpannerBackend;
 use crate::types::{
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest, GetTenantResponse,
-    SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetDatabaseRequest,
+    GetDatabaseResponse, GetTenantRequest, GetTenantResponse, SetTenantResourceNameRequest,
+    SetTenantResourceNameResponse,
 };
 use chroma_types::{chroma_proto::Database, sysdb_errors::SysDbError};
 
@@ -132,7 +133,8 @@ pub trait Runnable {
     type Input;
 
     /// Execute this request on the given backend(s).
-    async fn run(&self, backends: Self::Input) -> Result<Self::Response, SysDbError>;
+    /// Takes `self` by value to allow passing ownership to backends that need it.
+    async fn run(self, backends: Self::Input) -> Result<Self::Response, SysDbError>;
 }
 
 /// Backend enum that wraps all supported database backends.
@@ -154,7 +156,7 @@ impl Backend {
     /// Create a new tenant.
     pub async fn create_tenant(
         &self,
-        req: &CreateTenantRequest,
+        req: CreateTenantRequest,
     ) -> Result<CreateTenantResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.create_tenant(req).await,
@@ -164,10 +166,7 @@ impl Backend {
     /// Get a tenant by name.
     ///
     /// Returns `SysDbError::NotFound` if the tenant does not exist.
-    pub async fn get_tenant(
-        &self,
-        req: &GetTenantRequest,
-    ) -> Result<GetTenantResponse, SysDbError> {
+    pub async fn get_tenant(&self, req: GetTenantRequest) -> Result<GetTenantResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_tenant(req).await,
         }
@@ -176,7 +175,7 @@ impl Backend {
     /// Set the resource name for a tenant.
     pub async fn set_tenant_resource_name(
         &self,
-        req: &SetTenantResourceNameRequest,
+        req: SetTenantResourceNameRequest,
     ) -> Result<SetTenantResourceNameResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.set_tenant_resource_name(req).await,
@@ -190,7 +189,7 @@ impl Backend {
     /// Create a new database.
     pub async fn create_database(
         &self,
-        req: &CreateDatabaseRequest,
+        req: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.create_database(req).await,
@@ -202,7 +201,7 @@ impl Backend {
     /// Returns `SysDbError::NotFound` if the database does not exist.
     pub async fn get_database(
         &self,
-        req: &GetDatabaseRequest,
+        req: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_database(req).await,
@@ -225,6 +224,20 @@ impl Backend {
     pub async fn delete_database(&self, name: &str, tenant: &str) -> Result<(), SysDbError> {
         match self {
             Backend::Spanner(s) => s.delete_database(name, tenant).await,
+        }
+    }
+
+    // ============================================================
+    // Collection Operations
+    // ============================================================
+
+    /// Create a new collection.
+    pub async fn create_collection(
+        &self,
+        req: CreateCollectionRequest,
+    ) -> Result<CreateCollectionResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.create_collection(req).await,
         }
     }
 

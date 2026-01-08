@@ -3,6 +3,8 @@
 //! This module provides a backend-agnostic error type that all backends return.
 //! The server layer only sees `SysDbError`, not backend-specific errors.
 
+use std::num::TryFromIntError;
+
 use chroma_error::{ChromaError, ErrorCodes};
 use google_cloud_gax::grpc::Status as GrpcStatus;
 use google_cloud_gax::retry::TryAs;
@@ -10,6 +12,8 @@ use google_cloud_spanner::client::Error as SpannerClientError;
 use google_cloud_spanner::session::SessionError;
 use thiserror::Error;
 use tonic::Status;
+
+use crate::{CollectionToProtoError, MetadataValueConversionError, SegmentConversionError};
 
 /// Unified error type for all SysDb operations.
 ///
@@ -33,10 +37,6 @@ pub enum SysDbError {
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
 
-    /// Operation not supported on this backend
-    #[error("Operation not supported on this backend: {0}")]
-    NotSupported(&'static str),
-
     /// Internal/unexpected error
     #[error("Internal error: {0}")]
     Internal(String),
@@ -48,6 +48,34 @@ pub enum SysDbError {
     /// Failed to read column
     #[error("Failed to read column: {0}")]
     FailedToReadColumn(#[source] google_cloud_spanner::row::Error),
+
+    /// Schema missing
+    #[error("Schema missing: {0}")]
+    SchemaMissing(String),
+
+    /// Schema must be valid JSON
+    #[error("Schema must be valid JSON: {0}")]
+    InvalidSchemaJson(#[from] serde_json::Error),
+
+    /// Invalid segment
+    #[error("Invalid segment: {0}")]
+    InvalidSegment(#[from] SegmentConversionError),
+
+    /// Segments must be exactly 3
+    #[error("Segments must be exactly 3")]
+    InvalidSegmentsCount,
+
+    /// Invalid metadata
+    #[error("Invalid metadata: {0}")]
+    InvalidMetadata(#[from] MetadataValueConversionError),
+
+    /// Dimension must be non-negative
+    #[error("Failed to convert i32 dim to u32: {0}")]
+    InvalidDimension(#[from] TryFromIntError),
+
+    /// Failed to convert collection to proto
+    #[error("Failed to convert collection to proto: {0}")]
+    CollectionToProtoError(#[from] CollectionToProtoError),
 }
 
 impl ChromaError for SysDbError {
@@ -57,26 +85,23 @@ impl ChromaError for SysDbError {
             SysDbError::NotFound(_) => ErrorCodes::NotFound,
             SysDbError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             SysDbError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
-            SysDbError::NotSupported(_) => ErrorCodes::Internal,
             SysDbError::Internal(_) => ErrorCodes::Internal,
             SysDbError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
             SysDbError::FailedToReadColumn(_) => ErrorCodes::Internal,
+            SysDbError::SchemaMissing(_) => ErrorCodes::Internal,
+            SysDbError::InvalidSchemaJson(_) => ErrorCodes::Internal,
+            SysDbError::InvalidSegment(e) => e.code(),
+            SysDbError::InvalidSegmentsCount => ErrorCodes::Internal,
+            SysDbError::InvalidMetadata(e) => e.code(),
+            SysDbError::InvalidDimension(_) => ErrorCodes::Internal,
+            SysDbError::CollectionToProtoError(e) => e.code(),
         }
     }
 }
 
 impl From<SysDbError> for Status {
     fn from(e: SysDbError) -> Status {
-        match e {
-            SysDbError::NotFound(msg) => Status::not_found(msg),
-            SysDbError::AlreadyExists(msg) => Status::already_exists(msg),
-            SysDbError::InvalidArgument(msg) => Status::invalid_argument(msg),
-            SysDbError::NotSupported(msg) => Status::unimplemented(msg),
-            SysDbError::Spanner(err) => Status::internal(err.to_string()),
-            SysDbError::Internal(msg) => Status::internal(msg),
-            SysDbError::InvalidUuid(err) => Status::invalid_argument(err.to_string()),
-            SysDbError::FailedToReadColumn(msg) => Status::internal(msg.to_string()),
-        }
+        Status::new(e.code().into(), e.to_string())
     }
 }
 
