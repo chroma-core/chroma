@@ -6,6 +6,7 @@ import {
 import {
   BaseRecordSet,
   CollectionMetadata,
+  EmbeddingFunctionMetadata,
   GetResult,
   Metadata,
   PreparedRecordSet,
@@ -66,6 +67,11 @@ export interface Collection {
   configuration: CollectionConfiguration;
   /** Optional embedding function. Must match the one used to create the collection. */
   embeddingFunction?: EmbeddingFunction;
+  /**
+   * Metadata about the embedding function configuration.
+   * Returns undefined if no embedding function is configured.
+   */
+  embeddingFunctionMetadata?: EmbeddingFunctionMetadata;
   /** Collection schema describing index configuration */
   schema?: Schema;
   /** Gets the total number of records in the collection */
@@ -316,6 +322,57 @@ export class CollectionImpl implements Collection {
 
   protected set schema(schema: Schema | undefined) {
     this._schema = schema;
+  }
+
+  public get embeddingFunctionMetadata(): EmbeddingFunctionMetadata | undefined {
+    // Access via snake_case as that's how the field is actually named at runtime
+    const efConfig = (this._configuration as any).embedding_function ?? this._configuration.embeddingFunction;
+
+    // No embedding function configured
+    if (!efConfig) {
+      return undefined;
+    }
+
+    // Helper function to safely extract field from config checking multiple variants
+    const extractField = (config: unknown, ...fieldNames: string[]): any => {
+      if (!config || typeof config !== 'object') {
+        return undefined;
+      }
+      const configObj = config as Record<string, any>;
+      for (const field of fieldNames) {
+        if (configObj[field] !== undefined) {
+          return configObj[field];
+        }
+      }
+      return undefined;
+    };
+
+    // Handle legacy type
+    if (efConfig.type === 'legacy') {
+      return { type: 'legacy' };
+    }
+
+    // Handle unknown type
+    if (efConfig.type === 'unknown') {
+      return { type: 'unknown' };
+    }
+
+    // Handle known type - extract all fields
+    if (efConfig.type === 'known') {
+      const config = efConfig.config;
+
+      return {
+        type: efConfig.name,
+        model: extractField(config, 'model', 'model_name', 'modelName'),
+        revision: extractField(config, 'revision', 'model_revision'),
+        quantized: extractField(config, 'quantized', 'quantize'),
+        taskType: extractField(config, 'taskType', 'task_type', 'task'),
+        url: extractField(config, 'url', 'api_url', 'base_url', 'endpoint'),
+        organizationId: extractField(config, 'organizationId', 'organization_id', 'organization', 'org_id'),
+      };
+    }
+
+    return undefined;
   }
 
   protected async path(): Promise<{

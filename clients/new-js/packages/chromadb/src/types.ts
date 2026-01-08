@@ -20,6 +20,33 @@ export type CollectionMetadata = Record<
 >;
 
 /**
+ * Metadata about the embedding function used by a collection.
+ * Provides configuration details for various embedding providers.
+ */
+export interface EmbeddingFunctionMetadata {
+  /** Type/name of the embedding function (e.g., "openai", "default", "cohere") */
+  type: string;
+
+  /** Model identifier (e.g., "text-embedding-3-large", "all-MiniLM-L6-v2") */
+  model?: string;
+
+  /** Model revision for transformers */
+  revision?: string;
+
+  /** Whether the model is quantized (for transformers) */
+  quantized?: boolean;
+
+  /** Task type for Google embeddings */
+  taskType?: string;
+
+  /** Server URL for HuggingFace/Ollama endpoints */
+  url?: string;
+
+  /** Organization ID for OpenAI */
+  organizationId?: string;
+}
+
+/**
  * Metadata that can be associated with individual records.
  * Values must be boolean, number, or string types.
  */
