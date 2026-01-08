@@ -120,6 +120,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if run_logdb {
         if let Some(logdb_spanner) = &config.logdb_spanner {
             run_migrations(logdb_spanner, Some("spanner_logdb"), mode).await?;
+        } else if slug.is_some() {
+            return Err(
+                "Requested spanner_logdb migrations but logdb_spanner config is missing".into(),
+            );
         }
     }
 
