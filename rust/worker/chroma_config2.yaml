@@ -286,7 +286,7 @@ sysdb_service:
       rest_port: 9020
       project: "local-project"
       instance: "test-instance"
-      database: "local-database"
+      database: "local-sysdb-database"
 rust-sysdb-migration:
   service_name: "rust-sysdb-migration"
   otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
