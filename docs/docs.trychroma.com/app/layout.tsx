@@ -52,8 +52,25 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const websiteSchema = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": "https://docs.trychroma.com/#website",
+    "url": "https://docs.trychroma.com/",
+    "name": "Chroma Docs",
+    "alternateName": "Chroma Documentation",
+  };
+
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(websiteSchema),
+          }}
+        />
+      </head>
       <body data-invert-bg="true" className={`${inter.className} antialiased bg-white dark:bg-black bg-[url(/composite_noise.jpg)] bg-repeat relative text-[#27201C] dark:text-white dark:backdrop-invert`}>
         <ThemeProvider
           attribute="class"
@@ -68,10 +85,10 @@ export default function RootLayout({
               {/* prevent the header from shrinking */}
               <div className="shrink-0">
                 <Header />
-                <HeaderNav/>
+                <HeaderNav />
               </div>
-              {/* have this container take up the remaining space and hide any overflow 
-                  the side bar and main page content will be rendered here and will 
+              {/* have this container take up the remaining space and hide any overflow
+                  the side bar and main page content will be rendered here and will
                   fill the available space and do their own scrolling */}
               <div className="flex-1 overflow-y-hidden h-full">
                 {children}
