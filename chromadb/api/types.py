@@ -66,6 +66,7 @@ __all__ = [
     "UpdateMetadata",
     "SearchResult",
     "SearchResultRow",
+    "IndexingStatus",
     "SparseVector",
     # Index Configuration Types
     "FtsIndexConfig",
@@ -617,6 +618,14 @@ class QueryResult(TypedDict):
     metadatas: Optional[List[List[Metadata]]]
     distances: Optional[List[List[float]]]
     included: Include
+
+
+@dataclass
+class IndexingStatus:
+    num_indexed_ops: int
+    num_unindexed_ops: int
+    total_ops: int
+    op_indexing_progress: float
 
 
 class SearchResultRow(TypedDict, total=False):
