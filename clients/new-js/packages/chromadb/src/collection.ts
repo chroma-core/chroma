@@ -369,6 +369,7 @@ export class CollectionImpl implements Collection {
         taskType: extractField(config, 'taskType', 'task_type', 'task'),
         url: extractField(config, 'url', 'api_url', 'base_url', 'endpoint'),
         organizationId: extractField(config, 'organizationId', 'organization_id', 'organization', 'org_id'),
+        dimensions: extractField(config, 'dimensions', 'dim'),
       };
     }
 
