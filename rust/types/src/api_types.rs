@@ -1022,6 +1022,41 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct IndexStatusResponse {
+    pub op_indexing_progress: f32,
+    pub num_unindexed_ops: u64,
+    pub num_indexed_ops: u64,
+    pub total_ops: u64,
+}
+
+#[derive(Error, Debug)]
+pub enum IndexStatusError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl From<GetCollectionError> for IndexStatusError {
+    fn from(err: GetCollectionError) -> Self {
+        match err {
+            GetCollectionError::NotFound(msg) => IndexStatusError::NotFound(msg),
+            other => IndexStatusError::Internal(Box::new(other)),
+        }
+    }
+}
+
+impl ChromaError for IndexStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            IndexStatusError::NotFound(_) => ErrorCodes::NotFound,
+            IndexStatusError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Clone, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]

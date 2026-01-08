@@ -34,15 +34,15 @@ use chroma_types::{
     GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
     GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
     GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema, SchemaError,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    HeartbeatError, Include, IndexStatusError, IndexStatusResponse, KnnIndex,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
+    ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
+    ResetError, ResetResponse, Schema, SchemaError, SearchRequest, SearchResponse, Segment,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -1416,6 +1416,46 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn indexing_status(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<IndexStatusResponse, IndexStatusError> {
+        let collection = self.get_cached_collection(collection_id).await?;
+
+        let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
+            IndexStatusError::Internal(Box::new(chroma_error::TonicError(tonic::Status::internal(
+                "Invalid log_position value: must be >= 0 and convertible to u64",
+            ))))
+        })?;
+
+        // It is important that we do scout_logs AFTER we get the collection +
+        // compaction offset in order to give a strictly conservative estimate
+        // of the unindexed ops.
+
+        // Saturating sub 1 to account for scout_logs returning the next log to be inserted
+        // The same logic is used in get_enum_offset_on_server in log-service/src/lib.rs
+        let enumeration_offset = self
+            .log_client
+            .scout_logs(&collection.tenant, collection_id, 0)
+            .await?
+            .saturating_sub(1);
+
+        let total_ops = enumeration_offset;
+        let num_unindexed_ops = total_ops.saturating_sub(num_indexed_ops);
+        let op_indexing_progress = if total_ops == 0 {
+            1.0
+        } else {
+            num_indexed_ops as f32 / total_ops as f32
+        };
+
+        Ok(IndexStatusResponse {
+            op_indexing_progress,
+            num_unindexed_ops,
+            num_indexed_ops,
+            total_ops,
+        })
+    }
+
     async fn retryable_get(
         &mut self,
         GetRequest {
@@ -2344,5 +2384,49 @@ mod tests {
         assert!(GetCollectionByCrnRequest::try_new(":db1:coll1".to_string()).is_err());
         assert!(GetCollectionByCrnRequest::try_new(":db1:coll1:".to_string()).is_err());
         assert!(GetCollectionByCrnRequest::try_new(":db1::".to_string()).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_indexing_status_basic() {
+        // Test the indexing status endpoint for a newly created collection
+        let client = reqwest::Client::new();
+        let create_response = client
+            .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .json(
+                &CreateCollectionPayload {
+                    name: Uuid::new_v4().to_string(),
+                    configuration: None,
+                    schema: None,
+                    metadata: None,
+                    get_or_create: false
+                },
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), 200);
+        let collection: Collection = create_response.json().await.unwrap();
+
+        let status_url = format!(
+            "http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections/{}/indexing_status",
+            collection.collection_id
+        );
+        let status_response = client.get(&status_url).send().await.unwrap();
+
+        let status_code = status_response.status();
+        if status_code != 200 {
+            let body = status_response.text().await.unwrap();
+            panic!(
+                "Expected 200, got {}. URL: {}. Response: {}",
+                status_code, status_url, body
+            );
+        }
+        let status: IndexStatusResponse = status_response.json().await.unwrap();
+
+        assert_eq!(status.num_indexed_ops, 0);
+        assert_eq!(status.num_unindexed_ops, 0);
+        assert_eq!(status.total_ops, 0);
+        assert_eq!(status.op_indexing_progress, 1.0);
     }
 }
