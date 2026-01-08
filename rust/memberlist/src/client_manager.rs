@@ -18,8 +18,8 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tonic::transport::{Channel, Endpoint};
-use tower::{discover::Change, ServiceBuilder};
+use tonic::transport::{channel::Change, Channel, Endpoint};
+use tower::ServiceBuilder;
 
 #[derive(Debug, Clone)]
 pub struct ClientAssigner<T> {

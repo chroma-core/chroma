@@ -18,6 +18,7 @@ prost-types = { workspace = true }
 roaring = { workspace = true }
 thiserror = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = "0.14"
 uuid = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -37,7 +38,7 @@ chroma-error = { workspace = true, features = ["tonic", "validator"] }
 itertools.workspace = true
 
 [build-dependencies]
-tonic-build = "0.10"
+tonic-prost-build = "0.14"
 criterion = { workspace = true }
 
 [features]
