@@ -2,7 +2,7 @@
 against-tilt = { max-threads = 1 }
 
 [profile.default]
-default-filter = "not test(/test_k8s_integration_/) and not test(/test_long_running_/) and not test(/test_live_cloud_/) and not test(/test_gcs_/)"
+default-filter = "not test(/test_k8s_integration_/) and not test(/test_k8s_mcmr_integration_/) and not test(/test_long_running_/) and not test(/test_live_cloud_/) and not test(/test_gcs_/)"
 
 [profile.live_cloud]
 default-filter = "test(/test_live_cloud_/)"
