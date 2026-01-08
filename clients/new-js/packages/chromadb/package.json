@@ -47,7 +47,11 @@
     "semver": "^7.7.1"
   },
   "devDependencies": {
+    "@chroma-core/cohere": "workspace:^",
     "@chroma-core/default-embed": "workspace:^",
+    "@chroma-core/google-gemini": "workspace:^",
+    "@chroma-core/ollama": "workspace:^",
+    "@chroma-core/openai": "workspace:^",
     "@hey-api/client-fetch": "^0.10.0",
     "@hey-api/openapi-ts": "^0.67.3",
     "@jest/globals": "^29.7.0",
