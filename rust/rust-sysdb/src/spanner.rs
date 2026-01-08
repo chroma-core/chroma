@@ -1568,4 +1568,371 @@ mod tests {
             Some(&chroma_types::MetadataValue::Bool(true))
         );
     }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_duplicate_id_fails() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name1 = format!(
+            "test_collection_id1_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create collection first time
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name1.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id,
+            database_name: db_name.clone(),
+        };
+
+        let result1 = backend.create_collection(create_req).await;
+        assert!(
+            result1.is_ok(),
+            "Failed to create collection first time: {:?}",
+            result1.err()
+        );
+
+        // Create collection second time with SAME ID but different name (should fail)
+        let collection_name2 = format!(
+            "test_collection_id2_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let create_req2 = CreateCollectionRequest {
+            id: collection_id, // Same ID
+            name: collection_name2,
+            dimension: Some(256),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id,
+            database_name: db_name.clone(),
+        };
+
+        let result2 = backend.create_collection(create_req2).await;
+        assert!(
+            result2.is_err(),
+            "Creating collection with duplicate ID should fail"
+        );
+        match result2.unwrap_err() {
+            SysDbError::AlreadyExists(_) => {}
+            e => panic!("Expected AlreadyExists error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_duplicate_id_get_or_create() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name1 = format!(
+            "test_collection_goc_id1_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create collection first time with get_or_create=true
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name1.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: true,
+            tenant_id,
+            database_name: db_name.clone(),
+        };
+
+        let result1 = backend.create_collection(create_req).await;
+        assert!(
+            result1.is_ok(),
+            "Failed to create collection first time: {:?}",
+            result1.err()
+        );
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created first time");
+
+        // Create collection second time with SAME ID but different name (should return existing)
+        let collection_name2 = format!(
+            "test_collection_goc_id2_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let create_req2 = CreateCollectionRequest {
+            id: collection_id, // Same ID
+            name: collection_name2,
+            dimension: Some(512), // Different dimension
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: true,
+            tenant_id,
+            database_name: db_name.clone(),
+        };
+
+        let result2 = backend.create_collection(create_req2).await;
+        assert!(
+            result2.is_ok(),
+            "get_or_create with same ID should succeed: {:?}",
+            result2.err()
+        );
+        let response2 = result2.unwrap();
+        assert!(
+            !response2.created,
+            "Collection should NOT be created second time"
+        );
+        // Should return the original collection
+        assert_eq!(response2.collection.collection_id, collection_id);
+        assert_eq!(response2.collection.name, collection_name1); // Original name
+        assert_eq!(response2.collection.dimension, Some(128)); // Original dimension
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_same_name_different_databases() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Create tenant
+        let tenant_id = Uuid::new_v4();
+        let create_tenant_req = CreateTenantRequest { id: tenant_id };
+        backend
+            .create_tenant(create_tenant_req)
+            .await
+            .expect("Failed to create tenant");
+
+        // Create two databases
+        let db_name1 = format!(
+            "test_db1_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let db_name2 = format!(
+            "test_db2_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        backend
+            .create_database(CreateDatabaseRequest {
+                id: Uuid::new_v4(),
+                name: db_name1.clone(),
+                tenant_id,
+            })
+            .await
+            .expect("Failed to create database 1");
+
+        backend
+            .create_database(CreateDatabaseRequest {
+                id: Uuid::new_v4(),
+                name: db_name2.clone(),
+                tenant_id,
+            })
+            .await
+            .expect("Failed to create database 2");
+
+        // Same collection name for both
+        let collection_name = format!(
+            "shared_collection_name_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create collection in database 1
+        let collection_id1 = CollectionUuid(Uuid::new_v4());
+        let create_req1 = CreateCollectionRequest {
+            id: collection_id1,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id1),
+            metadata: None,
+            get_or_create: false,
+            tenant_id,
+            database_name: db_name1.clone(),
+        };
+
+        let result1 = backend.create_collection(create_req1).await;
+        assert!(
+            result1.is_ok(),
+            "Failed to create collection in db1: {:?}",
+            result1.err()
+        );
+
+        // Create collection with SAME NAME in database 2 (should succeed)
+        let collection_id2 = CollectionUuid(Uuid::new_v4());
+        let create_req2 = CreateCollectionRequest {
+            id: collection_id2,
+            name: collection_name.clone(), // Same name
+            dimension: Some(256),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id2),
+            metadata: None,
+            get_or_create: false,
+            tenant_id,
+            database_name: db_name2.clone(), // Different database
+        };
+
+        let result2 = backend.create_collection(create_req2).await;
+        assert!(
+            result2.is_ok(),
+            "Creating collection with same name in different database should succeed: {:?}",
+            result2.err()
+        );
+
+        let response2 = result2.unwrap();
+        assert!(response2.created);
+        assert_eq!(response2.collection.collection_id, collection_id2);
+        assert_eq!(response2.collection.database, db_name2);
+    }
+
+    // Note: This test requires a get_collection API to be implemented.
+    // For now, we use fetch_collection_in_tx indirectly through get_or_create.
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_readback_verification() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_readback_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Test all 4 metadata types for full roundtrip verification
+        let metadata: chroma_types::Metadata = [
+            (
+                "str_key".to_string(),
+                chroma_types::MetadataValue::Str("test_string".to_string()),
+            ),
+            (
+                "int_key".to_string(),
+                chroma_types::MetadataValue::Int(12345),
+            ),
+            (
+                "float_key".to_string(),
+                chroma_types::MetadataValue::Float(1.23456),
+            ),
+            (
+                "bool_key".to_string(),
+                chroma_types::MetadataValue::Bool(true),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        // Create collection
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(384),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: Some(metadata.clone()),
+            get_or_create: false,
+            tenant_id,
+            database_name: db_name.clone(),
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to create collection: {:?}",
+            result.err()
+        );
+
+        // Now use get_or_create=true with same name to read back from DB
+        // This triggers fetch_collection_in_tx which reads from the database
+        let collection_id2 = CollectionUuid(Uuid::new_v4());
+        let readback_req = CreateCollectionRequest {
+            id: collection_id2,
+            name: collection_name.clone(), // Same name triggers get
+            dimension: Some(999),          // Different, but should get original
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id2),
+            metadata: None,
+            get_or_create: true,
+            tenant_id,
+            database_name: db_name.clone(),
+        };
+
+        let readback_result = backend.create_collection(readback_req).await;
+        assert!(
+            readback_result.is_ok(),
+            "Failed to read back collection: {:?}",
+            readback_result.err()
+        );
+
+        let response = readback_result.unwrap();
+        assert!(
+            !response.created,
+            "Should return existing collection, not create"
+        );
+
+        // Verify the data was read correctly from the database
+        let collection = response.collection;
+        assert_eq!(collection.collection_id, collection_id);
+        assert_eq!(collection.name, collection_name);
+        assert_eq!(collection.dimension, Some(384));
+        assert_eq!(collection.tenant, tenant_id.to_string());
+        assert_eq!(collection.database, db_name);
+
+        // Verify all 4 metadata types were persisted and read back correctly
+        let returned_metadata = collection.metadata.expect("Should have metadata from DB");
+        assert_eq!(returned_metadata.len(), 4, "Should have 4 metadata entries");
+        assert_eq!(
+            returned_metadata.get("str_key"),
+            Some(&chroma_types::MetadataValue::Str("test_string".to_string()))
+        );
+        assert_eq!(
+            returned_metadata.get("int_key"),
+            Some(&chroma_types::MetadataValue::Int(12345))
+        );
+        assert_eq!(
+            returned_metadata.get("float_key"),
+            Some(&chroma_types::MetadataValue::Float(1.23456))
+        );
+        assert_eq!(
+            returned_metadata.get("bool_key"),
+            Some(&chroma_types::MetadataValue::Bool(true))
+        );
+    }
 }
