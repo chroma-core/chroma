@@ -106,9 +106,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None => config.migration_mode,
     };
 
-    run_migrations(&config.spanner, Some("spanner_sysdb"), mode).await?;
-    if let Some(logdb_spanner) = &config.logdb_spanner {
-        run_migrations(logdb_spanner, Some("spanner_logdb"), mode).await?;
+    let slug = args.slug.as_deref();
+    if let Some(s) = slug {
+        validate_slug(Some(s))?;
+    }
+
+    let run_sysdb = slug.is_none_or(|s| s == "spanner_sysdb");
+    let run_logdb = slug.is_none_or(|s| s == "spanner_logdb");
+
+    if run_sysdb {
+        run_migrations(&config.spanner, Some("spanner_sysdb"), mode).await?;
+    }
+    if run_logdb {
+        if let Some(logdb_spanner) = &config.logdb_spanner {
+            run_migrations(logdb_spanner, Some("spanner_logdb"), mode).await?;
+        }
     }
 
     Ok(())
