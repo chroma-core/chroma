@@ -6,8 +6,9 @@
 //! - Backend-specific optimizations without affecting the API
 //! - Cleaner internal APIs that aren't tied to protobuf conventions
 
-use chroma_types::{chroma_proto, Database, Tenant};
-use google_cloud_spanner::row::Row;
+use chroma_types::{
+    chroma_proto, Collection, CollectionUuid, Database, Metadata, Schema, Segment, Tenant,
+};
 use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
@@ -105,6 +106,76 @@ impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
     }
 }
 
+/// Internal request for creating a collection.
+#[derive(Debug, Clone)]
+pub struct CreateCollectionRequest {
+    pub id: CollectionUuid,
+    pub name: String,
+    pub dimension: Option<u32>,
+    pub index_schema: Schema,
+    pub segments: Vec<Segment>,
+    pub metadata: Option<Metadata>,
+    pub get_or_create: bool,
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateCollectionRequest) -> Result<Self, Self::Error> {
+        // Validate schema_str is provided and parse as strongly-typed Schema
+        let schema_str = req
+            .schema_str
+            .ok_or_else(|| SysDbError::SchemaMissing("schema_str is required".to_string()))?;
+
+        let index_schema: Schema = serde_json::from_str(&schema_str)?;
+
+        // Convert and validate segments
+        let segments: Result<Vec<Segment>, _> =
+            req.segments.into_iter().map(Segment::try_from).collect();
+
+        let segments = segments.map_err(SysDbError::InvalidSegment)?;
+
+        // Validate exactly 3 segments
+        if segments.len() != 3 {
+            return Err(SysDbError::InvalidSegmentsCount);
+        }
+
+        // Convert metadata if provided, filtering out legacy "hnsw:" keys
+        let metadata = req
+            .metadata
+            .map(|proto_metadata| -> Result<Metadata, SysDbError> {
+                let mut metadata =
+                    Metadata::try_from(proto_metadata).map_err(SysDbError::InvalidMetadata)?;
+
+                // Filter out legacy metadata keys starting with "hnsw:"
+                metadata.retain(|key, _| !key.starts_with("hnsw:"));
+
+                Ok(metadata)
+            })
+            .transpose()?;
+
+        // Convert dimension from i32 to u32 (validate non-negative)
+        let dimension = req
+            .dimension
+            .map(|d| u32::try_from(d).map_err(SysDbError::InvalidDimension))
+            .transpose()?;
+
+        Ok(Self {
+            id: CollectionUuid(validate_uuid(&req.id)?),
+            name: req.name,
+            dimension,
+            index_schema,
+            segments,
+            metadata,
+            get_or_create: req.get_or_create.unwrap_or(false),
+            tenant_id: req.tenant,
+            database_name: req.database,
+        })
+    }
+}
+
 // ============================================================================
 // Assignable Trait Implementations
 // ============================================================================
@@ -162,6 +233,16 @@ impl Assignable for GetDatabaseRequest {
     }
 }
 
+impl Assignable for CreateCollectionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by database_name prefix (for now, default to Spanner)
+        // TODO: Check self.database_name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
 // ============================================================================
 // Runnable Trait Implementations
 // ============================================================================
@@ -171,9 +252,9 @@ impl Runnable for CreateTenantRequest {
     type Response = CreateTenantResponse;
     type Input = Vec<Backend>;
 
-    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
         for backend in backends {
-            backend.create_tenant(self).await?;
+            backend.create_tenant(self.clone()).await?;
         }
         Ok(CreateTenantResponse {})
     }
@@ -184,7 +265,7 @@ impl Runnable for GetTenantRequest {
     type Response = GetTenantResponse;
     type Input = Backend;
 
-    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_tenant(self).await
     }
 }
@@ -194,9 +275,9 @@ impl Runnable for SetTenantResourceNameRequest {
     type Response = SetTenantResourceNameResponse;
     type Input = Vec<Backend>;
 
-    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
         for backend in backends {
-            backend.set_tenant_resource_name(self).await?;
+            backend.set_tenant_resource_name(self.clone()).await?;
         }
         Ok(SetTenantResourceNameResponse {})
     }
@@ -207,7 +288,7 @@ impl Runnable for CreateDatabaseRequest {
     type Response = CreateDatabaseResponse;
     type Input = Backend;
 
-    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.create_database(self).await
     }
 }
@@ -217,8 +298,18 @@ impl Runnable for GetDatabaseRequest {
     type Response = GetDatabaseResponse;
     type Input = Backend;
 
-    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_database(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CreateCollectionRequest {
+    type Response = CreateCollectionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.create_collection(self).await
     }
 }
 
@@ -455,5 +546,22 @@ impl TryAs<GrpcStatus> for SysDbError {
             // for domain errors like NotFound, AlreadyExists, etc.
             _ => None,
         }
+    }
+}
+/// Internal response for creating a collection.
+#[derive(Debug, Clone)]
+pub struct CreateCollectionResponse {
+    pub collection: Collection,
+    pub created: bool,
+}
+
+impl TryFrom<CreateCollectionResponse> for chroma_proto::CreateCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: CreateCollectionResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::CreateCollectionResponse {
+            collection: Some(r.collection.try_into()?),
+            created: r.created,
+        })
     }
 }

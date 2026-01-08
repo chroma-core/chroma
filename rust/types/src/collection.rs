@@ -1,13 +1,16 @@
 use std::str::FromStr;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::{Metadata, MetadataValueConversionError};
+use google_cloud_spanner::row::Row;
+
+use super::{Metadata, MetadataValue, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
-    SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
+    chroma_proto, sysdb_errors::SysDbError, test_segment, CollectionConfiguration,
+    InternalCollectionConfiguration, Schema, SchemaError, Segment, SegmentScope,
+    UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -339,6 +342,146 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             updated_at,
             database_id,
             compaction_failure_count: proto_collection.compaction_failure_count,
+        })
+    }
+}
+
+// ============================================================================
+// Row Conversion Implementation (Spanner DAO layer)
+// ============================================================================
+
+/// Convert a vector of Spanner rows (from a JOIN query) into a Collection.
+///
+/// The rows are expected to come from a query that JOINs:
+/// - collections table
+/// - collection_metadata table (LEFT JOIN, may have multiple rows per metadata key)
+/// - collection_compaction_cursors table (LEFT JOIN, single row for a specific region)
+///
+/// Column names expected:
+/// - collection_id, name, dimension, database_id, database_name, tenant_id, updated_at
+/// - metadata_key, metadata_str_value, metadata_int_value, metadata_float_value, metadata_bool_value
+/// - last_compacted_offset, version, total_records_post_compaction, size_bytes_post_compaction,
+///   last_compaction_time_secs, version_file_name, index_schema
+impl TryFrom<Vec<Row>> for Collection {
+    type Error = SysDbError;
+
+    fn try_from(rows: Vec<Row>) -> Result<Self, Self::Error> {
+        if rows.is_empty() {
+            return Err(SysDbError::NotFound("no rows returned".to_string()));
+        }
+
+        // Extract collection fields from the first row (same for all rows)
+        let first_row = &rows[0];
+
+        let collection_id_str: String = first_row
+            .column_by_name("collection_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let name: String = first_row
+            .column_by_name("name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let dimension: Option<i64> = first_row.column_by_name("dimension").ok();
+        let database_id_str: String = first_row
+            .column_by_name("database_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let database_name: String = first_row
+            .column_by_name("database_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let tenant_id: String = first_row
+            .column_by_name("tenant_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Spanner returns TIMESTAMP as i64 microseconds since Unix epoch
+        let updated_at_us: i64 = first_row
+            .column_by_name("updated_at")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Extract compaction cursor fields (region-specific, may be NULL if no cursor exists)
+        let last_compacted_offset: Option<i64> = first_row
+            .column_by_name("last_compacted_offset")
+            .ok()
+            .flatten();
+        let version: Option<i64> = first_row.column_by_name("version").ok().flatten();
+        let total_records_post_compaction: Option<i64> = first_row
+            .column_by_name("total_records_post_compaction")
+            .ok()
+            .flatten();
+        let size_bytes_post_compaction: Option<i64> = first_row
+            .column_by_name("size_bytes_post_compaction")
+            .ok()
+            .flatten();
+        let last_compaction_time_us: Option<i64> = first_row
+            .column_by_name("last_compaction_time_secs")
+            .ok()
+            .flatten();
+        let version_file_name: Option<String> =
+            first_row.column_by_name("version_file_name").ok().flatten();
+        let schema_json: Option<String> = first_row.column_by_name("index_schema").ok().flatten();
+
+        // Aggregate metadata from all rows
+        let mut collection_metadata = Metadata::new();
+        for row in &rows {
+            // metadata_key may be NULL if there's no metadata (LEFT JOIN)
+            if let Ok(Some(key)) = row.column_by_name::<Option<String>>("metadata_key") {
+                let str_val: Option<String> =
+                    row.column_by_name("metadata_str_value").ok().flatten();
+                let int_val: Option<i64> = row.column_by_name("metadata_int_value").ok().flatten();
+                let float_val: Option<f64> =
+                    row.column_by_name("metadata_float_value").ok().flatten();
+                let bool_val: Option<bool> =
+                    row.column_by_name("metadata_bool_value").ok().flatten();
+
+                if let Some(s) = str_val {
+                    collection_metadata.insert(key, MetadataValue::Str(s));
+                } else if let Some(i) = int_val {
+                    collection_metadata.insert(key, MetadataValue::Int(i));
+                } else if let Some(f) = float_val {
+                    collection_metadata.insert(key, MetadataValue::Float(f));
+                } else if let Some(b) = bool_val {
+                    collection_metadata.insert(key, MetadataValue::Bool(b));
+                }
+            }
+        }
+
+        // Parse schema JSON
+        let parsed_schema = schema_json.and_then(|s| serde_json::from_str::<Schema>(&s).ok());
+
+        // Convert microseconds to SystemTime
+        let updated_at_system_time = UNIX_EPOCH + Duration::from_micros(updated_at_us as u64);
+
+        // Convert last_compaction_time from microseconds to seconds
+        let last_compaction_time_secs_u64 = last_compaction_time_us
+            .map(|us| (us / 1_000_000) as u64)
+            .unwrap_or(0);
+
+        Ok(Collection {
+            collection_id: CollectionUuid(
+                Uuid::parse_str(&collection_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
+            name,
+            config: InternalCollectionConfiguration::default_hnsw(),
+            schema: parsed_schema,
+            metadata: if collection_metadata.is_empty() {
+                None
+            } else {
+                Some(collection_metadata)
+            },
+            dimension: dimension.map(|d| d as i32),
+            tenant: tenant_id,
+            database: database_name,
+            log_position: last_compacted_offset.unwrap_or(0),
+            version: version.map(|v| v as i32).unwrap_or(0),
+            total_records_post_compaction: total_records_post_compaction
+                .map(|v| v as u64)
+                .unwrap_or(0),
+            size_bytes_post_compaction: size_bytes_post_compaction.map(|v| v as u64).unwrap_or(0),
+            last_compaction_time_secs: last_compaction_time_secs_u64,
+            version_file_path: version_file_name,
+            root_collection_id: None,
+            lineage_file_path: None,
+            updated_at: updated_at_system_time,
+            database_id: DatabaseUuid(
+                Uuid::parse_str(&database_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
         })
     }
 }

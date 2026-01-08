@@ -7,17 +7,21 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::client::{Client, ClientConfig};
+use google_cloud_spanner::mutation::insert;
 use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::config::SpannerConfig;
 use crate::types::SysDbError;
 use crate::types::{
-    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest, GetTenantResponse,
-    SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
+    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetDatabaseRequest,
+    GetDatabaseResponse, GetTenantRequest, GetTenantResponse, SetTenantResourceNameRequest,
+    SetTenantResourceNameResponse, SpannerRow,
 };
-use chroma_types::{Database, Tenant};
+use chroma_types::sysdb_errors::SysDbError;
+use chroma_types::{Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Tenant};
 
 #[derive(Error, Debug)]
 pub enum SpannerError {
@@ -68,15 +72,12 @@ impl SpannerBackend {
     /// If the tenant already exists, does nothing (insert on conflict do nothing).
     pub async fn create_tenant(
         &self,
-        req: &CreateTenantRequest,
+        req: CreateTenantRequest,
     ) -> Result<CreateTenantResponse, SysDbError> {
-        // In the schema, tenant id IS the tenant name
-        let tenant_id = req.id.clone();
-
         // Use a read-write transaction to atomically check and insert
         self.client
             .read_write_transaction::<(), SysDbError, _>(|tx| {
-                let tenant_id = tenant_id.clone();
+                let tenant_id = req.id.clone();
                 Box::pin(async move {
                     // Check if tenant already exists
                     let mut check_stmt = Statement::new(
@@ -112,16 +113,11 @@ impl SpannerBackend {
     /// Get a tenant by name.
     ///
     /// Returns `SysDbError::NotFound` if the tenant does not exist or is marked as deleted.
-    pub async fn get_tenant(
-        &self,
-        req: &GetTenantRequest,
-    ) -> Result<GetTenantResponse, SysDbError> {
-        let tenant_id = &req.id;
-
+    pub async fn get_tenant(&self, req: GetTenantRequest) -> Result<GetTenantResponse, SysDbError> {
         let mut stmt = Statement::new(
             "SELECT id, resource_name, UNIX_SECONDS(last_compaction_time) as last_compaction_time FROM tenants WHERE id = @id AND is_deleted = FALSE",
         );
-        stmt.add_param("id", tenant_id);
+        stmt.add_param("id", &req.id);
 
         let mut tx = self.client.single().await?;
 
@@ -135,7 +131,7 @@ impl SpannerBackend {
         } else {
             Err(SysDbError::NotFound(format!(
                 "tenant '{}' not found",
-                tenant_id
+                req.id
             )))
         }
     }
@@ -145,7 +141,7 @@ impl SpannerBackend {
     /// Only sets if resource_name is currently NULL.
     pub async fn set_tenant_resource_name(
         &self,
-        _req: &SetTenantResourceNameRequest,
+        _req: SetTenantResourceNameRequest,
     ) -> Result<SetTenantResourceNameResponse, SysDbError> {
         todo!("implement set_tenant_resource_name")
     }
@@ -161,7 +157,7 @@ impl SpannerBackend {
     /// All checks and the insert are done atomically in a single transaction.
     pub async fn create_database(
         &self,
-        req: &CreateDatabaseRequest,
+        req: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, SysDbError> {
         // Validate database name is not empty
         if req.name.is_empty() {
@@ -171,16 +167,12 @@ impl SpannerBackend {
         }
 
         // Use a read-write transaction to atomically check tenant, check database, and insert
-        let tenant_id = req.tenant_id.clone();
-        let db_id = req.id.to_string();
-        let db_name = req.name.clone();
-
         let result = self
             .client
             .read_write_transaction::<(), SysDbError, _>(|tx| {
-                let tenant_id = tenant_id.clone();
-                let db_id = db_id.clone();
-                let db_name = db_name.clone();
+                let tenant_id = req.tenant_id.clone();
+                let db_id = req.id.to_string();
+                let db_name = req.name.to_string();
                 Box::pin(async move {
                     // Check if tenant exists within the same transaction
                     let mut tenant_check_stmt = Statement::new(
@@ -253,7 +245,7 @@ impl SpannerBackend {
     /// Returns `SysDbError::NotFound` if the database does not exist or is marked as deleted.
     pub async fn get_database(
         &self,
-        req: &GetDatabaseRequest,
+        req: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, SysDbError> {
         let mut stmt = Statement::new(
             "SELECT id, name, tenant_id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
@@ -289,6 +281,380 @@ impl SpannerBackend {
 
     pub async fn delete_database(&self, _name: &str, _tenant: &str) -> Result<(), SysDbError> {
         todo!("implement delete_database")
+    }
+
+    // ============================================================
+    // Collection Operations
+    // ============================================================
+
+    pub async fn create_collection(
+        &self,
+        req: CreateCollectionRequest,
+    ) -> Result<CreateCollectionResponse, SysDbError> {
+        // Validate collection name is not empty
+        if req.name.is_empty() {
+            return Err(SysDbError::InvalidArgument(
+                "collection name cannot be empty".to_string(),
+            ));
+        }
+
+        // Destructure req to take ownership of fields (avoids cloning)
+        let CreateCollectionRequest {
+            id,
+            name: collection_name,
+            dimension,
+            index_schema,
+            segments,
+            metadata,
+            get_or_create,
+            tenant_id,
+            database_name,
+        } = req;
+
+        // Regions for compaction cursors
+        // TODO(Sanket): Extract the topo name from db name and use the config
+        // to get the regions.
+        const REGIONS: &[&str] = &["us", "asia", "europe"];
+
+        // TRADEOFF: We use mutations with buffer_write instead of DML for inserts.
+        //
+        // Mutations (buffer_write):
+        // - Pros: All writes batched and applied atomically at commit, more efficient
+        // - Cons: Cannot read our own writes within the transaction (data not visible until commit)
+        //
+        // DML (tx.update with INSERT statements):
+        // - Pros: Can read our own writes, can use PENDING_COMMIT_TIMESTAMP()
+        // - Cons: Each statement is a separate round-trip, slower for many inserts
+        //
+        // For create_collection, we use mutations because:
+        // 1. We have 13+ inserts (1 collection + 3 cursors + 9 segments + N metadata)
+        // 2. We can build the response from the request data since we know exactly what we inserted
+        // 3. The only difference is timestamps, which we approximate with Utc::now()
+        // 4. Collection creation is infrequent, but we still prefer the simpler/faster approach
+        //
+        // Note: For get_or_create when collection exists, we DO read from DB (via fetch_collection_in_tx)
+        // since we need the actual stored data, not what we're trying to insert.
+
+        // Transaction returns (Collection, bool) where bool = was_created
+        let result = self
+            .client
+            .read_write_transaction::<(Collection, bool), SysDbError, _>(|tx| {
+                // Clone for the closure (needed because closure may be called multiple times for retries)
+                let collection_id_uuid = id;
+                let collection_id = id.0.to_string();
+                let tenant_id_str = tenant_id.to_string();
+                let collection_name = collection_name.clone();
+                let database_name = database_name.clone();
+                let dimension_i64 = dimension.map(|d| d as i64);
+                let segments = segments.clone();
+                let metadata = metadata.clone();
+                let index_schema = index_schema.clone();
+                Box::pin(async move {
+                    let index_schema_json = serde_json::to_string(&index_schema)?;
+                    // Check if database exists and get database_id
+                    let mut db_stmt = Statement::new(
+                        "SELECT id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
+                    );
+                    db_stmt.add_param("name", &database_name);
+                    db_stmt.add_param("tenant_id", &tenant_id_str);
+
+                    let mut db_iter = tx.query(db_stmt).await?;
+                    let db_row = db_iter.next().await?;
+                    let database_id = match db_row {
+                        Some(row) => {
+                            let db_id_str: String = row
+                                .column_by_name("id")
+                                .map_err(SysDbError::FailedToReadColumn)?;
+                            db_id_str
+                        }
+                        None => {
+                            return Err(SysDbError::NotFound(format!(
+                                "database '{}' not found for tenant '{}' for collection '{}'",
+                                database_name, tenant_id_str, collection_name
+                            )));
+                        }
+                    };
+
+                    // Check if collection with this ID already exists
+                    let mut id_check_stmt = Statement::new(
+                        "SELECT collection_id FROM collections WHERE collection_id = @collection_id AND is_deleted = FALSE",
+                    );
+                    id_check_stmt.add_param("collection_id", &collection_id);
+
+                    let mut id_iter = tx.query(id_check_stmt).await?;
+                    if id_iter.next().await?.is_some() {
+                        if get_or_create {
+                            // Return the existing collection
+                            // TODO(Sanket): Use the local region here.
+                            let fetched_collection =
+                                Self::fetch_collection_in_tx(&mut *tx, &collection_id, REGIONS[0]).await?;
+                            return Ok((fetched_collection, false)); // false = not created
+                        } else {
+                            return Err(SysDbError::AlreadyExists(format!(
+                                "collection with id '{}' already exists",
+                                collection_id
+                            )));
+                        }
+                    }
+
+                    // Check if collection with same name exists in this database
+                    let mut check_stmt = Statement::new(
+                        "SELECT collection_id, name, dimension, database_id, database_name, tenant_id FROM collections WHERE name = @name AND database_id = @database_id AND is_deleted = FALSE",
+                    );
+                    check_stmt.add_param("name", &collection_name);
+                    check_stmt.add_param("database_id", &database_id);
+
+                    let mut check_iter = tx.query(check_stmt).await?;
+                    if let Some(existing_row) = check_iter.next().await? {
+                        // Collection with same name exists
+                        if get_or_create {
+                            // Fetch the collection inside the transaction to avoid TOCTOU
+                            let existing_collection_id: String = existing_row
+                                .column_by_name("collection_id")
+                                .map_err(SysDbError::FailedToReadColumn)?;
+                            // TODO(Sanket): Use the local region here.
+                            let fetched_collection =
+                                Self::fetch_collection_in_tx(&mut *tx, &existing_collection_id, REGIONS[0]).await?;
+                            return Ok((fetched_collection, false)); // false = not created
+                        } else {
+                            return Err(SysDbError::AlreadyExists(format!(
+                                "collection with name '{}' already exists in database '{}'",
+                                collection_name, database_id
+                            )));
+                        }
+                    }
+
+                    let now_timestamp_us = chrono::Utc::now().timestamp_micros();
+                    let mut mutations = Vec::new();
+
+                    // Insert the collection
+                    mutations.push(insert(
+                        "collections",
+                        &[
+                            "collection_id",
+                            "name",
+                            "dimension",
+                            "database_id",
+                            "database_name",
+                            "tenant_id",
+                            "is_deleted",
+                            "created_at",
+                            "updated_at",
+                        ],
+                        &[
+                            &collection_id,
+                            &collection_name,
+                            &dimension_i64,
+                            &database_id,
+                            &database_name,
+                            &tenant_id_str,
+                            &false,
+                            &now_timestamp_us,
+                            &now_timestamp_us,
+                        ],
+                    ));
+
+                    // Insert compaction cursors for each region
+                    for region in REGIONS {
+                        mutations.push(insert(
+                            "collection_compaction_cursors",
+                            &[
+                                "collection_id",
+                                "region",
+                                "index_schema",
+                                "created_at",
+                                "updated_at",
+                            ],
+                            &[
+                                &collection_id,
+                                region,
+                                &index_schema_json,
+                                &now_timestamp_us,
+                                &now_timestamp_us,
+                            ],
+                        ));
+                    }
+
+                    // Insert segments (3 segments × 3 regions = 9 rows)
+                    for segment in &segments {
+                        let segment_id_str = segment.id.0.to_string();
+                        let segment_type_str: String = segment.r#type.into();
+                        let segment_scope_str: String = segment.scope.clone().into();
+                        let file_paths_json: Option<String> = if segment.file_path.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                serde_json::to_string(&segment.file_path)
+                                    .map_err(SysDbError::InvalidSchemaJson)?,
+                            )
+                        };
+
+                        for region in REGIONS {
+                            mutations.push(insert(
+                                "collection_segments",
+                                &[
+                                    "collection_id",
+                                    "region",
+                                    "id",
+                                    "type",
+                                    "scope",
+                                    "is_deleted",
+                                    "created_at",
+                                    "updated_at",
+                                    "file_paths",
+                                ],
+                                &[
+                                    &collection_id,
+                                    region,
+                                    &segment_id_str,
+                                    &segment_type_str,
+                                    &segment_scope_str,
+                                    &false,
+                                    &now_timestamp_us,
+                                    &now_timestamp_us,
+                                    &file_paths_json,
+                                ],
+                            ));
+                        }
+                    }
+
+                    // Insert metadata if provided
+                    if let Some(ref meta) = metadata {
+                        for (key, value) in meta.iter() {
+                            let (str_val, int_val, float_val, bool_val): (Option<&str>, Option<i64>, Option<f64>, Option<bool>) = match value {
+                                chroma_types::MetadataValue::Str(s) => (Some(s.as_str()), None, None, None),
+                                chroma_types::MetadataValue::Int(i) => (None, Some(*i), None, None),
+                                chroma_types::MetadataValue::Float(f) => (None, None, Some(*f), None),
+                                chroma_types::MetadataValue::Bool(b) => (None, None, None, Some(*b)),
+                                chroma_types::MetadataValue::SparseVector(_) => continue, // Not supported
+                            };
+
+                            mutations.push(insert(
+                                "collection_metadata",
+                                &[
+                                    "collection_id",
+                                    "key",
+                                    "str_value",
+                                    "int_value",
+                                    "float_value",
+                                    "bool_value",
+                                    "created_at",
+                                    "updated_at",
+                                ],
+                                &[
+                                    &collection_id,
+                                    key,
+                                    &str_val,
+                                    &int_val,
+                                    &float_val,
+                                    &bool_val,
+                                    &now_timestamp_us,
+                                    &now_timestamp_us,
+                                ],
+                            ));
+                        }
+                    }
+
+                    // Buffer all mutations - they will be applied atomically at commit
+                    tx.buffer_write(mutations);
+
+                    tracing::info!(
+                        "Created collection: {} (id: {}) in database: {} for tenant: {}",
+                        collection_name,
+                        collection_id,
+                        database_name,
+                        tenant_id_str
+                    );
+
+                    // Build the Collection object inside the transaction
+                    let collection = Collection {
+                        collection_id: collection_id_uuid,
+                        name: collection_name,
+                        config: InternalCollectionConfiguration::default_hnsw(),
+                        schema: Some(index_schema),
+                        metadata,
+                        dimension: dimension.map(|d| d as i32),
+                        tenant: tenant_id_str,
+                        database: database_name,
+                        log_position: 0,
+                        version: 0,
+                        total_records_post_compaction: 0,
+                        size_bytes_post_compaction: 0,
+                        last_compaction_time_secs: 0,
+                        version_file_path: None,
+                        root_collection_id: None,
+                        lineage_file_path: None,
+                        updated_at: std::time::SystemTime::now(),
+                        database_id: DatabaseUuid(
+                            Uuid::parse_str(&database_id).map_err(SysDbError::InvalidUuid)?,
+                        ),
+                    };
+
+                    Ok((collection, true)) // true = was created
+                })
+            })
+            .await?;
+
+        // Result is (CommitResult, (Collection, bool))
+        let (_commit_result, (collection, created)) = result;
+
+        Ok(CreateCollectionResponse {
+            collection,
+            created,
+        })
+    }
+
+    /// Fetch a collection from the database within a transaction.
+    ///
+    /// Uses a JOIN query to get collection, metadata, and compaction cursor fields.
+    /// The rows are converted to Collection via TryFrom<Vec<Row>>.
+    async fn fetch_collection_in_tx(
+        tx: &mut google_cloud_spanner::transaction_rw::ReadWriteTransaction,
+        collection_id: &str,
+        region: &str,
+    ) -> Result<Collection, SysDbError> {
+        // 3-way LEFT JOIN to get collection, metadata, and compaction cursor fields
+        let mut fetch_stmt = Statement::new(
+            r#"
+            SELECT 
+                c.collection_id,
+                c.name,
+                c.dimension,
+                c.database_id,
+                c.database_name,
+                c.tenant_id,
+                c.updated_at,
+                cm.key as metadata_key,
+                cm.str_value as metadata_str_value,
+                cm.int_value as metadata_int_value,
+                cm.float_value as metadata_float_value,
+                cm.bool_value as metadata_bool_value,
+                ccc.last_compacted_offset,
+                ccc.version,
+                ccc.total_records_post_compaction,
+                ccc.size_bytes_post_compaction,
+                ccc.last_compaction_time_secs,
+                ccc.version_file_name,
+                ccc.index_schema
+            FROM collections c
+            LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
+            LEFT JOIN collection_compaction_cursors ccc 
+                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            WHERE c.collection_id = @collection_id
+            "#,
+        );
+        fetch_stmt.add_param("collection_id", &collection_id);
+        fetch_stmt.add_param("region", &region);
+
+        let mut fetch_iter = tx.query(fetch_stmt).await?;
+
+        // Collect all rows and convert to Collection using TryFrom<Vec<Row>>
+        let mut rows = Vec::new();
+        while let Some(row) = fetch_iter.next().await? {
+            rows.push(row);
+        }
+
+        Collection::try_from(rows)
     }
 
     // ============================================================
@@ -354,8 +720,10 @@ impl Configurable<SpannerConfig> for SpannerBackend {
 mod tests {
     use super::*;
     use crate::types::{
-        CreateDatabaseRequest, CreateTenantRequest, GetDatabaseRequest, GetTenantRequest,
+        CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, GetDatabaseRequest,
+        GetTenantRequest,
     };
+    use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
     use uuid::Uuid;
 
     // These tests require Tilt to be running with Spanner emulator.
@@ -404,7 +772,7 @@ mod tests {
         let create_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.create_tenant(&create_req).await;
+        let result = backend.create_tenant(create_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create tenant: {:?}",
@@ -415,7 +783,7 @@ mod tests {
         let get_req = GetTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.get_tenant(&get_req).await;
+        let result = backend.get_tenant(get_req.clone()).await;
         assert!(result.is_ok(), "Failed to get tenant: {:?}", result.err());
 
         let tenant = result.unwrap();
@@ -436,7 +804,7 @@ mod tests {
         let create_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result1 = backend.create_tenant(&create_req).await;
+        let result1 = backend.create_tenant(create_req.clone()).await;
         assert!(
             result1.is_ok(),
             "Failed to create tenant first time: {:?}",
@@ -444,7 +812,7 @@ mod tests {
         );
 
         // Create tenant second time (should succeed - idempotent)
-        let result2 = backend.create_tenant(&create_req).await;
+        let result2 = backend.create_tenant(create_req.clone()).await;
         assert!(
             result2.is_ok(),
             "Failed to create tenant second time (should be idempotent): {:?}",
@@ -455,7 +823,7 @@ mod tests {
         let get_req = GetTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.get_tenant(&get_req).await;
+        let result = backend.get_tenant(get_req.clone()).await;
         assert!(result.is_ok(), "Failed to get tenant: {:?}", result.err());
         let tenant = result.unwrap(); // Tenant should exist
         assert_eq!(tenant.tenant.id, tenant_id);
@@ -471,7 +839,7 @@ mod tests {
 
         let tenant_id = Uuid::new_v4().to_string();
         let get_req = GetTenantRequest { id: tenant_id };
-        let result = backend.get_tenant(&get_req).await;
+        let result = backend.get_tenant(get_req.clone()).await;
         assert!(
             result.is_err(),
             "Getting nonexistent tenant should return error"
@@ -493,7 +861,7 @@ mod tests {
         let create_tenant_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.create_tenant(&create_tenant_req).await;
+        let result = backend.create_tenant(create_tenant_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create tenant: {:?}",
@@ -515,7 +883,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.create_database(&create_db_req).await;
+        let result = backend.create_database(create_db_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create database: {:?}",
@@ -527,7 +895,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.get_database(&get_db_req).await;
+        let result = backend.get_database(get_db_req.clone()).await;
         assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
 
         let db = result.unwrap();
@@ -547,7 +915,7 @@ mod tests {
         let create_tenant_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.create_tenant(&create_tenant_req).await;
+        let result = backend.create_tenant(create_tenant_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create tenant: {:?}",
@@ -569,7 +937,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result1 = backend.create_database(&create_db_req).await;
+        let result1 = backend.create_database(create_db_req.clone()).await;
         assert!(
             result1.is_ok(),
             "Failed to create database first time: {:?}",
@@ -577,7 +945,7 @@ mod tests {
         );
 
         // Create database second time with same ID (should return AlreadyExists)
-        let result2 = backend.create_database(&create_db_req).await;
+        let result2 = backend.create_database(create_db_req.clone()).await;
         assert!(
             result2.is_err(),
             "Creating database with duplicate ID should return error"
@@ -594,7 +962,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.get_database(&get_db_req).await;
+        let result = backend.get_database(get_db_req.clone()).await;
         assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
         let db = result.unwrap(); // Database should exist
         assert_eq!(db.database.id, db_id);
@@ -613,7 +981,7 @@ mod tests {
         let create_tenant_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.create_tenant(&create_tenant_req).await;
+        let result = backend.create_tenant(create_tenant_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create tenant: {:?}",
@@ -632,7 +1000,7 @@ mod tests {
             name: db_name,
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.get_database(&get_db_req).await;
+        let result = backend.get_database(get_db_req.clone()).await;
         assert!(
             result.is_err(),
             "Getting nonexistent database should return error"
@@ -664,7 +1032,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.create_database(&create_db_req).await;
+        let result = backend.create_database(create_db_req.clone()).await;
         assert!(
             result.is_err(),
             "Creating database with nonexistent tenant should fail"
@@ -688,7 +1056,7 @@ mod tests {
         let create_tenant_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.create_tenant(&create_tenant_req).await;
+        let result = backend.create_tenant(create_tenant_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create tenant: {:?}",
@@ -702,7 +1070,7 @@ mod tests {
             name: "".to_string(), // Empty name
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.create_database(&create_db_req).await;
+        let result = backend.create_database(create_db_req.clone()).await;
         assert!(
             result.is_err(),
             "Creating database with empty name should fail"
@@ -726,7 +1094,7 @@ mod tests {
         let create_tenant_req = CreateTenantRequest {
             id: tenant_id.clone(),
         };
-        let result = backend.create_tenant(&create_tenant_req).await;
+        let result = backend.create_tenant(create_tenant_req.clone()).await;
         assert!(
             result.is_ok(),
             "Failed to create tenant: {:?}",
@@ -748,7 +1116,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result1 = backend.create_database(&create_db_req1).await;
+        let result1 = backend.create_database(create_db_req1.clone()).await;
         assert!(
             result1.is_ok(),
             "Failed to create database first time: {:?}",
@@ -763,7 +1131,7 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result2 = backend.create_database(&create_db_req2).await;
+        let result2 = backend.create_database(create_db_req2.clone()).await;
         assert!(
             result2.is_err(),
             "Creating database with duplicate (name, tenant_id) should return error"
@@ -784,11 +1152,420 @@ mod tests {
             name: db_name.clone(),
             tenant_id: tenant_id.clone(),
         };
-        let result = backend.get_database(&get_db_req).await;
+        let result = backend.get_database(get_db_req.clone()).await;
         assert!(result.is_ok(), "Failed to get database: {:?}", result.err());
         let db = result.unwrap();
         assert_eq!(db.database.id, db_id1);
         assert_eq!(db.database.name, db_name);
         assert_eq!(db.database.tenant, tenant_id);
+    }
+
+    // Helper to create a tenant and database for collection tests
+    async fn setup_tenant_and_database(backend: &SpannerBackend) -> (String, String) {
+        let tenant_id = Uuid::new_v4().to_string();
+        let create_tenant_req = CreateTenantRequest {
+            id: tenant_id.clone(),
+        };
+        backend
+            .create_tenant(create_tenant_req)
+            .await
+            .expect("Failed to create tenant");
+
+        let db_id = Uuid::new_v4();
+        let db_name = format!(
+            "test_db_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_db_req = CreateDatabaseRequest {
+            id: db_id,
+            name: db_name.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        backend
+            .create_database(create_db_req)
+            .await
+            .expect("Failed to create database");
+
+        (tenant_id, db_name)
+    }
+
+    // Helper to create test segments for a collection
+    fn create_test_segments(collection_id: CollectionUuid) -> Vec<Segment> {
+        vec![
+            Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: None,
+                file_path: std::collections::HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileRecord,
+                scope: SegmentScope::RECORD,
+                collection: collection_id,
+                metadata: None,
+                file_path: std::collections::HashMap::new(),
+            },
+            Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::HnswDistributed,
+                scope: SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: std::collections::HashMap::new(),
+            },
+        ]
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: Some(
+                [(
+                    "key1".to_string(),
+                    chroma_types::MetadataValue::Str("value1".to_string()),
+                )]
+                .into_iter()
+                .collect(),
+            ),
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to create collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert!(response.created, "Collection should be marked as created");
+        assert_eq!(response.collection.name, collection_name);
+        assert_eq!(response.collection.collection_id, collection_id);
+        assert_eq!(response.collection.dimension, Some(128));
+        assert_eq!(response.collection.tenant, tenant_id);
+        assert_eq!(response.collection.database, db_name);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_duplicate_fails() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_dup_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create collection first time
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result1 = backend.create_collection(create_req).await;
+        assert!(
+            result1.is_ok(),
+            "Failed to create collection first time: {:?}",
+            result1.err()
+        );
+
+        // Create collection second time with same name (should fail)
+        let collection_id2 = CollectionUuid(Uuid::new_v4());
+        let create_req2 = CreateCollectionRequest {
+            id: collection_id2,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id2),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result2 = backend.create_collection(create_req2).await;
+        assert!(
+            result2.is_err(),
+            "Creating duplicate collection should fail"
+        );
+        match result2.unwrap_err() {
+            SysDbError::AlreadyExists(_) => {}
+            e => panic!("Expected AlreadyExists error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_get_or_create() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_goc_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create collection first time with get_or_create=true
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(256),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: true,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result1 = backend.create_collection(create_req).await;
+        assert!(
+            result1.is_ok(),
+            "Failed to create collection first time: {:?}",
+            result1.err()
+        );
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created first time");
+        assert_eq!(response1.collection.collection_id, collection_id);
+
+        // Create collection second time with get_or_create=true (should return existing)
+        let collection_id2 = CollectionUuid(Uuid::new_v4());
+        let create_req2 = CreateCollectionRequest {
+            id: collection_id2,
+            name: collection_name.clone(),
+            dimension: Some(512), // Different dimension
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id2),
+            metadata: None,
+            get_or_create: true,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result2 = backend.create_collection(create_req2).await;
+        assert!(
+            result2.is_ok(),
+            "get_or_create should succeed: {:?}",
+            result2.err()
+        );
+        let response2 = result2.unwrap();
+        assert!(
+            !response2.created,
+            "Collection should NOT be created second time"
+        );
+        // Should return the original collection
+        assert_eq!(response2.collection.collection_id, collection_id);
+        assert_eq!(response2.collection.dimension, Some(256)); // Original dimension
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_empty_name() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: "".to_string(), // Empty name
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name,
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_err(),
+            "Creating collection with empty name should fail"
+        );
+        match result.unwrap_err() {
+            SysDbError::InvalidArgument(_) => {}
+            e => panic!("Expected InvalidArgument error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_nonexistent_database() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Create tenant but NOT database
+        let tenant_id = Uuid::new_v4().to_string();
+        let create_tenant_req = CreateTenantRequest {
+            id: tenant_id.clone(),
+        };
+        backend
+            .create_tenant(create_tenant_req)
+            .await
+            .expect("Failed to create tenant");
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_no_db_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name,
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: "nonexistent_database".to_string(),
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_err(),
+            "Creating collection in nonexistent database should fail"
+        );
+        match result.unwrap_err() {
+            SysDbError::NotFound(_) => {}
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_with_metadata() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_meta_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let metadata: chroma_types::Metadata = [
+            (
+                "str_key".to_string(),
+                chroma_types::MetadataValue::Str("string_value".to_string()),
+            ),
+            ("int_key".to_string(), chroma_types::MetadataValue::Int(42)),
+            (
+                "float_key".to_string(),
+                chroma_types::MetadataValue::Float(1.5),
+            ),
+            (
+                "bool_key".to_string(),
+                chroma_types::MetadataValue::Bool(true),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: None, // No dimension
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: Some(metadata),
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name,
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to create collection with metadata: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert!(response.created);
+        assert_eq!(response.collection.name, collection_name);
+        assert!(response.collection.dimension.is_none());
+
+        // Verify metadata is returned (it's built from request data)
+        let returned_metadata = response.collection.metadata.expect("Should have metadata");
+        assert_eq!(
+            returned_metadata.get("str_key"),
+            Some(&chroma_types::MetadataValue::Str(
+                "string_value".to_string()
+            ))
+        );
+        assert_eq!(
+            returned_metadata.get("int_key"),
+            Some(&chroma_types::MetadataValue::Int(42))
+        );
+        assert_eq!(
+            returned_metadata.get("float_key"),
+            Some(&chroma_types::MetadataValue::Float(1.5))
+        );
+        assert_eq!(
+            returned_metadata.get("bool_key"),
+            Some(&chroma_types::MetadataValue::Bool(true))
+        );
     }
 }
