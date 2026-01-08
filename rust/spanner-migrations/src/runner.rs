@@ -132,6 +132,7 @@ impl MigrationRunner {
         for dir in MIGRATION_DIRS.iter() {
             if let Some(slug) = slug {
                 if dir.migration_slug() != slug {
+                    tracing::info!("skipping {} != {}", dir.migration_slug(), slug);
                     continue;
                 }
             }
@@ -169,6 +170,7 @@ impl MigrationRunner {
         for dir in MIGRATION_DIRS.iter() {
             if let Some(slug) = slug {
                 if dir.migration_slug() != slug {
+                    tracing::info!("skipping {} != {}", dir.migration_slug(), slug);
                     continue;
                 }
             }
