@@ -39,6 +39,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    ReadLevel,
     Schema,
     SearchResult,
 )
@@ -341,6 +342,7 @@ class RustBindingsAPI(ServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         raise NotImplementedError("Search is not implemented for Local Chroma")
 

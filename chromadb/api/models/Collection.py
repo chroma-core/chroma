@@ -16,6 +16,7 @@ from chromadb.api.types import (
     QueryResult,
     ID,
     OneOrMany,
+    ReadLevel,
     WhereDocument,
     SearchResult,
     maybe_cast_one_to_many,
@@ -303,6 +304,7 @@ class Collection(CollectionCommon["ServerAPI"]):
     def search(
         self,
         searches: OneOrMany[Search],
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Perform hybrid search on the collection.
         This is an experimental API that only works for Hosted Chroma for now.
@@ -313,6 +315,11 @@ class Collection(CollectionCommon["ServerAPI"]):
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
                 - select: Select configuration for keys to return (defaults to empty)
+            read_level: Controls whether to read from the write-ahead log (WAL):
+                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
+                  All committed writes will be visible.
+                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+                  Faster, but recent writes that haven't been compacted may not be visible.
 
         Returns:
             SearchResult: Column-major format response with:
@@ -360,6 +367,10 @@ class Collection(CollectionCommon["ServerAPI"]):
                 Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
             ]
             results = collection.search(searches)
+
+            # Skip WAL for faster queries (may miss recent uncommitted writes)
+            from chromadb.api.types import ReadLevel
+            result = collection.search(search, read_level=ReadLevel.INDEX_ONLY)
         """
         # Convert single search to list for consistent handling
         searches_list = maybe_cast_one_to_many(searches)
@@ -376,6 +387,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
+            read_level=read_level,
         )
 
     def update(
