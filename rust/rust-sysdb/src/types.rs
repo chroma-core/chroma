@@ -24,39 +24,35 @@ fn validate_uuid(id: &str) -> Result<Uuid, SysDbError> {
 /// Internal request for creating a tenant.
 #[derive(Debug, Clone)]
 pub struct CreateTenantRequest {
-    pub id: Uuid,
+    pub id: String,
 }
 
 impl TryFrom<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::CreateTenantRequest) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: validate_uuid(&req.name)?,
-        })
+        Ok(Self { id: req.name })
     }
 }
 
 /// Internal request for getting a tenant.
 #[derive(Debug, Clone)]
 pub struct GetTenantRequest {
-    pub id: Uuid,
+    pub id: String,
 }
 
 impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantRequest {
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::GetTenantRequest) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: validate_uuid(&req.name)?,
-        })
+        Ok(Self { id: req.name })
     }
 }
 
 /// Internal request for setting tenant resource name.
 #[derive(Debug, Clone)]
 pub struct SetTenantResourceNameRequest {
-    pub id: Uuid,
+    pub tenant_id: String,
     pub resource_name: String,
 }
 
@@ -65,7 +61,7 @@ impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNa
 
     fn try_from(req: chroma_proto::SetTenantResourceNameRequest) -> Result<Self, Self::Error> {
         Ok(Self {
-            id: validate_uuid(&req.id)?,
+            tenant_id: req.id,
             resource_name: req.resource_name,
         })
     }
@@ -76,7 +72,7 @@ impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNa
 pub struct CreateDatabaseRequest {
     pub id: Uuid,
     pub name: String,
-    pub tenant_id: Uuid,
+    pub tenant_id: String,
 }
 
 impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
@@ -86,7 +82,7 @@ impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
         Ok(Self {
             id: validate_uuid(&req.id)?,
             name: req.name,
-            tenant_id: validate_uuid(&req.tenant)?,
+            tenant_id: req.tenant,
         })
     }
 }
@@ -95,7 +91,7 @@ impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
 #[derive(Debug, Clone)]
 pub struct GetDatabaseRequest {
     pub name: String,
-    pub tenant_id: Uuid,
+    pub tenant_id: String,
 }
 
 impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
@@ -104,7 +100,7 @@ impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
     fn try_from(req: chroma_proto::GetDatabaseRequest) -> Result<Self, Self::Error> {
         Ok(Self {
             name: req.name,
-            tenant_id: validate_uuid(&req.tenant)?,
+            tenant_id: req.tenant,
         })
     }
 }
