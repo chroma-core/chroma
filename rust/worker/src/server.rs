@@ -17,7 +17,7 @@ use chroma_types::{
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
     operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
-    plan::SearchPayload,
+    plan::{ReadLevel, SearchPayload},
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -342,6 +342,7 @@ impl WorkerServer {
             collection_and_segments.clone(),
             fetch_log,
             filter.try_into()?,
+            ReadLevel::IndexAndWal, // Full consistency for KNN queries
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
@@ -478,6 +479,7 @@ impl WorkerServer {
         &self,
         scan: chroma_proto::ScanOperator,
         payload: chroma_proto::SearchPayload,
+        read_level: ReadLevel,
     ) -> Result<RankOrchestratorOutput, Status> {
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let search_payload = SearchPayload::try_from(payload)?;
@@ -497,6 +499,7 @@ impl WorkerServer {
             collection_and_segments.clone(),
             fetch_log,
             search_payload.filter.clone(),
+            read_level, // Use the specified read level
         );
 
         let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {
@@ -618,6 +621,7 @@ impl WorkerServer {
         search: Request<chroma_proto::SearchPlan>,
     ) -> Result<Response<chroma_proto::SearchResult>, Status> {
         let search_plan = search.into_inner();
+        let read_level: ReadLevel = search_plan.read_level().into();
         let scan = search_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
@@ -625,7 +629,7 @@ impl WorkerServer {
         let futures = search_plan
             .payloads
             .into_iter()
-            .map(|payload| self.orchestrate_search(scan.clone(), payload));
+            .map(|payload| self.orchestrate_search(scan.clone(), payload, read_level));
 
         let orchestrator_results = stream::iter(futures)
             .buffered(32) // Process up to 32 payloads concurrently

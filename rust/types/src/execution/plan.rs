@@ -543,16 +543,47 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ReadLevel {
+    /// Read from both the index and the write-ahead log (default).
+    /// Provides full consistency with all committed writes visible.
+    #[default]
+    IndexAndWal,
+    /// Read only from the index, skipping the write-ahead log.
+    /// Provides eventual consistency - recent uncommitted writes may not be visible.
+    IndexOnly,
+}
+
+impl From<chroma_proto::ReadLevel> for ReadLevel {
+    fn from(value: chroma_proto::ReadLevel) -> Self {
+        match value {
+            chroma_proto::ReadLevel::IndexAndWal => ReadLevel::IndexAndWal,
+            chroma_proto::ReadLevel::IndexOnly => ReadLevel::IndexOnly,
+        }
+    }
+}
+
+impl From<ReadLevel> for chroma_proto::ReadLevel {
+    fn from(value: ReadLevel) -> Self {
+        match value {
+            ReadLevel::IndexAndWal => chroma_proto::ReadLevel::IndexAndWal,
+            ReadLevel::IndexOnly => chroma_proto::ReadLevel::IndexOnly,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Search {
     pub scan: Scan,
     pub payloads: Vec<SearchPayload>,
+    pub read_level: ReadLevel,
 }
 
 impl TryFrom<chroma_proto::SearchPlan> for Search {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::SearchPlan) -> Result<Self, Self::Error> {
+        let read_level = value.read_level().into();
         Ok(Self {
             scan: value
                 .scan
@@ -563,6 +594,7 @@ impl TryFrom<chroma_proto::SearchPlan> for Search {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
+            read_level,
         })
     }
 }
@@ -578,6 +610,7 @@ impl TryFrom<Search> for chroma_proto::SearchPlan {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
+            read_level: chroma_proto::ReadLevel::from(value.read_level).into(),
         })
     }
 }

@@ -105,7 +105,7 @@ message RankExpr {
         optional float default = 4;
         bool return_rank = 5;
     }
-    
+
     message RankPair {
         RankExpr left = 1;
         RankExpr right = 2;
@@ -170,9 +170,22 @@ message SearchPayload {
     SelectOperator select = 4;
 }
 
+// ReadLevel specifies which data sources to read from during queries.
+// This affects consistency vs performance tradeoffs.
+enum ReadLevel {
+    // Read from both the index and the write-ahead log (default).
+    // Provides full consistency with all committed writes visible.
+    INDEX_AND_WAL = 0;
+    // Read only from the index, skipping the write-ahead log.
+    // Provides eventual consistency - recent uncommitted writes may not be visible.
+    INDEX_ONLY = 1;
+}
+
 message SearchPlan {
     ScanOperator scan = 1;
     repeated SearchPayload payloads = 2;
+    // Specifies the read level for this query
+    ReadLevel read_level = 3;
 }
 
 message SearchRecord {
@@ -198,4 +211,3 @@ service QueryExecutor {
     rpc KNN(KNNPlan) returns (KNNBatchResult) {}
     rpc Search(SearchPlan) returns (SearchResult) {}
 }
-
