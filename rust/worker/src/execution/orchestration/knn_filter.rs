@@ -12,8 +12,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, SchemaError,
-    SegmentType,
+    operator::Filter, plan::ReadLevel, CollectionAndSegments, HnswParametersFromSegmentError,
+    SchemaError, SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -178,8 +178,8 @@ pub struct KnnFilterOrchestrator {
     // Fetched logs
     fetched_logs: Option<FetchLogOutput>,
 
-    // Skip log fetching for eventual consistency queries
-    skip_log: bool,
+    // Read level for consistency vs performance tradeoff
+    read_level: ReadLevel,
 
     // Pipelined operators
     filter: Filter,
@@ -198,7 +198,7 @@ impl KnnFilterOrchestrator {
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         filter: Filter,
-        skip_log: bool,
+        read_level: ReadLevel,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -209,7 +209,7 @@ impl KnnFilterOrchestrator {
             collection_and_segments,
             fetch_log,
             fetched_logs: None,
-            skip_log,
+            read_level,
             filter,
             result_channel: None,
         }
@@ -296,24 +296,27 @@ impl Orchestrator for KnnFilterOrchestrator {
         Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_metadata_task, Some(prefetch_span)));
 
-        if self.skip_log {
-            // For eventual consistency queries, skip log fetching and use empty logs
-            tracing::debug!("Skipping log fetch for eventual consistency query");
-            let empty_logs = FetchLogOutput::new(Vec::new().into());
-            self.fetched_logs = Some(empty_logs.clone());
+        match self.read_level {
+            ReadLevel::IndexOnly => {
+                // For IndexOnly queries, skip log fetching and use empty logs
+                tracing::info!("Skipping log fetch for IndexOnly read level");
+                let empty_logs = FetchLogOutput::new(Vec::new().into());
+                self.fetched_logs = Some(empty_logs.clone());
 
-            // Immediately schedule the filter task with empty logs
-            let filter_task = self.create_filter_task(empty_logs, ctx);
-            tasks.push((filter_task, Some(Span::current())));
-        } else {
-            // Fetch log task.
-            let fetch_log_task = wrap(
-                Box::new(self.fetch_log.clone()),
-                (),
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            tasks.push((fetch_log_task, Some(Span::current())));
+                // Immediately schedule the filter task with empty logs
+                let filter_task = self.create_filter_task(empty_logs, ctx);
+                tasks.push((filter_task, Some(Span::current())));
+            }
+            ReadLevel::IndexAndWal => {
+                // Fetch log task for full consistency.
+                let fetch_log_task = wrap(
+                    Box::new(self.fetch_log.clone()),
+                    (),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((fetch_log_task, Some(Span::current())));
+            }
         }
 
         tasks

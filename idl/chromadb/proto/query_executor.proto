@@ -170,11 +170,22 @@ message SearchPayload {
     SelectOperator select = 4;
 }
 
+// ReadLevel specifies which data sources to read from during queries.
+// This affects consistency vs performance tradeoffs.
+enum ReadLevel {
+    // Read from both the index and the write-ahead log (default).
+    // Provides full consistency with all committed writes visible.
+    INDEX_AND_WAL = 0;
+    // Read only from the index, skipping the write-ahead log.
+    // Provides eventual consistency - recent uncommitted writes may not be visible.
+    INDEX_ONLY = 1;
+}
+
 message SearchPlan {
     ScanOperator scan = 1;
     repeated SearchPayload payloads = 2;
-    // If true, skip reading from the log for eventual consistency queries
-    bool eventual_consistency = 3;
+    // Specifies the read level for this query
+    ReadLevel read_level = 3;
 }
 
 message SearchRecord {
