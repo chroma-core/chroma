@@ -750,6 +750,19 @@ class IndexMetadata(TypedDict):
 
 Space = Literal["cosine", "l2", "ip"]
 
+class ReadLevel(str, Enum):
+    """Controls whether search queries read from the write-ahead log (WAL).
+
+    Attributes:
+        INDEX_AND_WAL: Read from both the compacted index and the WAL (default).
+            All committed writes will be visible.
+        INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+            Faster, but recent writes that haven't been compacted may not be visible.
+    """
+
+    INDEX_AND_WAL = "index_and_wal"
+    INDEX_ONLY = "index_only"
+
 
 # TODO: make warnings prettier and add link to migration docs
 @runtime_checkable

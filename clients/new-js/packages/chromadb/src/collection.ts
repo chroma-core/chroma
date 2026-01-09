@@ -12,6 +12,7 @@ import {
   PreparedInsertRecordSet,
   QueryRecordSet,
   QueryResult,
+  ReadLevel,
   RecordSet,
   Where,
   WhereDocument,
@@ -887,6 +888,14 @@ export class CollectionImpl implements Collection {
 
   public async search(
     searches: SearchLike | SearchLike[],
+    options?: {
+      /**
+       * Controls whether to read from the write-ahead log.
+       * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
+       * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+       */
+      readLevel?: ReadLevel;
+    },
   ): Promise<SearchResult> {
     const items = Array.isArray(searches) ? searches : [searches];
 
@@ -906,7 +915,10 @@ export class CollectionImpl implements Collection {
     const { data } = await Api.collectionSearch({
       client: this.apiClient,
       path: await this.path(),
-      body: { searches: payloads },
+      body: {
+        searches: payloads,
+        read_level: options?.readLevel,
+      },
     });
 
     return new SearchResult(data);
@@ -930,12 +942,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-          collectionName: this.name,
-          currentConfiguration: this.configuration,
-          newConfiguration: configuration,
-          currentEmbeddingFunction: this.embeddingFunction,
-          client: this.chromaClient,
-        })
+        collectionName: this.name,
+        currentConfiguration: this.configuration,
+        newConfiguration: configuration,
+        currentEmbeddingFunction: this.embeddingFunction,
+        client: this.chromaClient,
+      })
       : {};
 
     if (updateEmbeddingFunction) {

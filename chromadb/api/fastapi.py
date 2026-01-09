@@ -28,6 +28,7 @@ from chromadb.api.types import (
     Include,
     Schema,
     Metadatas,
+    ReadLevel,
     URIs,
     Where,
     WhereDocument,
@@ -387,10 +388,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
         # Convert Search objects to dictionaries
-        payload = {"searches": [s.to_dict() for s in searches]}
+        payload = {
+            "searches": [s.to_dict() for s in searches],
+            "read_level": read_level,
+        }
 
         resp_json = self._make_request(
             "post",

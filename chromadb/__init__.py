@@ -23,6 +23,7 @@ from chromadb.api.types import (
     Include,
     Metadata,
     Metadatas,
+    ReadLevel,
     Where,
     QueryResult,
     GetResult,
