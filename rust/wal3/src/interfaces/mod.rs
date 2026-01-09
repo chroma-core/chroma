@@ -212,8 +212,8 @@ pub fn checksum_parquet(
     parquet: &[u8],
     starting_log_position: Option<LogPosition>,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool), Error> {
-    let builder =
-        ParquetRecordBatchReaderBuilder::try_new(Bytes::from(parquet.to_vec())).map_err(|e| {
+    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(parquet))
+        .map_err(|e| {
             Error::CorruptFragment(format!("failed to create parquet reader builder: {}", e))
         })?;
     let reader = builder
