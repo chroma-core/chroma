@@ -1304,7 +1304,9 @@ mod tests {
 
         match result {
             Err(Error::LogFull) => {
-                println!("test_k8s_mcmr_integration_publish_with_overflow: correctly returned LogFull");
+                println!(
+                    "test_k8s_mcmr_integration_publish_with_overflow: correctly returned LogFull"
+                );
             }
             other => panic!("expected LogFull, got {:?}", other),
         }
