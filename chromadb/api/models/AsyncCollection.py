@@ -6,6 +6,7 @@ from chromadb.api.types import (
     Embedding,
     PyEmbedding,
     Include,
+    IndexingStatus,
     Metadata,
     Document,
     Image,
@@ -91,6 +92,22 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         """
         return await self._client._count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    async def get_indexing_status(self) -> IndexingStatus:
+        """Get the indexing status of this collection.
+
+        Returns:
+            IndexingStatus: An object containing:
+                - num_indexed_ops: Number of user operations that have been indexed
+                - num_unindexed_ops: Number of user operations pending indexing
+                - total_ops: Total number of user operations in collection
+                - op_indexing_progress: Proportion of user operations that have been indexed as a float between 0 and 1
+        """
+        return await self._client._get_indexing_status(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
