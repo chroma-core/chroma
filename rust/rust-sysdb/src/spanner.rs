@@ -342,7 +342,7 @@ impl SpannerBackend {
                 // Clone for the closure (needed because closure may be called multiple times for retries)
                 let collection_id_uuid = id;
                 let collection_id = id.0.to_string();
-                let tenant_id_str = tenant_id.to_string();
+                let tenant_id_str = tenant_id.clone();
                 let collection_name = collection_name.clone();
                 let database_name = database_name.clone();
                 let dimension_i64 = dimension.map(|d| d as i64);
@@ -1595,7 +1595,7 @@ mod tests {
             segments: create_test_segments(collection_id),
             metadata: None,
             get_or_create: false,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
@@ -1622,7 +1622,7 @@ mod tests {
             segments: create_test_segments(collection_id),
             metadata: None,
             get_or_create: false,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
@@ -1663,7 +1663,7 @@ mod tests {
             segments: create_test_segments(collection_id),
             metadata: None,
             get_or_create: true,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
@@ -1692,7 +1692,7 @@ mod tests {
             segments: create_test_segments(collection_id),
             metadata: None,
             get_or_create: true,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
@@ -1720,8 +1720,10 @@ mod tests {
         };
 
         // Create tenant
-        let tenant_id = Uuid::new_v4();
-        let create_tenant_req = CreateTenantRequest { id: tenant_id };
+        let tenant_id = Uuid::new_v4().to_string();
+        let create_tenant_req = CreateTenantRequest {
+            id: tenant_id.clone(),
+        };
         backend
             .create_tenant(create_tenant_req)
             .await
@@ -1747,7 +1749,7 @@ mod tests {
             .create_database(CreateDatabaseRequest {
                 id: Uuid::new_v4(),
                 name: db_name1.clone(),
-                tenant_id,
+                tenant_id: tenant_id.clone(),
             })
             .await
             .expect("Failed to create database 1");
@@ -1756,7 +1758,7 @@ mod tests {
             .create_database(CreateDatabaseRequest {
                 id: Uuid::new_v4(),
                 name: db_name2.clone(),
-                tenant_id,
+                tenant_id: tenant_id.clone(),
             })
             .await
             .expect("Failed to create database 2");
@@ -1780,7 +1782,7 @@ mod tests {
             segments: create_test_segments(collection_id1),
             metadata: None,
             get_or_create: false,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name1.clone(),
         };
 
@@ -1801,7 +1803,7 @@ mod tests {
             segments: create_test_segments(collection_id2),
             metadata: None,
             get_or_create: false,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name2.clone(), // Different database
         };
 
@@ -1868,7 +1870,7 @@ mod tests {
             segments: create_test_segments(collection_id),
             metadata: Some(metadata.clone()),
             get_or_create: false,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
@@ -1890,7 +1892,7 @@ mod tests {
             segments: create_test_segments(collection_id2),
             metadata: None,
             get_or_create: true,
-            tenant_id,
+            tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
