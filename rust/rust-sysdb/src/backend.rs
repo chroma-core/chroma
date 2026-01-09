@@ -8,35 +8,35 @@
 //! │                     (server.rs)                             │
 //! │              Implements all SysDb RPCs                      │
 //! │         Converts proto <-> internal types                   │
-//! │         Calls assign() then run() on request types           │
+//! │         Calls assign() then run() on request types          │
 //! └─────────────────────┬───────────────────────────────────────┘
 //!                       │
 //!                       ▼
 //! ┌─────────────────────────────────────────────────────────────┐
 //! │              Request Types (types.rs)                       │
 //! │                                                             │
-//! │   impl Assignable for CreateTenantRequest {                │
+//! │   impl Assignable for CreateTenantRequest {                 │
 //! │       type Output = Vec<Backend>;                           │
-//! │       fn assign(&self, factory: &BackendFactory) -> ...  │
+//! │       fn assign(&self, factory: &BackendFactory) -> ...     │
 //! │   }                                                         │
 //! │                                                             │
-//! │   impl Runnable for CreateTenantRequest {                  │
+//! │   impl Runnable for CreateTenantRequest {                   │
 //! │       type Input = Vec<Backend>;                            │
 //! │       async fn run(&self, backends: Vec<Backend>) -> ...    │
 //! │   }                                                         │
 //! │                                                             │
-//! │   • Each request type determines routing (assign)          │
-//! │   • Each request type defines execution (run)              │
+//! │   • Each request type determines routing (assign)           │
+//! │   • Each request type defines execution (run)               │
 //! └──────────┬─────────────────────────────────────┬────────────┘
 //!            │                                     │
 //!            │ assign()                            │ run()
 //!            │                                     │
 //!            ▼                                     ▼
 //! ┌──────────────────────────┐    ┌──────────────────────────┐
-//! │   BackendFactory          │    │   Backend (enum)         │
+//! │   BackendFactory         │    │   Backend (enum)         │
 //! │   (backend.rs)           │    │   (backend.rs)           │
 //! │                          │    │                          │
-//! │   struct BackendFactory {│    │   enum Backend {          │
+//! │   struct BackendFactory {│    │   enum Backend {         │
 //! │       spanner: ...       │    │       Spanner(...),      │
 //! │       // aurora: ...     │    │       // Aurora(...)     │
 //! │   }                      │    │   }                      │
@@ -49,24 +49,24 @@
 //!                          ┌──────────────────────────────────┐
 //!                          │   Concrete Backends              │
 //!                          │                                  │
-//!                          │  ┌────────────┐  ┌────────────┐ │
-//!                          │  │ Spanner    │  │ Aurora     │ │
-//!                          │  │ Backend    │  │ Backend    │ │
-//!                          │  │            │  │            │ │
-//!                          │  │ • google-  │  │ • sqlx/    │ │
-//!                          │  │   cloud-   │  │   PgPool   │ │
-//!                          │  │   spanner  │  │ • Postgres │ │
-//!                          │  └────────────┘  └────────────┘ │
+//!                          │  ┌────────────┐  ┌────────────┐  │
+//!                          │  │ Spanner    │  │ Aurora     │  │
+//!                          │  │ Backend    │  │ Backend    │  │
+//!                          │  │            │  │            │  │
+//!                          │  │ • google-  │  │ • sqlx/    │  │
+//!                          │  │   cloud-   │  │   PgPool   │  │
+//!                          │  │   spanner  │  │ • Postgres │  │
+//!                          │  └────────────┘  └────────────┘  │
 //!                          └──────────────────────────────────┘
 //! ```
 
-use crate::error::SysDbError;
 use crate::spanner::SpannerBackend;
 use crate::types::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    Database, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest, GetTenantResponse,
+    GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest, GetTenantResponse,
     SetTenantResourceNameRequest, SetTenantResourceNameResponse,
 };
+use chroma_types::{chroma_proto::Database, sysdb_errors::SysDbError};
 
 /// Factory that holds all configured backend instances.
 ///
