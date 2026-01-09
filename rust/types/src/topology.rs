@@ -267,10 +267,10 @@ impl std::fmt::Display for TopologyName {
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "T: Clone + Debug + Eq + PartialEq + Serialize",
-    deserialize = "T: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned"
+    serialize = "T: Clone + Debug + Serialize",
+    deserialize = "T: Clone + Debug + serde::de::DeserializeOwned"
 ))]
-pub struct ProviderRegion<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> {
+pub struct ProviderRegion<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> {
     /// The unique name for this provider-region combination.
     name: RegionName,
     /// The cloud provider (e.g., "aws", "gcp").
@@ -281,7 +281,7 @@ pub struct ProviderRegion<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a
     config: T,
 }
 
-impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> ProviderRegion<T> {
+impl<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> ProviderRegion<T> {
     /// Creates a new provider region.
     ///
     /// # Example
@@ -351,10 +351,10 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Pr
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "T: Clone + Debug + Eq + PartialEq + Serialize",
-    deserialize = "T: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned"
+    serialize = "T: Clone + Debug + Serialize",
+    deserialize = "T: Clone + Debug + serde::de::DeserializeOwned"
 ))]
-pub struct Topology<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> {
+pub struct Topology<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> {
     /// The unique name for this topology.
     name: TopologyName,
     /// The names of provider regions included in this topology.
@@ -363,7 +363,7 @@ pub struct Topology<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Dese
     config: T,
 }
 
-impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Topology<T> {
+impl<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> Topology<T> {
     /// Creates a new topology.
     ///
     /// # Example
@@ -434,8 +434,8 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> To
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(into = "RawMultiCloudMultiRegionConfiguration<R, T>")]
 pub struct MultiCloudMultiRegionConfiguration<
-    R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-    T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+    R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+    T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
 > {
     /// The name of the preferred region for operations with region affinity.
     preferred: RegionName,
@@ -448,12 +448,12 @@ pub struct MultiCloudMultiRegionConfiguration<
 /// Raw representation for serde deserialization before validation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "R: Clone + Debug + Eq + PartialEq + Serialize, T: Clone + Debug + Eq + PartialEq + Serialize",
-    deserialize = "R: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned, T: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned",
+    serialize = "R: Clone + Debug + Serialize, T: Clone + Debug + Serialize",
+    deserialize = "R: Clone + Debug + serde::de::DeserializeOwned, T: Clone + Debug + serde::de::DeserializeOwned",
 ))]
 struct RawMultiCloudMultiRegionConfiguration<
-    R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-    T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+    R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+    T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
 > {
     preferred: RegionName,
     regions: Vec<ProviderRegion<R>>,
@@ -461,8 +461,8 @@ struct RawMultiCloudMultiRegionConfiguration<
 }
 
 impl<
-        R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-        T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+        R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+        T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
     > From<MultiCloudMultiRegionConfiguration<R, T>>
     for RawMultiCloudMultiRegionConfiguration<R, T>
 {
@@ -476,8 +476,8 @@ impl<
 }
 
 impl<
-        R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-        T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+        R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+        T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
     > TryFrom<RawMultiCloudMultiRegionConfiguration<R, T>>
     for MultiCloudMultiRegionConfiguration<R, T>
 {
@@ -490,8 +490,8 @@ impl<
 
 impl<
         'de,
-        R: Clone + Debug + Eq + PartialEq + Serialize + serde::de::DeserializeOwned,
-        T: Clone + Debug + Eq + PartialEq + Serialize + serde::de::DeserializeOwned,
+        R: Clone + Debug + Serialize + serde::de::DeserializeOwned,
+        T: Clone + Debug + Serialize + serde::de::DeserializeOwned,
     > Deserialize<'de> for MultiCloudMultiRegionConfiguration<R, T>
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -603,8 +603,8 @@ fn format_name_list<T: std::fmt::Display>(names: &[T]) -> String {
 }
 
 impl<
-        R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-        T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+        R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+        T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
     > MultiCloudMultiRegionConfiguration<R, T>
 {
     /// Creates and validates a new multi-cloud, multi-region configuration.
