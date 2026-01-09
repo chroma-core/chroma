@@ -712,6 +712,39 @@ impl<
             Ok(())
         }
     }
+
+    /// Returns the configuration for the preferred region, if found.
+    ///
+    /// Since the configuration validates that the preferred region exists during construction,
+    /// this method returns `Some` for valid configurations. It returns `None` only if the
+    /// internal state is inconsistent, which should not occur with properly constructed instances.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::{
+    ///     MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName,
+    /// };
+    ///
+    /// let config = MultiCloudMultiRegionConfiguration::<String, ()>::new(
+    ///     RegionName::new("aws-us-east-1").unwrap(),
+    ///     vec![ProviderRegion::new(
+    ///         RegionName::new("aws-us-east-1").unwrap(),
+    ///         "aws",
+    ///         "us-east-1",
+    ///         "custom-config".to_string(),
+    ///     )],
+    ///     vec![],
+    /// ).expect("valid configuration");
+    ///
+    /// assert_eq!(config.preferred_region_config(), Some(&"custom-config".to_string()));
+    /// ```
+    pub fn preferred_region_config(&self) -> Option<&R> {
+        self.regions
+            .iter()
+            .find(|r| r.name == self.preferred)
+            .map(|r| r.config())
+    }
 }
 
 #[cfg(test)]
@@ -1617,6 +1650,54 @@ mod tests {
             err_msg.contains("non-ASCII"),
             "Expected error message to contain 'non-ASCII', got: {}",
             err_msg
+        );
+    }
+
+    #[test]
+    fn preferred_region_config_returns_config() {
+        let config = MultiCloudMultiRegionConfiguration::<String, ()>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "custom-config".to_string(),
+            )],
+            vec![],
+        )
+        .expect("valid configuration");
+
+        assert_eq!(
+            config.preferred_region_config(),
+            Some(&"custom-config".to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_region_config_selects_correct_region() {
+        let config = MultiCloudMultiRegionConfiguration::<String, ()>::new(
+            region_name("gcp-europe-west1"),
+            vec![
+                ProviderRegion::new(
+                    region_name("aws-us-east-1"),
+                    "aws",
+                    "us-east-1",
+                    "aws-config".to_string(),
+                ),
+                ProviderRegion::new(
+                    region_name("gcp-europe-west1"),
+                    "gcp",
+                    "europe-west1",
+                    "gcp-config".to_string(),
+                ),
+            ],
+            vec![],
+        )
+        .expect("valid configuration");
+
+        assert_eq!(
+            config.preferred_region_config(),
+            Some(&"gcp-config".to_string())
         );
     }
 }

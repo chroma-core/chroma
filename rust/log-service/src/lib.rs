@@ -853,7 +853,7 @@ impl LogServer {
                 .map_err(|_| wal3::Error::internal(file!(), line!()))
                 .unwrap()
                 .as_micros() as u64,
-            writer: "TODO".to_string(),
+            writer: self.config.my_member_id.clone(),
         };
         let witness = if let Some(witness) = witness.as_ref() {
             cursor_store
@@ -2593,11 +2593,21 @@ impl Configurable<LogServerConfig> for LogServer {
             } else {
                 None
             };
-        let storage_config = config.storage.as_ref().ok_or_else(|| {
-            Box::new(Error::ConfigValidation(
-                "storage configuration is required for LogServer".to_string(),
-            )) as Box<dyn ChromaError>
-        })?;
+        let storage_config = config
+            .storage
+            .as_ref()
+            .or_else(|| {
+                config
+                    .regions_and_topologies
+                    .as_ref()
+                    .and_then(|r| r.preferred_region_config())
+                    .map(|r| &r.storage)
+            })
+            .ok_or_else(|| {
+                Box::new(Error::ConfigValidation(
+                    "storage configuration is required for LogServer".to_string(),
+                )) as Box<dyn ChromaError>
+            })?;
         let storage = Storage::try_from_config(storage_config, registry).await?;
         let storage = Arc::new(storage);
         let dirty_log_prefix = MarkDirty::path_for_hostname(&config.my_member_id);

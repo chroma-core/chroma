@@ -205,7 +205,7 @@ log_service:
       throughput: 3300
       headroom: 200
   regions_and_topologies:
-    preferred: aws-us-east-1
+    preferred: tilt-config-2
     regions:
     - name: tilt-config-1
       provider: tilt
@@ -245,12 +245,12 @@ log_service:
     - name: tilt-topo-2
       regions:
       - tilt-config-2
-      config: null
+      config: {}
     - name: tilt-spanning
       regions:
       - tilt-config-1
       - tilt-config-2
-      config: null
+      config: {}
 garbage_collector:
   service_name: "garbage-collector"
   otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
