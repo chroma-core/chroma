@@ -26,6 +26,7 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    IndexingStatus,
     Schema,
     Metadatas,
     ReadLevel,
@@ -379,6 +380,25 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         )
         model = CollectionModel.from_json(resp_json)
         return model
+
+    @trace_method("FastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> IndexingStatus:
+        resp_json = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+        )
+        return IndexingStatus(
+            num_indexed_ops=resp_json["num_indexed_ops"],
+            num_unindexed_ops=resp_json["num_unindexed_ops"],
+            total_ops=resp_json["total_ops"],
+            op_indexing_progress=resp_json["op_indexing_progress"],
+        )
 
     @trace_method("FastAPI._search", OpenTelemetryGranularity.OPERATION)
     @override

@@ -184,6 +184,7 @@ enum ReadLevel {
 message SearchPlan {
     ScanOperator scan = 1;
     repeated SearchPayload payloads = 2;
+    // Specifies the read level for this query
     ReadLevel read_level = 3;
 }
 

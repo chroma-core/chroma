@@ -20,7 +20,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn, Search},
+    plan::{Count, Get, Knn, ReadLevel, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
     CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,

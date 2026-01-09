@@ -47,11 +47,11 @@ use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     create_factories, scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions,
-    CursorWitness, Fragment, FragmentManagerFactory, FragmentPuller, FragmentSeqNo,
+    CursorWitness, Fragment, FragmentConsumer, FragmentManagerFactory, FragmentSeqNo,
     GarbageCollectionOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
     LogWriterOptions, Manifest, ManifestAndETag, ManifestManagerFactory, ManifestReader,
-    MarkDirty as MarkDirtyTrait, S3FragmentManagerFactory, S3ManifestManagerFactory, Snapshot,
-    SnapshotCache, SnapshotPointer,
+    MarkDirty as MarkDirtyTrait, S3FragmentManagerFactory, S3FragmentPuller,
+    S3ManifestManagerFactory, Snapshot, SnapshotCache, SnapshotPointer,
 };
 
 /// Concrete type alias for the LogWriter with S3 factories.
@@ -59,7 +59,7 @@ type S3LogWriter =
     LogWriter<(FragmentSeqNo, LogPosition), S3FragmentManagerFactory, S3ManifestManagerFactory>;
 
 /// Concrete type alias for the LogReader with S3 consumers.
-type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), FragmentPuller, ManifestReader>;
+type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), S3FragmentPuller, ManifestReader>;
 
 mod scrub;
 pub mod state_hash_table;
@@ -675,11 +675,7 @@ impl LogServer {
     }
 
     /// Creates a LogReader for the given prefix with default (no-op) mark_dirty and snapshot_cache.
-    async fn make_log_reader(
-        &self,
-        prefix: String,
-        _writer_name: &str,
-    ) -> Result<S3LogReader, wal3::Error> {
+    async fn make_log_reader(&self, prefix: String) -> Result<S3LogReader, wal3::Error> {
         let (fragment_factory, manifest_factory) = create_factories(
             self.config.writer.clone(),
             self.config.reader.clone(),
@@ -695,7 +691,6 @@ impl LogServer {
             self.config.reader.clone(),
             fragment_consumer,
             manifest_consumer,
-            Arc::clone(&self.storage),
             prefix,
         ))
     }
@@ -704,7 +699,6 @@ impl LogServer {
     async fn make_log_reader_with_defaults(
         storage: Arc<Storage>,
         prefix: String,
-        _writer_name: &str,
     ) -> Result<S3LogReader, wal3::Error> {
         let writer_options = LogWriterOptions::default();
         let reader_options = LogReaderOptions::default();
@@ -723,7 +717,6 @@ impl LogServer {
             reader_options,
             fragment_consumer,
             manifest_consumer,
-            storage,
             prefix,
         ))
     }
@@ -812,7 +805,7 @@ impl LogServer {
         let log_reader = match log.reader(self.config.reader.clone()).await {
             Some(reader) => reader,
             None => self
-                .make_log_reader(storage_prefix.clone(), "log reader")
+                .make_log_reader(storage_prefix.clone())
                 .await
                 .map_err(|err| Status::unknown(err.to_string()))?,
         };
@@ -1237,12 +1230,8 @@ impl LogServer {
             // cache in order to prevent a stale cache from perpetually returning a stale result.
             let manifest = if witness.is_none() {
                 let prefix = collection_id.storage_prefix_for_log();
-                let reader = Self::make_log_reader_with_defaults(
-                    Arc::clone(storage),
-                    prefix,
-                    "enrich dirty log",
-                )
-                .await?;
+                let reader =
+                    Self::make_log_reader_with_defaults(Arc::clone(storage), prefix).await?;
                 reader.manifest().await?
             } else {
                 None
@@ -1407,7 +1396,7 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let prefix = collection_id.storage_prefix_for_log();
         let log_reader = self
-            .make_log_reader(prefix, "scout logs")
+            .make_log_reader(prefix)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let cache_key = cache_key_for_manifest_and_etag(collection_id);
@@ -1525,7 +1514,7 @@ impl LogServer {
         pull_logs: &PullLogsRequest,
     ) -> Result<Vec<Fragment>, wal3::Error> {
         let prefix = collection_id.storage_prefix_for_log();
-        let log_reader = self.make_log_reader(prefix, "read fragments").await?;
+        let log_reader = self.make_log_reader(prefix).await?;
         let limits = Limits {
             max_files: Some(pull_logs.batch_size as u64 + 1),
             max_bytes: None,
@@ -1566,20 +1555,26 @@ impl LogServer {
             .iter()
             .map(|fragment| async {
                 let prefix = collection_id.storage_prefix_for_log();
+                let puller = S3FragmentPuller::new(
+                    self.config.reader.clone(),
+                    Arc::clone(&self.storage),
+                    prefix.clone(),
+                );
                 if let Some(cache) = self.cache.as_ref() {
                     let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
                     if let Ok(Some(answer)) = cache.get(&cache_key).await {
                         return Ok(Arc::new(answer.bytes));
                     }
-                    let answer =
-                        S3LogReader::stateless_fetch(&self.storage, &prefix, fragment).await?;
+                    let answer = puller
+                        .read_raw_bytes(&fragment.path, fragment.start)
+                        .await?;
                     let cache_value = CachedBytes {
                         bytes: Clone::clone(&*answer),
                     };
                     cache.insert(cache_key, cache_value).await;
                     Ok(answer)
                 } else {
-                    S3LogReader::stateless_fetch(&self.storage, &prefix, fragment).await
+                    puller.read_raw_bytes(&fragment.path, fragment.start).await
                 }
             })
             .collect::<Vec<_>>();
@@ -1638,7 +1633,7 @@ impl LogServer {
             target_collection_id = target_collection_id.to_string(),
         );
         let log_reader = self
-            .make_log_reader(source_prefix.clone(), "fork logs source")
+            .make_log_reader(source_prefix.clone())
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let cursors = CursorStore::new(
@@ -1673,7 +1668,7 @@ impl LogServer {
         .await
         .map_err(|err| Status::new(err.code().into(), format!("Failed to copy log: {}", err)))?;
         let log_reader = self
-            .make_log_reader(target_prefix, "fork logs target")
+            .make_log_reader(target_prefix)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let new_manifest = log_reader
@@ -1900,7 +1895,7 @@ impl LogServer {
         tracing::info!("inspect_log_state for {collection_id}");
         let storage_prefix = collection_id.storage_prefix_for_log();
         let log_reader = self
-            .make_log_reader(storage_prefix.clone(), "inspect log state")
+            .make_log_reader(storage_prefix.clone())
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let mani = log_reader.manifest().await;
@@ -4196,7 +4191,7 @@ mod tests {
 
             let prefix = collection_id.storage_prefix_for_log();
             let reader = log_server
-                .make_log_reader(prefix, "test gc")
+                .make_log_reader(prefix)
                 .await
                 .expect("Log reader should be creatable");
             reader
@@ -4235,7 +4230,7 @@ mod tests {
 
         let prefix = collection_id.storage_prefix_for_log();
         let reader = log_server
-            .make_log_reader(prefix, "test rollup snapshot")
+            .make_log_reader(prefix)
             .await
             .expect("Log reader should be creatable");
         reader

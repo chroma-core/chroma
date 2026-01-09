@@ -280,7 +280,6 @@ impl<
             options,
             fragment_consumer,
             manifest_consumer,
-            Arc::clone(&self.storage),
             self.prefix.clone(),
         ))
     }
@@ -1089,6 +1088,8 @@ mod tests {
     use bytes::Bytes;
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
+    use crate::interfaces::checksum_parquet;
+
     /// Verifies that construct_parquet with Some(log_position) creates absolute offsets.
     #[test]
     fn construct_parquet_with_some_log_position_uses_absolute_offsets() {
@@ -1402,8 +1403,6 @@ mod tests {
     /// offsets.
     #[test]
     fn relative_offset_setsum_consistency() {
-        use crate::reader::checksum_parquet;
-
         let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
 
         // Write with relative offsets (None) - setsum computed with offsets 0, 1, 2
@@ -1435,8 +1434,6 @@ mod tests {
     /// offsets.
     #[test]
     fn absolute_offset_setsum_consistency() {
-        use crate::reader::checksum_parquet;
-
         let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
         let starting_position = LogPosition::from_offset(100);
 

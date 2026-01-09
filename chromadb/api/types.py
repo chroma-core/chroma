@@ -66,6 +66,7 @@ __all__ = [
     "UpdateMetadata",
     "SearchResult",
     "SearchResultRow",
+    "IndexingStatus",
     "SparseVector",
     # Index Configuration Types
     "FtsIndexConfig",
@@ -619,6 +620,14 @@ class QueryResult(TypedDict):
     included: Include
 
 
+@dataclass
+class IndexingStatus:
+    num_indexed_ops: int
+    num_unindexed_ops: int
+    total_ops: int
+    op_indexing_progress: float
+
+
 class SearchResultRow(TypedDict, total=False):
     """A single row from search results.
 
@@ -750,6 +759,7 @@ class IndexMetadata(TypedDict):
 
 Space = Literal["cosine", "l2", "ip"]
 
+
 class ReadLevel(str, Enum):
     """Controls whether search queries read from the write-ahead log (WAL).
 
@@ -780,7 +790,8 @@ class EmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> Embeddings: ...
+    def __call__(self, input: D) -> Embeddings:
+        ...
 
     def embed_query(self, input: D) -> Embeddings:
         """
@@ -964,7 +975,8 @@ def validate_embedding_function(
 
 
 class DataLoader(Protocol[L]):
-    def __call__(self, uris: URIs) -> L: ...
+    def __call__(self, uris: URIs) -> L:
+        ...
 
 
 def validate_ids(ids: IDs) -> IDs:
@@ -1421,7 +1433,8 @@ class SparseEmbeddingFunction(Protocol[D]):
     """
 
     @abstractmethod
-    def __call__(self, input: D) -> SparseVectors: ...
+    def __call__(self, input: D) -> SparseVectors:
+        ...
 
     def embed_query(self, input: D) -> SparseVectors:
         """
@@ -1615,9 +1628,9 @@ class VectorIndexConfig(BaseModel):
 
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = (
-        None  # key to source the vector from (accepts str or Key)
-    )
+    source_key: Optional[
+        str
+    ] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
 
@@ -1666,9 +1679,9 @@ class SparseVectorIndexConfig(BaseModel):
 
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = (
-        None  # key to source the sparse vector from (accepts str or Key)
-    )
+    source_key: Optional[
+        str
+    ] = None  # key to source the sparse vector from (accepts str or Key)
     bm25: Optional[bool] = None
 
     @field_validator("source_key", mode="before")

@@ -7,6 +7,7 @@ import Header from "@/components/header/header";
 import PostHogProvider from "@/components/posthog/posthog-provider";
 import CloudSignUp from "@/components/header/cloud-signup";
 import HeaderNav from "@/components/header/header-nav";
+import { GoogleTagManager } from "@next/third-parties/google";
 
 import "@/components/markdoc/code-block-themes.css";
 
@@ -52,9 +53,28 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const websiteSchema = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "@id": "https://docs.trychroma.com/#website",
+    "url": "https://docs.trychroma.com/",
+    "name": "Chroma Docs",
+    "alternateName": "Chroma Documentation",
+  };
+  const gtmId = process.env.NEXT_PUBLIC_GTM_MEASUREMENT_ID;
+
   return (
     <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{
+            __html: JSON.stringify(websiteSchema),
+          }}
+        />
+      </head>
       <body data-invert-bg="true" className={`${inter.className} antialiased bg-white dark:bg-black bg-[url(/composite_noise.jpg)] bg-repeat relative text-[#27201C] dark:text-white dark:backdrop-invert`}>
+        {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -68,10 +88,10 @@ export default function RootLayout({
               {/* prevent the header from shrinking */}
               <div className="shrink-0">
                 <Header />
-                <HeaderNav/>
+                <HeaderNav />
               </div>
-              {/* have this container take up the remaining space and hide any overflow 
-                  the side bar and main page content will be rendered here and will 
+              {/* have this container take up the remaining space and hide any overflow
+                  the side bar and main page content will be rendered here and will
                   fill the available space and do their own scrolling */}
               <div className="flex-1 overflow-y-hidden h-full">
                 {children}
