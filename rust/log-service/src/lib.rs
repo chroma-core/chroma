@@ -134,6 +134,20 @@ pub enum Error {
     CouldNotGetDirtyLogReader,
     #[error("Dirty log writer failed to provide a cursor store")]
     CouldNotGetDirtyLogCursors,
+    #[error("configuration error: {0}")]
+    ConfigValidation(String),
+}
+
+impl ChromaError for Error {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        match self {
+            Error::Wal3(_) => chroma_error::ErrorCodes::Internal,
+            Error::Json(_) => chroma_error::ErrorCodes::Internal,
+            Error::CouldNotGetDirtyLogReader => chroma_error::ErrorCodes::Internal,
+            Error::CouldNotGetDirtyLogCursors => chroma_error::ErrorCodes::Internal,
+            Error::ConfigValidation(_) => chroma_error::ErrorCodes::InvalidArgument,
+        }
+    }
 }
 
 ///////////////////////////////////////// InspectedLogState ////////////////////////////////////////
@@ -2475,16 +2489,13 @@ impl LogServerConfig {
         let regions_set = self.regions_and_topologies.is_some();
 
         match (storage_set, regions_set) {
-            (true, true) => Err(Box::new(
-                ChromaError::invalid_argument(
-                    "storage and regions_and_topologies are mutually exclusive; exactly one must be set"
-                )
-            )),
-            (false, false) => Err(Box::new(
-                ChromaError::invalid_argument(
-                    "exactly one of storage or regions_and_topologies must be set"
-                )
-            )),
+            (true, true) => Err(Box::new(Error::ConfigValidation(
+                "storage and regions_and_topologies are mutually exclusive; exactly one must be set"
+                    .to_string(),
+            ))),
+            (false, false) => Err(Box::new(Error::ConfigValidation(
+                "exactly one of storage or regions_and_topologies must be set".to_string(),
+            ))),
             (true, false) | (false, true) => Ok(()),
         }
     }
@@ -2582,7 +2593,12 @@ impl Configurable<LogServerConfig> for LogServer {
             } else {
                 None
             };
-        let storage = Storage::try_from_config(&config.storage, registry).await?;
+        let storage_config = config.storage.as_ref().ok_or_else(|| {
+            Box::new(Error::ConfigValidation(
+                "storage configuration is required for LogServer".to_string(),
+            )) as Box<dyn ChromaError>
+        })?;
+        let storage = Storage::try_from_config(storage_config, registry).await?;
         let storage = Arc::new(storage);
         let dirty_log_prefix = MarkDirty::path_for_hostname(&config.my_member_id);
         // Dirty log doesn't mark anything dirty (it is itself the dirty log).
@@ -4528,7 +4544,8 @@ mod tests {
         assert!(result.is_err(), "Both None should fail validation");
         let err = result.unwrap_err();
         assert!(
-            err.to_string().contains("exactly one of storage or regions_and_topologies must be set"),
+            err.to_string()
+                .contains("exactly one of storage or regions_and_topologies must be set"),
             "Error message should mention exactly one must be set"
         );
     }
@@ -4542,34 +4559,68 @@ mod tests {
         };
 
         let result = config.validate_storage_xor();
-        assert!(result.is_ok(), "Storage set and regions_and_topologies None should pass");
+        assert!(
+            result.is_ok(),
+            "Storage set and regions_and_topologies None should pass"
+        );
     }
 
     #[test]
     fn validate_storage_xor_regions_only() {
-        use chroma_types::MultiCloudMultiRegionConfiguration;
+        use chroma_types::ProviderRegion;
+        use chroma_types::RegionName;
+
+        let region_name = RegionName::new("test-region").unwrap();
+        let regions_and_topologies = MultiCloudMultiRegionConfiguration::new(
+            region_name.clone(),
+            vec![ProviderRegion::new(
+                region_name,
+                "test-provider",
+                "test-location",
+                RegionalStorage {
+                    storage: StorageConfig::default(),
+                },
+            )],
+            vec![],
+        )
+        .unwrap();
 
         let config = LogServerConfig {
             storage: None,
-            regions_and_topologies: Some(MultiCloudMultiRegionConfiguration {
-                regions: Default::default(),
-            }),
+            regions_and_topologies: Some(regions_and_topologies),
             ..Default::default()
         };
 
         let result = config.validate_storage_xor();
-        assert!(result.is_ok(), "regions_and_topologies set and storage None should pass");
+        assert!(
+            result.is_ok(),
+            "regions_and_topologies set and storage None should pass"
+        );
     }
 
     #[test]
     fn validate_storage_xor_both_set() {
-        use chroma_types::MultiCloudMultiRegionConfiguration;
+        use chroma_types::ProviderRegion;
+        use chroma_types::RegionName;
+
+        let region_name = RegionName::new("test-region").unwrap();
+        let regions_and_topologies = MultiCloudMultiRegionConfiguration::new(
+            region_name.clone(),
+            vec![ProviderRegion::new(
+                region_name,
+                "test-provider",
+                "test-location",
+                RegionalStorage {
+                    storage: StorageConfig::default(),
+                },
+            )],
+            vec![],
+        )
+        .unwrap();
 
         let config = LogServerConfig {
             storage: Some(StorageConfig::default()),
-            regions_and_topologies: Some(MultiCloudMultiRegionConfiguration {
-                regions: Default::default(),
-            }),
+            regions_and_topologies: Some(regions_and_topologies),
             ..Default::default()
         };
 
@@ -4585,7 +4636,10 @@ mod tests {
     #[test]
     fn default_config_has_neither_set() {
         let config = LogServerConfig::default();
-        assert!(config.storage.is_none(), "Default config should have storage as None");
+        assert!(
+            config.storage.is_none(),
+            "Default config should have storage as None"
+        );
         assert!(
             config.regions_and_topologies.is_none(),
             "Default config should have regions_and_topologies as None"
