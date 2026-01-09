@@ -253,6 +253,7 @@ k8s_resource(
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma',
+    'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma',
 
     'query-service-serviceaccount:ServiceAccount:chroma',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma',
@@ -265,6 +266,12 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma',
     'compaction-service-serviceaccount:ServiceAccount:chroma',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma',
+
+    'rust-frontend-service-serviceaccount:ServiceAccount:chroma',
+    'rust-frontend-service-rolebinding:RoleBinding:chroma',
+    'rust-frontend-service-query-service-memberlist-binding:RoleBinding:chroma',
+    'rust-log-service-memberlist-readerwriter:Role:chroma',
+    'rust-frontend-service-rust-log-service-memberlist-binding:RoleBinding:chroma',
 
     'test-memberlist:MemberList:chroma',
     'test-memberlist-reader:Role:chroma',
@@ -290,6 +297,7 @@ k8s_resource(
     'sysdb-serviceaccount-rolebinding:RoleBinding:chroma2',
     'sysdb-query-service-memberlist-binding:RoleBinding:chroma2',
     'sysdb-compaction-service-memberlist-binding:RoleBinding:chroma2',
+    'sysdb-rust-log-service-memberlist-binding:RoleBinding:chroma2',
 
     'query-service-serviceaccount:ServiceAccount:chroma2',
     'query-service-serviceaccount-rolebinding:RoleBinding:chroma2',
@@ -302,6 +310,12 @@ k8s_resource(
     'compaction-service-memberlist-readerwriter-binding:RoleBinding:chroma2',
     'compaction-service-serviceaccount:ServiceAccount:chroma2',
     'compaction-service-serviceaccount-rolebinding:RoleBinding:chroma2',
+
+    'rust-frontend-service-serviceaccount:ServiceAccount:chroma2',
+    'rust-frontend-service-rolebinding:RoleBinding:chroma2',
+    'rust-frontend-service-query-service-memberlist-binding:RoleBinding:chroma2',
+    'rust-log-service-memberlist-readerwriter:Role:chroma2',
+    'rust-frontend-service-rust-log-service-memberlist-binding:RoleBinding:chroma2',
 
     'lease-watcher:Role:chroma2',
     'rust-frontend-service-config:ConfigMap:chroma2',
