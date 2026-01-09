@@ -621,10 +621,10 @@ impl WorkerServer {
         search: Request<chroma_proto::SearchPlan>,
     ) -> Result<Response<chroma_proto::SearchResult>, Status> {
         let search_plan = search.into_inner();
+        let read_level: ReadLevel = search_plan.read_level().into();
         let scan = search_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
-        let read_level: ReadLevel = search_plan.read_level().into();
 
         let futures = search_plan
             .payloads

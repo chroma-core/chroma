@@ -583,6 +583,7 @@ impl TryFrom<chroma_proto::SearchPlan> for Search {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::SearchPlan) -> Result<Self, Self::Error> {
+        let read_level = value.read_level().into();
         Ok(Self {
             scan: value
                 .scan
@@ -593,7 +594,7 @@ impl TryFrom<chroma_proto::SearchPlan> for Search {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
-            read_level: value.read_level().into(),
+            read_level,
         })
     }
 }
