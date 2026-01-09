@@ -763,7 +763,7 @@ mod tests {
 
     // Initialize a manifest and verify it can be loaded.
     #[tokio::test]
-    async fn test_k8s_integration_init_and_load() {
+    async fn test_k8s_mcmr_integration_init_and_load() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -788,14 +788,14 @@ mod tests {
         assert_eq!(pos.offset(), 0, "initial enumeration_offset should be 0");
 
         println!(
-            "test_k8s_integration_init_and_load: log_id={}, witness={:?}",
+            "test_k8s_mcmr_integration_init_and_load: log_id={}, witness={:?}",
             log_id, pos
         );
     }
 
     // Load a non-existent manifest returns None.
     #[tokio::test]
-    async fn test_k8s_integration_load_nonexistent() {
+    async fn test_k8s_mcmr_integration_load_nonexistent() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -805,7 +805,7 @@ mod tests {
 
         match result {
             Ok(None) => {
-                println!("test_k8s_integration_load_nonexistent: correctly returned Ok(None)");
+                println!("test_k8s_mcmr_integration_load_nonexistent: correctly returned Ok(None)");
             }
             other => panic!("expected Ok(None), got {:?}", other),
         }
@@ -813,7 +813,7 @@ mod tests {
 
     // Test manifest_head returns true when witness matches current state.
     #[tokio::test]
-    async fn test_k8s_integration_manifest_head_matches() {
+    async fn test_k8s_mcmr_integration_manifest_head_matches() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -834,12 +834,12 @@ mod tests {
             "manifest_head should return true for matching witness"
         );
 
-        println!("test_k8s_integration_manifest_head_matches: passed");
+        println!("test_k8s_mcmr_integration_manifest_head_matches: passed");
     }
 
     // Test manifest_head returns false when witness does not match.
     #[tokio::test]
-    async fn test_k8s_integration_manifest_head_mismatch() {
+    async fn test_k8s_mcmr_integration_manifest_head_mismatch() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -860,12 +860,12 @@ mod tests {
             "manifest_head should return false for mismatched witness"
         );
 
-        println!("test_k8s_integration_manifest_head_mismatch: passed");
+        println!("test_k8s_mcmr_integration_manifest_head_mismatch: passed");
     }
 
     // Test manifest_and_witness via ManifestPublisher trait.
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_witness() {
+    async fn test_k8s_mcmr_integration_manifest_and_witness() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -887,14 +887,14 @@ mod tests {
         let maw = result.unwrap();
         assert_eq!(maw.manifest.setsum, manifest.setsum);
         println!(
-            "test_k8s_integration_manifest_and_witness: witness={:?}",
+            "test_k8s_mcmr_integration_manifest_and_witness: witness={:?}",
             maw.witness
         );
     }
 
     // Test manifest_and_witness returns UninitializedLog for missing manifest.
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_witness_uninitialized() {
+    async fn test_k8s_mcmr_integration_manifest_and_witness_uninitialized() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -906,7 +906,7 @@ mod tests {
         match result {
             Err(Error::UninitializedLog) => {
                 println!(
-                    "test_k8s_integration_manifest_and_witness_uninitialized: returned UninitializedLog"
+                    "test_k8s_mcmr_integration_manifest_and_witness_uninitialized: returned UninitializedLog"
                 );
             }
             other => panic!("expected UninitializedLog, got {:?}", other),
@@ -915,7 +915,7 @@ mod tests {
 
     // Test assign_timestamp generates unique UUIDs.
     #[tokio::test]
-    async fn test_k8s_integration_assign_timestamp() {
+    async fn test_k8s_mcmr_integration_assign_timestamp() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -930,12 +930,12 @@ mod tests {
         assert!(ts2.is_some(), "assign_timestamp should return Some");
         assert_ne!(ts1.unwrap(), ts2.unwrap(), "timestamps should be unique");
 
-        println!("test_k8s_integration_assign_timestamp: passed");
+        println!("test_k8s_mcmr_integration_assign_timestamp: passed");
     }
 
     // Test publish_fragment inserts a fragment and updates enumeration_offset.
     #[tokio::test]
-    async fn test_k8s_integration_publish_fragment() {
+    async fn test_k8s_mcmr_integration_publish_fragment() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -979,14 +979,14 @@ mod tests {
         );
 
         println!(
-            "test_k8s_integration_publish_fragment: log_position={}",
+            "test_k8s_mcmr_integration_publish_fragment: log_position={}",
             log_position.offset()
         );
     }
 
     // Test publishing multiple fragments in sequence.
     #[tokio::test]
-    async fn test_k8s_integration_publish_multiple_fragments() {
+    async fn test_k8s_mcmr_integration_publish_multiple_fragments() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1029,7 +1029,7 @@ mod tests {
         assert!(head_result.is_ok() && head_result.unwrap());
 
         println!(
-            "test_k8s_integration_publish_multiple_fragments: positions={}, {}, {}",
+            "test_k8s_mcmr_integration_publish_multiple_fragments: positions={}, {}, {}",
             pos1.offset(),
             pos2.offset(),
             pos3.offset()
@@ -1038,7 +1038,7 @@ mod tests {
 
     // Test publish_fragment with messages_len exceeding i64::MAX.
     #[tokio::test]
-    async fn test_k8s_integration_publish_fragment_too_large() {
+    async fn test_k8s_mcmr_integration_publish_fragment_too_large() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1060,7 +1060,7 @@ mod tests {
         match result {
             Err(Error::ReplicationBatchTooLarge { .. }) => {
                 println!(
-                    "test_k8s_integration_publish_fragment_too_large: correctly returned ReplicationBatchTooLarge"
+                    "test_k8s_mcmr_integration_publish_fragment_too_large: correctly returned ReplicationBatchTooLarge"
                 );
             }
             other => panic!("expected ReplicationBatchTooLarge, got {:?}", other),
@@ -1069,7 +1069,7 @@ mod tests {
 
     // Test that load returns fragments after publish_fragment.
     #[tokio::test]
-    async fn test_k8s_integration_load_with_fragments() {
+    async fn test_k8s_mcmr_integration_load_with_fragments() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1111,14 +1111,14 @@ mod tests {
         assert_eq!(pos.offset(), 15, "enumeration_offset should be 5 + 10");
 
         println!(
-            "test_k8s_integration_load_with_fragments: loaded {} fragments",
+            "test_k8s_mcmr_integration_load_with_fragments: loaded {} fragments",
             loaded.fragments.len()
         );
     }
 
     // Test recover succeeds on an initialized log.
     #[tokio::test]
-    async fn test_k8s_integration_recover() {
+    async fn test_k8s_mcmr_integration_recover() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1133,12 +1133,12 @@ mod tests {
         let result = manager.recover().await;
         assert!(result.is_ok(), "recover should succeed");
 
-        println!("test_k8s_integration_recover: passed");
+        println!("test_k8s_mcmr_integration_recover: passed");
     }
 
     // Test shutdown is a no-op that completes.
     #[tokio::test]
-    async fn test_k8s_integration_shutdown() {
+    async fn test_k8s_mcmr_integration_shutdown() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1147,12 +1147,12 @@ mod tests {
         let manager = ManifestManager::new(Arc::new(client), log_id);
         manager.shutdown();
 
-        println!("test_k8s_integration_shutdown: passed");
+        println!("test_k8s_mcmr_integration_shutdown: passed");
     }
 
     // Test init with non-default manifest values.
     #[tokio::test]
-    async fn test_k8s_integration_init_with_nondefault_manifest() {
+    async fn test_k8s_mcmr_integration_init_with_nondefault_manifest() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1184,14 +1184,14 @@ mod tests {
         assert_eq!(loaded.collected, collected);
         assert_eq!(loaded.acc_bytes, 12345);
 
-        println!("test_k8s_integration_init_with_nondefault_manifest: passed");
+        println!("test_k8s_mcmr_integration_init_with_nondefault_manifest: passed");
     }
 
     // ==================== Concurrent operations tests ====================
 
     // Test concurrent publish_fragment calls from multiple tasks.
     #[tokio::test]
-    async fn test_k8s_integration_publish_fragment_concurrent() {
+    async fn test_k8s_mcmr_integration_publish_fragment_concurrent() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1238,7 +1238,7 @@ mod tests {
         );
 
         println!(
-            "test_k8s_integration_publish_fragment_concurrent: positions={:?}",
+            "test_k8s_mcmr_integration_publish_fragment_concurrent: positions={:?}",
             positions
         );
     }
@@ -1247,7 +1247,7 @@ mod tests {
 
     // Test that init fails when called twice with the same log_id.
     #[tokio::test]
-    async fn test_k8s_integration_init_duplicate() {
+    async fn test_k8s_mcmr_integration_init_duplicate() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1265,14 +1265,14 @@ mod tests {
         );
 
         println!(
-            "test_k8s_integration_init_duplicate: second init error={:?}",
+            "test_k8s_mcmr_integration_init_duplicate: second init error={:?}",
             result2.err()
         );
     }
 
     // Test publish_fragment with enumeration_offset near i64::MAX causing overflow.
     #[tokio::test]
-    async fn test_k8s_integration_publish_with_overflow() {
+    async fn test_k8s_mcmr_integration_publish_with_overflow() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1304,7 +1304,7 @@ mod tests {
 
         match result {
             Err(Error::LogFull) => {
-                println!("test_k8s_integration_publish_with_overflow: correctly returned LogFull");
+                println!("test_k8s_mcmr_integration_publish_with_overflow: correctly returned LogFull");
             }
             other => panic!("expected LogFull, got {:?}", other),
         }
@@ -1314,7 +1314,7 @@ mod tests {
 
     // Test snapshot_load returns internal error (not implemented).
     #[tokio::test]
-    async fn test_k8s_integration_snapshot_load_returns_internal() {
+    async fn test_k8s_mcmr_integration_snapshot_load_returns_internal() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1337,7 +1337,7 @@ mod tests {
         match result {
             Err(Error::Internal { .. }) => {
                 println!(
-                    "test_k8s_integration_snapshot_load_returns_internal: correctly returned Internal"
+                    "test_k8s_mcmr_integration_snapshot_load_returns_internal: correctly returned Internal"
                 );
             }
             other => panic!("expected Internal error, got {:?}", other),
@@ -1346,7 +1346,7 @@ mod tests {
 
     // Test snapshot_install returns internal error (not implemented).
     #[tokio::test]
-    async fn test_k8s_integration_snapshot_install_returns_internal() {
+    async fn test_k8s_mcmr_integration_snapshot_install_returns_internal() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1367,7 +1367,7 @@ mod tests {
         match result {
             Err(Error::Internal { .. }) => {
                 println!(
-                    "test_k8s_integration_snapshot_install_returns_internal: correctly returned Internal"
+                    "test_k8s_mcmr_integration_snapshot_install_returns_internal: correctly returned Internal"
                 );
             }
             other => panic!("expected Internal error, got {:?}", other),
@@ -1376,7 +1376,7 @@ mod tests {
 
     // Test snapshot_load via ManifestConsumer trait.
     #[tokio::test]
-    async fn test_k8s_integration_snapshot_load_consumer_returns_internal() {
+    async fn test_k8s_mcmr_integration_snapshot_load_consumer_returns_internal() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1399,7 +1399,7 @@ mod tests {
 
         match result {
             Err(Error::Internal { .. }) => {
-                println!("test_k8s_integration_snapshot_load_consumer_returns_internal: correctly returned Internal");
+                println!("test_k8s_mcmr_integration_snapshot_load_consumer_returns_internal: correctly returned Internal");
             }
             other => panic!("expected Internal error, got {:?}", other),
         }
@@ -1409,7 +1409,7 @@ mod tests {
 
     // Test garbage_applies_cleanly returns Ok(true).
     #[tokio::test]
-    async fn test_k8s_integration_garbage_applies_cleanly() {
+    async fn test_k8s_mcmr_integration_garbage_applies_cleanly() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1429,12 +1429,12 @@ mod tests {
             "garbage_applies_cleanly should return true"
         );
 
-        println!("test_k8s_integration_garbage_applies_cleanly: passed");
+        println!("test_k8s_mcmr_integration_garbage_applies_cleanly: passed");
     }
 
     // Test apply_garbage returns Ok(()).
     #[tokio::test]
-    async fn test_k8s_integration_apply_garbage() {
+    async fn test_k8s_mcmr_integration_apply_garbage() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1449,12 +1449,12 @@ mod tests {
         let result = manager.apply_garbage(garbage).await;
         assert!(result.is_ok(), "apply_garbage failed: {:?}", result);
 
-        println!("test_k8s_integration_apply_garbage: passed");
+        println!("test_k8s_mcmr_integration_apply_garbage: passed");
     }
 
     // Test compute_garbage returns Ok(None).
     #[tokio::test]
-    async fn test_k8s_integration_compute_garbage() {
+    async fn test_k8s_mcmr_integration_compute_garbage() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1471,14 +1471,14 @@ mod tests {
             "compute_garbage should return None"
         );
 
-        println!("test_k8s_integration_compute_garbage: passed");
+        println!("test_k8s_mcmr_integration_compute_garbage: passed");
     }
 
     // ==================== Setsum consistency tests ====================
 
     // Test that publish_fragment correctly accumulates setsum in manifest.
     #[tokio::test]
-    async fn test_k8s_integration_publish_updates_manifest_setsum() {
+    async fn test_k8s_mcmr_integration_publish_updates_manifest_setsum() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1529,14 +1529,14 @@ mod tests {
         );
 
         println!(
-            "test_k8s_integration_publish_updates_manifest_setsum: final setsum={}",
+            "test_k8s_mcmr_integration_publish_updates_manifest_setsum: final setsum={}",
             loaded2.setsum.hexdigest()
         );
     }
 
     // Test manifest_head with ETag witness returns error (only Position is supported).
     #[tokio::test]
-    async fn test_k8s_integration_manifest_head_etag_witness() {
+    async fn test_k8s_mcmr_integration_manifest_head_etag_witness() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1554,7 +1554,7 @@ mod tests {
         match result {
             Err(Error::Internal { .. }) => {
                 println!(
-                    "test_k8s_integration_manifest_head_etag_witness: correctly returned Internal"
+                    "test_k8s_mcmr_integration_manifest_head_etag_witness: correctly returned Internal"
                 );
             }
             other => panic!("expected Internal error, got {:?}", other),
