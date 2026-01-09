@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
-    plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest,
-    GetResponse, IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
-    SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
+    plan::{ReadLevel, SearchPayload},
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
+    IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest, SearchResponse,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateMetadata,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
@@ -479,6 +480,7 @@ impl ChromaCollection {
             self.collection.database.clone(),
             self.collection.collection_id,
             searches,
+            ReadLevel::IndexAndWal,
         )?;
         let request = request.into_payload();
         self.send("search", "search", Method::POST, Some(request))
