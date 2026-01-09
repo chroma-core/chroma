@@ -7,6 +7,7 @@ import Header from "@/components/header/header";
 import PostHogProvider from "@/components/posthog/posthog-provider";
 import CloudSignUp from "@/components/header/cloud-signup";
 import HeaderNav from "@/components/header/header-nav";
+import GTM from "@/components/gtm";
 
 import "@/components/markdoc/code-block-themes.css";
 
@@ -55,6 +56,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body data-invert-bg="true" className={`${inter.className} antialiased bg-white dark:bg-black bg-[url(/composite_noise.jpg)] bg-repeat relative text-[#27201C] dark:text-white dark:backdrop-invert`}>
+        <GTM />
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
