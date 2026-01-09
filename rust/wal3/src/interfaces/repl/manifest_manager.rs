@@ -709,7 +709,7 @@ mod tests {
             rest_port: 9020,
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
-            database: "local-database".to_string(),
+            database: "local-logdb-database".to_string(),
         }
     }
 
