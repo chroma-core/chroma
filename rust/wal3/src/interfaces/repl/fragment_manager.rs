@@ -1206,7 +1206,7 @@ mod tests {
 
     // Single replica successfully uploads.
     #[tokio::test]
-    async fn replicated_uploader_single_replica_success() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_single_replica_success() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix1");
         let storages = Arc::new(vec![wrapper]);
@@ -1233,7 +1233,7 @@ mod tests {
 
     // Two replicas both successfully upload with consistent results.
     #[tokio::test]
-    async fn replicated_uploader_two_replicas_both_succeed() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_two_replicas_both_succeed() {
         let storage1 = s3_client_for_test_with_new_bucket().await;
         let storage2 = s3_client_for_test_with_new_bucket().await;
         let wrapper1 = make_storage_wrapper(storage1, "prefix1");
@@ -1262,7 +1262,7 @@ mod tests {
 
     // Three replicas with minimum replication of 2: all succeed.
     #[tokio::test]
-    async fn replicated_uploader_three_replicas_all_succeed() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_three_replicas_all_succeed() {
         let storage1 = s3_client_for_test_with_new_bucket().await;
         let storage2 = s3_client_for_test_with_new_bucket().await;
         let storage3 = s3_client_for_test_with_new_bucket().await;
@@ -1312,7 +1312,7 @@ mod tests {
 
     // Single replica with minimum replication factor of 2 yields ReplicationError.
     #[tokio::test]
-    async fn replicated_uploader_insufficient_replicas() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_insufficient_replicas() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
@@ -1340,7 +1340,7 @@ mod tests {
 
     // Verify error counter increments on storage failure (simulated by invalid storage config).
     #[tokio::test]
-    async fn replicated_uploader_error_counter_increments() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_error_counter_increments() {
         // Create one valid storage and one that will fail (using empty storage for simplicity).
         let storage1 = s3_client_for_test_with_new_bucket().await;
         let wrapper1 = make_storage_wrapper(storage1, "prefix1");
@@ -1380,7 +1380,7 @@ mod tests {
 
     // Same UUID uploaded twice to same storage should succeed (idempotent).
     #[tokio::test]
-    async fn replicated_uploader_same_uuid_twice() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_same_uuid_twice() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
@@ -1413,7 +1413,7 @@ mod tests {
 
     // Different messages produce different setsums (sanity check).
     #[tokio::test]
-    async fn replicated_uploader_different_messages_different_setsums() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_different_messages_different_setsums() {
         let storage1 = s3_client_for_test_with_new_bucket().await;
         let storage2 = s3_client_for_test_with_new_bucket().await;
         let wrapper1 = make_storage_wrapper(storage1, "prefix");
