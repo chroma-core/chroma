@@ -173,7 +173,7 @@ mod tests {
 
     // Test make_publisher returns a BatchManager.
     #[tokio::test]
-    async fn replicated_fragment_manager_factory_make_publisher() {
+    async fn test_k8s_mcmr_integration_replicated_fragment_manager_factory_make_publisher() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
         use std::time::Duration;
 
@@ -204,7 +204,7 @@ mod tests {
 
     // Test make_consumer returns a FragmentReader.
     #[tokio::test]
-    async fn replicated_fragment_manager_factory_make_consumer() {
+    async fn test_k8s_mcmr_integration_replicated_fragment_manager_factory_make_consumer() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
         use std::time::Duration;
 
