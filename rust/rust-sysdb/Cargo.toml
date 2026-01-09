@@ -29,3 +29,4 @@ google-cloud-spanner = { workspace = true }
 google-cloud-gax = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde_json = { workspace = true }
+chrono = { workspace = true }
