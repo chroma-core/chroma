@@ -24,8 +24,8 @@ pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
 pub use interfaces::s3::{
-    create_factories, upload_parquet, BatchManager, FragmentPuller, ManifestManager,
-    ManifestReader, S3FragmentManagerFactory, S3ManifestManagerFactory,
+    create_factories, upload_parquet, BatchManager, ManifestManager, ManifestReader,
+    S3FragmentManagerFactory, S3FragmentPuller, S3ManifestManagerFactory,
 };
 pub use interfaces::{
     FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher, ManifestConsumer,
@@ -35,7 +35,7 @@ pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
 };
 pub use quorum_writer::write_quorum;
-pub use reader::{checksum_parquet, scan_from_manifest, Limits, LogReader};
+pub use reader::{scan_from_manifest, Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
 pub use writer::{LogWriter, MarkDirty};
 
@@ -106,6 +106,8 @@ pub enum Error {
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
     StorageError(#[from] Arc<chroma_storage::StorageError>),
+    #[error("overflow error: {0}")]
+    Overflow(String),
 }
 
 impl Error {
@@ -142,6 +144,7 @@ impl chroma_error::ChromaError for Error {
             Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
+            Self::Overflow(_) => chroma_error::ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -772,6 +775,10 @@ pub fn parse_fragment_path(path: &str) -> Option<FragmentIdentifier> {
     } else {
         None
     }
+}
+
+pub fn fragment_path(prefix: &str, path: &str) -> String {
+    format!("{prefix}/{path}")
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
