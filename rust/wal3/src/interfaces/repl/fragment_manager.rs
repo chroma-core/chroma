@@ -1458,7 +1458,7 @@ mod tests {
 
     // Verify compute_mask updates last_decimation after interval elapsed.
     #[tokio::test]
-    async fn compute_mask_after_decimation_interval_elapsed() {
+    async fn test_k8s_mcmr_integration_compute_mask_after_decimation_interval_elapsed() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
@@ -1486,7 +1486,7 @@ mod tests {
 
     // Verify compute_mask behavior before decimation interval elapses.
     #[tokio::test]
-    async fn compute_mask_before_decimation_interval_elapsed() {
+    async fn test_k8s_mcmr_integration_compute_mask_before_decimation_interval_elapsed() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
@@ -1514,7 +1514,7 @@ mod tests {
 
     // Multiple simultaneous uploads to same replicas should all succeed.
     #[tokio::test]
-    async fn replicated_uploader_concurrent_uploads() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_concurrent_uploads() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
@@ -1625,7 +1625,7 @@ mod tests {
 
     // Upload with empty messages vector.
     #[tokio::test]
-    async fn replicated_uploader_empty_messages() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_empty_messages() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
@@ -1645,7 +1645,7 @@ mod tests {
 
     // Upload with single empty message.
     #[tokio::test]
-    async fn replicated_uploader_single_empty_message() {
+    async fn test_k8s_mcmr_integration_replicated_uploader_single_empty_message() {
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = make_storage_wrapper(storage, "prefix");
         let storages = Arc::new(vec![wrapper]);
