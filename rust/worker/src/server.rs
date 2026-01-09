@@ -624,9 +624,7 @@ impl WorkerServer {
         let scan = search_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
-        let read_level: ReadLevel = chroma_proto::ReadLevel::try_from(search_plan.read_level)
-            .unwrap_or(chroma_proto::ReadLevel::IndexAndWal)
-            .into();
+        let read_level: ReadLevel = search_plan.read_level().into();
 
         let futures = search_plan
             .payloads

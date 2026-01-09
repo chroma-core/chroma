@@ -593,9 +593,7 @@ impl TryFrom<chroma_proto::SearchPlan> for Search {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
-            read_level: chroma_proto::ReadLevel::try_from(value.read_level)
-                .unwrap_or(chroma_proto::ReadLevel::IndexAndWal)
-                .into(),
+            read_level: value.read_level().into(),
         })
     }
 }
