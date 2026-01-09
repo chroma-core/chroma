@@ -252,9 +252,21 @@ impl SysDb for SysdbService {
 
     async fn create_collection(
         &self,
-        _request: Request<CreateCollectionRequest>,
+        request: Request<CreateCollectionRequest>,
     ) -> Result<Response<CreateCollectionResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::CreateCollectionRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let proto_resp: CreateCollectionResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn delete_collection(
