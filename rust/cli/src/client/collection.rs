@@ -3,7 +3,7 @@ use crate::client::prelude::CollectionModel;
 use crate::client::utils::send_request;
 use chroma_types::{
     AddCollectionRecordsPayload, AddCollectionRecordsResponse, CountResponse, GetResponse,
-    IncludeList, Metadata,
+    IncludeList, IndexStatusResponse, Metadata,
 };
 use reqwest::Method;
 use serde_json::{json, Map, Value};
@@ -19,6 +19,8 @@ pub enum CollectionAPIError {
     Get(String),
     #[error("Failed to add records to collection {0}")]
     Add(String),
+    #[error("Failed to get indexing status from collection {0}")]
+    IndexingStatus(String),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -142,5 +144,23 @@ impl Collection {
         .await?;
 
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_indexing_status(&self) -> Result<IndexStatusResponse, Box<dyn Error>> {
+        let route = format!(
+            "/api/v2/tenants/{}/databases/{}/collections/{}/indexing_status",
+            self.chroma_client.tenant_id, self.chroma_client.db, self.collection.collection_id
+        );
+        let response = send_request::<(), IndexStatusResponse>(
+            &self.chroma_client.host,
+            Method::GET,
+            &route,
+            self.chroma_client.headers()?,
+            None,
+        )
+        .await
+        .map_err(|_| CollectionAPIError::IndexingStatus(self.collection.name.clone()))?;
+        Ok(response)
     }
 }

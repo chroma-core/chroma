@@ -1,4 +1,4 @@
-import { GetUserIdentityResponse, Include, SparseVector } from "./api";
+import { GetUserIdentityResponse, Include, IndexStatusResponse, SparseVector } from "./api";
 
 /**
  * User identity information including tenant and database access.
@@ -310,3 +310,8 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
     return queries;
   }
 }
+
+/**
+ * Re-export IndexStatusResponse type for external use
+ */
+export type IndexingStatus = IndexStatusResponse;
