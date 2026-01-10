@@ -266,7 +266,7 @@ mod tests {
 
     // Test init_manifest delegates to ManifestManager::init.
     #[tokio::test]
-    async fn replicated_manifest_manager_factory_init_manifest() {
+    async fn test_k8s_mcmr_integration_replicated_manifest_manager_factory_init_manifest() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -287,7 +287,8 @@ mod tests {
 
     // Test init_manifest fails on duplicate log_id.
     #[tokio::test]
-    async fn replicated_manifest_manager_factory_init_manifest_duplicate() {
+    async fn test_k8s_mcmr_integration_replicated_manifest_manager_factory_init_manifest_duplicate()
+    {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -313,7 +314,7 @@ mod tests {
 
     // Test open_publisher returns a ManifestManager.
     #[tokio::test]
-    async fn replicated_manifest_manager_factory_open_publisher() {
+    async fn test_k8s_mcmr_integration_replicated_manifest_manager_factory_open_publisher() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -333,7 +334,7 @@ mod tests {
 
     // Test make_consumer returns a ManifestManager.
     #[tokio::test]
-    async fn replicated_manifest_manager_factory_make_consumer() {
+    async fn test_k8s_mcmr_integration_replicated_manifest_manager_factory_make_consumer() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -353,7 +354,7 @@ mod tests {
 
     // Test that publisher from factory can be used to publish fragments.
     #[tokio::test]
-    async fn replicated_manifest_manager_factory_publisher_works() {
+    async fn test_k8s_mcmr_integration_replicated_manifest_manager_factory_publisher_works() {
         use crate::interfaces::ManifestPublisher;
         use crate::FragmentUuid;
         use setsum::Setsum;
@@ -398,7 +399,7 @@ mod tests {
 
     // Test that consumer from factory can load manifest.
     #[tokio::test]
-    async fn replicated_manifest_manager_factory_consumer_works() {
+    async fn test_k8s_mcmr_integration_replicated_manifest_manager_factory_consumer_works() {
         use crate::interfaces::ManifestConsumer;
 
         let Some(client) = setup_spanner_client().await else {
