@@ -13,13 +13,14 @@ use crate::{
     SnapshotPointer, ThrottleOptions,
 };
 
-pub mod batch_manager;
 pub mod fragment_puller;
+pub mod fragment_uploader;
 pub mod manifest_manager;
 pub mod manifest_reader;
 
-pub use batch_manager::{upload_parquet, BatchManager};
+pub use super::batch_manager::{upload_parquet, BatchManager};
 pub use fragment_puller::S3FragmentPuller;
+pub use fragment_uploader::S3FragmentUploader;
 pub use manifest_manager::ManifestManager;
 pub use manifest_reader::ManifestReader;
 
@@ -27,7 +28,7 @@ pub use manifest_reader::ManifestReader;
 ///
 /// This helper encapsulates the common factory setup logic, reducing boilerplate
 /// when opening logs.
-pub fn create_factories(
+pub fn create_s3_factories(
     write: LogWriterOptions,
     read: LogReaderOptions,
     storage: Arc<Storage>,
@@ -66,17 +67,18 @@ pub struct S3FragmentManagerFactory {
 #[async_trait::async_trait]
 impl FragmentManagerFactory for S3FragmentManagerFactory {
     type FragmentPointer = (FragmentSeqNo, LogPosition);
-    type Publisher = BatchManager;
+    type Publisher = BatchManager<Self::FragmentPointer, S3FragmentUploader>;
     type Consumer = S3FragmentPuller;
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
-        BatchManager::new(
+        let fragment_uploader = S3FragmentUploader::new(
             self.write.clone(),
             Arc::clone(&self.storage),
             self.prefix.clone(),
             Arc::clone(&self.mark_dirty),
-        )
-        .ok_or_else(|| Error::internal(file!(), line!()))
+        );
+        BatchManager::new(self.write.clone(), fragment_uploader)
+            .ok_or_else(|| Error::internal(file!(), line!()))
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
@@ -247,43 +249,29 @@ pub async fn manifest_load(
 }
 
 /// Reads a parquet fragment from storage and computes its setsum and records.
-async fn read_parquet(
+pub async fn read_parquet(
     storage: &Storage,
     prefix: &str,
     path: &str,
     starting_log_position: Option<LogPosition>,
-) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
     let path = fragment_path(prefix, path);
     let parquet = storage
         .get(&path, GetOptions::new(StorageRequestPriority::P0))
         .await
         .map_err(Arc::new)?;
     let num_bytes = parquet.len() as u64;
-    let (setsum, mut records, uses_relative_offsets) =
+    let (setsum, records, uses_relative_offsets, now_micros) =
         super::checksum_parquet(&parquet, starting_log_position)?;
     match (starting_log_position, uses_relative_offsets) {
-        (Some(starting_log_position), true) => {
-            for record in records.iter_mut() {
-                record.0 = LogPosition::from_offset(
-                    starting_log_position
-                        .offset()
-                        .checked_add(record.0.offset())
-                        .ok_or(Error::Overflow(format!(
-                            "log position overflow: {} + {}",
-                            starting_log_position.offset(),
-                            record.0.offset()
-                        )))?,
-                );
-            }
-            Ok((setsum, records, num_bytes))
-        }
-        (None, false) => Ok((setsum, records, num_bytes)),
+        (Some(_), true) => Ok((setsum, records, num_bytes, now_micros)),
         (Some(_), false) => Err(Error::internal(file!(), line!())),
+        (None, false) => Ok((setsum, records, num_bytes, now_micros)),
         (None, true) => Err(Error::internal(file!(), line!())),
     }
 }
 
-async fn read_fragment(
+pub async fn read_fragment(
     storage: &Storage,
     prefix: &str,
     path: &str,
@@ -296,7 +284,7 @@ async fn read_fragment(
     };
     let (setsum, data, num_bytes) =
         match read_parquet(storage, prefix, path, starting_log_position).await {
-            Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
+            Ok((setsum, data, num_bytes, _ts)) => (setsum, data, num_bytes),
             Err(Error::StorageError(storage)) => {
                 if matches!(&*storage, StorageError::NotFound { .. }) {
                     return Ok(None);

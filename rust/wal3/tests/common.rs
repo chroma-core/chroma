@@ -1,13 +1,68 @@
+use std::sync::Arc;
+use std::time::Duration;
+
 use bytes::Bytes;
+use chroma_config::spanner::SpannerEmulatorConfig;
 use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
+use google_cloud_gax::conn::Environment;
+use google_cloud_spanner::client::{Client, ClientConfig};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 extern crate wal3;
 
 use wal3::{
-    FragmentIdentifier, Garbage, LogPosition, ManifestReader, Snapshot, SnapshotPointer,
-    ThrottleOptions,
+    FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, ManifestReader,
+    ReplicatedFragmentOptions, Snapshot, SnapshotPointer, ThrottleOptions,
 };
+
+//////////////////////////////////////////// Repl Utilities /////////////////////////////////////////
+
+/// Returns the Spanner emulator configuration for tests.
+///
+/// Expects a Spanner emulator running locally (e.g., via Tilt).
+#[allow(dead_code)]
+pub fn emulator_config() -> SpannerEmulatorConfig {
+    SpannerEmulatorConfig {
+        host: "localhost".to_string(),
+        grpc_port: 9010,
+        rest_port: 9020,
+        project: "local-project".to_string(),
+        instance: "test-instance".to_string(),
+        database: "local-database".to_string(),
+    }
+}
+
+/// Creates a Spanner client connected to the emulator.
+///
+/// Panics if the emulator is not running.
+#[allow(dead_code)]
+pub async fn setup_spanner_client() -> Arc<Client> {
+    let emulator = emulator_config();
+    let client_config = ClientConfig {
+        environment: Environment::Emulator(emulator.grpc_endpoint()),
+        ..Default::default()
+    };
+    match Client::new(&emulator.database_path(), client_config).await {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            panic!(
+                "Failed to connect to Spanner emulator: {:?}. Is Tilt running?",
+                e
+            );
+        }
+    }
+}
+
+/// Returns default ReplicatedFragmentOptions for tests.
+#[allow(dead_code)]
+pub fn default_repl_options() -> ReplicatedFragmentOptions {
+    ReplicatedFragmentOptions {
+        minimum_allowed_replication_factor: 1,
+        minimum_failures_to_exclude_replica: 100,
+        decimation_interval: Duration::from_secs(3600),
+        slow_writer_tolerance: Duration::from_secs(30),
+    }
+}
 
 ///////////////////////////////////////////// Condition ////////////////////////////////////////////
 
@@ -22,6 +77,7 @@ pub enum Condition {
 
 ///////////////////////////////////////// ManifestCondition ////////////////////////////////////////
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ManifestCondition {
     pub acc_bytes: u64,
@@ -31,6 +87,7 @@ pub struct ManifestCondition {
 }
 
 impl ManifestCondition {
+    #[allow(dead_code)]
     pub async fn assert(&self, storage: &Storage, prefix: &str) {
         println!("assert_postconditions: Manifest: {:#?}", self);
         let manifest = ManifestReader::load(&ThrottleOptions::default(), storage, prefix)
@@ -65,6 +122,7 @@ impl ManifestCondition {
 
 ///////////////////////////////////////// SnapshotCondition ////////////////////////////////////////
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct SnapshotCondition {
     pub depth: u8,
@@ -77,6 +135,7 @@ pub struct SnapshotCondition {
 }
 
 impl SnapshotCondition {
+    #[allow(dead_code)]
     pub async fn assert(&self, storage: &Storage, prefix: &str, path: &str) {
         let key = format!("{prefix}/{}", path);
         let json = storage
@@ -100,6 +159,7 @@ impl SnapshotCondition {
         }
     }
 
+    #[allow(dead_code)]
     pub fn assert_snapshot_pointer(&self, snapshot: &SnapshotPointer) {
         assert_eq!(self.depth, snapshot.depth);
         assert_eq!(self.start, snapshot.start);
@@ -110,6 +170,7 @@ impl SnapshotCondition {
 
 ///////////////////////////////////////// FragmentCondition ////////////////////////////////////////
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct FragmentCondition {
     pub path: String,
@@ -121,6 +182,7 @@ pub struct FragmentCondition {
 }
 
 impl FragmentCondition {
+    #[allow(dead_code)]
     pub async fn assert(&self, storage: &Storage, prefix: &str) {
         let key = format!("{prefix}/{}", self.path);
         let parquet = storage
@@ -170,17 +232,19 @@ impl FragmentCondition {
 
 ///////////////////////////////////////// GarbageCondition /////////////////////////////////////////
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct GarbageCondition {
     pub snapshots_to_drop: Vec<SnapshotCondition>,
     pub snapshots_to_make: Vec<SnapshotCondition>,
     pub snapshot_for_root: Option<SnapshotCondition>,
-    pub fragments_to_drop_start: FragmentIdentifier,
-    pub fragments_to_drop_limit: FragmentIdentifier,
+    pub fragments_to_drop_start: FragmentSeqNo,
+    pub fragments_to_drop_limit: FragmentSeqNo,
     pub first_to_keep: LogPosition,
 }
 
 impl GarbageCondition {
+    #[allow(dead_code)]
     pub async fn assert(&self, storage: &Storage, prefix: &str) {
         println!("asserting garbage condition {self:#?}");
         let garbage = Garbage::load(&ThrottleOptions::default(), storage, prefix)
@@ -242,6 +306,7 @@ impl GarbageCondition {
 
 ///////////////////////////////////////// assert_conditions ////////////////////////////////////////
 
+#[allow(dead_code)]
 pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: &[Condition]) {
     for postcondition in postconditions {
         match postcondition {

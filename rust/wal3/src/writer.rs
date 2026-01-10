@@ -15,6 +15,7 @@ use setsum::Setsum;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::interfaces::s3::fragment_uploader::S3FragmentUploader;
 use crate::interfaces::{
     FragmentManagerFactory, FragmentPointer, FragmentPublisher, ManifestManagerFactory,
     ManifestPublisher,
@@ -22,7 +23,7 @@ use crate::interfaces::{
 use crate::{
     BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
     FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
+    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -32,7 +33,7 @@ use crate::{
 #[derive(Clone)]
 pub struct EpochWriter<
     P: FragmentPointer = (FragmentSeqNo, LogPosition),
-    FP: FragmentPublisher<FragmentPointer = P> = BatchManager,
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager<P, S3FragmentUploader>,
     MP: ManifestPublisher<P> = ManifestManager,
 > {
     epoch: u64,
@@ -204,8 +205,9 @@ impl<
         if num_records > 0 {
             let fragment_publisher = new_fragment_publisher.make_publisher().await?;
             let pointer = P::bootstrap(first_record_offset);
+            let epoch_micros = now_micros();
             let (path, setsum, num_bytes) = fragment_publisher
-                .upload_parquet(&pointer, messages, cmek)
+                .upload_parquet(&pointer, messages, cmek, epoch_micros)
                 .await?;
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
@@ -280,7 +282,6 @@ impl<
             options,
             fragment_consumer,
             manifest_consumer,
-            self.prefix.clone(),
         ))
     }
 
@@ -294,13 +295,13 @@ impl<
         ))
     }
 
-    pub async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+    pub async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
         let inner = {
             // SAFETY(rescrv):  Mutex poisoning.
             let inner = self.inner.lock().unwrap();
             Arc::clone(inner.writer.as_ref().ok_or_else(|| Error::LogClosed)?)
         };
-        inner.manifest_and_etag().await
+        inner.manifest_and_witness().await
     }
 
     pub async fn garbage_collect_phase1_compute_garbage(
@@ -514,7 +515,7 @@ impl<
 /// the perspective of initialization.
 pub(crate) struct OnceLogWriter<
     P: FragmentPointer = (FragmentSeqNo, LogPosition),
-    FP: FragmentPublisher<FragmentPointer = P> = BatchManager,
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager<P, S3FragmentUploader>,
     MP: ManifestPublisher<P> = ManifestManager,
 > {
     /// LogWriterOptions are fixed at log creation time.
@@ -609,8 +610,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         }))
     }
 
-    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
-        self.manifest_manager.manifest_and_etag().await
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+        self.manifest_manager.manifest_and_witness().await
     }
 
     fn shutdown(&self) {
@@ -725,9 +726,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
         let messages_len = messages.len();
+        let epoch_micros = now_micros();
         let res = self
             .batch_manager
-            .upload_parquet(&pointer, messages, self.cmek.clone())
+            .upload_parquet(&pointer, messages, self.cmek.clone(), epoch_micros)
             .await;
         let (path, setsum, num_bytes) = res.inspect_err(|_| {
             self.shutdown();
@@ -736,6 +738,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             .manifest_manager
             .publish_fragment(
                 &pointer,
+                &["dummy"],
                 &path,
                 messages_len as u64,
                 num_bytes as u64,
@@ -1022,20 +1025,25 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     }
 }
 
+/// Returns the current epoch time in microseconds.
+pub fn now_micros() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_micros() as u64
+}
+
 #[tracing::instrument(skip(messages))]
 pub fn construct_parquet(
     log_position: Option<LogPosition>,
     messages: &[Vec<u8>],
+    epoch_micros: u64,
 ) -> Result<(Vec<u8>, Setsum), Error> {
     // Construct the columns and construct the setsum.
     let mut setsum = Setsum::default();
     let messages_len = messages.len();
     let mut positions = Vec::with_capacity(messages_len);
     let mut bodies = Vec::with_capacity(messages_len);
-    let epoch_micros = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_micros() as u64;
     let relative = log_position.is_none();
     let log_position = log_position.unwrap_or_default();
     for (index, message) in messages.iter().enumerate() {
@@ -1090,13 +1098,15 @@ mod tests {
 
     use crate::interfaces::checksum_parquet;
 
+    const TEST_EPOCH_MICROS: u64 = 1234567890123456;
+
     /// Verifies that construct_parquet with Some(log_position) creates absolute offsets.
     #[test]
     fn construct_parquet_with_some_log_position_uses_absolute_offsets() {
         let log_position = LogPosition::from_offset(100);
         let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
 
-        let (buffer, setsum) = construct_parquet(Some(log_position), &messages)
+        let (buffer, setsum) = construct_parquet(Some(log_position), &messages, TEST_EPOCH_MICROS)
             .expect("construct_parquet should succeed");
 
         // Verify that the parquet buffer is non-empty.
@@ -1169,8 +1179,8 @@ mod tests {
             vec![100, 110, 120],
         ];
 
-        let (buffer, setsum) =
-            construct_parquet(None, &messages).expect("construct_parquet should succeed");
+        let (buffer, setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
 
         // Verify that the parquet buffer is non-empty.
         assert!(!buffer.is_empty(), "parquet buffer should not be empty");
@@ -1255,12 +1265,15 @@ mod tests {
     fn construct_parquet_setsum_differs_based_on_log_position() {
         let messages = vec![vec![1, 2, 3]];
 
-        let (_, setsum_with_position) =
-            construct_parquet(Some(LogPosition::from_offset(100)), &messages)
-                .expect("construct_parquet with Some should succeed");
+        let (_, setsum_with_position) = construct_parquet(
+            Some(LogPosition::from_offset(100)),
+            &messages,
+            TEST_EPOCH_MICROS,
+        )
+        .expect("construct_parquet with Some should succeed");
 
-        let (_, setsum_without_position) =
-            construct_parquet(None, &messages).expect("construct_parquet with None should succeed");
+        let (_, setsum_without_position) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet with None should succeed");
 
         // The setsums should differ because the offset used in the setsum calculation differs.
         // With Some(100), offset is 100. With None, offset is 0.
@@ -1280,12 +1293,16 @@ mod tests {
     fn construct_parquet_with_empty_messages() {
         let messages: Vec<Vec<u8>> = vec![];
 
-        let (buffer_with_pos, setsum_with_pos) =
-            construct_parquet(Some(LogPosition::from_offset(1)), &messages)
-                .expect("construct_parquet with Some and empty messages should succeed");
+        let (buffer_with_pos, setsum_with_pos) = construct_parquet(
+            Some(LogPosition::from_offset(1)),
+            &messages,
+            TEST_EPOCH_MICROS,
+        )
+        .expect("construct_parquet with Some and empty messages should succeed");
 
-        let (buffer_without_pos, setsum_without_pos) = construct_parquet(None, &messages)
-            .expect("construct_parquet with None and empty messages should succeed");
+        let (buffer_without_pos, setsum_without_pos) =
+            construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet with None and empty messages should succeed");
 
         // Both should produce non-empty parquet files (even with 0 rows).
         assert!(
@@ -1321,7 +1338,7 @@ mod tests {
         let log_position = LogPosition::from_offset(0);
         let messages = vec![vec![1], vec![2]];
 
-        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages)
+        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages, TEST_EPOCH_MICROS)
             .expect("construct_parquet should succeed");
 
         let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
@@ -1357,7 +1374,7 @@ mod tests {
         let log_position = LogPosition::from_offset(u64::MAX - 2);
         let messages = vec![vec![1], vec![2], vec![3]];
 
-        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages)
+        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages, TEST_EPOCH_MICROS)
             .expect("construct_parquet should succeed");
 
         let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
@@ -1406,12 +1423,13 @@ mod tests {
         let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
 
         // Write with relative offsets (None) - setsum computed with offsets 0, 1, 2
-        let (buffer, setsum_from_writer) =
-            construct_parquet(None, &messages).expect("construct_parquet with None should succeed");
+        let (buffer, setsum_from_writer) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet with None should succeed");
 
         // Read back with checksum_parquet (no starting position)
-        let (setsum_from_reader, records, uses_relative_offsets) =
-            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, Some(LogPosition::from_offset(100)))
+                .expect("checksum_parquet should succeed");
 
         println!(
             "relative_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
@@ -1424,6 +1442,9 @@ mod tests {
             "should detect relative offsets in parquet"
         );
         assert_eq!(records.len(), 3, "should have 3 records");
+        assert_eq!(records[0].0.offset(), 100);
+        assert_eq!(records[1].0.offset(), 101);
+        assert_eq!(records[2].0.offset(), 102);
         assert_eq!(
             setsum_from_writer, setsum_from_reader,
             "writer and reader setsums should match for relative-offset files"
@@ -1438,13 +1459,13 @@ mod tests {
         let starting_position = LogPosition::from_offset(100);
 
         // Write with absolute offsets
-        let (buffer, setsum_from_writer) = construct_parquet(Some(starting_position), &messages)
-            .expect("construct_parquet should succeed");
+        let (buffer, setsum_from_writer) =
+            construct_parquet(Some(starting_position), &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet should succeed");
 
         // Read back with checksum_parquet
-        let (setsum_from_reader, records, uses_relative_offsets) =
-            checksum_parquet(&buffer, Some(starting_position))
-                .expect("checksum_parquet should succeed");
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
 
         println!(
             "absolute_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",

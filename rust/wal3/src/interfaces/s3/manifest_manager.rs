@@ -10,7 +10,7 @@ use setsum::Setsum;
 use crate::gc::Garbage;
 use crate::interfaces::s3::read_fragment;
 use crate::interfaces::{ManifestPublisher, ManifestWitness};
-use crate::manifest::{Manifest, ManifestAndETag, Snapshot, SnapshotPointer};
+use crate::manifest::{Manifest, ManifestAndWitness, Snapshot, SnapshotPointer};
 use crate::writer::MarkDirty;
 use crate::{
     unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
@@ -24,7 +24,7 @@ use crate::{
 struct Staging {
     /// This is the manifest and e-tag most recently witnessed in storage.  It will be gotten at
     /// startup and will be maintained by the background thread.
-    stable: ManifestAndETag,
+    stable: ManifestAndWitness,
     /// Fragments that are waiting to be applied.  These are fragments that are in any order.
     fragments: Vec<(Fragment, tokio::sync::oneshot::Sender<Option<Error>>)>,
     /// The next timestamp to assign.
@@ -140,9 +140,13 @@ impl Staging {
             snapshot
         };
         self.next_seq_no_to_apply = next_seq_no_to_apply;
+        let ManifestWitness::ETag(e_tag) = &self.stable.witness else {
+            tracing::error!("ManifestWitness is not an ETag in S3 manifest manager");
+            return None;
+        };
         Some((
             self.stable.manifest.clone(),
-            self.stable.e_tag.clone(),
+            e_tag.clone(),
             new_manifest,
             next_seq_no_to_apply,
             snapshot,
@@ -176,9 +180,13 @@ impl Staging {
                     return None;
                 }
             };
+            let ManifestWitness::ETag(e_tag) = &self.stable.witness else {
+                tracing::error!("ManifestWitness is not an ETag in S3 manifest manager");
+                return None;
+            };
             Some((
                 self.stable.manifest.clone(),
-                self.stable.e_tag.clone(),
+                e_tag.clone(),
                 new_manifest,
                 self.next_seq_no_to_apply,
                 None,
@@ -244,7 +252,10 @@ impl ManifestManager {
             return Err(Error::internal(file!(), line!()));
         };
         let next_seq_no_to_apply = next_seq_no_to_assign;
-        let stable = ManifestAndETag { manifest, e_tag };
+        let stable = ManifestAndWitness {
+            manifest,
+            witness: ManifestWitness::ETag(e_tag),
+        };
         let staging = Mutex::new(Staging {
             stable,
             fragments: vec![],
@@ -270,7 +281,7 @@ impl ManifestManager {
     }
 
     /// Return the latest stable manifest
-    pub fn latest(&self) -> ManifestAndETag {
+    pub fn latest(&self) -> ManifestAndWitness {
         let staging = self.staging.lock().unwrap();
         staging.stable.clone()
     }
@@ -312,9 +323,9 @@ impl ManifestManager {
                         {
                             let mut staging = self.staging.lock().unwrap();
                             staging.next_seq_no_to_apply = next_seq_no_to_apply;
-                            staging.stable = ManifestAndETag {
+                            staging.stable = ManifestAndWitness {
                                 manifest: new_manifest,
-                                e_tag,
+                                witness: ManifestWitness::ETag(e_tag),
                             };
                         }
                         for notifier in notifiers.into_iter() {
@@ -539,6 +550,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             match self
                 .publish_fragment(
                     &(fragment_seq_no, log_position),
+                    &[],
                     &fragment.path,
                     fragment
                         .limit
@@ -562,7 +574,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
     }
 
     /// Return a possibly-stale version of the manifest.
-    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, Error> {
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
         let staging = self.staging.lock().unwrap();
         Ok(staging.stable.clone())
     }
@@ -596,6 +608,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
     async fn publish_fragment(
         &self,
         (seq_no, log_position): &(FragmentSeqNo, LogPosition),
+        _: &[&str],
         path: &str,
         num_records: u64,
         num_bytes: u64,
@@ -728,23 +741,6 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             }
             retry_count += 1;
         }
-    }
-
-    async fn manifest_init(&self, initial: &Manifest) -> Result<(), Error> {
-        let payload = serde_json::to_string(initial)
-            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
-            .into_bytes();
-        self.storage
-            .put_bytes(
-                &crate::manifest::manifest_path(&self.prefix),
-                payload,
-                PutOptions::default()
-                    .with_priority(StorageRequestPriority::P0)
-                    .with_mode(PutMode::IfNotExist),
-            )
-            .await
-            .map_err(Arc::new)?;
-        Ok(())
     }
 
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error> {

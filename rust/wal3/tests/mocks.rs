@@ -6,7 +6,7 @@ use setsum::Setsum;
 use wal3::ManifestWitness;
 use wal3::{
     Error, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, Manifest,
-    ManifestAndETag, ManifestPublisher, Snapshot, SnapshotPointer,
+    ManifestAndWitness, ManifestPublisher, Snapshot, SnapshotPointer,
 };
 
 /// A mock ManifestPublisher that delegates snapshot_load to a SnapshotCache.
@@ -28,7 +28,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
         Ok(())
     }
 
-    async fn manifest_and_etag(&self) -> Result<ManifestAndETag, wal3::Error> {
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, wal3::Error> {
         Err(wal3::Error::UninitializedLog)
     }
 
@@ -39,6 +39,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     async fn publish_fragment(
         &self,
         _pointer: &(FragmentSeqNo, LogPosition),
+        _regions: &[&str],
         _path: &str,
         _messages_len: u64,
         _num_bytes: u64,
@@ -79,10 +80,6 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     }
 
     fn shutdown(&self) {}
-
-    async fn manifest_init(&self, _: &Manifest) -> Result<(), Error> {
-        Err(wal3::Error::UninitializedLog)
-    }
 
     async fn manifest_head(&self, _: &ManifestWitness) -> Result<bool, Error> {
         Err(wal3::Error::UninitializedLog)

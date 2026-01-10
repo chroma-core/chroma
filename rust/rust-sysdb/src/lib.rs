@@ -30,5 +30,5 @@ pub async fn sysdb_service_entrypoint() {
     };
 
     // Server will run until it receives a shutdown signal
-    server::SysdbService::run(sysdb_server).await;
+    Box::pin(server::SysdbService::run(sysdb_server)).await;
 }

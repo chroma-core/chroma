@@ -46,10 +46,10 @@ use tonic::{transport::Server, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
-    create_factories, scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions,
+    create_s3_factories, scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions,
     CursorWitness, Fragment, FragmentConsumer, FragmentManagerFactory, FragmentSeqNo,
     GarbageCollectionOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
-    LogWriterOptions, Manifest, ManifestAndETag, ManifestManagerFactory, ManifestReader,
+    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManagerFactory, ManifestReader,
     MarkDirty as MarkDirtyTrait, S3FragmentManagerFactory, S3FragmentPuller,
     S3ManifestManagerFactory, Snapshot, SnapshotCache, SnapshotPointer,
 };
@@ -309,7 +309,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         });
     }
     let mark_dirty_arc: Arc<dyn MarkDirtyTrait> = Arc::new(mark_dirty);
-    let (fragment_publisher_factory, manifest_publisher_factory) = create_factories(
+    let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
         options.clone(),
         LogReaderOptions::default(),
         Arc::clone(storage),
@@ -676,7 +676,7 @@ impl LogServer {
 
     /// Creates a LogReader for the given prefix with default (no-op) mark_dirty and snapshot_cache.
     async fn make_log_reader(&self, prefix: String) -> Result<S3LogReader, wal3::Error> {
-        let (fragment_factory, manifest_factory) = create_factories(
+        let (fragment_factory, manifest_factory) = create_s3_factories(
             self.config.writer.clone(),
             self.config.reader.clone(),
             Arc::clone(&self.storage),
@@ -691,7 +691,6 @@ impl LogServer {
             self.config.reader.clone(),
             fragment_consumer,
             manifest_consumer,
-            prefix,
         ))
     }
 
@@ -702,7 +701,7 @@ impl LogServer {
     ) -> Result<S3LogReader, wal3::Error> {
         let writer_options = LogWriterOptions::default();
         let reader_options = LogReaderOptions::default();
-        let (fragment_factory, manifest_factory) = create_factories(
+        let (fragment_factory, manifest_factory) = create_s3_factories(
             writer_options,
             reader_options.clone(),
             Arc::clone(&storage),
@@ -717,7 +716,6 @@ impl LogServer {
             reader_options,
             fragment_consumer,
             manifest_consumer,
-            prefix,
         ))
     }
 
@@ -1133,7 +1131,7 @@ impl LogServer {
         let dirty_futures = dirty_fragments
             .iter()
             .map(|fragment| async {
-                let (_, records, _) = reader.read_parquet(fragment).await?;
+                let (_, records, _, _) = reader.read_parquet(fragment).await?;
                 let records = records
                     .into_iter()
                     .flat_map(|x| match serde_json::from_slice::<DirtyMarker>(&x.1) {
@@ -1371,7 +1369,7 @@ impl LogServer {
         };
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_manifest_and_etag(collection_id);
-            if let Ok(manifest_and_etag) = log.manifest_and_etag().await {
+            if let Ok(manifest_and_etag) = log.manifest_and_witness().await {
                 if let Ok(manifest_and_etag_bytes) = serde_json::to_vec(&manifest_and_etag) {
                     let cache_value = CachedBytes {
                         bytes: manifest_and_etag_bytes,
@@ -1403,7 +1401,7 @@ impl LogServer {
         let mut cached_manifest_and_e_tag = None;
         if let Some(cache) = self.cache.as_ref() {
             if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
-                let met = serde_json::from_slice::<ManifestAndETag>(&cache_bytes.bytes).ok();
+                let met = serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes).ok();
                 cached_manifest_and_e_tag = met;
             }
         }
@@ -1421,43 +1419,44 @@ impl LogServer {
                 cached_manifest_and_e_tag.take();
             }
         }
-        let (start_position, limit_position) =
-            if let Some(manifest_and_e_tag) = cached_manifest_and_e_tag {
-                (
-                    manifest_and_e_tag.manifest.oldest_timestamp(),
-                    manifest_and_e_tag.manifest.next_write_timestamp(),
-                )
-            } else {
-                let (start_position, limit_position) = match log_reader.manifest_and_e_tag().await {
-                    Ok(Some(manifest_and_e_tag)) => {
-                        if let Some(cache) = self.cache.as_ref() {
-                            let json = serde_json::to_string(&manifest_and_e_tag)
-                                .map_err(|err| Status::unknown(err.to_string()))?;
-                            let cached_bytes = CachedBytes {
-                                bytes: Vec::from(json),
-                            };
-                            cache.insert(cache_key, cached_bytes).await;
-                        }
-                        (
-                            manifest_and_e_tag.manifest.oldest_timestamp(),
-                            manifest_and_e_tag.manifest.next_write_timestamp(),
-                        )
+        let (start_position, limit_position) = if let Some(manifest_and_e_tag) =
+            cached_manifest_and_e_tag
+        {
+            (
+                manifest_and_e_tag.manifest.oldest_timestamp(),
+                manifest_and_e_tag.manifest.next_write_timestamp(),
+            )
+        } else {
+            let (start_position, limit_position) = match log_reader.manifest_and_witness().await {
+                Ok(Some(manifest_and_e_tag)) => {
+                    if let Some(cache) = self.cache.as_ref() {
+                        let json = serde_json::to_string(&manifest_and_e_tag)
+                            .map_err(|err| Status::unknown(err.to_string()))?;
+                        let cached_bytes = CachedBytes {
+                            bytes: Vec::from(json),
+                        };
+                        cache.insert(cache_key, cached_bytes).await;
                     }
-                    Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
-                    Err(wal3::Error::UninitializedLog) => {
-                        return Err(Status::not_found(format!(
-                            "collection {collection_id} not found"
-                        )));
-                    }
-                    Err(err) => {
-                        return Err(Status::new(
-                            err.code().into(),
-                            format!("could not scout logs: {err:?}"),
-                        ));
-                    }
-                };
-                (start_position, limit_position)
+                    (
+                        manifest_and_e_tag.manifest.oldest_timestamp(),
+                        manifest_and_e_tag.manifest.next_write_timestamp(),
+                    )
+                }
+                Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+                Err(wal3::Error::UninitializedLog) => {
+                    return Err(Status::not_found(format!(
+                        "collection {collection_id} not found"
+                    )));
+                }
+                Err(err) => {
+                    return Err(Status::new(
+                        err.code().into(),
+                        format!("could not scout logs: {err:?}"),
+                    ));
+                }
             };
+            (start_position, limit_position)
+        };
         let start_offset = start_position.offset() as i64;
         let limit_offset = limit_position.offset() as i64;
         Ok(Response::new(ScoutLogsResponse {
@@ -1491,7 +1490,7 @@ impl LogServer {
         if let Some(cache) = self.cache.as_ref() {
             let cache_key = cache_key_for_manifest_and_etag(collection_id);
             let cached_bytes = cache.get(&cache_key).await.ok().flatten()?;
-            let manifest_and_etag: ManifestAndETag =
+            let manifest_and_etag: ManifestAndWitness =
                 serde_json::from_slice(&cached_bytes.bytes).ok()?;
             let limits = Limits {
                 max_files: Some(pull_logs.batch_size as u64 + 1),
@@ -1649,21 +1648,31 @@ impl LogServer {
         // This is the existing compaction_offset, which is the next record to compact.
         let cursor = witness.map(|x| x.cursor.position);
         tracing::event!(Level::INFO, offset = ?cursor);
-        let target_manifest_factory = S3ManifestManagerFactory {
-            write: options,
-            read: self.config.reader.clone(),
-            storage: Arc::clone(&storage),
-            prefix: target_prefix.clone(),
-            writer: "copy".to_string(),
-            mark_dirty: Arc::new(()),
-            snapshot_cache: Arc::new(()),
-        };
+        let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
+            options,
+            self.config.reader.clone(),
+            Arc::clone(&storage),
+            target_prefix.clone(),
+            "copy".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let target_fragment_publisher =
+            target_fragment_factory
+                .make_publisher()
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("Failed to create fragment publisher: {}", err),
+                    )
+                })?;
         wal3::copy(
-            &storage,
             &log_reader,
             cursor.unwrap_or(LogPosition::from_offset(1)),
-            target_prefix.clone(),
+            &target_fragment_publisher,
             target_manifest_factory,
+            None,
         )
         .await
         .map_err(|err| Status::new(err.code().into(), format!("Failed to copy log: {}", err)))?;
@@ -1852,7 +1861,7 @@ impl LogServer {
                 )
             })?;
         let mut markers = vec![];
-        for (_, records, _) in dirty_raw {
+        for (_, records, _, _) in dirty_raw {
             let records = records
                 .into_iter()
                 .map(|x| String::from_utf8(x.1))
@@ -2542,7 +2551,7 @@ impl Configurable<LogServerConfig> for LogServer {
         let dirty_log_prefix = MarkDirty::path_for_hostname(&config.my_member_id);
         // Dirty log doesn't mark anything dirty (it is itself the dirty log).
         let (dirty_log_fragment_publisher_factory, dirty_log_manifest_publisher_factory) =
-            create_factories(
+            create_s3_factories(
                 config.writer.clone(),
                 config.reader.clone(),
                 Arc::clone(&storage),
@@ -3764,7 +3773,7 @@ mod tests {
             },
             ..Default::default()
         };
-        let (fragment_publisher_factory, manifest_publisher_factory) = create_factories(
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
             writer_options.clone(),
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3957,7 +3966,7 @@ mod tests {
     ) {
         'to_the_top: loop {
             let prefix = collection_id.storage_prefix_for_log();
-            let (fragment_publisher_factory, manifest_publisher_factory) = create_factories(
+            let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
                 server.config.writer.clone(),
                 server.config.reader.clone(),
                 Arc::clone(&server.storage),
@@ -4339,7 +4348,7 @@ mod tests {
 
         // Create the dirty log writer
         let options = LogWriterOptions::default();
-        let (fragment_publisher_factory, manifest_publisher_factory) = create_factories(
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
             options.clone(),
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -4381,7 +4390,7 @@ mod tests {
         // Manually initialize a log for this collection to avoid "proxy not initialized" error
         let storage_prefix = collection_id.storage_prefix_for_log();
         let options2 = LogWriterOptions::default();
-        let (fragment_publisher_factory2, manifest_publisher_factory2) = create_factories(
+        let (fragment_publisher_factory2, manifest_publisher_factory2) = create_s3_factories(
             options2.clone(),
             LogReaderOptions::default(),
             Arc::clone(&log_server.storage),

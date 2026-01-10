@@ -13,7 +13,7 @@ use futures::future::try_join_all;
 use thiserror::Error;
 use tracing::Level;
 use wal3::{
-    create_factories, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector, LogPosition,
+    create_s3_factories, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector, LogPosition,
     LogReaderOptions, LogWriterOptions, ManifestManager, S3FragmentManagerFactory,
     S3ManifestManagerFactory, SnapshotOptions, ThrottleOptions,
 };
@@ -83,7 +83,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                 log_gc_futures.push(async move {
                     let prefix = collection_id.storage_prefix_for_log();
                     let options = LogWriterOptions::default();
-                    let (fragment_manager_factory, manifest_manager_factory) = create_factories(
+                    let (fragment_manager_factory, manifest_manager_factory) = create_s3_factories(
                         options.clone(),
                         LogReaderOptions::default(),
                         storage_clone.clone(),
