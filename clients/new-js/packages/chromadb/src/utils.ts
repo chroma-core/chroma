@@ -494,8 +494,7 @@ export const validateWhere = (where: Where) => {
 
   if (Object.keys(where).length != 1) {
     throw new ChromaValueError(
-      `Expected 'where' to have exactly one operator, but got ${
-        Object.keys(where).length
+      `Expected 'where' to have exactly one operator, but got ${Object.keys(where).length
       }`,
     );
   }
@@ -717,6 +716,7 @@ export const parseConnectionPath = (path: string) => {
     throw new ChromaValueError(`Invalid URL: ${path}`);
   }
 };
+
 const packEmbedding = (embedding: number[]): ArrayBuffer => {
   const buffer = new ArrayBuffer(embedding.length * 4);
   const view = new Float32Array(buffer);
@@ -726,14 +726,24 @@ const packEmbedding = (embedding: number[]): ArrayBuffer => {
   return buffer;
 };
 
-export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
+const portableEmbeddingsToBase64Bytes = (embeddings: number[][]) => {
   return embeddings.map((embedding) => {
     const buffer = packEmbedding(embedding);
-
     const uint8Array = new Uint8Array(buffer);
     const binaryString = Array.from(uint8Array, (byte) =>
       String.fromCharCode(byte),
     ).join("");
     return btoa(binaryString);
   });
+};
+
+function bufferEmbeddingsToBase64(embeddings: number[][]): string[] {
+  return embeddings.map((embedding) => {
+    const float32 = new Float32Array(embedding);
+    return Buffer.from(float32.buffer).toString("base64");
+  });
+}
+
+export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
+  return typeof Buffer !== "undefined" ? bufferEmbeddingsToBase64(embeddings) : portableEmbeddingsToBase64Bytes(embeddings);
 };
