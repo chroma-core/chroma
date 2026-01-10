@@ -269,6 +269,20 @@ impl TryFrom<Filter> for chroma_proto::FilterOperator {
     }
 }
 
+impl Filter {
+    /// Returns a masked copy suitable for logging.
+    /// Sensitive values are replaced with placeholders while preserving structure.
+    pub fn masked(&self) -> Self {
+        Filter {
+            query_ids: self
+                .query_ids
+                .as_ref()
+                .map(|ids| vec![format!("<len:{}>", ids.len())]),
+            where_clause: self.where_clause.as_ref().map(|w| w.masked()),
+        }
+    }
+}
+
 /// The `Knn` operator searches for the nearest neighbours of the specified embedding. This is intended to use by executor
 ///
 /// # Parameters
@@ -896,6 +910,27 @@ impl From<SparseVector> for QueryVector {
     }
 }
 
+impl QueryVector {
+    /// Returns a masked copy suitable for logging.
+    /// Embedding data is replaced with dimension/size information.
+    pub fn masked(&self) -> Self {
+        match self {
+            QueryVector::Dense(vec) => {
+                // Single element encoding the dimension
+                QueryVector::Dense(vec![vec.len() as f32])
+            }
+            QueryVector::Sparse(sparse) => {
+                // Encode nnz (number of non-zeros) as single elements
+                QueryVector::Sparse(SparseVector {
+                    indices: vec![sparse.indices.len() as u32],
+                    values: vec![sparse.values.len() as f32],
+                    tokens: None,
+                })
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct KnnQuery {
     pub query: QueryVector,
@@ -945,6 +980,14 @@ impl Rank {
             .as_ref()
             .map(RankExpr::knn_queries)
             .unwrap_or_default()
+    }
+
+    /// Returns a masked copy suitable for logging.
+    /// Sensitive values are replaced with placeholders while preserving structure.
+    pub fn masked(&self) -> Self {
+        Rank {
+            expr: self.expr.as_ref().map(|e| e.masked()),
+        }
     }
 }
 
@@ -1378,6 +1421,50 @@ impl RankExpr {
                 }
                 _ => RankExpr::Minimum(vec![self, other]),
             },
+        }
+    }
+
+    /// Returns a masked copy suitable for logging.
+    /// Embedding data is replaced with dimension/size information while preserving structure.
+    pub fn masked(&self) -> Self {
+        match self {
+            RankExpr::Absolute(expr) => RankExpr::Absolute(Box::new(expr.masked())),
+            RankExpr::Division { left, right } => RankExpr::Division {
+                left: Box::new(left.masked()),
+                right: Box::new(right.masked()),
+            },
+            RankExpr::Exponentiation(expr) => RankExpr::Exponentiation(Box::new(expr.masked())),
+            RankExpr::Knn {
+                query,
+                key,
+                limit,
+                default,
+                return_rank,
+            } => RankExpr::Knn {
+                query: query.masked(),
+                key: key.clone(),
+                limit: *limit,
+                default: *default,
+                return_rank: *return_rank,
+            },
+            RankExpr::Logarithm(expr) => RankExpr::Logarithm(Box::new(expr.masked())),
+            RankExpr::Maximum(exprs) => {
+                RankExpr::Maximum(exprs.iter().map(|e| e.masked()).collect())
+            }
+            RankExpr::Minimum(exprs) => {
+                RankExpr::Minimum(exprs.iter().map(|e| e.masked()).collect())
+            }
+            RankExpr::Multiplication(exprs) => {
+                RankExpr::Multiplication(exprs.iter().map(|e| e.masked()).collect())
+            }
+            RankExpr::Subtraction { left, right } => RankExpr::Subtraction {
+                left: Box::new(left.masked()),
+                right: Box::new(right.masked()),
+            },
+            RankExpr::Summation(exprs) => {
+                RankExpr::Summation(exprs.iter().map(|e| e.masked()).collect())
+            }
+            RankExpr::Value(v) => RankExpr::Value(*v),
         }
     }
 }
