@@ -35,6 +35,7 @@ from chromadb.api.types import (
     IndexingStatus,
     Schema,
     Metadatas,
+    ReadLevel,
     URIs,
     Where,
     WhereDocument,
@@ -444,9 +445,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
-        payload = {"searches": [s.to_dict() for s in searches]}
+        payload = {
+            "searches": [s.to_dict() for s in searches],
+            "read_level": read_level,
+        }
 
         resp_json = await self._make_request(
             "post",

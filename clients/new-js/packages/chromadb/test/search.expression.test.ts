@@ -496,4 +496,73 @@ describe("search expression DSL", () => {
     expect(knnPayload.key).toBe("sparse_metadata");
     expect(knnPayload.limit).toBe(10);
   });
+
+  test("search passes readLevel option to API", async () => {
+    const { ReadLevel } = await import("../src/types");
+
+    let capturedBody: any;
+    const mockChromaClient = {
+      getMaxBatchSize: jest.fn<() => Promise<number>>().mockResolvedValue(1000),
+      supportsBase64Encoding: jest.fn<() => Promise<boolean>>().mockResolvedValue(false),
+      _path: jest.fn<() => Promise<{ path: string; tenant: string; database: string }>>().mockResolvedValue({ path: "/api/v1", tenant: "default_tenant", database: "default_database" }),
+    };
+
+    const mockApiClient = {
+      post: jest.fn().mockImplementation(async (options: any) => {
+        capturedBody = options.body;
+        return {
+          data: {
+            ids: [],
+            documents: [],
+            embeddings: [],
+            metadatas: [],
+            scores: [],
+            select: [],
+          } as SearchResponse,
+        };
+      }),
+    };
+
+    const collection = new CollectionImpl({
+      chromaClient: mockChromaClient as unknown as ChromaClient,
+      apiClient: mockApiClient as any,
+      id: "col-id",
+      name: "test",
+      tenant: "default_tenant",
+      database: "default_database",
+      configuration: {} as CollectionConfiguration,
+      metadata: undefined,
+      embeddingFunction: undefined,
+      schema: undefined,
+    });
+
+    // Test with INDEX_ONLY
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+      { readLevel: ReadLevel.INDEX_ONLY },
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody).toBeDefined();
+    expect(capturedBody.read_level).toBe("index_only");
+
+    // Test with INDEX_AND_WAL
+    mockApiClient.post.mockClear();
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+      { readLevel: ReadLevel.INDEX_AND_WAL },
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody.read_level).toBe("index_and_wal");
+
+    // Test without readLevel (should be undefined)
+    mockApiClient.post.mockClear();
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody.read_level).toBeUndefined();
+  });
 });

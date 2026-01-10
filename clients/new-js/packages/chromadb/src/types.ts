@@ -6,6 +6,21 @@ import { GetUserIdentityResponse, Include, SparseVector } from "./api";
 export type UserIdentity = GetUserIdentityResponse;
 
 /**
+ * Read level controls whether queries read from the write-ahead log (WAL).
+ *
+ * - INDEX_AND_WAL: Read from both the compacted index and the WAL.
+ *   All committed writes will be visible. This is the default.
+ * - INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+ *   Recent writes that haven't been compacted may not be visible, but queries are faster.
+ */
+export const ReadLevel = {
+  INDEX_AND_WAL: "index_and_wal",
+  INDEX_ONLY: "index_only",
+} as const;
+
+export type ReadLevel = (typeof ReadLevel)[keyof typeof ReadLevel];
+
+/**
  * Re-export SparseVector type for external use
  */
 export type { SparseVector };

@@ -12,6 +12,7 @@ use crate::operators_generated::{
     FUNCTION_STATISTICS_NAME,
 };
 use crate::plan::PlanToProtoError;
+use crate::plan::ReadLevel;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
@@ -2190,6 +2191,10 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequestPayload {
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    /// Defaults to IndexAndWal (full consistency).
+    #[serde(default)]
+    pub read_level: ReadLevel,
 }
 
 #[non_exhaustive]
@@ -2201,6 +2206,8 @@ pub struct SearchRequest {
     pub collection_id: CollectionUuid,
     #[validate(nested)]
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    pub read_level: ReadLevel,
 }
 
 impl SearchRequest {
@@ -2209,12 +2216,14 @@ impl SearchRequest {
         database_name: String,
         collection_id: CollectionUuid,
         searches: Vec<SearchPayload>,
+        read_level: ReadLevel,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
             searches,
+            read_level,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -2223,6 +2232,7 @@ impl SearchRequest {
     pub fn into_payload(self) -> SearchRequestPayload {
         SearchRequestPayload {
             searches: self.searches,
+            read_level: self.read_level,
         }
     }
 }

@@ -16,11 +16,12 @@ use std::sync::Arc;
 
 use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
-    plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest,
-    GetResponse, IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
-    SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
-    UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
+    plan::{ReadLevel, SearchPayload},
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
+    IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest, SearchResponse,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateMetadata,
+    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
@@ -474,11 +475,52 @@ impl ChromaCollection {
         &self,
         searches: Vec<SearchPayload>,
     ) -> Result<SearchResponse, ChromaHttpClientError> {
+        self.search_with_options(searches, ReadLevel::IndexAndWal)
+            .await
+    }
+
+    /// Search with custom read level controlling whether to read from the write-ahead log.
+    ///
+    /// By default, searches read from both the compacted index and the write-ahead log (WAL),
+    /// ensuring all committed writes are visible. For higher throughput at the cost of
+    /// potentially missing recent uncommitted writes, use `ReadLevel::IndexOnly` to skip
+    /// the WAL and read only from the compacted index.
+    ///
+    /// # Arguments
+    ///
+    /// * `searches` - Vector of search payloads to execute
+    /// * `read_level` - Controls data sources for the query:
+    ///   - [`ReadLevel::IndexAndWal`] - Read from both the compacted index and WAL (default).
+    ///     All committed writes will be visible.
+    ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
+    ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::plan::{SearchPayload, ReadLevel};
+    ///
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let search = SearchPayload::default().limit(Some(10), 0);
+    ///
+    /// // Skip WAL for faster queries (may miss recent writes)
+    /// let results = collection
+    ///     .search_with_options(vec![search], ReadLevel::IndexOnly)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn search_with_options(
+        &self,
+        searches: Vec<SearchPayload>,
+        read_level: ReadLevel,
+    ) -> Result<SearchResponse, ChromaHttpClientError> {
         let request = SearchRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
             self.collection.collection_id,
             searches,
+            read_level,
         )?;
         let request = request.into_payload();
         self.send("search", "search", Method::POST, Some(request))

@@ -1834,7 +1834,7 @@ impl ServiceBasedFrontend {
                 collection_and_segments,
             },
             payloads: request.searches,
-            read_level: ReadLevel::IndexAndWal,
+            read_level: request.read_level,
         };
 
         // Execute the single search plan using the executor
