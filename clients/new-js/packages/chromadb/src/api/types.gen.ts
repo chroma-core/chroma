@@ -271,7 +271,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-  [key: string]: boolean | number | string | SparseVector | null;
+    [key: string]: boolean | number | string | SparseVector | null;
 };
 
 export type HeartbeatResponse = {
@@ -686,6 +686,25 @@ export type VectorIndexType = {
 };
 
 export type U32 = number;
+
+export type IndexingStatus = {
+    /**
+     * Number of indexed operations
+     */
+    num_indexed_ops: number;
+    /**
+     * Number of unindexed operations
+     */
+    num_unindexed_ops: number;
+    /**
+     * Total number of operations
+     */
+    total_ops: number;
+    /**
+     * Operation indexing progress (0.0 to 1.0)
+     */
+    op_indexing_progress: number;
+};
 
 export type GetUserIdentityData = {
     body?: never;
@@ -1465,6 +1484,52 @@ export type CollectionCountResponses = {
 };
 
 export type CollectionCountResponse = CollectionCountResponses[keyof CollectionCountResponses];
+
+export type CollectionIndexingStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant ID for the collection
+         */
+        tenant: string;
+        /**
+         * Database containing this collection
+         */
+        database: string;
+        /**
+         * Collection ID whose indexing status is retrieved
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status';
+};
+
+export type CollectionIndexingStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type CollectionIndexingStatusError = CollectionIndexingStatusErrors[keyof CollectionIndexingStatusErrors];
+
+export type CollectionIndexingStatusResponses = {
+    /**
+     * Indexing status of the collection
+     */
+    200: IndexingStatus;
+};
+
+export type CollectionIndexingStatusResponse = CollectionIndexingStatusResponses[keyof CollectionIndexingStatusResponses];
 
 export type CollectionDeleteData = {
     body: DeleteCollectionRecordsPayload;

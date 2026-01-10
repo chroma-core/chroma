@@ -310,3 +310,10 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
     return queries;
   }
 }
+
+export interface IndexingStatus {
+  num_indexed_ops: number;
+  num_unindexed_ops: number;
+  total_ops: number;
+  op_indexing_progress: number;
+}
