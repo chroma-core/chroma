@@ -325,9 +325,21 @@ impl SysDb for SysdbService {
 
     async fn get_collection_with_segments(
         &self,
-        _request: Request<GetCollectionWithSegmentsRequest>,
+        request: Request<GetCollectionWithSegmentsRequest>,
     ) -> Result<Response<GetCollectionWithSegmentsResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetCollectionWithSegmentsRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let proto_resp: GetCollectionWithSegmentsResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn check_collections(

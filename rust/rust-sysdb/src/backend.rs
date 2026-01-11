@@ -64,7 +64,8 @@ use crate::spanner::SpannerBackend;
 use crate::types::SysDbError;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetCollectionsRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
 };
@@ -250,6 +251,18 @@ impl Backend {
     ) -> Result<GetCollectionsResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_collections(req).await,
+        }
+    }
+
+    /// Get a collection with its segments.
+    ///
+    /// Returns `SysDbError::NotFound` if the collection does not exist.
+    pub async fn get_collection_with_segments(
+        &self,
+        req: GetCollectionWithSegmentsRequest,
+    ) -> Result<GetCollectionWithSegmentsResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.get_collection_with_segments(req).await,
         }
     }
 

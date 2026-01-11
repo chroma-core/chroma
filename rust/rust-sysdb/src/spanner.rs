@@ -14,9 +14,12 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::SpannerConfig;
+use crate::types::SpannerRows;
+use crate::types::SysDbError;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetCollectionsRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
     SpannerRows, SysDbError,
@@ -825,6 +828,115 @@ impl SpannerBackend {
         Collection::try_from(SpannerRows { rows })
     }
 
+    /// Get a collection with its segments using a single 4-way JOIN query.
+    ///
+    /// This query joins:
+    /// - collections (1 row)
+    /// - collection_metadata (N rows - one per metadata key)
+    /// - collection_compaction_cursors (1 row for the region)
+    /// - collection_segments (3 rows - one per segment type)
+    ///
+    /// The result is N × 3 rows which are deduplicated in Rust.
+    /// - Collection + metadata + compaction cursor: parsed via `Collection::try_from(rows)`
+    /// - Segments: deduplicated using HashMap
+    ///
+    /// This approach fetches all data in a single network round trip.
+    pub async fn get_collection_with_segments(
+        &self,
+        req: GetCollectionWithSegmentsRequest,
+    ) -> Result<GetCollectionWithSegmentsResponse, SysDbError> {
+        // TODO(Sanket): Get region from config based on db name topology
+        let region = "us";
+        let collection_id = req.id.0.to_string();
+
+        // 4-way JOIN query: collection + metadata + compaction cursor + segments
+        // Note: Segment columns are aliased with "segment_" prefix to match TryFrom<Row> for Segment
+        let query = r#"
+            SELECT 
+                c.collection_id,
+                c.name,
+                c.dimension,
+                c.database_id,
+                c.database_name,
+                c.tenant_id,
+                c.updated_at,
+                cm.key as metadata_key,
+                cm.str_value as metadata_str_value,
+                cm.int_value as metadata_int_value,
+                cm.float_value as metadata_float_value,
+                cm.bool_value as metadata_bool_value,
+                ccc.last_compacted_offset,
+                ccc.version,
+                ccc.total_records_post_compaction,
+                ccc.size_bytes_post_compaction,
+                ccc.last_compaction_time_secs,
+                ccc.version_file_name,
+                ccc.index_schema,
+                cs.id as segment_id,
+                cs.type as segment_type,
+                cs.scope as segment_scope,
+                cs.collection_id as segment_collection_id,
+                cs.file_paths as segment_file_paths
+            FROM collections c
+            LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
+            LEFT JOIN collection_compaction_cursors ccc 
+                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            LEFT JOIN collection_segments cs 
+                ON cs.collection_id = c.collection_id AND cs.region = @region
+            WHERE c.collection_id = @collection_id AND c.is_deleted = FALSE
+        "#;
+
+        let mut stmt = Statement::new(query);
+        stmt.add_param("collection_id", &collection_id);
+        stmt.add_param("region", &region);
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx.query(stmt).await?;
+
+        // Collect all rows
+        let mut rows: Vec<Row> = Vec::new();
+        while let Some(row) = result_set.next().await? {
+            rows.push(row);
+        }
+
+        if rows.is_empty() {
+            return Err(SysDbError::NotFound(format!(
+                "Collection {} not found",
+                collection_id
+            )));
+        }
+
+        // Extract segments from rows (dedupe using HashMap)
+        // Note: This must be done BEFORE Collection::try_from since that consumes rows
+        // Uses TryFrom<&Row> for Segment which expects segment_ prefixed column names
+        let mut segments_map: HashMap<String, Segment> = HashMap::new();
+
+        for row in &rows {
+            // Check if segment columns are present (LEFT JOIN may return NULLs)
+            if let Ok(Some(segment_id_str)) = row.column_by_name::<Option<String>>("segment_id") {
+                use std::collections::hash_map::Entry;
+                if let Entry::Vacant(entry) = segments_map.entry(segment_id_str) {
+                    let segment = Segment::try_from(row)?;
+                    entry.insert(segment);
+                }
+            }
+        }
+
+        // Parse collection (including metadata and compaction cursor) using TryFrom<Vec<Row>>
+        // This reuses the existing implementation that handles:
+        // - Collection fields from first row
+        // - Metadata aggregation from all rows
+        // - Compaction cursor fields
+        let collection = Collection::try_from(rows)?;
+
+        let segments: Vec<Segment> = segments_map.into_values().collect();
+
+        Ok(GetCollectionWithSegmentsResponse {
+            collection,
+            segments,
+        })
+    }
+
     // ============================================================
     // Lifecycle
     // ============================================================
@@ -889,7 +1001,8 @@ mod tests {
     use super::*;
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
-        GetCollectionsRequest, GetDatabaseRequest, GetTenantRequest,
+        GetCollectionWithSegmentsRequest, GetCollectionsRequest, GetDatabaseRequest,
+        GetTenantRequest,
     };
     use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
     use uuid::Uuid;
@@ -1361,7 +1474,7 @@ mod tests {
         (tenant_id, db_name)
     }
 
-    // Helper to create test segments for a collection
+    // Helper to create test segments for a collection (empty file paths)
     fn create_test_segments(collection_id: CollectionUuid) -> Vec<Segment> {
         vec![
             Segment {
@@ -1473,6 +1586,63 @@ mod tests {
                 expected_metadata, collection.metadata
             ),
         }
+    }
+
+    // Helper to create test segments with file paths populated
+    fn create_test_segments_with_file_paths(collection_id: CollectionUuid) -> Vec<Segment> {
+        vec![
+            Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                metadata: None,
+                file_path: [(
+                    "metadata_block".to_string(),
+                    vec!["path/to/metadata1.bin".to_string()],
+                )]
+                .into_iter()
+                .collect(),
+            },
+            Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileRecord,
+                scope: SegmentScope::RECORD,
+                collection: collection_id,
+                metadata: None,
+                file_path: [(
+                    "record_block".to_string(),
+                    vec![
+                        "path/to/record1.bin".to_string(),
+                        "path/to/record2.bin".to_string(),
+                    ],
+                )]
+                .into_iter()
+                .collect(),
+            },
+            Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::HnswDistributed,
+                scope: SegmentScope::VECTOR,
+                collection: collection_id,
+                metadata: None,
+                file_path: [
+                    (
+                        "hnsw_index".to_string(),
+                        vec!["path/to/hnsw.idx".to_string()],
+                    ),
+                    (
+                        "vectors".to_string(),
+                        vec![
+                            "path/to/vectors1.bin".to_string(),
+                            "path/to/vectors2.bin".to_string(),
+                        ],
+                    ),
+                ]
+                .into_iter()
+                .collect(),
+            },
+        ]
     }
 
     #[tokio::test]
@@ -3033,5 +3203,485 @@ mod tests {
             None,
             Some(&Schema::default()),
         );
+    }
+
+    // ============================================================
+    // GetCollectionWithSegments Tests
+    // ============================================================
+
+    // Helper to verify all segment fields
+    fn verify_segment(
+        segment: &Segment,
+        expected_collection_id: CollectionUuid,
+        expected_scope: SegmentScope,
+        expected_type: SegmentType,
+        expected_file_paths: &std::collections::HashMap<String, Vec<String>>,
+    ) {
+        assert_eq!(
+            segment.collection, expected_collection_id,
+            "Segment collection ID mismatch"
+        );
+        assert_eq!(segment.scope, expected_scope, "Segment scope mismatch");
+        assert_eq!(segment.r#type, expected_type, "Segment type mismatch");
+        assert_eq!(
+            &segment.file_path, expected_file_paths,
+            "Segment file_path mismatch for {:?}",
+            expected_scope
+        );
+        // Segment metadata is not stored in collection_segments table
+        assert!(
+            segment.metadata.is_none(),
+            "Segment metadata should be None"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collection_with_segments_empty_file_paths() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection with segments (empty file paths)
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_with_segments_empty_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let segments = create_test_segments(collection_id);
+        let segment_ids: Vec<SegmentUuid> = segments.iter().map(|s| s.id).collect();
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments,
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get collection with segments
+        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let result = backend.get_collection_with_segments(get_req).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to get collection with segments: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+
+        // ===== Verify ALL collection fields =====
+        verify_new_collection(
+            &response.collection,
+            collection_id,
+            &collection_name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+
+        // ===== Verify segments =====
+        assert_eq!(response.segments.len(), 3, "Should return all 3 segments");
+
+        // Verify all segment IDs are present
+        let returned_segment_ids: std::collections::HashSet<SegmentUuid> =
+            response.segments.iter().map(|s| s.id).collect();
+        for expected_id in &segment_ids {
+            assert!(
+                returned_segment_ids.contains(expected_id),
+                "Missing segment ID: {:?}",
+                expected_id
+            );
+        }
+
+        // Verify each segment's fields exhaustively
+        let empty_file_paths: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+
+        for segment in &response.segments {
+            match segment.scope {
+                SegmentScope::METADATA => {
+                    verify_segment(
+                        segment,
+                        collection_id,
+                        SegmentScope::METADATA,
+                        SegmentType::BlockfileMetadata,
+                        &empty_file_paths,
+                    );
+                }
+                SegmentScope::RECORD => {
+                    verify_segment(
+                        segment,
+                        collection_id,
+                        SegmentScope::RECORD,
+                        SegmentType::BlockfileRecord,
+                        &empty_file_paths,
+                    );
+                }
+                SegmentScope::VECTOR => {
+                    verify_segment(
+                        segment,
+                        collection_id,
+                        SegmentScope::VECTOR,
+                        SegmentType::HnswDistributed,
+                        &empty_file_paths,
+                    );
+                }
+                _ => panic!("Unexpected segment scope: {:?}", segment.scope),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collection_with_segments_with_file_paths() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection with segments that have file paths
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_with_segments_files_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let segments = create_test_segments_with_file_paths(collection_id);
+        let segment_ids: Vec<SegmentUuid> = segments.iter().map(|s| s.id).collect();
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(256),
+            index_schema: Schema::default(),
+            segments,
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get collection with segments
+        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let result = backend.get_collection_with_segments(get_req).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to get collection with segments: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+
+        // ===== Verify ALL collection fields =====
+        verify_new_collection(
+            &response.collection,
+            collection_id,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+
+        // ===== Verify segments =====
+        assert_eq!(response.segments.len(), 3, "Should return all 3 segments");
+
+        // Verify all segment IDs are present
+        let returned_segment_ids: std::collections::HashSet<SegmentUuid> =
+            response.segments.iter().map(|s| s.id).collect();
+        for expected_id in &segment_ids {
+            assert!(
+                returned_segment_ids.contains(expected_id),
+                "Missing segment ID: {:?}",
+                expected_id
+            );
+        }
+
+        // Build expected file paths for each segment type
+        let metadata_file_paths: std::collections::HashMap<String, Vec<String>> = [(
+            "metadata_block".to_string(),
+            vec!["path/to/metadata1.bin".to_string()],
+        )]
+        .into_iter()
+        .collect();
+
+        let record_file_paths: std::collections::HashMap<String, Vec<String>> = [(
+            "record_block".to_string(),
+            vec![
+                "path/to/record1.bin".to_string(),
+                "path/to/record2.bin".to_string(),
+            ],
+        )]
+        .into_iter()
+        .collect();
+
+        let vector_file_paths: std::collections::HashMap<String, Vec<String>> = [
+            (
+                "hnsw_index".to_string(),
+                vec!["path/to/hnsw.idx".to_string()],
+            ),
+            (
+                "vectors".to_string(),
+                vec![
+                    "path/to/vectors1.bin".to_string(),
+                    "path/to/vectors2.bin".to_string(),
+                ],
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        // Verify each segment's fields exhaustively
+        for segment in &response.segments {
+            match segment.scope {
+                SegmentScope::METADATA => {
+                    verify_segment(
+                        segment,
+                        collection_id,
+                        SegmentScope::METADATA,
+                        SegmentType::BlockfileMetadata,
+                        &metadata_file_paths,
+                    );
+                }
+                SegmentScope::RECORD => {
+                    verify_segment(
+                        segment,
+                        collection_id,
+                        SegmentScope::RECORD,
+                        SegmentType::BlockfileRecord,
+                        &record_file_paths,
+                    );
+                }
+                SegmentScope::VECTOR => {
+                    verify_segment(
+                        segment,
+                        collection_id,
+                        SegmentScope::VECTOR,
+                        SegmentType::HnswDistributed,
+                        &vector_file_paths,
+                    );
+                }
+                _ => panic!("Unexpected segment scope: {:?}", segment.scope),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collection_with_segments_not_found() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Try to get a non-existent collection
+        let non_existent_id = CollectionUuid(Uuid::new_v4());
+        let get_req = GetCollectionWithSegmentsRequest {
+            id: non_existent_id,
+        };
+
+        let result = backend.get_collection_with_segments(get_req).await;
+
+        assert!(result.is_err(), "Should fail for non-existent collection");
+
+        match result.err().unwrap() {
+            SysDbError::NotFound(msg) => {
+                assert!(
+                    msg.contains(&non_existent_id.0.to_string()),
+                    "Error should mention collection ID: {}",
+                    msg
+                );
+            }
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collection_with_segments_and_metadata() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection with both metadata and segments with file paths
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_with_segments_and_metadata_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create metadata with all 4 types
+        let metadata: chroma_types::Metadata = [
+            (
+                "str_key".to_string(),
+                chroma_types::MetadataValue::Str("Test collection".to_string()),
+            ),
+            ("int_key".to_string(), chroma_types::MetadataValue::Int(42)),
+            (
+                "float_key".to_string(),
+                chroma_types::MetadataValue::Float(1.5),
+            ),
+            (
+                "bool_key".to_string(),
+                chroma_types::MetadataValue::Bool(true),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let segments = create_test_segments_with_file_paths(collection_id);
+        let segment_ids: Vec<SegmentUuid> = segments.iter().map(|s| s.id).collect();
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(512),
+            index_schema: Schema::default(),
+            segments,
+            metadata: Some(metadata.clone()),
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get collection with segments
+        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let result = backend.get_collection_with_segments(get_req).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to get collection with segments: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+
+        // ===== Verify ALL collection fields =====
+        verify_new_collection(
+            &response.collection,
+            collection_id,
+            &collection_name,
+            Some(512),
+            &tenant_id,
+            &db_name,
+            Some(&metadata),
+            Some(&Schema::default()),
+        );
+
+        // ===== Verify metadata exhaustively (all 4 types) =====
+        let returned_metadata = response.collection.metadata.as_ref();
+        assert!(returned_metadata.is_some(), "Should have metadata");
+
+        let returned_metadata = returned_metadata.unwrap();
+        assert_eq!(returned_metadata.len(), 4, "Should have 4 metadata entries");
+        assert_eq!(
+            returned_metadata.get("str_key"),
+            Some(&chroma_types::MetadataValue::Str(
+                "Test collection".to_string()
+            ))
+        );
+        assert_eq!(
+            returned_metadata.get("int_key"),
+            Some(&chroma_types::MetadataValue::Int(42))
+        );
+        assert_eq!(
+            returned_metadata.get("float_key"),
+            Some(&chroma_types::MetadataValue::Float(1.5))
+        );
+        assert_eq!(
+            returned_metadata.get("bool_key"),
+            Some(&chroma_types::MetadataValue::Bool(true))
+        );
+
+        // ===== Verify segments =====
+        assert_eq!(response.segments.len(), 3, "Should return all 3 segments");
+
+        // Verify all segment IDs are present
+        let returned_segment_ids: std::collections::HashSet<SegmentUuid> =
+            response.segments.iter().map(|s| s.id).collect();
+        for expected_id in &segment_ids {
+            assert!(
+                returned_segment_ids.contains(expected_id),
+                "Missing segment ID: {:?}",
+                expected_id
+            );
+        }
+
+        // Verify each segment has correct collection reference and non-empty file paths
+        for segment in &response.segments {
+            assert_eq!(
+                segment.collection, collection_id,
+                "Segment should reference correct collection"
+            );
+            assert!(
+                !segment.file_path.is_empty(),
+                "Segment {:?} should have file paths",
+                segment.scope
+            );
+            assert!(
+                segment.metadata.is_none(),
+                "Segment metadata should be None"
+            );
+        }
+
+        // Verify segment types are correct
+        let metadata_segment = response
+            .segments
+            .iter()
+            .find(|s| s.scope == SegmentScope::METADATA);
+        let record_segment = response
+            .segments
+            .iter()
+            .find(|s| s.scope == SegmentScope::RECORD);
+        let vector_segment = response
+            .segments
+            .iter()
+            .find(|s| s.scope == SegmentScope::VECTOR);
+
+        assert!(metadata_segment.is_some(), "Should have METADATA segment");
+        assert!(record_segment.is_some(), "Should have RECORD segment");
+        assert!(vector_segment.is_some(), "Should have VECTOR segment");
+
+        assert_eq!(
+            metadata_segment.unwrap().r#type,
+            SegmentType::BlockfileMetadata
+        );
+        assert_eq!(record_segment.unwrap().r#type, SegmentType::BlockfileRecord);
+        assert_eq!(vector_segment.unwrap().r#type, SegmentType::HnswDistributed);
     }
 }

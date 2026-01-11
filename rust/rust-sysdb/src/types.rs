@@ -346,6 +346,22 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
     }
 }
 
+/// Internal request for getting a collection with its segments.
+#[derive(Debug, Clone)]
+pub struct GetCollectionWithSegmentsRequest {
+    pub id: CollectionUuid,
+}
+
+impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWithSegmentsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetCollectionWithSegmentsRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: CollectionUuid(validate_uuid(&req.id)?),
+        })
+    }
+}
+
 // ============================================================================
 // Assignable Trait Implementations
 // ============================================================================
@@ -419,6 +435,16 @@ impl Assignable for GetCollectionsRequest {
     fn assign(&self, factory: &BackendFactory) -> Backend {
         // Route by database_name prefix (for now, default to Spanner)
         // TODO: Check self.filter.database_name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for GetCollectionWithSegmentsRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Single collection lookup - default to Spanner
+        // TODO: Determine routing based on collection metadata if needed
         Backend::Spanner(factory.spanner().clone())
     }
 }
@@ -500,6 +526,16 @@ impl Runnable for GetCollectionsRequest {
 
     async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_collections(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetCollectionWithSegmentsRequest {
+    type Response = GetCollectionWithSegmentsResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_collection_with_segments(self).await
     }
 }
 
@@ -935,6 +971,28 @@ impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
             r.collections.into_iter().map(|c| c.try_into()).collect();
         Ok(chroma_proto::GetCollectionsResponse {
             collections: collections?,
+        })
+    }
+}
+
+/// Internal response for getting a collection with its segments.
+#[derive(Debug, Clone)]
+pub struct GetCollectionWithSegmentsResponse {
+    pub collection: Collection,
+    pub segments: Vec<Segment>,
+}
+
+impl TryFrom<GetCollectionWithSegmentsResponse>
+    for chroma_proto::GetCollectionWithSegmentsResponse
+{
+    type Error = SysDbError;
+
+    fn try_from(r: GetCollectionWithSegmentsResponse) -> Result<Self, Self::Error> {
+        // Segment -> chroma_proto::Segment is infallible (From, not TryFrom)
+        let segments: Vec<chroma_proto::Segment> = r.segments.into_iter().map(Into::into).collect();
+        Ok(chroma_proto::GetCollectionWithSegmentsResponse {
+            collection: Some(r.collection.try_into()?),
+            segments,
         })
     }
 }
