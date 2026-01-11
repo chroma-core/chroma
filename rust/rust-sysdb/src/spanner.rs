@@ -890,8 +890,8 @@ impl Configurable<SpannerConfig> for SpannerBackend {
 mod tests {
     use super::*;
     use crate::types::{
-        CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, GetDatabaseRequest,
-        GetTenantRequest,
+        CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
+        GetCollectionsRequest, GetDatabaseRequest, GetTenantRequest,
     };
     use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
     use uuid::Uuid;
@@ -2402,6 +2402,562 @@ mod tests {
                 .keys
                 .contains_key("custom_key"),
             "Schema should still contain custom_key after get_or_create"
+        );
+    }
+
+    // ============================================================
+    // get_collections tests
+    // ============================================================
+
+    /// Helper to verify all fields of a newly created collection
+    fn verify_new_collection(
+        collection: &chroma_types::Collection,
+        expected_id: CollectionUuid,
+        expected_name: &str,
+        expected_dimension: Option<i32>,
+        expected_tenant: &str,
+        expected_database: &str,
+        expected_metadata: Option<&chroma_types::Metadata>,
+    ) {
+        // Basic fields
+        assert_eq!(collection.collection_id, expected_id);
+        assert_eq!(collection.name, expected_name);
+        assert_eq!(collection.dimension, expected_dimension);
+        assert_eq!(collection.tenant, expected_tenant);
+        assert_eq!(collection.database, expected_database);
+
+        // Compaction cursor fields - should be 0/None for newly created collection
+        assert_eq!(
+            collection.log_position, 0,
+            "log_position should be 0 for new collection"
+        );
+        assert_eq!(
+            collection.version, 0,
+            "version should be 0 for new collection"
+        );
+        assert_eq!(
+            collection.total_records_post_compaction, 0,
+            "total_records_post_compaction should be 0"
+        );
+        assert_eq!(
+            collection.size_bytes_post_compaction, 0,
+            "size_bytes_post_compaction should be 0"
+        );
+        assert_eq!(
+            collection.last_compaction_time_secs, 0,
+            "last_compaction_time_secs should be 0"
+        );
+        assert!(
+            collection.version_file_path.is_none(),
+            "version_file_path should be None for new collection"
+        );
+
+        // Metadata
+        match (expected_metadata, &collection.metadata) {
+            (Some(expected), Some(actual)) => {
+                assert_eq!(expected.len(), actual.len(), "Metadata length mismatch");
+                for (key, value) in expected {
+                    assert_eq!(
+                        actual.get(key),
+                        Some(value),
+                        "Metadata key '{}' mismatch",
+                        key
+                    );
+                }
+            }
+            (None, None) => {}                              // Both None, OK
+            (None, Some(actual)) if actual.is_empty() => {} // Empty is same as None
+            _ => panic!(
+                "Metadata mismatch: expected {:?}, got {:?}",
+                expected_metadata, collection.metadata
+            ),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_by_id() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_get_by_id_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get by ID
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_by_name() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_get_by_name_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(256),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get by name + tenant + database
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name(collection_name.clone())
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name,
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_multiple_ids() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create multiple collections
+        let mut collection_ids = Vec::new();
+        for i in 0..3 {
+            let collection_id = CollectionUuid(Uuid::new_v4());
+            collection_ids.push(collection_id);
+
+            let collection_name = format!(
+                "test_multi_{}_{}_{}",
+                i,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                Uuid::new_v4()
+            );
+
+            let create_req = CreateCollectionRequest {
+                id: collection_id,
+                name: collection_name,
+                dimension: Some(128),
+                index_schema: Schema::default(),
+                segments: create_test_segments(collection_id),
+                metadata: None,
+                get_or_create: false,
+                tenant_id: tenant_id.clone(),
+                database_name: db_name.clone(),
+            };
+
+            backend
+                .create_collection(create_req)
+                .await
+                .expect("Failed to create collection");
+        }
+
+        // Get by multiple IDs
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(collection_ids.clone()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 3);
+
+        // Verify all IDs are present
+        let returned_ids: std::collections::HashSet<_> = response
+            .collections
+            .iter()
+            .map(|c| c.collection_id)
+            .collect();
+        for id in &collection_ids {
+            assert!(returned_ids.contains(id), "Missing collection ID: {:?}", id);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_pagination() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create 5 collections
+        let mut collection_ids = Vec::new();
+        for i in 0..5 {
+            let collection_id = CollectionUuid(Uuid::new_v4());
+            collection_ids.push(collection_id);
+
+            let collection_name = format!(
+                "test_pagination_{}_{}_{}",
+                i,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                Uuid::new_v4()
+            );
+
+            let create_req = CreateCollectionRequest {
+                id: collection_id,
+                name: collection_name,
+                dimension: Some(128),
+                index_schema: Schema::default(),
+                segments: create_test_segments(collection_id),
+                metadata: None,
+                get_or_create: false,
+                tenant_id: tenant_id.clone(),
+                database_name: db_name.clone(),
+            };
+
+            backend
+                .create_collection(create_req)
+                .await
+                .expect("Failed to create collection");
+
+            // Small delay to ensure different created_at timestamps
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // Get first 2
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone())
+                .limit(2),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 2);
+
+        let first_page_ids: Vec<_> = response
+            .collections
+            .iter()
+            .map(|c| c.collection_id)
+            .collect();
+
+        // Get next 2 with offset
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone())
+                .limit(2)
+                .offset(2),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 2);
+
+        // Verify no overlap between pages
+        for c in &response.collections {
+            assert!(
+                !first_page_ids.contains(&c.collection_id),
+                "Second page should not contain collections from first page"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_empty_result() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Get non-existent collection by ID
+        let non_existent_id = CollectionUuid(Uuid::new_v4());
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![non_existent_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Should return Ok with empty list: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert!(
+            response.collections.is_empty(),
+            "Should return empty list for non-existent ID"
+        );
+
+        // Get by non-existent name
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name("non_existent_collection_name_xyz")
+                .tenant_id(tenant_id)
+                .database_name(db_name),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Should return Ok with empty list: {:?}",
+            result.err()
+        );
+        assert!(result.unwrap().collections.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_tenant_database_isolation() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Create two separate tenant/database pairs
+        let (tenant_id1, db_name1) = setup_tenant_and_database(&backend).await;
+        let (tenant_id2, db_name2) = setup_tenant_and_database(&backend).await;
+
+        // Create collection in first tenant/database
+        let collection_id1 = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "isolated_collection_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id1,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id1),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id1.clone(),
+            database_name: db_name1.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Query from second tenant/database - should not find the collection
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name(collection_name.clone())
+                .tenant_id(tenant_id2)
+                .database_name(db_name2),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().collections.is_empty(),
+            "Should not find collection from different tenant/database"
+        );
+
+        // Query from first tenant/database - should find the collection
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name(collection_name.clone())
+                .tenant_id(tenant_id1.clone())
+                .database_name(db_name1.clone()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id1,
+            &collection_name,
+            Some(128),
+            &tenant_id1,
+            &db_name1,
+            None,
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_get_collections_with_metadata() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection with all 4 metadata types
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_get_with_metadata_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let metadata: chroma_types::Metadata = [
+            (
+                "str_key".to_string(),
+                chroma_types::MetadataValue::Str("test_value".to_string()),
+            ),
+            ("int_key".to_string(), chroma_types::MetadataValue::Int(42)),
+            (
+                "float_key".to_string(),
+                chroma_types::MetadataValue::Float(1.23456),
+            ),
+            (
+                "bool_key".to_string(),
+                chroma_types::MetadataValue::Bool(true),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(512),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: Some(metadata.clone()),
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get collection and verify all fields including metadata
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            Some(512),
+            &tenant_id,
+            &db_name,
+            Some(&metadata),
         );
     }
 }
