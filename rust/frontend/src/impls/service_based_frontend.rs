@@ -1448,6 +1448,11 @@ impl ServiceBasedFrontend {
             num_indexed_ops as f32 / total_ops as f32
         };
 
+        chroma_metering::with_current(|context| {
+            context.latest_collection_logical_size_bytes(0);
+            context.finish_request(Instant::now());
+        });
+
         Ok(IndexStatusResponse {
             op_indexing_progress,
             num_unindexed_ops,
