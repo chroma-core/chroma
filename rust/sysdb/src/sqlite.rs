@@ -379,6 +379,7 @@ impl SqliteSysDb {
             lineage_file_path: None,
             updated_at: SystemTime::UNIX_EPOCH,
             database_id: database_uuid,
+            compaction_failure_count: 0,
         })
     }
 
@@ -845,6 +846,7 @@ impl SqliteSysDb {
                     lineage_file_path: None,
                     updated_at: SystemTime::UNIX_EPOCH,
                     database_id,
+                    compaction_failure_count: 0,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;

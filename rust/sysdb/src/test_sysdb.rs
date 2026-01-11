@@ -694,6 +694,14 @@ impl TestSysDb {
         inner.tenant_resource_names.insert(tenant_id, resource_name);
         Ok(UpdateTenantResponse {})
     }
+
+    /// Increment the compaction failure count for a collection.
+    pub fn increment_compaction_failure_count(&mut self, collection_id: CollectionUuid) {
+        let mut inner = self.inner.lock();
+        if let Some(collection) = inner.collections.get_mut(&collection_id) {
+            collection.compaction_failure_count += 1;
+        }
+    }
 }
 
 fn attached_function_to_proto(
