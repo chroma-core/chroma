@@ -2410,6 +2410,7 @@ mod tests {
     // ============================================================
 
     /// Helper to verify all fields of a newly created collection
+    #[allow(clippy::too_many_arguments)]
     fn verify_new_collection(
         collection: &chroma_types::Collection,
         expected_id: CollectionUuid,
@@ -2418,6 +2419,7 @@ mod tests {
         expected_tenant: &str,
         expected_database: &str,
         expected_metadata: Option<&chroma_types::Metadata>,
+        expected_schema: Option<&Schema>,
     ) {
         // Basic fields
         assert_eq!(collection.collection_id, expected_id);
@@ -2425,6 +2427,13 @@ mod tests {
         assert_eq!(collection.dimension, expected_dimension);
         assert_eq!(collection.tenant, expected_tenant);
         assert_eq!(collection.database, expected_database);
+
+        // Schema verification
+        assert_eq!(
+            collection.schema.as_ref(),
+            expected_schema,
+            "Schema mismatch"
+        );
 
         // Compaction cursor fields - should be 0/None for newly created collection
         assert_eq!(
@@ -2532,6 +2541,7 @@ mod tests {
             &tenant_id,
             &db_name,
             None,
+            Some(&Schema::default()),
         );
     }
 
@@ -2596,6 +2606,7 @@ mod tests {
             &tenant_id,
             &db_name,
             None,
+            Some(&Schema::default()),
         );
     }
 
@@ -2879,6 +2890,7 @@ mod tests {
             &tenant_id1,
             &db_name1,
             None,
+            Some(&Schema::default()),
         );
     }
 
@@ -2958,6 +2970,7 @@ mod tests {
             &tenant_id,
             &db_name,
             Some(&metadata),
+            Some(&Schema::default()),
         );
     }
 
@@ -3094,6 +3107,7 @@ mod tests {
             &tenant_id,
             &db_name,
             None,
+            Some(&Schema::default()),
         );
     }
 }
