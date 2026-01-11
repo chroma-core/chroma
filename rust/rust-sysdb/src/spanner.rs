@@ -8,6 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::client::{Client, ClientConfig};
 use google_cloud_spanner::mutation::insert;
+use google_cloud_spanner::row::Row;
 use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
 use uuid::Uuid;
@@ -15,11 +16,11 @@ use uuid::Uuid;
 use crate::config::SpannerConfig;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetDatabaseRequest,
-    GetDatabaseResponse, GetTenantRequest, GetTenantResponse, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse, SpannerRow,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
+    GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
+    SpannerRows, SysDbError,
 };
-use crate::types::{SpannerRows, SysDbError};
 use chroma_types::{Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Tenant};
 
 #[derive(Error, Debug)]
@@ -603,6 +604,173 @@ impl SpannerBackend {
             collection,
             created,
         })
+    }
+
+    /// Get collections by filter.
+    ///
+    /// Supports filtering by:
+    /// - `ids`: One or more collection IDs
+    /// - `name` + `tenant_id` + `database_name`: Collection by name within a database
+    /// - `include_soft_deleted`: Whether to include soft-deleted collections (default: false)
+    /// - `limit` and `offset`: Pagination
+    ///
+    /// Returns a list of matching collections.
+    pub async fn get_collections(
+        &self,
+        req: GetCollectionsRequest,
+    ) -> Result<GetCollectionsResponse, SysDbError> {
+        let filter = req.filter;
+
+        // TODO(Sanket): Get region from config based on db name topology
+        let region = "us";
+
+        // Build dynamic query based on which filters are provided
+        let mut where_clauses: Vec<String> = Vec::new();
+
+        // Filter by collection IDs
+        let ids_str: Option<Vec<String>> = filter
+            .ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0.to_string()).collect());
+        if let Some(ref ids) = ids_str {
+            if ids.len() == 1 {
+                where_clauses.push("c.collection_id = @collection_id".to_string());
+            } else {
+                where_clauses.push("c.collection_id IN UNNEST(@collection_ids)".to_string());
+            }
+        }
+
+        // Filter by name
+        if filter.name.is_some() {
+            where_clauses.push("c.name = @name".to_string());
+        }
+
+        // Filter by tenant_id
+        if filter.tenant_id.is_some() {
+            where_clauses.push("c.tenant_id = @tenant_id".to_string());
+        }
+
+        // Filter by database_name
+        if filter.database_name.is_some() {
+            where_clauses.push("c.database_name = @database_name".to_string());
+        }
+
+        // Filter by soft-deleted status
+        if !filter.include_soft_deleted {
+            where_clauses.push("c.is_deleted = FALSE".to_string());
+        }
+
+        // AND.
+        let where_clause = if where_clauses.is_empty() {
+            "TRUE".to_string()
+        } else {
+            where_clauses.join(" AND ")
+        };
+
+        // Build LIMIT/OFFSET clause for pagination
+        // Note: We apply pagination to a subquery to get collection IDs first,
+        // then join with metadata to avoid limiting metadata rows instead of collections
+        let pagination = match (filter.limit, filter.offset) {
+            (Some(limit), Some(offset)) => format!("LIMIT {} OFFSET {}", limit, offset),
+            (Some(limit), None) => format!("LIMIT {}", limit),
+            (None, Some(offset)) => format!("OFFSET {}", offset),
+            (None, None) => String::new(),
+        };
+
+        let query = format!(
+            r#"
+            WITH filtered_collections AS (
+                SELECT c.collection_id
+                FROM collections c
+                WHERE {where_clause}
+                ORDER BY c.created_at ASC
+                {pagination}
+            )
+            SELECT 
+                c.collection_id,
+                c.name,
+                c.dimension,
+                c.database_id,
+                c.database_name,
+                c.tenant_id,
+                c.updated_at,
+                c.created_at,
+                cm.key as metadata_key,
+                cm.str_value as metadata_str_value,
+                cm.int_value as metadata_int_value,
+                cm.float_value as metadata_float_value,
+                cm.bool_value as metadata_bool_value,
+                ccc.last_compacted_offset,
+                ccc.version,
+                ccc.total_records_post_compaction,
+                ccc.size_bytes_post_compaction,
+                ccc.last_compaction_time_secs,
+                ccc.version_file_name,
+                ccc.index_schema
+            FROM filtered_collections fc
+            JOIN collections c ON c.collection_id = fc.collection_id
+            LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
+            LEFT JOIN collection_compaction_cursors ccc 
+                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            ORDER BY c.created_at ASC
+            "#,
+            where_clause = where_clause,
+            pagination = pagination,
+        );
+
+        let mut stmt = Statement::new(&query);
+        stmt.add_param("region", &region);
+
+        // Bind parameters based on which filters are set
+        if let Some(ref ids) = ids_str {
+            if ids.len() == 1 {
+                stmt.add_param("collection_id", &ids[0]);
+            } else {
+                stmt.add_param("collection_ids", ids);
+            }
+        }
+        if let Some(ref name) = filter.name {
+            stmt.add_param("name", name);
+        }
+        if let Some(ref tenant_id) = filter.tenant_id {
+            stmt.add_param("tenant_id", tenant_id);
+        }
+        if let Some(ref database_name) = filter.database_name {
+            stmt.add_param("database_name", database_name);
+        }
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx.query(stmt).await?;
+
+        // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
+        let mut collection_order: Vec<String> = Vec::new();
+        let mut rows_by_collection: std::collections::HashMap<String, Vec<Row>> =
+            std::collections::HashMap::new();
+
+        while let Some(row) = result_set.next().await? {
+            let collection_id: String = row
+                .column_by_name("collection_id")
+                .map_err(SysDbError::FailedToReadColumn)?;
+
+            if !rows_by_collection.contains_key(&collection_id) {
+                collection_order.push(collection_id.clone());
+            }
+            rows_by_collection
+                .entry(collection_id)
+                .or_default()
+                .push(row);
+        }
+
+        // Convert each group of rows to a Collection, preserving the query order
+        let mut collections = Vec::new();
+        for collection_id in collection_order {
+            if let Some(rows) = rows_by_collection.remove(&collection_id) {
+                let collection = Collection::try_from(SpannerRows { rows })?;
+                collections.push(collection);
+            }
+        }
+
+        Ok(GetCollectionsResponse { collections })
     }
 
     /// Fetch a collection from the database within a transaction.

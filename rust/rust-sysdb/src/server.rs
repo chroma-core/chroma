@@ -292,9 +292,21 @@ impl SysDb for SysdbService {
 
     async fn get_collections(
         &self,
-        _request: Request<GetCollectionsRequest>,
+        request: Request<GetCollectionsRequest>,
     ) -> Result<Response<GetCollectionsResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let proto_resp: GetCollectionsResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn get_collection_by_resource_name(
