@@ -13,6 +13,7 @@ from chromadb import (
     QueryResult,
     URIs,
 )
+from chromadb.api.types import IndexingStatus
 from chromadb.api import ServerAPI
 
 if TYPE_CHECKING:
@@ -341,9 +342,7 @@ class RustBindingsAPI(ServerAPI):
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> "IndexingStatus":
-        raise NotImplementedError(
-            "Indexing status is not implemented for Local Chroma"
-        )
+        raise NotImplementedError("Indexing status is not implemented for Local Chroma")
 
     @override
     def _search(
