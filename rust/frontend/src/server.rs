@@ -12,7 +12,6 @@ use chroma_metering::{
 };
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
-use chroma_types::ForkCollectionResponse;
 use chroma_types::{
     decode_embeddings, maybe_decode_update_embeddings, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
@@ -21,7 +20,7 @@ use chroma_types::{
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
+    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
     GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionRequest,
     GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload, GetResponse,
     GetTenantRequest, GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
