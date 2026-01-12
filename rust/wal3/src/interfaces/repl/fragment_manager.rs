@@ -90,6 +90,13 @@ impl ReplicatedFragmentUploader {
         let mut bookkeeping = self.bookkeeping.lock().unwrap();
         if bookkeeping.last_decimation.elapsed() >= self.options.decimation_interval {
             bookkeeping.last_decimation = Instant::now();
+            // Halve error counters periodically to implement time-decaying error rates. This
+            // allows replicas that experienced temporary outages to gradually rejoin the quorum
+            // as their error counts decay, rather than being permanently excluded.
+            for storage in self.storages.iter() {
+                let current = storage.counter.load(Ordering::Relaxed);
+                storage.counter.store(current / 2, Ordering::Relaxed);
+            }
         }
         let counts = self
             .storages
