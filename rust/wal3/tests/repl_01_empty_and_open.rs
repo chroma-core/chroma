@@ -9,7 +9,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_01_empty_and_open() {
+async fn test_k8s_mcmr_integration_repl_01_empty_and_open() {
     // Opening a log that hasn't been initialized should fail.
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
