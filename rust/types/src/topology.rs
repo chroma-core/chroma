@@ -1033,14 +1033,20 @@ mod tests {
         let json = r#"{
             "preferred": "aws-us-east-1",
             "regions": [
-                {"name": "aws-us-east-1", "provider": "aws", "region": "us-east-1", "config": null}
+                {"name": "aws-us-east-1", "provider": "aws", "region": "us-east-1", "config": null},
+                {"name": "gcp-europe-west1", "provider": "gcp", "region": "europe-west1", "config": null}
             ],
-            "topologies": []
+            "topologies": [
+                {"name": "global", "regions": ["aws-us-east-1", "gcp-europe-west1"], "config": null}
+            ]
         }"#;
 
         let config: MultiCloudMultiRegionConfiguration<(), ()> =
             serde_json::from_str(json).unwrap();
         assert_eq!(config.preferred().as_str(), "aws-us-east-1");
+        assert_eq!(config.topologies().len(), 1);
+        assert_eq!(config.topologies()[0].name().as_str(), "global");
+        assert_eq!(config.topologies()[0].regions().len(), 2);
     }
 
     #[test]
