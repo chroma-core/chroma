@@ -20,7 +20,7 @@ use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
-    plan::{Count, Get, Knn, ReadLevel, Search},
+    plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
     AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
     CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
@@ -1834,7 +1834,7 @@ impl ServiceBasedFrontend {
                 collection_and_segments,
             },
             payloads: request.searches,
-            read_level: ReadLevel::IndexAndWal,
+            read_level: request.read_level,
         };
 
         // Execute the single search plan using the executor

@@ -543,7 +543,9 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum ReadLevel {
     /// Read from both the index and the write-ahead log (default).
     /// Provides full consistency with all committed writes visible.

@@ -22,6 +22,7 @@ from chromadb.api.types import (
     IndexingStatus,
     Loadable,
     Metadatas,
+    ReadLevel,
     Schema,
     URIs,
     Where,
@@ -665,6 +666,7 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         pass
 

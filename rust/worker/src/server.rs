@@ -1118,4 +1118,50 @@ mod tests {
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
+
+    fn gen_search_request(scan_operator: chroma_proto::ScanOperator) -> chroma_proto::SearchPlan {
+        chroma_proto::SearchPlan {
+            scan: Some(scan_operator),
+            payloads: vec![chroma_proto::SearchPayload {
+                filter: Some(chroma_proto::FilterOperator {
+                    ids: None,
+                    r#where: None,
+                    where_document: None,
+                }),
+                rank: Some(chroma_proto::RankOperator { expr: None }),
+                group_by: None,
+                limit: Some(chroma_proto::LimitOperator {
+                    offset: 0,
+                    limit: Some(10),
+                }),
+                select: Some(chroma_proto::SelectOperator { keys: vec![] }),
+            }],
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
+        }
+    }
+
+    #[tokio::test]
+    async fn search_accepts_read_level_index_and_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = gen_search_request(scan_operator);
+
+        let response = executor.search(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn search_accepts_read_level_index_only() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let mut request = gen_search_request(scan_operator);
+        request.read_level = chroma_proto::ReadLevel::IndexOnly as i32;
+
+        let response = executor.search(request).await;
+        assert!(response.is_ok());
+    }
 }
