@@ -27,7 +27,8 @@ use chroma_types::chroma_proto::{
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetFunctionsRequest,
     GetFunctionsResponse, GetLastCompactionTimeForTenantRequest,
     GetLastCompactionTimeForTenantResponse, GetSegmentsRequest, GetSegmentsResponse,
-    GetTenantRequest, GetTenantResponse, ListCollectionVersionsRequest,
+    GetTenantRequest, GetTenantResponse, IncrementCompactionFailureCountRequest,
+    IncrementCompactionFailureCountResponse, ListCollectionVersionsRequest,
     ListCollectionVersionsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
     ListDatabasesRequest, ListDatabasesResponse, MarkVersionForDeletionRequest,
     MarkVersionForDeletionResponse, ResetStateResponse, RestoreCollectionRequest,
@@ -477,6 +478,13 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<FlushCollectionCompactionAndAttachedFunctionRequest>,
     ) -> Result<Response<FlushCollectionCompactionAndAttachedFunctionResponse>, Status> {
+        todo!()
+    }
+
+    async fn increment_compaction_failure_count(
+        &self,
+        _request: Request<IncrementCompactionFailureCountRequest>,
+    ) -> Result<Response<IncrementCompactionFailureCountResponse>, Status> {
         todo!()
     }
 }

@@ -30,8 +30,9 @@ impl TryFrom<Row> for Tenant {
             .column_by_name("id")
             .map_err(SysDbError::FailedToReadColumn)?;
 
-        // resource_name can be NULL, so we handle the error as None
-        let resource_name: Option<String> = row.column_by_name("resource_name").ok();
+        let resource_name: Option<String> = row
+            .column_by_name("resource_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
 
         let last_compaction_time: i64 = row
             .column_by_name("last_compaction_time")
