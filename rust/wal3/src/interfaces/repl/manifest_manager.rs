@@ -58,6 +58,8 @@ impl ManifestManager {
             let FragmentIdentifier::Uuid(uuid) = fragment.seq_no else {
                 return Err(Error::internal(file!(), line!()));
             };
+            let log_id_str = log_id.to_string();
+            let uuid_str = uuid.to_string();
             mutations.push(insert(
                 "fragments",
                 &[
@@ -70,14 +72,21 @@ impl ManifestManager {
                     "setsum",
                 ],
                 &[
-                    &log_id.to_string(),
-                    &uuid.to_string(),
+                    &log_id_str,
+                    &uuid_str,
                     &fragment.path,
                     &(fragment.start.offset() as i64),
                     &(fragment.limit.offset() as i64),
                     &(fragment.num_bytes as i64),
                     &fragment.setsum.hexdigest(),
                 ],
+            ));
+            // Insert into fragment_regions so that GC can see this fragment.
+            // TODO(rescrv, mcmr): region-aware
+            mutations.push(insert(
+                "fragment_regions",
+                &["log_id", "ident", "region"],
+                &[&log_id_str, &uuid_str, &"dummy"],
             ));
         }
         spanner
@@ -465,10 +474,13 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     AND fragments.ident = fragment_regions.ident
             WHERE fragments.log_id = @log_id
                 AND fragments.position_limit <= @threshold
+                AND fragment_regions.region = @local_region
             ",
         );
         stmt1.add_param("log_id", &self.log_id.to_string());
         stmt1.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
+        // TODO(rescrv, mcmr): region-aware
+        stmt1.add_param("local_region", &"dummy");
         let mut tx = self.spanner.read_only_transaction().await?;
         let mut iter = tx.query(stmt1).await?;
         let mut acc = Setsum::default();
@@ -1792,5 +1804,90 @@ mod tests {
             }
             other => panic!("expected Internal error, got {:?}", other),
         }
+    }
+
+    // ==================== Fragment region tests ====================
+
+    // Test that fragments inserted via init are visible to garbage collection.
+    //
+    // When init is called with a non-empty manifest (e.g., during a copy operation where existing
+    // fragments are carried over), those fragments should be GC-able just like fragments published
+    // via publish_fragment.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_init_fragments_visible_to_gc() {
+        use crate::{Fragment, FragmentIdentifier};
+
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+
+        // Create a manifest with pre-existing fragments (simulating a copy operation).
+        let fragment_uuid = FragmentUuid::generate();
+        let fragment_setsum = make_setsum(1);
+        let fragment = Fragment {
+            seq_no: FragmentIdentifier::Uuid(fragment_uuid),
+            path: "copied/fragment.parquet".to_string(),
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(10),
+            num_bytes: 1000,
+            setsum: fragment_setsum,
+        };
+
+        let manifest = Manifest {
+            setsum: fragment_setsum,
+            collected: Setsum::default(),
+            acc_bytes: 1000,
+            snapshots: vec![],
+            fragments: vec![fragment],
+            initial_offset: Some(LogPosition::from_offset(0)),
+            initial_seq_no: None,
+            writer: "copy-writer".to_string(),
+        };
+
+        // Initialize with the pre-existing fragment.
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        // Verify the fragment was loaded correctly.
+        let (loaded, _) = ManifestManager::load(&client, log_id)
+            .await
+            .expect("load failed")
+            .expect("manifest should exist");
+        assert_eq!(
+            loaded.fragments.len(),
+            1,
+            "should have 1 fragment from init"
+        );
+        assert_eq!(loaded.fragments[0].setsum, fragment_setsum);
+
+        // Fragments inserted via init should be visible to garbage collection.
+        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let gc_options = crate::GarbageCollectionOptions::default();
+        let first_to_keep = LogPosition::from_offset(100); // Keep nothing, GC everything.
+
+        let garbage = manager
+            .compute_garbage(&gc_options, first_to_keep)
+            .await
+            .expect("compute_garbage failed");
+
+        // Fragments from init should be GC-able.
+        assert!(
+            garbage.is_some(),
+            "Fragments inserted via init should be visible to garbage collection"
+        );
+        assert_eq!(
+            garbage.as_ref().unwrap().setsum_to_discard,
+            fragment_setsum,
+            "garbage should contain the init fragment's setsum"
+        );
+
+        println!(
+            "test_k8s_mcmr_integration_init_fragments_visible_to_gc: \
+             garbage={:?}",
+            garbage.map(|g| g.setsum_to_discard.hexdigest())
+        );
     }
 }

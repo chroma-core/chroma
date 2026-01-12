@@ -68,7 +68,7 @@ async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
 }
 
 #[tokio::test]
-async fn repl_copy_immediately_after_initialization() {
+async fn test_k8s_mcmr_integration_repl_copy_immediately_after_initialization() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
@@ -94,7 +94,7 @@ async fn repl_copy_immediately_after_initialization() {
 }
 
 #[tokio::test]
-async fn repl_copy_preserves_fragment_boundaries() {
+async fn test_k8s_mcmr_integration_repl_copy_preserves_fragment_boundaries() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
@@ -163,7 +163,7 @@ async fn repl_copy_preserves_fragment_boundaries() {
 }
 
 #[tokio::test]
-async fn repl_copy_multiple_times_creates_independent_copies() {
+async fn test_k8s_mcmr_integration_repl_copy_multiple_times_creates_independent_copies() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
@@ -218,7 +218,7 @@ async fn repl_copy_multiple_times_creates_independent_copies() {
 }
 
 #[tokio::test]
-async fn repl_copy_with_cursors() {
+async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
