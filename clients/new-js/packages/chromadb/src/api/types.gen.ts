@@ -412,6 +412,8 @@ export type RawWhereFields = {
     where_document?: unknown;
 };
 
+export type ReadLevel = 'index_and_wal' | 'index_only';
+
 /**
  * Schema representation for collection index configurations
  *
@@ -467,6 +469,11 @@ export type SearchPayload = {
 };
 
 export type SearchRequestPayload = {
+    /**
+     * Specifies the read level for consistency vs performance tradeoffs.
+     * Defaults to IndexAndWal (full consistency).
+     */
+    read_level?: ReadLevel;
     searches: Array<SearchPayload>;
 };
 
