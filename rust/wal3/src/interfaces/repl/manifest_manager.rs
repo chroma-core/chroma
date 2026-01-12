@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::convert::TryFrom;
 use std::sync::Arc;
+use std::time::Duration;
 
 use google_cloud_spanner::client::Client;
 use google_cloud_spanner::key::Key;
@@ -12,7 +13,7 @@ use uuid::Uuid;
 
 use crate::interfaces::{ManifestConsumer, ManifestPublisher, PositionWitness};
 use crate::{
-    Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
+    Error, ExponentialBackoff, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
     GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, ManifestWitness, Snapshot,
     SnapshotPointer,
 };
@@ -302,6 +303,9 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         let pointer = pointer.to_string();
         let path = path.to_string();
         let regions: Vec<String> = regions.iter().map(|s| s.to_string()).collect();
+        // The SDK's read_write_transaction has internal retries for Aborted errors, so this outer
+        // loop handles cases where those are exhausted.
+        let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
         for _ in 0..3 {
             let res = self
                 .spanner
@@ -427,6 +431,11 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 Err(err) => {
                     if let google_cloud_spanner::client::Error::GRPC(grpc) = &err {
                         if grpc.code() == Code::Aborted {
+                            let mut backoff = exp_backoff.next();
+                            if backoff > Duration::from_secs(10) {
+                                backoff = Duration::from_secs(10);
+                            }
+                            tokio::time::sleep(backoff).await;
                             continue;
                         }
                     }
