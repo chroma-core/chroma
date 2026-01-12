@@ -3572,7 +3572,7 @@ mod tests {
                 assert!(!e_tag.0.is_empty(), "etag should not be empty");
             }
             crate::ManifestWitness::Position(_) => {
-                panic!("Expected ETag witness, got Timestamp");
+                panic!("Expected ETag witness, got Position");
             }
         }
     }

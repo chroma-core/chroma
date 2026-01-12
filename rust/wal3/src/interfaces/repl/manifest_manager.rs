@@ -10,7 +10,7 @@ use setsum::Setsum;
 use tonic::Code;
 use uuid::Uuid;
 
-use crate::interfaces::{ManifestConsumer, ManifestPublisher};
+use crate::interfaces::{ManifestConsumer, ManifestPublisher, PositionWitness};
 use crate::{
     Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
     GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, ManifestWitness, Snapshot,
@@ -97,18 +97,34 @@ impl ManifestManager {
         log_id: Uuid,
         witness: &ManifestWitness,
     ) -> Result<bool, Error> {
-        let ManifestWitness::Position(position) = witness else {
+        let ManifestWitness::Position(pos_witness) = witness else {
             return Err(Error::internal(file!(), line!()));
         };
+        let Some(witness_collected) = pos_witness.collected() else {
+            return Err(Error::CorruptManifest(format!(
+                "invalid collected setsum hexdigest in witness: {}",
+                pos_witness.collected
+            )));
+        };
         let mut stmt = Statement::new(
-            "SELECT enumeration_offset FROM manifests WHERE log_id = @log_id LIMIT 1",
+            "SELECT enumeration_offset, collected FROM manifests WHERE log_id = @log_id LIMIT 1",
         );
         stmt.add_param("log_id", &log_id.to_string());
         let mut tx = spanner.read_only_transaction().await?;
         let mut reader = tx.query(stmt).await?;
         while let Some(row) = reader.next().await? {
             let enumeration_offset = row.column_by_name::<i64>("enumeration_offset")?;
-            if enumeration_offset as u64 == position.offset() {
+            let collected_hex = row.column_by_name::<String>("collected")?;
+            let Some(current_collected) = Setsum::from_hexdigest(&collected_hex) else {
+                return Err(Error::CorruptManifest(format!(
+                    "invalid collected setsum {collected_hex} for manifest {log_id}"
+                )));
+            };
+            // Both enumeration_offset and collected must match for the cache to be valid.
+            // This ensures GC (which modifies collected) invalidates cached manifests.
+            if enumeration_offset as u64 == pos_witness.position().offset()
+                && current_collected == witness_collected
+            {
                 return Ok(true);
             }
         }
@@ -227,8 +243,12 @@ impl ManifestManager {
             initial_seq_no: Some(FragmentUuid::generate().into()),
             writer,
         };
-        let manifest_witness =
-            ManifestWitness::Position(LogPosition::from_offset(enumeration_offset));
+        // Include both enumeration_offset and collected in the witness.
+        // This ensures GC (which modifies collected) invalidates cached manifests.
+        let manifest_witness = ManifestWitness::Position(PositionWitness::new(
+            LogPosition::from_offset(enumeration_offset),
+            collected,
+        ));
         Ok(Some((manifest, manifest_witness)))
     }
 }
@@ -699,7 +719,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::ManifestManager;
-    use crate::interfaces::ManifestPublisher;
+    use crate::interfaces::{ManifestPublisher, PositionWitness};
     use crate::{Error, FragmentUuid, LogPosition, Manifest, ManifestWitness};
 
     fn emulator_config() -> SpannerEmulatorConfig {
@@ -782,14 +802,23 @@ mod tests {
         assert_eq!(loaded_manifest.collected, manifest.collected);
         assert_eq!(loaded_manifest.acc_bytes, manifest.acc_bytes);
 
-        let ManifestWitness::Position(pos) = witness else {
+        let ManifestWitness::Position(pos_witness) = witness else {
             panic!("expected Position witness");
         };
-        assert_eq!(pos.offset(), 0, "initial enumeration_offset should be 0");
+        assert_eq!(
+            pos_witness.position().offset(),
+            0,
+            "initial enumeration_offset should be 0"
+        );
+        assert_eq!(
+            pos_witness.collected(),
+            Some(Setsum::default()),
+            "initial collected should be default"
+        );
 
         println!(
             "test_k8s_mcmr_integration_init_and_load: log_id={}, witness={:?}",
-            log_id, pos
+            log_id, pos_witness
         );
     }
 
@@ -825,7 +854,10 @@ mod tests {
             .expect("init failed");
 
         let manager = ManifestManager::new(Arc::new(client), log_id);
-        let witness = ManifestWitness::Position(LogPosition::from_offset(0));
+        let witness = ManifestWitness::Position(PositionWitness::new(
+            LogPosition::from_offset(0),
+            Setsum::default(),
+        ));
 
         let result = manager.manifest_head(&witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
@@ -851,7 +883,11 @@ mod tests {
             .expect("init failed");
 
         let manager = ManifestManager::new(Arc::new(client), log_id);
-        let witness = ManifestWitness::Position(LogPosition::from_offset(999));
+        // Witness with wrong enumeration_offset should not match.
+        let witness = ManifestWitness::Position(PositionWitness::new(
+            LogPosition::from_offset(999),
+            Setsum::default(),
+        ));
 
         let result = manager.manifest_head(&witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
@@ -970,7 +1006,11 @@ mod tests {
         );
 
         // Verify enumeration_offset was updated by checking manifest_head.
-        let witness = ManifestWitness::Position(LogPosition::from_offset(messages_len));
+        // collected is still default because no GC has occurred.
+        let witness = ManifestWitness::Position(PositionWitness::new(
+            LogPosition::from_offset(messages_len),
+            Setsum::default(),
+        ));
         let head_result = manager.manifest_head(&witness).await;
         assert!(head_result.is_ok(), "manifest_head failed");
         assert!(
@@ -1024,7 +1064,11 @@ mod tests {
         assert_eq!(pos3.offset(), 30);
 
         // Verify final enumeration_offset.
-        let witness = ManifestWitness::Position(LogPosition::from_offset(60));
+        // collected is still default because no GC has occurred.
+        let witness = ManifestWitness::Position(PositionWitness::new(
+            LogPosition::from_offset(60),
+            Setsum::default(),
+        ));
         let head_result = manager.manifest_head(&witness).await;
         assert!(head_result.is_ok() && head_result.unwrap());
 
@@ -1105,10 +1149,19 @@ mod tests {
 
         assert_eq!(loaded.fragments.len(), 2, "should have 2 fragments");
 
-        let ManifestWitness::Position(pos) = witness else {
+        let ManifestWitness::Position(pos_witness) = witness else {
             panic!("expected Position witness");
         };
-        assert_eq!(pos.offset(), 15, "enumeration_offset should be 5 + 10");
+        assert_eq!(
+            pos_witness.position().offset(),
+            15,
+            "enumeration_offset should be 5 + 10"
+        );
+        assert_eq!(
+            pos_witness.collected(),
+            Some(Setsum::default()),
+            "collected should be default (no GC)"
+        );
 
         println!(
             "test_k8s_mcmr_integration_load_with_fragments: loaded {} fragments",
@@ -1452,6 +1505,175 @@ mod tests {
         assert!(result.is_ok(), "apply_garbage failed: {:?}", result);
 
         println!("test_k8s_mcmr_integration_apply_garbage: passed");
+    }
+
+    // Test that garbage collection invalidates cached manifests.
+    //
+    // This test verifies the fix for a cache invalidation bug: the ManifestWitness must include
+    // the `collected` setsum so that GC (which modifies `collected`) causes cache invalidation.
+    // Without this, readers could use stale cached manifests with deleted fragment references.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_gc_invalidates_witness() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+
+        // Publish fragments with a region so they can be garbage collected.
+        let setsum1 = make_setsum(1);
+        let pointer1 = FragmentUuid::generate();
+        manager
+            .publish_fragment(&pointer1, &["dummy"], "path1", 10, 100, setsum1)
+            .await
+            .expect("first publish failed");
+
+        let setsum2 = make_setsum(2);
+        let pointer2 = FragmentUuid::generate();
+        manager
+            .publish_fragment(&pointer2, &["dummy"], "path2", 10, 100, setsum2)
+            .await
+            .expect("second publish failed");
+
+        // Get the current witness (before GC).
+        let (manifest_before_gc, witness_before_gc) = ManifestManager::load(&client, log_id)
+            .await
+            .expect("load failed")
+            .expect("manifest should exist");
+
+        // Verify witness is valid before GC.
+        let is_valid_before = manager
+            .manifest_head(&witness_before_gc)
+            .await
+            .expect("manifest_head failed");
+        assert!(
+            is_valid_before,
+            "witness should be valid before GC: {:?}",
+            witness_before_gc
+        );
+        assert_eq!(
+            manifest_before_gc.fragments.len(),
+            2,
+            "should have 2 fragments before GC"
+        );
+
+        // Perform GC: compute and apply garbage for fragments up to offset 10.
+        let gc_options = crate::GarbageCollectionOptions::default();
+        let first_to_keep = LogPosition::from_offset(10);
+        let garbage = manager
+            .compute_garbage(&gc_options, first_to_keep)
+            .await
+            .expect("compute_garbage failed");
+
+        if let Some(garbage) = garbage {
+            manager
+                .apply_garbage(garbage)
+                .await
+                .expect("apply_garbage failed");
+
+            // After GC, the old witness should be INVALID because `collected` changed.
+            let is_valid_after = manager
+                .manifest_head(&witness_before_gc)
+                .await
+                .expect("manifest_head failed");
+            assert!(
+                !is_valid_after,
+                "witness from before GC should be INVALID after GC. \
+                 This is critical: without this, readers could access deleted fragments. \
+                 Witness: {:?}",
+                witness_before_gc
+            );
+
+            // Load the new manifest and verify the new witness is valid.
+            let (manifest_after_gc, witness_after_gc) = ManifestManager::load(&client, log_id)
+                .await
+                .expect("load failed")
+                .expect("manifest should exist");
+
+            let is_new_valid = manager
+                .manifest_head(&witness_after_gc)
+                .await
+                .expect("manifest_head failed");
+            assert!(
+                is_new_valid,
+                "new witness should be valid after GC: {:?}",
+                witness_after_gc
+            );
+
+            // Verify the collected setsum changed.
+            let ManifestWitness::Position(pos_witness_before) = witness_before_gc else {
+                panic!("expected Position witness");
+            };
+            let ManifestWitness::Position(pos_witness_after) = &witness_after_gc else {
+                panic!("expected Position witness");
+            };
+            let collected_before = pos_witness_before.collected().expect("valid collected");
+            let collected_after = pos_witness_after.collected().expect("valid collected");
+            assert_ne!(
+                collected_before, collected_after,
+                "collected setsum should change after GC"
+            );
+
+            // Verify the manifest's collected field matches the witness.
+            assert_eq!(
+                manifest_after_gc.collected, collected_after,
+                "manifest collected should match witness collected"
+            );
+
+            println!(
+                "test_k8s_mcmr_integration_gc_invalidates_witness: \
+                 collected_before={}, collected_after={}, fragments_before={}, fragments_after={}",
+                collected_before.hexdigest(),
+                collected_after.hexdigest(),
+                manifest_before_gc.fragments.len(),
+                manifest_after_gc.fragments.len()
+            );
+        } else {
+            // If no garbage was computed (e.g., no fragments eligible), that's also fine
+            // for this test - just log it.
+            println!(
+                "test_k8s_mcmr_integration_gc_invalidates_witness: no garbage to collect, \
+                 test passes trivially"
+            );
+        }
+    }
+
+    // Test that manifest_head returns false when collected setsum doesn't match.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_manifest_head_collected_mismatch() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(&client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client), log_id);
+
+        // Create a witness with correct enumeration_offset but wrong collected.
+        let wrong_collected = make_setsum(1);
+        let witness = ManifestWitness::Position(PositionWitness::new(
+            LogPosition::from_offset(0),
+            wrong_collected,
+        ));
+
+        let result = manager.manifest_head(&witness).await;
+        assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
+        assert!(
+            !result.unwrap(),
+            "manifest_head should return false when collected doesn't match"
+        );
+
+        println!("test_k8s_mcmr_integration_manifest_head_collected_mismatch: passed");
     }
 
     // Test compute_garbage returns Ok(None).

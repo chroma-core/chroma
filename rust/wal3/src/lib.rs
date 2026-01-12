@@ -34,6 +34,7 @@ pub use interfaces::s3::{
 pub use interfaces::{
     BatchManager, FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher,
     FragmentUploader, ManifestConsumer, ManifestManagerFactory, ManifestPublisher, ManifestWitness,
+    PositionWitness,
 };
 pub use manifest::{
     unprefixed_snapshot_path, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,

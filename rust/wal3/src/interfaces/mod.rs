@@ -183,10 +183,57 @@ pub trait ManifestManagerFactory {
 
 ////////////////////////////////////////// ManifestWitness /////////////////////////////////////////
 
+/// Position-based witness data for Spanner backend.
+///
+/// Contains `enumeration_offset` and `collected_setsum` where:
+/// - `enumeration_offset` changes on `publish_fragment` (appends).
+/// - `collected_setsum` changes on `apply_garbage` (GC).
+///
+/// Both must match for the cached manifest to be considered valid.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PositionWitness {
+    /// The enumeration offset, which changes on appends.
+    pub position: LogPosition,
+    /// The collected setsum as hexdigest, which changes on GC.
+    pub collected: String,
+}
+
+impl PositionWitness {
+    /// Creates a new PositionWitness from a LogPosition and Setsum.
+    pub fn new(position: LogPosition, collected: setsum::Setsum) -> Self {
+        Self {
+            position,
+            collected: collected.hexdigest(),
+        }
+    }
+
+    /// Returns the LogPosition component.
+    pub fn position(&self) -> LogPosition {
+        self.position
+    }
+
+    /// Returns the collected setsum, or None if the stored hexdigest is invalid.
+    pub fn collected(&self) -> Option<setsum::Setsum> {
+        setsum::Setsum::from_hexdigest(&self.collected)
+    }
+}
+
+/// A witness to the state of a manifest used for cache invalidation.
+///
+/// The witness is compared against the current state to determine if a cached manifest is still
+/// valid. Different backends use different witness types:
+/// - S3: Uses ETag from the object store.
+/// - Spanner: Uses Position with enumeration_offset and collected setsum.
+///
+/// The `collected` field in the Position variant is critical for correctness: it ensures that
+/// garbage collection (which modifies `collected` and deletes fragments) invalidates cached
+/// manifests. Without it, readers could use stale cached manifests containing references to
+/// deleted fragments.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ManifestWitness {
     ETag(ETag),
-    Position(LogPosition),
+    /// Position-based witness for Spanner backend.
+    Position(PositionWitness),
 }
 
 ///////////////////////////////////////// ManifestPublisher ////////////////////////////////////////
