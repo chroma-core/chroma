@@ -12,7 +12,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_97_destroy_wedge() {
+async fn test_k8s_mcmr_integration_repl_97_destroy_wedge() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 

@@ -113,7 +113,7 @@ fn deltas_to_uuid_fragment_sequence(deltas: &[FragmentDelta]) -> Vec<Fragment> {
 
 proptest::proptest! {
     #[test]
-    fn repl_manifests(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1000)) {
+    fn test_k8s_mcmr_integration_repl_manifests(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1000)) {
         let mut manifest = Manifest::new_empty("test");
         let fragments = deltas_to_uuid_fragment_sequence(&deltas);
         for fragment in fragments.into_iter() {
@@ -129,7 +129,7 @@ proptest::proptest! {
     })]
 
     #[test]
-    fn repl_manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..75)) {
+    fn test_k8s_mcmr_integration_repl_manifests_garbage(deltas in proptest::collection::vec(FragmentDelta::arbitrary(), 1..75)) {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let mut manifest = Manifest::new_empty("test");
         println!("deltas = {deltas:#?}");

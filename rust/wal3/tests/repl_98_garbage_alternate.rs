@@ -127,7 +127,7 @@ async fn garbage_collector_thread(
 }
 
 #[tokio::test]
-async fn repl_98_garbage_alternate() {
+async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 

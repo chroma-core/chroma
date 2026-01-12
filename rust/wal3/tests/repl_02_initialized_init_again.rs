@@ -8,7 +8,7 @@ mod common;
 use common::setup_spanner_client;
 
 #[tokio::test]
-async fn repl_02_initialized_init_again() {
+async fn test_k8s_mcmr_integration_repl_02_initialized_init_again() {
     // Double initialization should fail and the second failure should not touch the log's content.
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();

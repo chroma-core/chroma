@@ -13,7 +13,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_copy_with_deep_snapshots() {
+async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
     // Note: Snapshots are not fully implemented for repl manifests, so this test
     // focuses on fragment copying without snapshot assertions.
     let client = setup_spanner_client().await;

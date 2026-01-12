@@ -15,7 +15,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_85_copy_race_condition() {
+async fn test_k8s_mcmr_integration_repl_85_copy_race_condition() {
     const DELAYS_MS: &[u64] = &[0, 1, 2, 3, 5];
     const ATTEMPTS_PER_DELAY: usize = 5;
 

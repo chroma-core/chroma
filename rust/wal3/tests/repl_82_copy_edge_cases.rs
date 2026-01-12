@@ -13,7 +13,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_copy_single_fragment() {
+async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 

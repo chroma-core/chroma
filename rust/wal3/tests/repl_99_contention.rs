@@ -63,7 +63,7 @@ async fn writer_thread(
 }
 
 #[tokio::test]
-async fn repl_99_ping_pong_contention() {
+async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 

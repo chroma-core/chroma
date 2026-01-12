@@ -12,7 +12,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_05_crash_safety_initialize_fails() {
+async fn test_k8s_mcmr_integration_repl_05_crash_safety_initialize_fails() {
     // Test that after initializing a log and appending data, re-opening the log
     // allows continued progress. This tests basic crash safety where the manifest
     // in Spanner persists across "crashes" (log reopens).

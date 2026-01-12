@@ -13,7 +13,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_82_copy_empty_log_initializes() {
+async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     // Test copying an empty-after-gc log initializes correctly.
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();

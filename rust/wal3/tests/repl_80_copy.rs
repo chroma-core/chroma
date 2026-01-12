@@ -13,7 +13,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_80_copy() {
+async fn test_k8s_mcmr_integration_repl_80_copy() {
     // Test copying a log to a new location.
     // Note: The copy function currently expects S3ManifestManagerFactory, so this test
     // verifies the source log creation and reading with repl types.

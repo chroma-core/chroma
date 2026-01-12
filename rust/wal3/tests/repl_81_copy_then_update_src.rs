@@ -13,7 +13,7 @@ mod common;
 use common::{default_repl_options, setup_spanner_client};
 
 #[tokio::test]
-async fn repl_81_copy_then_update_src() {
+async fn test_k8s_mcmr_integration_repl_81_copy_then_update_src() {
     // Test copying a log and then updating the source - target should remain unchanged.
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
