@@ -694,7 +694,11 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        new.initial_seq_no = Some(FragmentIdentifier::from(garbage.fragments_to_drop_limit));
+        // Only update initial_seq_no for SeqNo-based logs. UUID-based logs don't use sequential
+        // numbering, so setting initial_seq_no to SeqNo(0) would mix identifier types.
+        if !garbage.fragments_are_uuids {
+            new.initial_seq_no = Some(FragmentIdentifier::from(garbage.fragments_to_drop_limit));
+        }
         new.scrub()?;
 
         // Sanity check that new manifest contains valid range of logs
