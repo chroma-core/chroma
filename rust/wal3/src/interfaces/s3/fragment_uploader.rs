@@ -61,6 +61,10 @@ impl FragmentUploader<(FragmentSeqNo, LogPosition)> for S3FragmentUploader {
             }
         };
         let (res1, res2) = futures::future::join(fut1, fut2).await;
+        // Prioritize upload error if it exists, as that's the primary operation.
+        if let Err(e) = &res1 {
+            return Err(e.clone());
+        }
         res2?;
         res1
     }
