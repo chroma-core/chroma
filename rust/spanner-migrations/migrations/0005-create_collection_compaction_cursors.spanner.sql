@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS collection_compaction_cursors (
     total_records_post_compaction INT64 DEFAULT (0),
     size_bytes_post_compaction INT64 DEFAULT (0),
     num_versions INT64 DEFAULT (0),
+    compaction_failure_count INT64 NOT NULL DEFAULT (0),
     version_file_name STRING(MAX),
     last_compaction_time_secs TIMESTAMP OPTIONS (allow_commit_timestamp=true),
     oldest_version_ts TIMESTAMP,
