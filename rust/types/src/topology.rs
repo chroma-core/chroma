@@ -946,6 +946,89 @@ mod tests {
     }
 
     #[test]
+    fn configuration_serde_roundtrip_with_complex_config() {
+        /// A concrete configuration struct to verify serde bounds work for complex types.
+        #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+        struct RegionConfig {
+            endpoint: String,
+            max_connections: u32,
+        }
+
+        #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+        struct TopologyConfig {
+            replication_factor: u8,
+            consistency_level: String,
+        }
+
+        let region1 = ProviderRegion::new(
+            RegionName::new("aws-us-east-1").unwrap(),
+            "aws",
+            "us-east-1",
+            RegionConfig {
+                endpoint: "https://us-east-1.example.com".to_string(),
+                max_connections: 100,
+            },
+        );
+        let region2 = ProviderRegion::new(
+            RegionName::new("gcp-europe-west1").unwrap(),
+            "gcp",
+            "europe-west1",
+            RegionConfig {
+                endpoint: "https://europe-west1.example.com".to_string(),
+                max_connections: 50,
+            },
+        );
+
+        let topology = Topology::new(
+            TopologyName::new("global").unwrap(),
+            vec![
+                RegionName::new("aws-us-east-1").unwrap(),
+                RegionName::new("gcp-europe-west1").unwrap(),
+            ],
+            TopologyConfig {
+                replication_factor: 3,
+                consistency_level: "quorum".to_string(),
+            },
+        );
+
+        let config: MultiCloudMultiRegionConfiguration<RegionConfig, TopologyConfig> =
+            MultiCloudMultiRegionConfiguration::new(
+                RegionName::new("aws-us-east-1").unwrap(),
+                vec![region1, region2],
+                vec![topology],
+            )
+            .expect("valid configuration");
+
+        // Verify serialization produces valid JSON with config payloads.
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        assert!(
+            json.contains("endpoint"),
+            "JSON should contain region config fields: {json}"
+        );
+        assert!(
+            json.contains("replication_factor"),
+            "JSON should contain topology config fields: {json}"
+        );
+
+        // Verify deserialization roundtrip.
+        let deserialized: MultiCloudMultiRegionConfiguration<RegionConfig, TopologyConfig> =
+            serde_json::from_str(&json).unwrap();
+        assert_eq!(config, deserialized);
+
+        // Verify the config values are accessible and correct.
+        assert_eq!(
+            deserialized.regions()[0].config().endpoint,
+            "https://us-east-1.example.com"
+        );
+        assert_eq!(deserialized.regions()[0].config().max_connections, 100);
+        assert_eq!(deserialized.topologies()[0].config().replication_factor, 3);
+        assert_eq!(
+            deserialized.topologies()[0].config().consistency_level,
+            "quorum"
+        );
+    }
+
+    #[test]
     fn configuration_deserialize_valid() {
         let json = r#"{
             "preferred": "aws-us-east-1",
