@@ -82,7 +82,7 @@ async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
 }
 
 #[tokio::test]
-async fn repl_copy_at_specific_offset() {
+async fn test_k8s_mcmr_integration_repl_copy_at_specific_offset() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
@@ -156,7 +156,7 @@ async fn repl_copy_at_specific_offset() {
 }
 
 #[tokio::test]
-async fn repl_copy_verifies_manifest_consistency() {
+async fn test_k8s_mcmr_integration_repl_copy_verifies_manifest_consistency() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
@@ -222,7 +222,7 @@ async fn repl_copy_verifies_manifest_consistency() {
 }
 
 #[tokio::test]
-async fn repl_copy_empty_with_advanced_manifest() {
+async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
@@ -291,7 +291,7 @@ async fn repl_copy_empty_with_advanced_manifest() {
 }
 
 #[tokio::test]
-async fn repl_copy_with_large_fragments() {
+async fn test_k8s_mcmr_integration_repl_copy_with_large_fragments() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
