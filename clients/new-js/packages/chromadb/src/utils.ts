@@ -789,11 +789,23 @@ function portableEmbeddingsToBase64Bytes(embeddings: number[][]): string[] {
 
 function bufferEmbeddingsToBase64Bytes(embeddings: number[][]): string[] {
   return embeddings.map((embedding) => {
-    const float32 = new Float32Array(embedding);
-    return Buffer.from(float32.buffer).toString("base64");
+    const buffer = Buffer.alloc(embedding.length * 4);
+    for (let i = 0; i < embedding.length; i++) {
+      buffer.writeFloatLE(embedding[i]!, i * 4);
+    }
+    return buffer.toString("base64");
   });
 }
 
 export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
-  return Buffer != undefined && typeof Buffer.from === "function" ? bufferEmbeddingsToBase64Bytes(embeddings) : portableEmbeddingsToBase64Bytes(embeddings);
+  /*
+   * This function is on the hot path for writing embeddings to Chroma.
+   * Depending on the number of documents and the size of the embeddings, this
+   * function can be a significant bottleneck.
+   *
+   * We benchmarked each implementation of this function and found that the
+   * Buffer implementation is 4-6x faster than the portable implementation.
+   */
+  const useBuffer = Buffer != undefined && typeof Buffer.alloc === "function" && typeof Buffer.prototype.writeFloatLE === "function";
+  return useBuffer ? bufferEmbeddingsToBase64Bytes(embeddings) : portableEmbeddingsToBase64Bytes(embeddings);
 };
