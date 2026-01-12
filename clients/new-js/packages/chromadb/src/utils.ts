@@ -806,6 +806,6 @@ export const embeddingsToBase64Bytes = (embeddings: number[][]) => {
    * We benchmarked each implementation of this function and found that the
    * Buffer implementation is 4-6x faster than the portable implementation.
    */
-  const useBuffer = Buffer != undefined && typeof Buffer.alloc === "function" && typeof Buffer.prototype.writeFloatLE === "function";
+  const useBuffer = typeof Buffer !== "undefined" && Buffer != undefined && typeof Buffer.alloc === "function" && typeof Buffer.prototype.writeFloatLE === "function";
   return useBuffer ? bufferEmbeddingsToBase64Bytes(embeddings) : portableEmbeddingsToBase64Bytes(embeddings);
 };
