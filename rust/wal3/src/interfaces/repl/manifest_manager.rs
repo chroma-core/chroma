@@ -601,11 +601,22 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     }
 
     /// Compute the garbage assuming at least log position will be kept.
+    ///
+    /// This method limits the number of fragments returned to avoid exceeding Spanner's
+    /// mutation limit (typically 20,000-40,000 mutations per transaction). Since each
+    /// fragment deletion involves mutations to both `fragments` and `fragment_regions`
+    /// tables, we limit to 5,000 fragments to stay well under the limit while still
+    /// making progress during heavy GC or catch-up scenarios.
     async fn compute_garbage(
         &self,
         _: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
     ) -> Result<Option<Garbage>, Error> {
+        // Limit fragments to avoid exceeding Spanner's mutation limit per transaction.
+        // Each fragment requires deletions from both `fragment_regions` and `fragments`
+        // tables, so 5,000 fragments = ~10,000 mutations, well under the 20,000-40,000 limit.
+        const MAX_FRAGMENTS_PER_GC: i64 = 5000;
+
         if first_to_keep.offset() > i64::MAX as u64 {
             return Err(Error::Overflow(format!(
                 "first_to_keep offset {} exceeds i64::MAX",
@@ -622,12 +633,15 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             WHERE fragments.log_id = @log_id
                 AND fragments.position_limit <= @threshold
                 AND fragment_regions.region = @local_region
+            ORDER BY fragments.position_limit ASC
+            LIMIT @max_fragments
             ",
         );
         stmt1.add_param("log_id", &self.log_id.to_string());
         stmt1.add_param("threshold", &(first_to_keep.offset() as i64));
         // TODO(rescrv, mcmr):  dummy region.
         stmt1.add_param("local_region", &"dummy");
+        stmt1.add_param("max_fragments", &MAX_FRAGMENTS_PER_GC);
         let mut tx = self.spanner.read_only_transaction().await?;
         let mut iter = tx.query(stmt1).await?;
         let mut acc = Setsum::default();
