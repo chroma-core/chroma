@@ -194,12 +194,12 @@ jobs:
           # Forward Spanner emulator port for rust-sysdb backend tests
           kubectl -n chroma port-forward svc/spanner 9010:9010 &
       - name: Run rust-sysdb k8s integration tests
-        run: cargo nextest run --profile rust_mcmr_k8s_integration --test-threads 1
+        run: cargo nextest run --profile mcmr_k8s_integration --test-threads 1
       - name: Save service logs to artifact
         if: always()
         uses: ./.github/actions/export-tilt-logs
         with:
-          artifact-name: "rust-sysdb-integration-test"
+          artifact-name: "mcmr-integration-test"
 
   can-build-release:
     runs-on: blacksmith-16vcpu-ubuntu-2404

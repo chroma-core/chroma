@@ -8,7 +8,7 @@ use guacamole::Guacamole;
 use chroma_storage::s3::s3_client_for_test_with_bucket_name;
 use chroma_storage::Storage;
 
-use wal3::{create_factories, Error, LogReaderOptions, LogWriter, LogWriterOptions};
+use wal3::{create_s3_factories, Error, LogReaderOptions, LogWriter, LogWriterOptions};
 
 ///////////////////////////////////////////// benchmark ////////////////////////////////////////////
 
@@ -56,7 +56,7 @@ async fn append_once(mut guac: Guacamole, log: Arc<DefaultLogWriter>) {
 async fn garbage_collect_in_a_loop(options: LogWriterOptions, storage: Arc<Storage>, prefix: &str) {
     let writer = "benchmark gc'er";
     loop {
-        let (fragment_factory, manifest_factory) = create_factories(
+        let (fragment_factory, manifest_factory) = create_s3_factories(
             options.clone(),
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -99,7 +99,7 @@ async fn main() {
     let storage = Arc::new(s3_client_for_test_with_bucket_name("wal3-testing").await);
     let prefix = "wal3bench";
     let writer = "benchmark writer";
-    let (fragment_factory, manifest_factory) = create_factories(
+    let (fragment_factory, manifest_factory) = create_s3_factories(
         options.log.clone(),
         LogReaderOptions::default(),
         Arc::clone(&storage),

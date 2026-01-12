@@ -313,7 +313,7 @@ impl HeapTender {
         let dirty_futures = dirty_fragments
             .iter()
             .map(|fragment| async {
-                let (_, records, _) = self.reader.read_parquet(fragment).await?;
+                let (_, records, _, _) = self.reader.read_parquet(fragment).await?;
                 let dirty_markers = records
                     .into_iter()
                     .map(|x| -> Result<(LogPosition, DirtyMarker), Error> {

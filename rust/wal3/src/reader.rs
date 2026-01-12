@@ -11,10 +11,10 @@ use chroma_storage::Storage;
 use crate::interfaces::s3;
 use crate::interfaces::{
     FragmentConsumer, FragmentManagerFactory, FragmentPointer, ManifestConsumer,
-    ManifestManagerFactory, ManifestWitness,
+    ManifestManagerFactory,
 };
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest, ManifestAndETag,
+    Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest, ManifestAndWitness,
     ScrubError, ScrubSuccess, SnapshotCache,
 };
 
@@ -141,25 +141,18 @@ pub struct LogReader<
     fragment_consumer: FC,
     manifest_consumer: MC,
     cache: Option<Arc<dyn SnapshotCache>>,
-    pub(crate) prefix: String,
 }
 
 impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
     LogReader<P, FC, MC>
 {
-    pub fn new(
-        options: LogReaderOptions,
-        fragment_consumer: FC,
-        manifest_consumer: MC,
-        prefix: String,
-    ) -> Self {
+    pub fn new(options: LogReaderOptions, fragment_consumer: FC, manifest_consumer: MC) -> Self {
         let cache = None;
         Self {
             _options: options,
             fragment_consumer,
             manifest_consumer,
             cache,
-            prefix,
         }
     }
 
@@ -167,7 +160,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
         options: LogReaderOptions,
         fragment_consumer: FC,
         manifest_consumer: MC,
-        prefix: String,
     ) -> Result<Self, Error> {
         let cache = None;
         Ok(Self {
@@ -175,7 +167,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
             fragment_consumer,
             manifest_consumer,
             cache,
-            prefix,
         })
     }
 
@@ -184,10 +175,10 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
     }
 
     /// Verify that the reader would read the same manifest as the one provided in
-    /// manifest_and_etag, but do it in a way that doesn't load the whole manifest.
-    pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
+    /// manifest_and_witness, but do it in a way that doesn't load the whole manifest.
+    pub async fn verify(&self, manifest_and_witness: &ManifestAndWitness) -> Result<bool, Error> {
         self.manifest_consumer
-            .manifest_head(&ManifestWitness::ETag(manifest_and_etag.e_tag.clone()))
+            .manifest_head(&manifest_and_witness.witness)
             .await
     }
 
@@ -199,12 +190,9 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
             .map(|(m, _)| m))
     }
 
-    pub async fn manifest_and_e_tag(&self) -> Result<Option<ManifestAndETag>, Error> {
+    pub async fn manifest_and_witness(&self) -> Result<Option<ManifestAndWitness>, Error> {
         match self.manifest_consumer.manifest_load().await {
-            Ok(Some((manifest, ManifestWitness::ETag(e_tag)))) => {
-                Ok(Some(ManifestAndETag { manifest, e_tag }))
-            }
-            Ok(Some((_, _))) => Err(Error::internal(file!(), line!())),
+            Ok(Some((manifest, witness))) => Ok(Some(ManifestAndWitness { manifest, witness })),
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }
@@ -318,7 +306,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
     pub async fn read_parquet(
         &self,
         fragment: &Fragment,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         self.fragment_consumer
             .read_parquet(&fragment.path, fragment.start)
             .await
@@ -468,7 +456,7 @@ impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestR
         prefix: String,
     ) -> Result<Self, Error> {
         let write = crate::LogWriterOptions::default();
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             write,
             options.clone(),
             Arc::clone(&storage),
@@ -479,7 +467,7 @@ impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestR
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
-        Self::open(options, fragment_consumer, manifest_consumer, prefix).await
+        Self::open(options, fragment_consumer, manifest_consumer).await
     }
 }
 
@@ -3370,7 +3358,6 @@ mod tests {
         ) else {
             panic!("failed to get fragments");
         };
-        eprintln!("{fragments:?}");
         assert_eq!(fragments.len(), 2);
         assert_eq!(
             fragments[0],
@@ -3415,7 +3402,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3427,24 +3414,19 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(
-            options.clone(),
-            batch_manager,
-            manifest_manager,
-            prefix.clone(),
-        );
+        let reader = LogReader::new(options.clone(), batch_manager, manifest_manager);
 
         let (loaded_manifest, etag) = ManifestReader::load(&options.throttle, &storage, &prefix)
             .await
             .unwrap()
             .unwrap();
 
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest: loaded_manifest,
-            e_tag: etag,
+            witness: crate::ManifestWitness::ETag(etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(result, "verify should return true for matching etag");
     }
 
@@ -3465,7 +3447,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3477,15 +3459,15 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
         let fake_etag = chroma_storage::ETag("fake-etag-that-wont-match".to_string());
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest,
-            e_tag: fake_etag,
+            witness: crate::ManifestWitness::ETag(fake_etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(!result, "verify should return false for non-matching etag");
     }
 
@@ -3512,7 +3494,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3524,15 +3506,15 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
         let fake_etag = chroma_storage::ETag("fake-etag".to_string());
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest,
-            e_tag: fake_etag,
+            witness: crate::ManifestWitness::ETag(fake_etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await;
+        let result = reader.verify(&manifest_and_witness).await;
         match result {
             Err(crate::Error::StorageError(storage_error)) => {
                 match storage_error.as_ref() {
@@ -3547,7 +3529,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_e_tag_returns_both_manifest_and_etag() {
+    async fn test_k8s_integration_manifest_and_witness_returns_both_manifest_and_witness() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3563,7 +3545,7 @@ mod tests {
         .await
         .unwrap();
 
-        let (fragment_factory, manifest_factory) = s3::create_factories(
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
             writer_options,
             LogReaderOptions::default(),
             Arc::clone(&storage),
@@ -3575,24 +3557,28 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix.clone());
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
-        let result = reader.manifest_and_e_tag().await.unwrap();
+        let result = reader.manifest_and_witness().await.unwrap();
         assert!(
             result.is_some(),
-            "manifest_and_e_tag should return Some when manifest exists"
+            "manifest_and_witness should return Some when manifest exists"
         );
 
-        let manifest_and_etag = result.unwrap();
-        assert_eq!(manifest_and_etag.manifest.writer, "test-writer");
-        assert!(
-            !manifest_and_etag.e_tag.0.is_empty(),
-            "etag should not be empty"
-        );
+        let manifest_and_witness = result.unwrap();
+        assert_eq!(manifest_and_witness.manifest.writer, "test-writer");
+        match manifest_and_witness.witness {
+            crate::ManifestWitness::ETag(e_tag) => {
+                assert!(!e_tag.0.is_empty(), "etag should not be empty");
+            }
+            crate::ManifestWitness::Position(_) => {
+                panic!("Expected ETag witness, got Position");
+            }
+        }
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
+    async fn test_k8s_integration_manifest_and_witness_returns_none_when_no_manifest() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "nonexistent-prefix".to_string();
         let options = LogReaderOptions::default();
@@ -3618,12 +3604,12 @@ mod tests {
         let batch_manager = fragment_factory.make_consumer().await.unwrap();
         let manifest_manager = manifest_factory.make_consumer().await.unwrap();
 
-        let reader = LogReader::new(options, batch_manager, manifest_manager, prefix);
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
 
-        let result = reader.manifest_and_e_tag().await.unwrap();
+        let result = reader.manifest_and_witness().await.unwrap();
         assert!(
             result.is_none(),
-            "manifest_and_e_tag should return None when no manifest exists"
+            "manifest_and_witness should return None when no manifest exists"
         );
     }
 }

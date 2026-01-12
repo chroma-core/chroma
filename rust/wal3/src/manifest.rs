@@ -5,12 +5,11 @@
 //! Snapshots are content-addressable and immutable, while manifests get overwritten.  For that
 //! reason, manifests embed the ETag for conditional writes while snapshots do not.
 
-use chroma_storage::ETag;
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, ScrubError,
-    ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
+    Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, ManifestWitness,
+    ScrubError, ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -424,7 +423,8 @@ impl Manifest {
     /// Once upon a time there was more parallelism in wal3 and this was a more interesting.  Now
     /// it mostly returns true unless internal invariants are violated.
     pub fn can_apply_fragment(&self, fragment: &Fragment) -> bool {
-        Some(fragment.seq_no) == self.next_fragment_seq_no()
+        (Some(fragment.seq_no) == self.next_fragment_seq_no()
+            || matches!(fragment.seq_no, FragmentIdentifier::Uuid(_)))
             && fragment.start.offset() < fragment.limit.offset()
     }
 
@@ -623,8 +623,9 @@ impl Manifest {
                 ),
             ));
         }
-        if garbage.fragments_to_drop_limit
-            <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
+        if !garbage.fragments_are_uuids
+            && FragmentIdentifier::from(garbage.fragments_to_drop_limit)
+                <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
             && !garbage
                 .snapshots_to_drop
                 .iter()
@@ -640,8 +641,7 @@ impl Manifest {
                 garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
             )));
         }
-        if garbage.fragments_to_drop_limit == FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0))
-        {
+        if garbage.fragments_to_drop_limit == FragmentSeqNo::ZERO && !garbage.fragments_are_uuids {
             return Ok(None);
         }
         let mut new = self.clone();
@@ -654,19 +654,8 @@ impl Manifest {
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        // TODO(mcmr.wal3.gc): This garbage collection loop only handles SeqNo variants. If Uuid
-        // variants need garbage collection, this logic will need to be extended to handle them
-        // explicitly.
-        let start = garbage
-            .fragments_to_drop_start
-            .as_seq_no()
-            .unwrap_or(FragmentSeqNo::ZERO)
-            .as_u64();
-        let limit = garbage
-            .fragments_to_drop_limit
-            .as_seq_no()
-            .unwrap_or(FragmentSeqNo::ZERO)
-            .as_u64();
+        let start = garbage.fragments_to_drop_start.as_u64();
+        let limit = garbage.fragments_to_drop_limit.as_u64();
         for seq_no in start..limit {
             if let Some(index) = new.fragments.iter().position(|f| {
                 f.seq_no == FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(seq_no))
@@ -674,6 +663,18 @@ impl Manifest {
                 setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
             }
+        }
+        if garbage.fragments_are_uuids {
+            let mut acc = Setsum::default();
+            new.fragments.retain(|frag| {
+                if frag.limit <= garbage.first_to_keep {
+                    acc += frag.setsum;
+                    false
+                } else {
+                    true
+                }
+            });
+            setsum_to_discard += acc;
         }
         let mut root_setsum = Setsum::default();
         if let Some(snap) = garbage.snapshot_for_root.as_ref() {
@@ -693,7 +694,11 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
+        // Only update initial_seq_no for SeqNo-based logs. UUID-based logs don't use sequential
+        // numbering, so setting initial_seq_no to SeqNo(0) would mix identifier types.
+        if !garbage.fragments_are_uuids {
+            new.initial_seq_no = Some(FragmentIdentifier::from(garbage.fragments_to_drop_limit));
+        }
         new.scrub()?;
 
         // Sanity check that new manifest contains valid range of logs
@@ -714,18 +719,20 @@ impl Manifest {
     }
 }
 
-////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
+////////////////////////////////////////// ManifestAndWitness /////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct ManifestAndETag {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestAndWitness {
     pub manifest: Manifest,
-    pub e_tag: ETag,
+    pub witness: ManifestWitness,
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
+    use chroma_storage::ETag;
+
     use super::*;
     use crate::FragmentUuid;
 
@@ -1386,8 +1393,9 @@ mod tests {
         let garbage = Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(100),
             snapshot_for_root: None,
@@ -1415,8 +1423,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(10),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1427,7 +1436,7 @@ mod tests {
         if let Err(crate::Error::GarbageCollection(msg)) = result {
             println!("GarbageCollection error message: {msg}");
             assert!(msg.contains("Garbage has start > limit"));
-            assert!(msg.contains("SeqNo(FragmentSeqNo(10)) > SeqNo(FragmentSeqNo(5))"));
+            assert!(msg.contains("FragmentSeqNo(10) > FragmentSeqNo(5)"));
         } else {
             panic!("Expected GarbageCollection error, got {:?}", result);
         }
@@ -1437,8 +1446,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1452,8 +1462,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1499,8 +1510,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089257)),
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089266)), // Equal to initial_seq_no
+            fragments_to_drop_start: FragmentSeqNo::from_u64(3089257),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(3089266), // Equal to initial_seq_no
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::from_hexdigest(
                 "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",
             )
@@ -1517,7 +1529,7 @@ mod tests {
 
         // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
         let garbage_below_initial = Garbage {
-            fragments_to_drop_limit: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089265)), // Less than initial_seq_no
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(3089265), // Less than initial_seq_no
             ..garbage.clone()
         };
 
@@ -1798,5 +1810,207 @@ mod tests {
             snapshot.scrub().is_ok(),
             "scrub should accept uniform Uuid identifiers"
         );
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_empty_manifest() {
+        let manifest = Manifest::new_empty("test-writer");
+        let witness = ManifestWitness::ETag(ETag("test-etag-12345".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (empty): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_fragments() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "manifest writer 1".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
+            )
+            .unwrap(),
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("etag-with-fragments".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with fragments): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_snapshots() {
+        let snapshot_setsum = Setsum::from_hexdigest(
+            "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+        )
+        .unwrap();
+        let snapshot_pointer = SnapshotPointer {
+            path_to_snapshot: unprefixed_snapshot_path(snapshot_setsum),
+            setsum: snapshot_setsum,
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(100),
+            depth: 1,
+            num_bytes: 5000,
+        };
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 3000,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "snapshot-writer".to_string(),
+            setsum: snapshot_setsum + fragment.setsum,
+            collected: Setsum::default(),
+            acc_bytes: 8000,
+            snapshots: vec![snapshot_pointer],
+            fragments: vec![fragment],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("snapshot-etag-xyz".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with snapshots): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_initial_offset() {
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(1000)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100))),
+        };
+        let witness = ManifestWitness::ETag(ETag("initial-offset-etag".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with initial_offset): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+        assert_eq!(
+            deserialized.manifest.initial_offset,
+            Some(LogPosition::from_offset(1000))
+        );
+        assert_eq!(
+            deserialized.manifest.initial_seq_no,
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100)))
+        );
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_uuid_fragments() {
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("6ba7b810-9dad-11d1-80b4-00c04fd430c8").unwrap();
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(50),
+            num_bytes: 1000,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            start: LogPosition::from_offset(50),
+            limit: LogPosition::from_offset(100),
+            num_bytes: 2000,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "uuid-writer".to_string(),
+            setsum: fragment1.setsum + fragment2.setsum,
+            collected: Setsum::default(),
+            acc_bytes: 3000,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("uuid-etag".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with uuid fragments): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_collected() {
+        let collected_setsum = Setsum::from_hexdigest(
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .unwrap();
+        let manifest = Manifest {
+            writer: "gc-writer".to_string(),
+            setsum: Setsum::default(),
+            collected: collected_setsum,
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("collected-etag".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with collected): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+        assert_eq!(deserialized.manifest.collected, collected_setsum);
     }
 }
