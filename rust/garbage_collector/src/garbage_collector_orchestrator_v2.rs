@@ -515,10 +515,16 @@ impl GarbageCollectorOrchestrator {
                         "Expected log offset to be unsigned".to_string(),
                     )
                 })?;
-            let database_name = DatabaseName::new(self.database_name.clone().unwrap_or_default())
-                .ok_or(GarbageCollectorError::InvariantViolation(
-                "Expected database_name to be set".to_string(),
-            ))?;
+            let collection_info = version_file.collection_info_immutable.as_ref().ok_or(
+                GarbageCollectorError::InvariantViolation(
+                    "Expected collection_info_immutable to be set".to_string(),
+                ),
+            )?;
+            let database_name = DatabaseName::new(collection_info.database_name.clone()).ok_or(
+                GarbageCollectorError::InvariantViolation(
+                    "Expected database_name to be set".to_string(),
+                ),
+            )?;
             collections_to_garbage_collect.insert(
                 *collection_id,
                 // The minimum offset to keep is one after the minimum compaction offset
