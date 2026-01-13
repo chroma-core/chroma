@@ -814,6 +814,8 @@ impl ChromaCollection {
 #[cfg(test)]
 mod tests {
     use crate::tests::{unique_collection_name, with_client};
+    use chroma_types::operator::{Key, QueryVector, RankExpr};
+    use chroma_types::plan::{ReadLevel, SearchPayload};
     use chroma_types::{
         Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
         PrimitiveOperator, UpdateMetadata, UpdateMetadataValue, Where,
@@ -1334,6 +1336,65 @@ mod tests {
             assert_eq!(response.ids.len(), 2);
             assert_eq!(response.ids[0].len(), 1);
             assert_eq!(response.ids[1].len(), 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_search_with_read_levels() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_search_read_level").await;
+
+            collection
+                .add(
+                    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+                    vec![
+                        vec![1.0, 2.0, 3.0],
+                        vec![1.1, 2.1, 3.1],
+                        vec![0.9, 1.9, 2.9],
+                    ],
+                    Some(vec![
+                        Some("first".to_string()),
+                        Some("second".to_string()),
+                        Some("third".to_string()),
+                    ]),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let search = SearchPayload::default()
+                .rank(RankExpr::Knn {
+                    query: QueryVector::Dense(vec![1.0, 2.0, 3.0]),
+                    key: Key::Embedding,
+                    limit: 10,
+                    default: None,
+                    return_rank: false,
+                })
+                .limit(Some(5), 0)
+                .select([Key::Document, Key::Score]);
+
+            let index_and_wal = collection
+                .search_with_options(vec![search.clone()], ReadLevel::IndexAndWal)
+                .await
+                .unwrap();
+            assert_eq!(index_and_wal.ids.len(), 1);
+            assert!(!index_and_wal.ids[0].is_empty());
+            assert_eq!(index_and_wal.ids[0].len(), 3);
+            assert!(index_and_wal.documents[0].is_some());
+            assert!(index_and_wal.scores[0].is_some());
+
+            // IndexOnly may omit recent WAL writes; just ensure the call succeeds
+            // and the response structure matches the requested payload.
+            let index_only = collection
+                .search_with_options(vec![search], ReadLevel::IndexOnly)
+                .await
+                .unwrap();
+            assert_eq!(index_only.ids.len(), 1);
+            assert!(index_only.documents[0].is_some());
+            assert!(index_only.scores[0].is_some());
         })
         .await;
     }
