@@ -33,6 +33,7 @@ use crate::Schema;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
+#[cfg(feature = "spanner")]
 use crate::SysDbError;
 use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
@@ -40,6 +41,7 @@ use crate::Where;
 use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
+#[cfg(feature = "spanner")]
 use google_cloud_spanner::row::Row;
 use serde::Deserialize;
 use serde::Serialize;
@@ -460,6 +462,7 @@ impl From<Database> for crate::chroma_proto::Database {
 // Row Conversion Implementations (DAO layer)
 // ============================================================================
 
+#[cfg(feature = "spanner")]
 impl TryFrom<Row> for Database {
     type Error = SysDbError;
 

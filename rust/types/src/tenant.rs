@@ -1,6 +1,8 @@
+#[cfg(feature = "spanner")]
 use google_cloud_spanner::row::Row;
 
 use crate::chroma_proto::TenantLastCompactionTime;
+#[cfg(feature = "spanner")]
 use crate::sysdb_errors::SysDbError;
 
 #[derive(Debug, Clone)]
@@ -22,6 +24,7 @@ impl TryFrom<TenantLastCompactionTime> for Tenant {
     }
 }
 
+#[cfg(feature = "spanner")]
 impl TryFrom<Row> for Tenant {
     type Error = SysDbError;
 
