@@ -9,7 +9,7 @@
 //! Collections support the following categories of operations:
 //!
 //! - **Metadata access**: [`database()`](ChromaCollection::database), [`metadata()`](ChromaCollection::metadata), [`schema()`](ChromaCollection::schema), [`tenant()`](ChromaCollection::tenant)
-//! - **Read operations**: [`count()`](ChromaCollection::count), [`get()`](ChromaCollection::get), [`query()`](ChromaCollection::query), [`search()`](ChromaCollection::search)
+//! - **Read operations**: [`count()`](ChromaCollection::count), [`get()`](ChromaCollection::get), [`get_indexing_status()`](ChromaCollection::get_indexing_status), [`query()`](ChromaCollection::query), [`search()`](ChromaCollection::search)
 //! - **Write operations**: [`add()`](ChromaCollection::add), [`update()`](ChromaCollection::update), [`upsert()`](ChromaCollection::upsert), [`delete()`](ChromaCollection::delete), [`modify()`](ChromaCollection::modify)
 
 use std::sync::Arc;
@@ -19,9 +19,9 @@ use chroma_types::{
     plan::{ReadLevel, SearchPayload},
     AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
-    IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest, SearchResponse,
-    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateMetadata,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
+    IncludeList, IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
+    SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
+    UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
 use reqwest::Method;
 use serde::{de::DeserializeOwned, Serialize};
@@ -158,6 +158,36 @@ impl ChromaCollection {
     pub async fn count(&self) -> Result<u32, ChromaHttpClientError> {
         self.send::<(), u32>("count", "count", Method::GET, None)
             .await
+    }
+
+    /// Gets the indexing status of this collection.
+    ///
+    /// Returns information about how many operations have been indexed versus how many are
+    /// pending. This is useful for monitoring the progress of bulk data ingestion.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if network communication fails, or if unauthenticated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let status = collection.get_indexing_status().await?;
+    /// println!("Indexing progress: {:.1}%", status.op_indexing_progress * 100.0);
+    /// println!("Indexed: {} / Total: {}", status.num_indexed_ops, status.total_ops);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_indexing_status(&self) -> Result<IndexStatusResponse, ChromaHttpClientError> {
+        self.send::<(), IndexStatusResponse>(
+            "indexing_status",
+            "indexing_status",
+            Method::GET,
+            None,
+        )
+        .await
     }
 
     /// Modifies the collection's name or metadata.
@@ -811,6 +841,40 @@ mod tests {
             let count = collection.count().await.unwrap();
             println!("Empty collection count: {}", count);
             assert_eq!(count, 0);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_get_indexing_status() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_indexing_status").await;
+
+            // Test on empty collection
+            let status = collection.get_indexing_status().await.unwrap();
+            println!("Indexing status: {:?}", status);
+            assert_eq!(status.total_ops, 0);
+            assert_eq!(status.num_indexed_ops, 0);
+            assert_eq!(status.num_unindexed_ops, 0);
+
+            // Add some records
+            collection
+                .add(
+                    vec!["id1".to_string(), "id2".to_string()],
+                    vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            // Check status after adding records
+            let status = collection.get_indexing_status().await.unwrap();
+            println!("Indexing status after add: {:?}", status);
+            assert_eq!(status.total_ops, 2);
+            assert!(status.op_indexing_progress >= 0.0 && status.op_indexing_progress <= 1.0);
         })
         .await;
     }
