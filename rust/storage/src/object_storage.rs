@@ -10,6 +10,7 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_tracing::util::Stopwatch;
 use chroma_types::Cmek;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::{
@@ -24,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     config::{ObjectStorageConfig, ObjectStorageProvider, StorageConfig},
+    metrics::StorageMetrics,
     s3::DeletedObjects,
     ETag, GetOptions, PutMode, PutOptions, StorageConfigError, StorageError,
 };
@@ -202,6 +204,7 @@ pub struct ObjectStorage {
     pub(super) download_part_size_bytes: u64,
     pub(super) store: Arc<dyn ObjectStore>,
     pub(super) upload_part_size_bytes: u64,
+    metrics: StorageMetrics,
 }
 
 impl ObjectStorage {
@@ -240,6 +243,7 @@ impl ObjectStorage {
             download_part_size_bytes: config.download_part_size_bytes,
             store: Arc::new(store),
             upload_part_size_bytes: config.upload_part_size_bytes,
+            metrics: StorageMetrics::default(),
         })
     }
 
@@ -273,6 +277,11 @@ impl ObjectStorage {
             .map(|(start, end)| start..end);
 
         let mut buffer = BytesMut::zeroed(object_size as usize);
+        let stopwatch = Stopwatch::new(
+            &self.metrics.s3_get_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let get_part_futures = buffer
             .chunks_mut(self.download_part_size_bytes as usize)
             .zip(chunk_ranges)
@@ -304,15 +313,23 @@ impl ObjectStorage {
             .collect::<Vec<_>>();
 
         let chunk_count = get_part_futures.len();
+        self.metrics.s3_get_count.add(chunk_count as u64, &[]);
         stream::iter(get_part_futures)
             .buffer_unordered(chunk_count)
             .try_collect::<Vec<_>>()
             .await?;
 
+        drop(stopwatch);
         Ok((buffer.freeze(), etag))
     }
 
     async fn oneshot_get(&self, key: &str) -> Result<(Bytes, ETag), StorageError> {
+        self.metrics.s3_get_count.add(1, &[]);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_get_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let result = self.store.get_opts(&key.into(), Default::default()).await?;
         let update_version = UpdateVersion {
             e_tag: result.meta.e_tag.clone(),
@@ -343,6 +360,14 @@ impl ObjectStorage {
             put_options.extensions.insert(cmek);
         }
 
+        let total_size_bytes = bytes.len() as u64;
+        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics.s3_put_bytes.record(total_size_bytes, &[]);
+        let stopwatch = Stopwatch::new(
+            &self.metrics.s3_put_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         let chunk_ranges = Self::partition(bytes.len() as u64, self.upload_part_size_bytes)
             .map(|(start, end)| start as usize..end as usize);
         let mut upload_handle = self
@@ -350,7 +375,12 @@ impl ObjectStorage {
             .put_multipart_opts(&key.into(), put_options)
             .await?;
         let upload_parts = chunk_ranges
-            .map(|range| upload_handle.put_part(bytes.slice(range).into()))
+            .map(|range| {
+                self.metrics
+                    .s3_upload_part_bytes
+                    .record(range.end.saturating_sub(range.start) as u64, &[]);
+                upload_handle.put_part(bytes.slice(range).into())
+            })
             .collect::<Vec<_>>();
         let chunk_count = upload_parts.len();
 
@@ -359,6 +389,10 @@ impl ObjectStorage {
             .try_collect::<Vec<_>>()
             .await?;
 
+        self.metrics
+            .s3_multipart_upload_parts
+            .record(chunk_count as u64, &[]);
+
         let result = upload_handle.complete().await?;
 
         let update_version = UpdateVersion {
@@ -366,7 +400,15 @@ impl ObjectStorage {
             version: result.version,
         };
 
-        (&update_version).try_into()
+        let res = (&update_version).try_into();
+        if res.is_err() {
+            self.metrics.s3_put_error_count.add(1, &[]);
+        }
+        let duration = stopwatch.finish();
+        if duration > Duration::from_secs(1) {
+            self.metrics.s3_put_bytes_slow.record(total_size_bytes, &[]);
+        }
+        res
     }
 
     pub async fn oneshot_put(
@@ -385,6 +427,15 @@ impl ObjectStorage {
         // Apply conditional operations
         put_options.mode = options.mode.try_into()?;
 
+        let total_size_bytes = bytes.len() as u64;
+        self.metrics.s3_put_count.add(1, &[]);
+        self.metrics.s3_put_bytes.record(total_size_bytes, &[]);
+        let stopwatch = Stopwatch::new(
+            &self.metrics.s3_put_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+
         let result = self
             .store
             .put_opts(&key.into(), bytes.into(), put_options)
@@ -395,7 +446,15 @@ impl ObjectStorage {
             version: result.version,
         };
 
-        (&update_version).try_into()
+        let res = (&update_version).try_into();
+        if res.is_err() {
+            self.metrics.s3_put_error_count.add(1, &[]);
+        }
+        let duration = stopwatch.finish();
+        if duration > Duration::from_secs(1) {
+            self.metrics.s3_put_bytes_slow.record(total_size_bytes, &[]);
+        }
+        res
     }
 
     pub fn is_oneshot_upload(&self, total_size_bytes: u64, options: &PutOptions) -> bool {
@@ -438,6 +497,7 @@ impl ObjectStorage {
     }
 
     pub async fn delete(&self, key: &str) -> Result<(), StorageError> {
+        self.metrics.s3_delete_count.add(1, &[]);
         self.store.delete(&key.into()).await?;
         Ok(())
     }
@@ -458,6 +518,10 @@ impl ObjectStorage {
             .collect::<Vec<_>>()
             .await;
 
+        self.metrics
+            .s3_delete_many_count
+            .add(results.len() as u64, &[]);
+
         let mut result = DeletedObjects::default();
         for (key, res) in results {
             match res {
@@ -470,11 +534,24 @@ impl ObjectStorage {
     }
 
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        self.metrics.s3_rename_count.add(1, &[]);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_rename_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+
         self.store.rename(&src_key.into(), &dst_key.into()).await?;
         Ok(())
     }
 
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
+        self.metrics.s3_copy_count.add(1, &[]);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_copy_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
         self.store.copy(&src_key.into(), &dst_key.into()).await?;
         Ok(())
     }
@@ -485,6 +562,13 @@ impl ObjectStorage {
         } else {
             Some(prefix.into())
         };
+
+        self.metrics.s3_list_count.add(1, &[]);
+        let _stopwatch = Stopwatch::new(
+            &self.metrics.s3_list_latency_ms,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
 
         let list_stream = self.store.list(prefix_path.as_ref());
 

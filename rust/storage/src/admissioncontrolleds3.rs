@@ -38,7 +38,7 @@ use tokio::{
 #[derive(Clone)]
 pub enum ACStorageProvider {
     S3(Box<S3Storage>),
-    Object(ObjectStorage),
+    Object(Box<ObjectStorage>),
 }
 
 impl ACStorageProvider {
@@ -606,7 +606,7 @@ impl AdmissionControlledS3Storage {
 
     pub fn new_object_with_default_policy(storage: ObjectStorage) -> Self {
         Self {
-            storage: ACStorageProvider::Object(storage),
+            storage: ACStorageProvider::Object(Box::new(storage)),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
                 2,
@@ -618,7 +618,7 @@ impl AdmissionControlledS3Storage {
 
     pub fn new_object(storage: ObjectStorage, policy: RateLimitPolicy) -> Self {
         Self {
-            storage: ACStorageProvider::Object(storage),
+            storage: ACStorageProvider::Object(Box::new(storage)),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
             metrics: AdmissionControlledS3StorageMetrics::default(),

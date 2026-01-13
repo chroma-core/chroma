@@ -9,6 +9,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
+pub mod metrics;
 pub mod object_storage;
 pub mod s3;
 pub mod stream;
