@@ -250,62 +250,6 @@ impl From<Segment> for chroma_proto::Segment {
     }
 }
 
-// Row Conversion Implementation (Spanner DAO layer)
-//
-// This implementation expects columns with `segment_` prefix, which is the convention
-// for JOIN queries where segment columns need to be aliased to avoid conflicts.
-//
-// Expected columns:
-// - segment_id: STRING - the segment UUID
-// - segment_type: STRING - the segment type URN
-// - segment_scope: STRING - the segment scope (VECTOR, METADATA, RECORD, SQLITE)
-// - segment_collection_id: STRING - the collection UUID this segment belongs to
-// - segment_file_paths: JSON (optional) - file paths as JSON object
-impl TryFrom<&google_cloud_spanner::row::Row> for Segment {
-    type Error = crate::sysdb_errors::SysDbError;
-
-    fn try_from(row: &google_cloud_spanner::row::Row) -> Result<Self, Self::Error> {
-        use crate::sysdb_errors::SysDbError;
-
-        let segment_id_str: String = row
-            .column_by_name("segment_id")
-            .map_err(SysDbError::FailedToReadColumn)?;
-        let segment_type_str: String = row
-            .column_by_name("segment_type")
-            .map_err(SysDbError::FailedToReadColumn)?;
-        let segment_scope_str: String = row
-            .column_by_name("segment_scope")
-            .map_err(SysDbError::FailedToReadColumn)?;
-        let segment_collection_id_str: String = row
-            .column_by_name("segment_collection_id")
-            .map_err(SysDbError::FailedToReadColumn)?;
-        let file_paths_json: Option<String> =
-            row.column_by_name("segment_file_paths").ok().flatten();
-
-        // Parse segment type and scope
-        let segment_type =
-            SegmentType::try_from(segment_type_str.as_str()).map_err(SysDbError::InvalidSegment)?;
-        let segment_scope = SegmentScope::try_from(segment_scope_str.as_str())
-            .map_err(|e| SysDbError::InvalidArgument(e.to_string()))?;
-
-        // Parse file_paths JSON
-        let file_path: HashMap<String, Vec<String>> = file_paths_json
-            .map(|json| serde_json::from_str(&json).unwrap_or_default())
-            .unwrap_or_default();
-
-        Ok(Segment {
-            id: SegmentUuid(Uuid::parse_str(&segment_id_str).map_err(SysDbError::InvalidUuid)?),
-            r#type: segment_type,
-            scope: segment_scope,
-            collection: CollectionUuid(
-                Uuid::parse_str(&segment_collection_id_str).map_err(SysDbError::InvalidUuid)?,
-            ),
-            metadata: None, // Segment metadata not stored in collection_segments table
-            file_path,
-        })
-    }
-}
-
 pub fn test_segment(collection_uuid: CollectionUuid, scope: SegmentScope) -> Segment {
     let r#type = match scope {
         SegmentScope::METADATA => SegmentType::BlockfileMetadata,

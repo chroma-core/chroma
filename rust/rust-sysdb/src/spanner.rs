@@ -3,6 +3,8 @@
 //! This module provides the `SpannerBackend` which implements all SysDb
 //! operations using Google Cloud Spanner as the underlying database.
 
+use std::collections::HashMap;
+
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use google_cloud_gax::conn::Environment;
@@ -14,17 +16,17 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::SpannerConfig;
-use crate::types::SpannerRows;
-use crate::types::SysDbError;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
-    SpannerRows, SysDbError,
+    SpannerRowRef, SpannerRows, SysDbError,
 };
-use chroma_types::{Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Tenant};
+use chroma_types::{
+    Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Segment, Tenant,
+};
 
 #[derive(Error, Debug)]
 pub enum SpannerError {
@@ -916,7 +918,7 @@ impl SpannerBackend {
             if let Ok(Some(segment_id_str)) = row.column_by_name::<Option<String>>("segment_id") {
                 use std::collections::hash_map::Entry;
                 if let Entry::Vacant(entry) = segments_map.entry(segment_id_str) {
-                    let segment = Segment::try_from(row)?;
+                    let segment = Segment::try_from(SpannerRowRef { row })?;
                     entry.insert(segment);
                 }
             }
@@ -927,7 +929,7 @@ impl SpannerBackend {
         // - Collection fields from first row
         // - Metadata aggregation from all rows
         // - Compaction cursor fields
-        let collection = Collection::try_from(rows)?;
+        let collection = Collection::try_from(SpannerRows { rows })?;
 
         let segments: Vec<Segment> = segments_map.into_values().collect();
 
