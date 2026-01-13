@@ -7,6 +7,7 @@ import {
   BaseRecordSet,
   CollectionMetadata,
   GetResult,
+  IndexingStatus,
   Metadata,
   PreparedRecordSet,
   PreparedInsertRecordSet,
@@ -205,6 +206,12 @@ export interface Collection {
    * @returns Promise resolving to column-major search results
    */
   search(searches: SearchLike | SearchLike[]): Promise<SearchResult>;
+
+  /**
+   * Gets the indexing status of the collection.
+   * @returns Promise resolving to indexing status information
+   */
+  getIndexingStatus(): Promise<IndexingStatus>;
 }
 
 /**
@@ -1090,5 +1097,14 @@ export class CollectionImpl implements Collection {
         where_document: whereDocument,
       },
     });
+  }
+
+  public async getIndexingStatus(): Promise<IndexingStatus> {
+    const { data } = await Api.indexingStatus({
+      client: this.apiClient,
+      path: await this.path(),
+    });
+
+    return data;
   }
 }

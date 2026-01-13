@@ -304,6 +304,13 @@ export type Include = 'distances' | 'documents' | 'embeddings' | 'metadatas' | '
 
 export type IncludeList = Array<Include>;
 
+export type IndexStatusResponse = {
+    num_indexed_ops: number;
+    num_unindexed_ops: number;
+    op_indexing_progress: number;
+    total_ops: number;
+};
+
 export type IntInvertedIndexConfig = {
     [key: string]: never;
 };
@@ -1702,6 +1709,52 @@ export type CollectionGetResponses = {
 };
 
 export type CollectionGetResponse = CollectionGetResponses[keyof CollectionGetResponses];
+
+export type IndexingStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name for the collection
+         */
+        database: string;
+        /**
+         * Collection ID to get index status for
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status';
+};
+
+export type IndexingStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type IndexingStatusError = IndexingStatusErrors[keyof IndexingStatusErrors];
+
+export type IndexingStatusResponses = {
+    /**
+     * Index status retrieved successfully
+     */
+    200: IndexStatusResponse;
+};
+
+export type IndexingStatusResponse = IndexingStatusResponses[keyof IndexingStatusResponses];
 
 export type CollectionQueryData = {
     body: QueryRequestPayload;
