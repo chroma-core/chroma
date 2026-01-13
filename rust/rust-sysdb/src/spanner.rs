@@ -13,14 +13,13 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::SpannerConfig;
-use crate::types::SysDbError;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetDatabaseRequest,
     GetDatabaseResponse, GetTenantRequest, GetTenantResponse, SetTenantResourceNameRequest,
     SetTenantResourceNameResponse, SpannerRow,
 };
-use chroma_types::sysdb_errors::SysDbError;
+use crate::types::{SpannerRows, SysDbError};
 use chroma_types::{Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Tenant};
 
 #[derive(Error, Debug)]
@@ -657,7 +656,7 @@ impl SpannerBackend {
             rows.push(row);
         }
 
-        Collection::try_from(rows)
+        Collection::try_from(SpannerRows { rows })
     }
 
     // ============================================================
