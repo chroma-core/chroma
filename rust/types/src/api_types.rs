@@ -1033,7 +1033,7 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct IndexStatusResponse {
     pub op_indexing_progress: f32,
