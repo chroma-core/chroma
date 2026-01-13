@@ -2084,8 +2084,6 @@ dependencies = [
  "chroma-error",
  "chrono",
  "criterion",
- "gcloud-gax",
- "gcloud-spanner",
  "itertools 0.13.0",
  "proptest",
  "proptest-derive 0.5.1",

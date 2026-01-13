@@ -61,12 +61,13 @@
 //! ```
 
 use crate::spanner::SpannerBackend;
+use crate::types::SysDbError;
 use crate::types::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest, GetTenantResponse,
     SetTenantResourceNameRequest, SetTenantResourceNameResponse,
 };
-use chroma_types::{chroma_proto::Database, sysdb_errors::SysDbError};
+use chroma_types::chroma_proto::Database;
 
 /// Factory that holds all configured backend instances.
 ///

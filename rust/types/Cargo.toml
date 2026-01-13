@@ -29,8 +29,6 @@ regex = { workspace = true }
 regex-syntax = { workspace = true }
 utoipa = { workspace = true, optional = true }
 sprs = { workspace = true }
-google-cloud-spanner = { workspace = true, optional = true }
-google-cloud-gax = { workspace = true, optional = true }
 
 # (Cross-crate testing dependencies)
 proptest = { workspace = true, optional = true }
@@ -46,5 +44,4 @@ criterion = { workspace = true }
 [features]
 testing = ["dep:proptest", "dep:proptest-derive"]
 utoipa = ["dep:utoipa"]
-spanner = ["dep:google-cloud-spanner", "dep:google-cloud-gax"]
 default = []

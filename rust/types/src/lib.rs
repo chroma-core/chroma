@@ -32,8 +32,6 @@ mod where_parsing;
 
 pub mod optional_u128;
 pub mod regex;
-#[cfg(feature = "spanner")]
-pub mod sysdb_errors;
 
 // Re-export Space from hnsw_configuration
 pub use hnsw_configuration::Space;
@@ -60,8 +58,6 @@ pub use segment_scope::*;
 pub use signed_rbm::*;
 pub use spann_configuration::*;
 pub use spann_posting_list::*;
-#[cfg(feature = "spanner")]
-pub use sysdb_errors::*;
 pub use task::*;
 pub use tenant::*;
 pub use topology::*;
