@@ -26,7 +26,7 @@ if (platform === "darwin") {
 } else if (platform === "win32") {
   if (arch === "arm64") {
     binding = require("chromadb-js-bindings-win32-arm64-msvc");
-  } else if (process.arch === "x64") {
+  } else if (arch === "x64") {
     binding = require("chromadb-js-bindings-win32-x64-msvc");
   } else {
     throw new Error(
