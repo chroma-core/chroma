@@ -630,18 +630,18 @@ impl SpannerBackend {
                 cm.int_value as metadata_int_value,
                 cm.float_value as metadata_float_value,
                 cm.bool_value as metadata_bool_value,
-                ccc.last_compacted_offset,
-                ccc.version,
-                ccc.total_records_post_compaction,
-                ccc.size_bytes_post_compaction,
-                ccc.last_compaction_time_secs,
-                ccc.version_file_name,
-                ccc.index_schema,
-                ccc.compaction_failure_count
+                cursors.last_compacted_offset,
+                cursors.version,
+                cursors.total_records_post_compaction,
+                cursors.size_bytes_post_compaction,
+                cursors.last_compaction_time_secs,
+                cursors.version_file_name,
+                cursors.index_schema,
+                cursors.compaction_failure_count
             FROM collections c
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors ccc 
-                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            LEFT JOIN collection_compaction_cursors cursors 
+                ON cursors.collection_id = c.collection_id AND cursors.region = @region
             WHERE c.collection_id = @collection_id
             "#,
         );

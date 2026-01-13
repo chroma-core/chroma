@@ -134,7 +134,6 @@ pub trait Runnable {
     type Input;
 
     /// Execute this request on the given backend(s).
-    /// Takes `self` by value to allow passing ownership to backends that need it.
     async fn run(self, backends: Self::Input) -> Result<Self::Response, SysDbError>;
 }
 
