@@ -399,10 +399,11 @@ impl SpannerBackend {
 
                     // Check if collection with same name exists in this database
                     let mut check_stmt = Statement::new(
-                        "SELECT collection_id, name, dimension, database_id, database_name, tenant_id FROM collections WHERE name = @name AND database_id = @database_id AND is_deleted = FALSE",
+                        "SELECT collection_id, name, dimension, database_id, database_name, tenant_id FROM collections WHERE tenant_id = @tenant_id AND database_name = @database_name AND name = @name AND is_deleted = FALSE",
                     );
+                    check_stmt.add_param("tenant_id", &tenant_id_str);
+                    check_stmt.add_param("database_name", &database_name);
                     check_stmt.add_param("name", &collection_name);
-                    check_stmt.add_param("database_id", &database_id);
 
                     let mut check_iter = tx.query(check_stmt).await?;
                     if let Some(existing_row) = check_iter.next().await? {
@@ -588,6 +589,7 @@ impl SpannerBackend {
                         database_id: DatabaseUuid(
                             Uuid::parse_str(&database_id).map_err(SysDbError::InvalidUuid)?,
                         ),
+                        compaction_failure_count: 0,
                     };
 
                     Ok((collection, true)) // true = was created
@@ -635,7 +637,8 @@ impl SpannerBackend {
                 ccc.size_bytes_post_compaction,
                 ccc.last_compaction_time_secs,
                 ccc.version_file_name,
-                ccc.index_schema
+                ccc.index_schema,
+                ccc.compaction_failure_count
             FROM collections c
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
             LEFT JOIN collection_compaction_cursors ccc 
@@ -1223,6 +1226,90 @@ mod tests {
         ]
     }
 
+    /// Helper to verify all fields of a newly created collection
+    #[allow(clippy::too_many_arguments)]
+    fn verify_new_collection(
+        collection: &chroma_types::Collection,
+        expected_id: CollectionUuid,
+        expected_name: &str,
+        expected_dimension: Option<i32>,
+        expected_tenant: &str,
+        expected_database: &str,
+        expected_metadata: Option<&chroma_types::Metadata>,
+        expected_schema: Option<&Schema>,
+    ) {
+        // Basic fields
+        assert_eq!(
+            collection.collection_id, expected_id,
+            "collection_id mismatch"
+        );
+        assert_eq!(collection.name, expected_name, "name mismatch");
+        assert_eq!(
+            collection.dimension, expected_dimension,
+            "dimension mismatch"
+        );
+        assert_eq!(collection.tenant, expected_tenant, "tenant mismatch");
+        assert_eq!(collection.database, expected_database, "database mismatch");
+
+        // Schema verification
+        assert_eq!(
+            collection.schema.as_ref(),
+            expected_schema,
+            "schema mismatch"
+        );
+
+        // Compaction cursor fields - should be 0/None for newly created collection
+        assert_eq!(
+            collection.log_position, 0,
+            "log_position should be 0 for new collection"
+        );
+        assert_eq!(
+            collection.version, 0,
+            "version should be 0 for new collection"
+        );
+        assert_eq!(
+            collection.total_records_post_compaction, 0,
+            "total_records_post_compaction should be 0"
+        );
+        assert_eq!(
+            collection.size_bytes_post_compaction, 0,
+            "size_bytes_post_compaction should be 0"
+        );
+        assert_eq!(
+            collection.last_compaction_time_secs, 0,
+            "last_compaction_time_secs should be 0"
+        );
+        assert!(
+            collection.version_file_path.is_none(),
+            "version_file_path should be None for new collection"
+        );
+        assert_eq!(
+            collection.compaction_failure_count, 0,
+            "compaction_failure_count should be 0"
+        );
+
+        // Metadata verification
+        match (expected_metadata, &collection.metadata) {
+            (Some(expected), Some(actual)) => {
+                assert_eq!(expected.len(), actual.len(), "metadata length mismatch");
+                for (key, value) in expected {
+                    assert_eq!(
+                        actual.get(key),
+                        Some(value),
+                        "metadata key '{}' mismatch",
+                        key
+                    );
+                }
+            }
+            (None, None) => {}
+            (None, Some(actual)) if actual.is_empty() => {} // Empty is same as None
+            _ => panic!(
+                "metadata mismatch: expected {:?}, got {:?}",
+                expected_metadata, collection.metadata
+            ),
+        }
+    }
+
     #[tokio::test]
     async fn test_k8s_integration_create_collection() {
         let Some(backend) = setup_test_backend().await else {
@@ -1240,20 +1327,20 @@ mod tests {
                 .as_nanos()
         );
 
+        let metadata: chroma_types::Metadata = [(
+            "key1".to_string(),
+            chroma_types::MetadataValue::Str("value1".to_string()),
+        )]
+        .into_iter()
+        .collect();
+
         let create_req = CreateCollectionRequest {
             id: collection_id,
             name: collection_name.clone(),
             dimension: Some(128),
             index_schema: Schema::default(),
             segments: create_test_segments(collection_id),
-            metadata: Some(
-                [(
-                    "key1".to_string(),
-                    chroma_types::MetadataValue::Str("value1".to_string()),
-                )]
-                .into_iter()
-                .collect(),
-            ),
+            metadata: Some(metadata.clone()),
             get_or_create: false,
             tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
@@ -1268,11 +1355,17 @@ mod tests {
 
         let response = result.unwrap();
         assert!(response.created, "Collection should be marked as created");
-        assert_eq!(response.collection.name, collection_name);
-        assert_eq!(response.collection.collection_id, collection_id);
-        assert_eq!(response.collection.dimension, Some(128));
-        assert_eq!(response.collection.tenant, tenant_id);
-        assert_eq!(response.collection.database, db_name);
+
+        verify_new_collection(
+            &response.collection,
+            collection_id,
+            &collection_name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            Some(&metadata),
+            Some(&Schema::default()),
+        );
     }
 
     #[tokio::test]
@@ -1310,6 +1403,19 @@ mod tests {
             result1.is_ok(),
             "Failed to create collection first time: {:?}",
             result1.err()
+        );
+
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created first time");
+        verify_new_collection(
+            &response1.collection,
+            collection_id,
+            &collection_name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
         );
 
         // Create collection second time with same name (should fail)
@@ -1375,7 +1481,23 @@ mod tests {
         );
         let response1 = result1.unwrap();
         assert!(response1.created, "Collection should be created first time");
-        assert_eq!(response1.collection.collection_id, collection_id);
+        verify_new_collection(
+            &response1.collection,
+            collection_id,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+
+        let metadata: chroma_types::Metadata = [(
+            "key1".to_string(),
+            chroma_types::MetadataValue::Str("value1".to_string()),
+        )]
+        .into_iter()
+        .collect();
 
         // Create collection second time with get_or_create=true (should return existing)
         let collection_id2 = CollectionUuid(Uuid::new_v4());
@@ -1385,7 +1507,7 @@ mod tests {
             dimension: Some(512), // Different dimension
             index_schema: Schema::default(),
             segments: create_test_segments(collection_id2),
-            metadata: None,
+            metadata: Some(metadata.clone()),
             get_or_create: true,
             tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
@@ -1402,9 +1524,17 @@ mod tests {
             !response2.created,
             "Collection should NOT be created second time"
         );
-        // Should return the original collection
-        assert_eq!(response2.collection.collection_id, collection_id);
-        assert_eq!(response2.collection.dimension, Some(256)); // Original dimension
+        // Should return the original collection with original values
+        verify_new_collection(
+            &response2.collection,
+            collection_id,
+            &collection_name,
+            Some(256), // Original dimension, not 512
+            &tenant_id,
+            &db_name,
+            None, // None and not some(metadata)
+            Some(&Schema::default()),
+        );
     }
 
     #[tokio::test]
@@ -1529,10 +1659,10 @@ mod tests {
             dimension: None, // No dimension
             index_schema: Schema::default(),
             segments: create_test_segments(collection_id),
-            metadata: Some(metadata),
+            metadata: Some(metadata.clone()),
             get_or_create: false,
             tenant_id: tenant_id.clone(),
-            database_name: db_name,
+            database_name: db_name.clone(),
         };
 
         let result = backend.create_collection(create_req).await;
@@ -1544,28 +1674,16 @@ mod tests {
 
         let response = result.unwrap();
         assert!(response.created);
-        assert_eq!(response.collection.name, collection_name);
-        assert!(response.collection.dimension.is_none());
 
-        // Verify metadata is returned (it's built from request data)
-        let returned_metadata = response.collection.metadata.expect("Should have metadata");
-        assert_eq!(
-            returned_metadata.get("str_key"),
-            Some(&chroma_types::MetadataValue::Str(
-                "string_value".to_string()
-            ))
-        );
-        assert_eq!(
-            returned_metadata.get("int_key"),
-            Some(&chroma_types::MetadataValue::Int(42))
-        );
-        assert_eq!(
-            returned_metadata.get("float_key"),
-            Some(&chroma_types::MetadataValue::Float(1.5))
-        );
-        assert_eq!(
-            returned_metadata.get("bool_key"),
-            Some(&chroma_types::MetadataValue::Bool(true))
+        verify_new_collection(
+            &response.collection,
+            collection_id,
+            &collection_name,
+            None,
+            &tenant_id,
+            &db_name,
+            Some(&metadata),
+            Some(&Schema::default()),
         );
     }
 
@@ -1604,6 +1722,19 @@ mod tests {
             result1.is_ok(),
             "Failed to create collection first time: {:?}",
             result1.err()
+        );
+
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created first time");
+        verify_new_collection(
+            &response1.collection,
+            collection_id,
+            &collection_name1,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
         );
 
         // Create collection second time with SAME ID but different name (should fail)
@@ -1675,6 +1806,16 @@ mod tests {
         );
         let response1 = result1.unwrap();
         assert!(response1.created, "Collection should be created first time");
+        verify_new_collection(
+            &response1.collection,
+            collection_id,
+            &collection_name1,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
 
         // Create collection second time with SAME ID but different name (should return existing)
         let collection_name2 = format!(
@@ -1707,10 +1848,17 @@ mod tests {
             !response2.created,
             "Collection should NOT be created second time"
         );
-        // Should return the original collection
-        assert_eq!(response2.collection.collection_id, collection_id);
-        assert_eq!(response2.collection.name, collection_name1); // Original name
-        assert_eq!(response2.collection.dimension, Some(128)); // Original dimension
+        // Should return the original collection with original values
+        verify_new_collection(
+            &response2.collection,
+            collection_id,
+            &collection_name1, // Original name, not collection_name2
+            Some(128),         // Original dimension, not 512
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
     }
 
     #[tokio::test]
@@ -1793,6 +1941,19 @@ mod tests {
             result1.err()
         );
 
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created in db1");
+        verify_new_collection(
+            &response1.collection,
+            collection_id1,
+            &collection_name,
+            Some(128),
+            &tenant_id,
+            &db_name1,
+            None,
+            Some(&Schema::default()),
+        );
+
         // Create collection with SAME NAME in database 2 (should succeed)
         let collection_id2 = CollectionUuid(Uuid::new_v4());
         let create_req2 = CreateCollectionRequest {
@@ -1815,15 +1976,21 @@ mod tests {
         );
 
         let response2 = result2.unwrap();
-        assert!(response2.created);
-        assert_eq!(response2.collection.collection_id, collection_id2);
-        assert_eq!(response2.collection.database, db_name2);
+        assert!(response2.created, "Collection should be created in db2");
+        verify_new_collection(
+            &response2.collection,
+            collection_id2,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name2,
+            None,
+            Some(&Schema::default()),
+        );
     }
 
-    // Note: This test requires a get_collection API to be implemented.
-    // For now, we use fetch_collection_in_tx indirectly through get_or_create.
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_readback_verification() {
+    async fn test_k8s_integration_create_collection_get_or_create_with_metadata() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1832,26 +1999,23 @@ mod tests {
 
         let collection_id = CollectionUuid(Uuid::new_v4());
         let collection_name = format!(
-            "test_collection_readback_{}",
+            "test_collection_goc_meta_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         );
 
-        // Test all 4 metadata types for full roundtrip verification
-        let metadata: chroma_types::Metadata = [
+        // Create collection with metadata using get_or_create=true
+        let original_metadata: chroma_types::Metadata = [
             (
                 "str_key".to_string(),
-                chroma_types::MetadataValue::Str("test_string".to_string()),
+                chroma_types::MetadataValue::Str("original_value".to_string()),
             ),
-            (
-                "int_key".to_string(),
-                chroma_types::MetadataValue::Int(12345),
-            ),
+            ("int_key".to_string(), chroma_types::MetadataValue::Int(42)),
             (
                 "float_key".to_string(),
-                chroma_types::MetadataValue::Float(1.23456),
+                chroma_types::MetadataValue::Float(1.5),
             ),
             (
                 "bool_key".to_string(),
@@ -1861,34 +2025,175 @@ mod tests {
         .into_iter()
         .collect();
 
-        // Create collection
         let create_req = CreateCollectionRequest {
             id: collection_id,
             name: collection_name.clone(),
-            dimension: Some(384),
+            dimension: Some(256),
             index_schema: Schema::default(),
             segments: create_test_segments(collection_id),
-            metadata: Some(metadata.clone()),
-            get_or_create: false,
+            metadata: Some(original_metadata.clone()),
+            get_or_create: true,
             tenant_id: tenant_id.clone(),
             database_name: db_name.clone(),
         };
 
-        let result = backend.create_collection(create_req).await;
+        let result1 = backend.create_collection(create_req).await;
         assert!(
-            result.is_ok(),
-            "Failed to create collection: {:?}",
-            result.err()
+            result1.is_ok(),
+            "Failed to create collection first time: {:?}",
+            result1.err()
+        );
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created first time");
+        verify_new_collection(
+            &response1.collection,
+            collection_id,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name,
+            Some(&original_metadata),
+            Some(&Schema::default()),
         );
 
-        // Now use get_or_create=true with same name to read back from DB
-        // This triggers fetch_collection_in_tx which reads from the database
+        // Call get_or_create again with different metadata - should return original
+        let different_metadata: chroma_types::Metadata = [(
+            "different_key".to_string(),
+            chroma_types::MetadataValue::Str("different_value".to_string()),
+        )]
+        .into_iter()
+        .collect();
+
         let collection_id2 = CollectionUuid(Uuid::new_v4());
-        let readback_req = CreateCollectionRequest {
+        let create_req2 = CreateCollectionRequest {
             id: collection_id2,
-            name: collection_name.clone(), // Same name triggers get
-            dimension: Some(999),          // Different, but should get original
+            name: collection_name.clone(), // Same name
+            dimension: Some(512),          // Different dimension
             index_schema: Schema::default(),
+            segments: create_test_segments(collection_id2),
+            metadata: Some(different_metadata), // Different metadata - should be ignored
+            get_or_create: true,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result2 = backend.create_collection(create_req2).await;
+        assert!(
+            result2.is_ok(),
+            "get_or_create should succeed: {:?}",
+            result2.err()
+        );
+        let response2 = result2.unwrap();
+        assert!(
+            !response2.created,
+            "Collection should NOT be created second time"
+        );
+
+        // Should return the original collection with ORIGINAL metadata
+        verify_new_collection(
+            &response2.collection,
+            collection_id,
+            &collection_name,
+            Some(256), // Original dimension
+            &tenant_id,
+            &db_name,
+            Some(&original_metadata), // Original metadata, not different_metadata
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_create_collection_get_or_create_with_custom_schema() {
+        use chroma_types::{
+            FtsIndexConfig, FtsIndexType, StringInvertedIndexConfig, StringInvertedIndexType,
+            StringValueType, ValueTypes,
+        };
+
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_collection_goc_schema_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        // Create a custom schema with an additional key override
+        let mut custom_schema = Schema::default();
+        custom_schema.keys.insert(
+            "custom_key".to_string(),
+            ValueTypes {
+                string: Some(StringValueType {
+                    fts_index: Some(FtsIndexType {
+                        enabled: true,
+                        config: FtsIndexConfig {},
+                    }),
+                    string_inverted_index: Some(StringInvertedIndexType {
+                        enabled: false,
+                        config: StringInvertedIndexConfig {},
+                    }),
+                }),
+                ..Default::default()
+            },
+        );
+
+        // Create collection with custom schema
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(256),
+            index_schema: custom_schema.clone(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: true,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result1 = backend.create_collection(create_req).await;
+        assert!(
+            result1.is_ok(),
+            "Failed to create collection first time: {:?}",
+            result1.err()
+        );
+        let response1 = result1.unwrap();
+        assert!(response1.created, "Collection should be created first time");
+        verify_new_collection(
+            &response1.collection,
+            collection_id,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&custom_schema),
+        );
+
+        // Verify the custom key is in the schema
+        assert!(
+            response1
+                .collection
+                .schema
+                .as_ref()
+                .unwrap()
+                .keys
+                .contains_key("custom_key"),
+            "Schema should contain custom_key"
+        );
+
+        // Call get_or_create again with default schema - should return original custom schema
+        let collection_id2 = CollectionUuid(Uuid::new_v4());
+        let create_req2 = CreateCollectionRequest {
+            id: collection_id2,
+            name: collection_name.clone(),   // Same name
+            dimension: Some(512),            // Different dimension
+            index_schema: Schema::default(), // Different schema - should be ignored
             segments: create_test_segments(collection_id2),
             metadata: None,
             get_or_create: true,
@@ -1896,45 +2201,40 @@ mod tests {
             database_name: db_name.clone(),
         };
 
-        let readback_result = backend.create_collection(readback_req).await;
+        let result2 = backend.create_collection(create_req2).await;
         assert!(
-            readback_result.is_ok(),
-            "Failed to read back collection: {:?}",
-            readback_result.err()
+            result2.is_ok(),
+            "get_or_create should succeed: {:?}",
+            result2.err()
         );
-
-        let response = readback_result.unwrap();
+        let response2 = result2.unwrap();
         assert!(
-            !response.created,
-            "Should return existing collection, not create"
+            !response2.created,
+            "Collection should NOT be created second time"
         );
 
-        // Verify the data was read correctly from the database
-        let collection = response.collection;
-        assert_eq!(collection.collection_id, collection_id);
-        assert_eq!(collection.name, collection_name);
-        assert_eq!(collection.dimension, Some(384));
-        assert_eq!(collection.tenant, tenant_id.to_string());
-        assert_eq!(collection.database, db_name);
+        // Should return the original collection with ORIGINAL custom schema
+        verify_new_collection(
+            &response2.collection,
+            collection_id,
+            &collection_name,
+            Some(256), // Original dimension
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&custom_schema), // Original custom schema, not default
+        );
 
-        // Verify all 4 metadata types were persisted and read back correctly
-        let returned_metadata = collection.metadata.expect("Should have metadata from DB");
-        assert_eq!(returned_metadata.len(), 4, "Should have 4 metadata entries");
-        assert_eq!(
-            returned_metadata.get("str_key"),
-            Some(&chroma_types::MetadataValue::Str("test_string".to_string()))
-        );
-        assert_eq!(
-            returned_metadata.get("int_key"),
-            Some(&chroma_types::MetadataValue::Int(12345))
-        );
-        assert_eq!(
-            returned_metadata.get("float_key"),
-            Some(&chroma_types::MetadataValue::Float(1.23456))
-        );
-        assert_eq!(
-            returned_metadata.get("bool_key"),
-            Some(&chroma_types::MetadataValue::Bool(true))
+        // Verify the custom key is still in the schema (proving it was read from DB)
+        assert!(
+            response2
+                .collection
+                .schema
+                .as_ref()
+                .unwrap()
+                .keys
+                .contains_key("custom_key"),
+            "Schema should still contain custom_key after get_or_create"
         );
     }
 }

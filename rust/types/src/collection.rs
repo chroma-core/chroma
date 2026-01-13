@@ -379,7 +379,9 @@ impl TryFrom<Vec<Row>> for Collection {
         let name: String = first_row
             .column_by_name("name")
             .map_err(SysDbError::FailedToReadColumn)?;
-        let dimension: Option<i64> = first_row.column_by_name("dimension").ok();
+        let dimension: Option<i64> = first_row
+            .column_by_name("dimension")
+            .map_err(SysDbError::FailedToReadColumn)?;
         let database_id_str: String = first_row
             .column_by_name("database_id")
             .map_err(SysDbError::FailedToReadColumn)?;
@@ -395,40 +397,48 @@ impl TryFrom<Vec<Row>> for Collection {
             .column_by_name("updated_at")
             .map_err(SysDbError::FailedToReadColumn)?;
 
-        // Extract compaction cursor fields (region-specific, may be NULL if no cursor exists)
         let last_compacted_offset: Option<i64> = first_row
             .column_by_name("last_compacted_offset")
-            .ok()
-            .flatten();
-        let version: Option<i64> = first_row.column_by_name("version").ok().flatten();
-        let total_records_post_compaction: Option<i64> = first_row
-            .column_by_name("total_records_post_compaction")
-            .ok()
-            .flatten();
-        let size_bytes_post_compaction: Option<i64> = first_row
-            .column_by_name("size_bytes_post_compaction")
-            .ok()
-            .flatten();
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let version: Option<i64> = first_row
+            .column_by_name("version")
+            .map_err(SysDbError::FailedToReadColumn)?;
         let last_compaction_time_us: Option<i64> = first_row
             .column_by_name("last_compaction_time_secs")
-            .ok()
-            .flatten();
-        let version_file_name: Option<String> =
-            first_row.column_by_name("version_file_name").ok().flatten();
-        let schema_json: Option<String> = first_row.column_by_name("index_schema").ok().flatten();
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let version_file_name: Option<String> = first_row
+            .column_by_name("version_file_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let total_records_post_compaction: i64 = first_row
+            .column_by_name("total_records_post_compaction")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let size_bytes_post_compaction: i64 = first_row
+            .column_by_name("size_bytes_post_compaction")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let compaction_failure_count: i64 = first_row
+            .column_by_name("compaction_failure_count")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let schema_json: String = first_row
+            .column_by_name("index_schema")
+            .map_err(SysDbError::FailedToReadColumn)?;
 
         // Aggregate metadata from all rows
         let mut collection_metadata = Metadata::new();
         for row in &rows {
             // metadata_key may be NULL if there's no metadata (LEFT JOIN)
             if let Ok(Some(key)) = row.column_by_name::<Option<String>>("metadata_key") {
-                let str_val: Option<String> =
-                    row.column_by_name("metadata_str_value").ok().flatten();
-                let int_val: Option<i64> = row.column_by_name("metadata_int_value").ok().flatten();
-                let float_val: Option<f64> =
-                    row.column_by_name("metadata_float_value").ok().flatten();
-                let bool_val: Option<bool> =
-                    row.column_by_name("metadata_bool_value").ok().flatten();
+                let str_val: Option<String> = row
+                    .column_by_name("metadata_str_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let int_val: Option<i64> = row
+                    .column_by_name("metadata_int_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let float_val: Option<f64> = row
+                    .column_by_name("metadata_float_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let bool_val: Option<bool> = row
+                    .column_by_name("metadata_bool_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
 
                 if let Some(s) = str_val {
                     collection_metadata.insert(key, MetadataValue::Str(s));
@@ -442,8 +452,9 @@ impl TryFrom<Vec<Row>> for Collection {
             }
         }
 
-        // Parse schema JSON
-        let parsed_schema = schema_json.and_then(|s| serde_json::from_str::<Schema>(&s).ok());
+        // Parse schema JSON (index_schema is NOT NULL, so parsing should succeed)
+        let parsed_schema: Schema =
+            serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
 
         // Convert microseconds to SystemTime
         let updated_at_system_time = UNIX_EPOCH + Duration::from_micros(updated_at_us as u64);
@@ -459,7 +470,7 @@ impl TryFrom<Vec<Row>> for Collection {
             ),
             name,
             config: InternalCollectionConfiguration::default_hnsw(),
-            schema: parsed_schema,
+            schema: Some(parsed_schema),
             metadata: if collection_metadata.is_empty() {
                 None
             } else {
@@ -470,10 +481,8 @@ impl TryFrom<Vec<Row>> for Collection {
             database: database_name,
             log_position: last_compacted_offset.unwrap_or(0),
             version: version.map(|v| v as i32).unwrap_or(0),
-            total_records_post_compaction: total_records_post_compaction
-                .map(|v| v as u64)
-                .unwrap_or(0),
-            size_bytes_post_compaction: size_bytes_post_compaction.map(|v| v as u64).unwrap_or(0),
+            total_records_post_compaction: total_records_post_compaction as u64,
+            size_bytes_post_compaction: size_bytes_post_compaction as u64,
             last_compaction_time_secs: last_compaction_time_secs_u64,
             version_file_path: version_file_name,
             root_collection_id: None,
@@ -482,6 +491,7 @@ impl TryFrom<Vec<Row>> for Collection {
             database_id: DatabaseUuid(
                 Uuid::parse_str(&database_id_str).map_err(SysDbError::InvalidUuid)?,
             ),
+            compaction_failure_count: compaction_failure_count as i32,
         })
     }
 }
