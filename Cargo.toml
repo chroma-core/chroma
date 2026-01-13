@@ -19,6 +19,7 @@ flatbuffers = "25.2.10"
 futures = "0.3"
 futures-core = "0.3"
 http-body-util = "0.1.3"
+hyper-tls = { version = "0.6", default-features = false }
 object_store = { version = "0.12", features = ["gcp"] }
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
@@ -68,16 +69,16 @@ rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.2", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
-reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
+reqwest = { version = "0.13.1", features = ["rustls-no-provider", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
-google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner" }
-google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }
-google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"] }
+google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner", default-features = false }
+google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax", default-features = false }
+google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"], default-features = false }
 
 chroma = { path = "rust/chroma", version = "0.10.0" }
 chroma-api-types = { path = "rust/api-types", version = "0.10.0" }
