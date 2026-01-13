@@ -680,6 +680,12 @@ async fn update_tenant(
 #[error("invalid database name:  Must be at least three asci chars, not contain .., and end in a letter or number")]
 pub struct InvalidDatabaseError;
 
+impl chroma_error::ChromaError for InvalidDatabaseError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
+
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
 pub struct CreateDatabasePayload {
     pub name: String,
@@ -705,7 +711,7 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    if let Err(err) = validate_name(name) {
+    if let Err(_err) = validate_name(&name) {
         return Err(ServerError(Box::new(InvalidDatabaseError)));
     }
     server.metrics.create_database.add(1, &[]);

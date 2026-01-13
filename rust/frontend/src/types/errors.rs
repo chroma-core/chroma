@@ -46,7 +46,7 @@ impl ChromaError for ValidationError {
 }
 
 /// Wrapper around `dyn ChromaError` that implements `IntoResponse`. This means that route handlers can return `Result<_, ServerError>` and use the `?` operator to return arbitrary errors.
-pub struct ServerError(Box<dyn ChromaError>);
+pub struct ServerError(pub Box<dyn ChromaError>);
 
 impl<E: ChromaError + 'static> From<E> for ServerError {
     fn from(e: E) -> Self {
