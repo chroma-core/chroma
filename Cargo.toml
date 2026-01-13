@@ -79,14 +79,14 @@ google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", 
 google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }
 google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"] }
 
-chroma = { path = "rust/chroma", version = "0.10.0" }
-chroma-api-types = { path = "rust/api-types", version = "0.10.0" }
+chroma = { path = "rust/chroma", version = "0.11.0" }
+chroma-api-types = { path = "rust/api-types", version = "0.11.0" }
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
-chroma-error = { path = "rust/error", version = "0.10.0" }
+chroma-error = { path = "rust/error", version = "0.11.0" }
 chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
@@ -98,7 +98,7 @@ chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
-chroma-types = { path = "rust/types", version = "0.10.0" }
+chroma-types = { path = "rust/types", version = "0.11.0" }
 chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }
