@@ -46,7 +46,7 @@ use crate::backend::{Assignable, BackendFactory, Runnable};
 use crate::config::SysDbServiceConfig;
 use crate::spanner::SpannerBackend;
 use crate::types as internal;
-use chroma_types::sysdb_errors::SysDbError;
+use crate::types::SysDbError;
 
 pub struct SysdbService {
     port: u16,

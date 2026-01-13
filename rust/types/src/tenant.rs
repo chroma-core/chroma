@@ -1,9 +1,4 @@
-#[cfg(feature = "spanner")]
-use google_cloud_spanner::row::Row;
-
 use crate::chroma_proto::TenantLastCompactionTime;
-#[cfg(feature = "spanner")]
-use crate::sysdb_errors::SysDbError;
 
 #[derive(Debug, Clone)]
 pub struct Tenant {
@@ -20,31 +15,6 @@ impl TryFrom<TenantLastCompactionTime> for Tenant {
             id: proto_tenant.tenant_id,
             last_compaction_time: proto_tenant.last_compaction_time,
             resource_name: None,
-        })
-    }
-}
-
-#[cfg(feature = "spanner")]
-impl TryFrom<Row> for Tenant {
-    type Error = SysDbError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        let id: String = row
-            .column_by_name("id")
-            .map_err(SysDbError::FailedToReadColumn)?;
-
-        let resource_name: Option<String> = row
-            .column_by_name("resource_name")
-            .map_err(SysDbError::FailedToReadColumn)?;
-
-        let last_compaction_time: i64 = row
-            .column_by_name("last_compaction_time")
-            .map_err(SysDbError::FailedToReadColumn)?;
-
-        Ok(Tenant {
-            id,
-            resource_name,
-            last_compaction_time,
         })
     }
 }

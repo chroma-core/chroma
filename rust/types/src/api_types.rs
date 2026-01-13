@@ -33,16 +33,12 @@ use crate::Schema;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
-#[cfg(feature = "spanner")]
-use crate::SysDbError;
 use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
-#[cfg(feature = "spanner")]
-use google_cloud_spanner::row::Row;
 use serde::Deserialize;
 use serde::Serialize;
 use std::time::SystemTimeError;
@@ -455,33 +451,6 @@ impl From<Database> for crate::chroma_proto::Database {
             name: d.name,
             tenant: d.tenant,
         }
-    }
-}
-
-// ============================================================================
-// Row Conversion Implementations (DAO layer)
-// ============================================================================
-
-#[cfg(feature = "spanner")]
-impl TryFrom<Row> for Database {
-    type Error = SysDbError;
-
-    fn try_from(row: Row) -> Result<Self, Self::Error> {
-        let id: String = row
-            .column_by_name("id")
-            .map_err(SysDbError::FailedToReadColumn)?;
-        let name: String = row
-            .column_by_name("name")
-            .map_err(SysDbError::FailedToReadColumn)?;
-        let tenant: String = row
-            .column_by_name("tenant_id")
-            .map_err(SysDbError::FailedToReadColumn)?;
-
-        Ok(Database {
-            id: Uuid::parse_str(&id).map_err(SysDbError::InvalidUuid)?,
-            name,
-            tenant,
-        })
     }
 }
 

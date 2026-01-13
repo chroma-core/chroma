@@ -11,12 +11,12 @@ use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
 
 use crate::config::SpannerConfig;
+use crate::types::SysDbError;
 use crate::types::{
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest, GetTenantResponse,
-    SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
 };
-use chroma_types::sysdb_errors::SysDbError;
 use chroma_types::{Database, Tenant};
 
 #[derive(Error, Debug)]
@@ -130,7 +130,7 @@ impl SpannerBackend {
         // Get the first row if it exists
         if let Some(row) = iter.next().await? {
             Ok(GetTenantResponse {
-                tenant: Tenant::try_from(row)?,
+                tenant: Tenant::try_from(SpannerRow { row })?,
             })
         } else {
             Err(SysDbError::NotFound(format!(
@@ -268,7 +268,7 @@ impl SpannerBackend {
         // Get the first row if it exists
         if let Some(row) = iter.next().await? {
             Ok(GetDatabaseResponse {
-                database: Database::try_from(row)?,
+                database: Database::try_from(SpannerRow { row })?,
             })
         } else {
             Err(SysDbError::NotFound(format!(
