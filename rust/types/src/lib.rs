@@ -66,6 +66,7 @@ pub use task::*;
 pub use tenant::*;
 pub use topology::*;
 pub use types::*;
+pub use validators::validate_name;
 pub use where_parsing::*;
 
 #[allow(clippy::all)]
