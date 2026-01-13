@@ -157,7 +157,7 @@ fn process_quorum_results<E>(
                 }
                 if r.2 != canonical.2 {
                     return QuorumOutcome::ConsistencyError(format!(
-                        "record-count mismatch: {} != {}",
+                        "byte-size mismatch: {} != {}",
                         r.2, canonical.2
                     ));
                 }
