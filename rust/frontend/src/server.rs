@@ -13,7 +13,7 @@ use chroma_metering::{
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
-    decode_embeddings, maybe_decode_update_embeddings, AddCollectionRecordsPayload,
+    decode_embeddings, maybe_decode_update_embeddings, validate_name, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
@@ -676,6 +676,10 @@ async fn update_tenant(
     Ok(Json(server.frontend.update_tenant(request).await?))
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("invalid database name:  Must be at least three asci chars, not contain .., and end in a letter or number")]
+pub struct InvalidDatabaseError;
+
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
 pub struct CreateDatabasePayload {
     pub name: String,
@@ -701,6 +705,9 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
+    if let Err(err) = validate_name(name) {
+        return Err(ServerError(Box::new(InvalidDatabaseError)));
+    }
     server.metrics.create_database.add(1, &[]);
     tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
