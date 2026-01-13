@@ -5,8 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{Storage, StorageError};
+use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
 use parquet::basic::Compression;
@@ -15,21 +15,40 @@ use setsum::Setsum;
 use tracing::{Instrument, Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+use crate::interfaces::s3::fragment_uploader::S3FragmentUploader;
+use crate::interfaces::{
+    FragmentManagerFactory, FragmentPointer, FragmentPublisher, ManifestManagerFactory,
+    ManifestPublisher,
+};
 use crate::{
-    unprefixed_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error,
-    ExponentialBackoff, Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition,
-    LogReader, LogReaderOptions, LogWriterOptions, Manifest, ManifestAndETag, ManifestManager,
-    ThrottleOptions,
+    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
+    FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader, LogReaderOptions,
+    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
 /// unused->used->discarded.  The epoch of a writer is used to determine if and when log contention
 /// indicates that a new writer should be created.  The epoch is incremented when a new writer is
 /// created and checked before creating a new writer.
-#[derive(Clone, Default)]
-pub struct EpochWriter {
+#[derive(Clone)]
+pub struct EpochWriter<
+    P: FragmentPointer = (FragmentSeqNo, LogPosition),
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager<P, S3FragmentUploader>,
+    MP: ManifestPublisher<P> = ManifestManager,
+> {
     epoch: u64,
-    writer: Option<Arc<OnceLogWriter>>,
+    writer: Option<Arc<OnceLogWriter<P, FP, MP>>>,
+}
+
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
+    Default for EpochWriter<P, FP, MP>
+{
+    fn default() -> Self {
+        Self {
+            epoch: 0,
+            writer: None,
+        }
+    }
 }
 
 ///////////////////////////////////////////// MarkDirty ////////////////////////////////////////////
@@ -48,35 +67,46 @@ impl MarkDirty for () {
 
 ///////////////////////////////////////////// LogWriter ////////////////////////////////////////////
 
-pub struct LogWriter {
+pub struct LogWriter<
+    P: FragmentPointer,
+    FP: FragmentManagerFactory<FragmentPointer = P>,
+    MP: ManifestManagerFactory<FragmentPointer = P>,
+> {
     options: LogWriterOptions,
     storage: Arc<Storage>,
     prefix: String,
     writer: String,
-    mark_dirty: Arc<dyn MarkDirty>,
-    inner: Mutex<EpochWriter>,
+    new_fragment_publisher: FP,
+    new_manifest_publisher: MP,
+    _phantom_p: std::marker::PhantomData<P>,
+    inner: Mutex<EpochWriter<P, FP::Publisher, MP::Publisher>>,
     reopen_protection: tokio::sync::Mutex<()>,
+    cmek: Option<Cmek>,
 }
 
-impl LogWriter {
-    pub async fn initialize(
-        options: &LogWriterOptions,
-        storage: &Storage,
-        prefix: &str,
-        writer: &str,
-    ) -> Result<(), Error> {
-        Manifest::initialize(options, storage, prefix, writer).await
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > LogWriter<P, FP, MP>
+{
+    pub async fn initialize(new_manifest_publisher: &MP, writer: &str) -> Result<(), Error> {
+        new_manifest_publisher
+            .init_manifest(&Manifest::new_empty(writer))
+            .await
     }
 
     /// Open the log, possibly writing a new manifest to recover it.
-    pub async fn open<D: MarkDirty>(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
-        mark_dirty: D,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
+        cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
-        let mark_dirty = Arc::new(mark_dirty) as _;
         let inner = EpochWriter::default();
         let prefix = prefix.to_string();
         let writer = writer.to_string();
@@ -86,23 +116,28 @@ impl LogWriter {
             storage,
             prefix,
             writer,
-            mark_dirty,
+            new_fragment_publisher,
+            new_manifest_publisher,
+            _phantom_p: std::marker::PhantomData,
             inner: Mutex::new(inner),
             reopen_protection,
+            cmek,
         };
         this.ensure_open().await?;
         Ok(this)
     }
 
     /// Open or try once to initialize the log.
-    pub async fn open_or_initialize<D: MarkDirty>(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open_or_initialize(
         options: LogWriterOptions,
         storage: Arc<Storage>,
         prefix: &str,
         writer: &str,
-        mark_dirty: D,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
+        cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
-        let mark_dirty = Arc::new(mark_dirty) as _;
         let inner = EpochWriter::default();
         let prefix = prefix.to_string();
         let writer = writer.to_string();
@@ -112,14 +147,17 @@ impl LogWriter {
             storage,
             prefix,
             writer,
-            mark_dirty,
+            new_fragment_publisher,
+            new_manifest_publisher,
+            _phantom_p: std::marker::PhantomData,
             inner: Mutex::new(inner),
             reopen_protection,
+            cmek,
         };
         match this.ensure_open().await {
             Ok(_) => {}
             Err(Error::UninitializedLog) => {
-                Self::initialize(&this.options, &this.storage, &this.prefix, &this.writer).await?;
+                Self::initialize(&this.new_manifest_publisher, &this.writer).await?;
                 this.ensure_open().await?;
             }
             Err(err) => {
@@ -140,24 +178,23 @@ impl LogWriter {
     /// and I'd prefer to manually inspect failures than get the automation right to do it always
     /// automatically.  Bootstrap is intended only to last as long as there is a migration from the
     /// go to the rust log services.
+    #[allow(clippy::too_many_arguments)]
     pub async fn bootstrap<D: MarkDirty>(
-        options: &LogWriterOptions,
-        storage: &Arc<Storage>,
-        prefix: &str,
+        _options: &LogWriterOptions,
         writer: &str,
         mark_dirty: D,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
         first_record_offset: LogPosition,
         messages: Vec<Vec<u8>>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Error> {
         let num_records = messages.len();
         let start = first_record_offset;
         let limit = first_record_offset + num_records;
-        // SAFETY(rescrv):  This is a speculative load to narrow the window in which we would see a
-        // race between writers.
-        let manifest = Manifest::load(&ThrottleOptions::default(), storage, prefix).await?;
-        if manifest.is_some() {
-            return Err(Error::LogContentionFailure);
-        }
+        // NOTE(rescrv):  There was once a speculative load to narrow the window in which we would
+        // see a race between writers.  That's been eliminated via other tuning, I think (re gc),
+        // so that check has been removed.
         // SAFETY(rescrv):  This will only succeed if the file doesn't exist.  Technically the log
         // could be initialized and garbage collected to leave a prefix hole, but our timing
         // assumption is that every op happens in less than 1/2 the GC interval, so there's no way
@@ -166,20 +203,16 @@ impl LogWriter {
         // If the file exists, this will fail with LogContention, which fails us with
         // LogContention.  Other errors fail transparently, too.
         if num_records > 0 {
-            let (path, setsum, num_bytes) = upload_parquet(
-                options,
-                storage,
-                prefix,
-                FragmentSeqNo(1),
-                first_record_offset,
-                messages,
-            )
-            .await?;
-            let seq_no = FragmentSeqNo(1);
+            let fragment_publisher = new_fragment_publisher.make_publisher().await?;
+            let pointer = P::bootstrap(first_record_offset);
+            let epoch_micros = now_micros();
+            let (path, setsum, num_bytes) = fragment_publisher
+                .upload_parquet(&pointer, messages, cmek, epoch_micros)
+                .await?;
             let num_bytes = num_bytes as u64;
             let frag = Fragment {
                 path,
-                seq_no,
+                seq_no: pointer.identifier(),
                 start,
                 limit,
                 num_bytes,
@@ -191,20 +224,11 @@ impl LogWriter {
             // SAFETY(rescrv):  This is unit tested to never happen.  If it happens, add more tests.
             if !new_manifest.can_apply_fragment(&frag) {
                 tracing::error!("Cannot apply frag to a clean manifest.");
-                return Err(Error::Internal);
+                return Err(Error::internal(file!(), line!()));
             }
             new_manifest.apply_fragment(frag);
             // SAFETY(rescrv):  If this fails, there's nothing left to do.
-            empty_manifest
-                .install(
-                    //TODO(rescrv): Thread throttle options.
-                    &ThrottleOptions::default(),
-                    storage,
-                    prefix,
-                    None,
-                    &new_manifest,
-                )
-                .await?;
+            new_manifest_publisher.init_manifest(&new_manifest).await?;
             // Not Safety:
             // We mark dirty, but if we lose that we lose that.
             // Failure to mark dirty fails the bootstrap.
@@ -214,16 +238,7 @@ impl LogWriter {
             let mut new_manifest = empty_manifest.clone();
             new_manifest.initial_offset = Some(start);
             // SAFETY(rescrv):  If this fails, there's nothing left to do.
-            empty_manifest
-                .install(
-                    //TODO(rescrv): Thread throttle options.
-                    &ThrottleOptions::default(),
-                    storage,
-                    prefix,
-                    None,
-                    &new_manifest,
-                )
-                .await?;
+            new_manifest_publisher.init_manifest(&new_manifest).await?;
             // No need to mark dirty as the manifest is empty.
         }
         Ok(())
@@ -247,21 +262,26 @@ impl LogWriter {
 
     #[tracing::instrument(skip(self, messages))]
     pub async fn append_many(&self, messages: Vec<Vec<u8>>) -> Result<LogPosition, Error> {
-        let once_log_append_many = move |log: &Arc<OnceLogWriter>| {
-            let messages = messages.clone();
-            let log = Arc::clone(log);
-            async move { log.append(messages).await }
-        };
+        let once_log_append_many =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let messages = messages.clone();
+                let log = Arc::clone(log);
+                async move { log.append(messages).await }
+            };
         self.handle_errors_and_contention(once_log_append_many)
             .await
     }
 
-    // TODO(rescrv):  No option
-    pub fn reader(&self, options: LogReaderOptions) -> Option<LogReader> {
+    pub async fn reader(
+        &self,
+        options: LogReaderOptions,
+    ) -> Option<LogReader<P, FP::Consumer, MP::Consumer>> {
+        let fragment_consumer = self.new_fragment_publisher.make_consumer().await.ok()?;
+        let manifest_consumer = self.new_manifest_publisher.make_consumer().await.ok()?;
         Some(LogReader::new(
             options,
-            Arc::clone(&self.storage),
-            self.prefix.clone(),
+            fragment_consumer,
+            manifest_consumer,
         ))
     }
 
@@ -275,17 +295,13 @@ impl LogWriter {
         ))
     }
 
-    pub fn manifest(&self) -> Option<Manifest> {
-        self.manifest_and_etag().map(|m| m.manifest)
-    }
-
-    pub fn manifest_and_etag(&self) -> Option<ManifestAndETag> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner
-            .writer
-            .as_ref()
-            .map(|writer| writer.manifest_manager.latest())
+    pub async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+        let inner = {
+            // SAFETY(rescrv):  Mutex poisoning.
+            let inner = self.inner.lock().unwrap();
+            Arc::clone(inner.writer.as_ref().ok_or_else(|| Error::LogClosed)?)
+        };
+        inner.manifest_and_witness().await
     }
 
     pub async fn garbage_collect_phase1_compute_garbage(
@@ -293,14 +309,15 @@ impl LogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<bool, Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move {
-                log.garbage_collect_phase1_compute_garbage(&options, keep_at_least)
-                    .await
-            }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move {
+                    log.garbage_collect_phase1_compute_garbage(&options, keep_at_least)
+                        .await
+                }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
@@ -309,11 +326,12 @@ impl LogWriter {
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move { log.garbage_collect_phase2_update_manifest(&options).await }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move { log.garbage_collect_phase2_update_manifest(&options).await }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
@@ -322,11 +340,12 @@ impl LogWriter {
         &self,
         options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move { log.garbage_collect_phase3_delete_garbage(&options).await }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move { log.garbage_collect_phase3_delete_garbage(&options).await }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
@@ -336,18 +355,19 @@ impl LogWriter {
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
     ) -> Result<(), Error> {
-        let once_log_garbage_collect = move |log: &Arc<OnceLogWriter>| {
-            let options = options.clone();
-            let log = Arc::clone(log);
-            async move { log.garbage_collect(&options, keep_at_least).await }
-        };
+        let once_log_garbage_collect =
+            move |log: &Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>| {
+                let options = options.clone();
+                let log = Arc::clone(log);
+                async move { log.garbage_collect(&options, keep_at_least).await }
+            };
         self.handle_errors_and_contention(once_log_garbage_collect)
             .await
     }
 
     async fn handle_errors_and_contention<O, F: Future<Output = Result<O, Error>>>(
         &self,
-        f: impl Fn(&Arc<OnceLogWriter>) -> F,
+        f: impl Fn(&Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>) -> F,
     ) -> Result<O, Error> {
         for _ in 0..3 {
             let (writer, epoch) = self.ensure_open().await?;
@@ -408,7 +428,9 @@ impl LogWriter {
         Err(Error::LogContentionFailure)
     }
 
-    async fn ensure_open(&self) -> Result<(Arc<OnceLogWriter>, u64), Error> {
+    async fn ensure_open(
+        &self,
+    ) -> Result<(Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>, u64), Error> {
         let _guard = self.reopen_protection.lock().await;
         for _ in 0..3 {
             let epoch = {
@@ -426,12 +448,15 @@ impl LogWriter {
                 }
                 inner.epoch
             };
+            let batch_manager = self.new_fragment_publisher.make_publisher().await?;
+            let manifest_manager = self.new_manifest_publisher.open_publisher().await?;
             let writer = match OnceLogWriter::open(
                 self.options.clone(),
                 self.storage.clone(),
+                batch_manager,
+                manifest_manager,
                 self.prefix.clone(),
-                self.writer.clone(),
-                Arc::clone(&self.mark_dirty),
+                self.cmek.clone(),
             )
             .await
             {
@@ -452,32 +477,14 @@ impl LogWriter {
         }
         Err(Error::LogContentionRetry)
     }
-
-    pub fn count_waiters(&self) -> Option<(usize, usize)> {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        inner.writer.as_ref().map(|writer| {
-            (
-                writer.batch_manager.count_waiters(),
-                writer.manifest_manager.count_waiters(),
-            )
-        })
-    }
-
-    pub fn debug_dump(&self) -> String {
-        // SAFETY(rescrv):  Mutex poisoning.
-        let inner = self.inner.lock().unwrap();
-        let Some(writer) = inner.writer.as_ref() else {
-            return "<no writer>\n".to_string();
-        };
-        let mut output = String::new();
-        output += &writer.batch_manager.debug_dump();
-        output += &writer.manifest_manager.debug_dump();
-        output
-    }
 }
 
-impl std::fmt::Debug for LogWriter {
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > std::fmt::Debug for LogWriter<P, FP, MP>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogWriter")
             .field("writer", &self.writer)
@@ -485,7 +492,12 @@ impl std::fmt::Debug for LogWriter {
     }
 }
 
-impl Drop for LogWriter {
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > Drop for LogWriter<P, FP, MP>
+{
     fn drop(&mut self) {
         let mut inner = self.inner.lock().unwrap();
         if let Some(writer) = inner.writer.as_mut() {
@@ -501,7 +513,11 @@ impl Drop for LogWriter {
 /// structure as the recovery procedure does, this allows us to re-use exactly one code path for
 /// both.  That code path can then be well-tested because any contention state gets exercised from
 /// the perspective of initialization.
-pub(crate) struct OnceLogWriter {
+pub(crate) struct OnceLogWriter<
+    P: FragmentPointer = (FragmentSeqNo, LogPosition),
+    FP: FragmentPublisher<FragmentPointer = P> = BatchManager<P, S3FragmentUploader>,
+    MP: ManifestPublisher<P> = ManifestManager,
+> {
     /// LogWriterOptions are fixed at log creation time.
     /// LogWriter is intentionally cheap to construct and destroy.
     /// Reopen the log to change the options.
@@ -512,42 +528,36 @@ pub(crate) struct OnceLogWriter {
     prefix: String,
     /// True iff the log is done.
     done: AtomicBool,
-    /// Mark each write dirty via this mechanism.
-    mark_dirty: Arc<dyn MarkDirty>,
     /// ManifestManager coordinates updates to the manifest.
-    manifest_manager: ManifestManager,
+    manifest_manager: MP,
     /// BatchManager coordinates batching writes to the log.
-    batch_manager: BatchManager,
+    batch_manager: FP,
+    /// Customer-managed encryption key for encrypting log fragments.
+    cmek: Option<Cmek>,
 }
 
-impl OnceLogWriter {
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
+    OnceLogWriter<P, FP, MP>
+{
+    #[allow(clippy::too_many_arguments)]
     async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
+        batch_manager: FP,
+        mut manifest_manager: MP,
         prefix: String,
-        writer: String,
-        mark_dirty: Arc<dyn MarkDirty>,
+        cmek: Option<Cmek>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager =
-            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
-        let mut manifest_manager = ManifestManager::new(
-            options.throttle_manifest,
-            options.snapshot_manifest,
-            Arc::clone(&storage),
-            prefix.clone(),
-            writer,
-        )
-        .await?;
-        manifest_manager.recover(&*mark_dirty).await?;
+        manifest_manager.recover().await?;
         let this = Arc::new(Self {
             options,
             storage,
             prefix,
             done,
-            mark_dirty,
             manifest_manager,
             batch_manager,
+            cmek,
         });
         let that = Arc::downgrade(&this);
         let _flusher = tokio::task::spawn(async move {
@@ -557,11 +567,9 @@ impl OnceLogWriter {
                 };
                 if !that.done.load(std::sync::atomic::Ordering::Relaxed) {
                     that.batch_manager.wait_for_writable().await;
-                    match that.batch_manager.take_work(&that.manifest_manager) {
-                        Ok(Some((fragment_seq_no, log_position, work))) => {
-                            Arc::clone(&that)
-                                .append_batch(fragment_seq_no, log_position, work)
-                                .await;
+                    match that.batch_manager.take_work(&that.manifest_manager).await {
+                        Ok(Some((pointer, work))) => {
+                            Arc::clone(&that).append_batch(pointer, work).await;
                         }
                         Ok(None) => {
                             let sleep_for = that.batch_manager.until_next_time();
@@ -586,37 +594,31 @@ impl OnceLogWriter {
     pub(crate) async fn open_for_read_only_and_stale_ops(
         options: LogWriterOptions,
         storage: Arc<Storage>,
+        batch_manager: FP,
+        manifest_manager: MP,
         prefix: String,
-        writer: String,
-        mark_dirty: Arc<dyn MarkDirty>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
-        let batch_manager =
-            BatchManager::new(options.throttle_fragment).ok_or_else(|| Error::Internal)?;
-        let manifest_manager = ManifestManager::new(
-            options.throttle_manifest,
-            options.snapshot_manifest,
-            Arc::clone(&storage),
-            prefix.clone(),
-            writer,
-        )
-        .await?;
         Ok(Arc::new(Self {
             options,
             storage,
             prefix,
             done,
-            mark_dirty,
             manifest_manager,
             batch_manager,
+            cmek: None, // Read-only operations don't need CMEK
         }))
     }
 
+    async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
+        self.manifest_manager.manifest_and_witness().await
+    }
+
     fn shutdown(&self) {
-        self.batch_manager.shutdown();
+        self.batch_manager.shutdown_prepare();
         self.manifest_manager.shutdown();
         self.done.store(true, std::sync::atomic::Ordering::Relaxed);
-        self.batch_manager.pump_write_finished();
+        self.batch_manager.shutdown_finish();
     }
 
     async fn close(mut self: Arc<Self>) -> Result<(), Error> {
@@ -643,16 +645,14 @@ impl OnceLogWriter {
         let append_span_clone = append_span.clone();
         async move {
             let (tx, rx) = tokio::sync::oneshot::channel();
-            self.batch_manager.push_work(messages, tx, append_span);
-            match self.batch_manager.take_work(&self.manifest_manager) {
+            self.batch_manager
+                .push_work(messages, tx, append_span)
+                .await;
+            match self.batch_manager.take_work(&self.manifest_manager).await {
                 Ok(Some(work)) => {
-                    let (fragment_seq_no, log_position, work) = work;
+                    let (pointer, work) = work;
                     {
-                        tokio::task::spawn(Arc::clone(self).append_batch(
-                            fragment_seq_no,
-                            log_position,
-                            work,
-                        ));
+                        tokio::task::spawn(Arc::clone(self).append_batch(pointer, work));
                     }
                 }
                 Ok(None) => {}
@@ -661,7 +661,9 @@ impl OnceLogWriter {
                 }
             }
             let span = tracing::info_span!("wait_for_durability");
-            rx.instrument(span).await.map_err(|_| Error::Internal)?
+            rx.instrument(span)
+                .await
+                .map_err(|_| Error::internal(file!(), line!()))?
         }
         .instrument(append_span_clone)
         .await
@@ -670,8 +672,7 @@ impl OnceLogWriter {
     #[allow(clippy::type_complexity)]
     async fn append_batch(
         self: Arc<Self>,
-        fragment_seq_no: FragmentSeqNo,
-        log_position: LogPosition,
+        pointer: P,
         work: Vec<(
             Vec<Vec<u8>>,
             tokio::sync::oneshot::Sender<Result<LogPosition, Error>>,
@@ -695,10 +696,7 @@ impl OnceLogWriter {
                 tracing::error!("somehow got empty messages");
                 return;
             }
-            match self
-                .append_batch_internal(fragment_seq_no, log_position, messages)
-                .await
-            {
+            match self.append_batch_internal(pointer, messages).await {
                 Ok(mut log_position) => {
                     for (num_messages, notify) in notifies.into_iter() {
                         if notify.send(Ok(log_position)).is_err() {
@@ -720,53 +718,38 @@ impl OnceLogWriter {
         .await
     }
 
-    #[tracing::instrument(skip(self, messages))]
+    #[tracing::instrument(skip(self, pointer, messages))]
     async fn append_batch_internal(
         &self,
-        fragment_seq_no: FragmentSeqNo,
-        log_position: LogPosition,
+        pointer: P,
         messages: Vec<Vec<u8>>,
     ) -> Result<LogPosition, Error> {
         assert!(!messages.is_empty());
         let messages_len = messages.len();
-        let fut1 = upload_parquet(
-            &self.options,
-            &self.storage,
-            &self.prefix,
-            fragment_seq_no,
-            log_position,
-            messages,
-        );
-        let fut2 = async {
-            match self.mark_dirty.mark_dirty(log_position, messages_len).await {
-                Ok(_) | Err(Error::LogContentionDurable) => Ok(()),
-                Err(err) => Err(err),
-            }
-        };
-        let (res1, res2) = futures::future::join(fut1, fut2).await;
-        res2.inspect_err(|_| {
+        let epoch_micros = now_micros();
+        let res = self
+            .batch_manager
+            .upload_parquet(&pointer, messages, self.cmek.clone(), epoch_micros)
+            .await;
+        let (path, setsum, num_bytes) = res.inspect_err(|_| {
             self.shutdown();
         })?;
-        let (path, setsum, num_bytes) = res1.inspect_err(|_| {
-            self.shutdown();
-        })?;
-        // Upload to a coalesced manifest.
-        let fragment = Fragment {
-            path: path.to_string(),
-            seq_no: fragment_seq_no,
-            start: log_position,
-            limit: log_position + messages_len,
-            num_bytes: num_bytes as u64,
-            setsum,
-        };
-        self.manifest_manager
-            .publish_fragment(fragment)
+        let log_position = self
+            .manifest_manager
+            .publish_fragment(
+                &pointer,
+                &["dummy"],
+                &path,
+                messages_len as u64,
+                num_bytes as u64,
+                setsum,
+            )
             .await
             .inspect_err(|_| {
                 self.shutdown();
             })?;
         // Record the records/batches written.
-        self.batch_manager.finish_write();
+        self.batch_manager.finish_write().await;
         Ok(log_position)
     }
 
@@ -806,7 +789,11 @@ impl OnceLogWriter {
             .await
             {
                 Ok(Some((garbage, e_tag))) => {
-                    if garbage.is_empty() || self.manifest_manager.garbage_applies_cleanly(&garbage)
+                    if garbage.is_empty()
+                        || self
+                            .manifest_manager
+                            .garbage_applies_cleanly(&garbage)
+                            .await?
                     {
                         Some((garbage, e_tag))
                     } else if let Some(e_tag) = e_tag {
@@ -841,13 +828,14 @@ impl OnceLogWriter {
             };
             let garbage = self
                 .manifest_manager
-                .compute_garbage(options, cutoff, &())
+                .compute_garbage(options, cutoff)
                 .await?;
             let Some(garbage) = garbage else {
                 return Ok(false);
             };
             match garbage
                 .install(
+                    &self.manifest_manager,
                     &self.options.throttle_manifest,
                     &self.storage,
                     &self.prefix,
@@ -890,8 +878,8 @@ impl OnceLogWriter {
             };
         if !garbage.is_empty() {
             self.manifest_manager.apply_garbage(garbage.clone()).await.inspect_err(|err| {
-                if let Error::GarbageCollectionPrecondition(_) = err {
-                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", manifest =? self.manifest_manager.latest(), garbage =? garbage);
+                if let Error::GarbageCollectionPrecondition(err) = err {
+                    tracing::event!(Level::ERROR, name = "garbage collection precondition failed", error =? err, garbage =? garbage);
                 }
             })?;
         }
@@ -1029,26 +1017,35 @@ impl OnceLogWriter {
     }
 }
 
-impl Drop for OnceLogWriter {
+impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>> Drop
+    for OnceLogWriter<P, FP, MP>
+{
     fn drop(&mut self) {
         self.shutdown();
     }
 }
 
+/// Returns the current epoch time in microseconds.
+pub fn now_micros() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or(Duration::ZERO)
+        .as_micros() as u64
+}
+
 #[tracing::instrument(skip(messages))]
 pub fn construct_parquet(
-    log_position: LogPosition,
+    log_position: Option<LogPosition>,
     messages: &[Vec<u8>],
+    epoch_micros: u64,
 ) -> Result<(Vec<u8>, Setsum), Error> {
     // Construct the columns and construct the setsum.
     let mut setsum = Setsum::default();
     let messages_len = messages.len();
     let mut positions = Vec::with_capacity(messages_len);
     let mut bodies = Vec::with_capacity(messages_len);
-    let epoch_micros = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or(Duration::ZERO)
-        .as_micros() as u64;
+    let relative = log_position.is_none();
+    let log_position = log_position.unwrap_or_default();
     for (index, message) in messages.iter().enumerate() {
         let position = log_position + index;
         setsum.insert_vectored(&[
@@ -1066,10 +1063,15 @@ pub fn construct_parquet(
     let offsets = UInt64Array::from(offsets);
     let timestamps_us = UInt64Array::from(timestamps_us);
     let bodies = BinaryArray::from(bodies);
+    let offset_column_name = if relative {
+        "relative_offset"
+    } else {
+        "offset"
+    };
     // SAFETY(rescrv):  The try_from_iter call will always succeed.
     // TODO(rescrv):  Arrow pre-allocator.
     let batch = RecordBatch::try_from_iter(vec![
-        ("offset", Arc::new(offsets) as ArrayRef),
+        (offset_column_name, Arc::new(offsets) as ArrayRef),
         ("timestamp_us", Arc::new(timestamps_us) as ArrayRef),
         ("body", Arc::new(bodies) as ArrayRef),
     ])
@@ -1086,88 +1088,403 @@ pub fn construct_parquet(
     Ok((buffer, setsum))
 }
 
-#[tracing::instrument(skip(options, storage, messages))]
-pub async fn upload_parquet(
-    options: &LogWriterOptions,
-    storage: &Storage,
-    prefix: &str,
-    fragment_seq_no: FragmentSeqNo,
-    log_position: LogPosition,
-    messages: Vec<Vec<u8>>,
-) -> Result<(String, Setsum, usize), Error> {
-    // Upload the log.
-    let unprefixed_path = unprefixed_fragment_path(fragment_seq_no);
-    let path = format!("{prefix}/{unprefixed_path}");
-    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
-    let start = Instant::now();
-    loop {
-        let (buffer, setsum) = construct_parquet(log_position, &messages)?;
-        tracing::info!("upload_parquet: {:?} with {} bytes", path, buffer.len());
-        // NOTE(rescrv):  This match block has been thoroughly reasoned through within the
-        // `bootstrap` call above.  Don't change the error handling here without re-reasoning
-        // there.
-        match storage
-            .put_bytes(
-                &path,
-                buffer.clone(),
-                PutOptions::if_not_exists(StorageRequestPriority::P0),
-            )
-            .await
-        {
-            Ok(_) => {
-                return Ok((unprefixed_path, setsum, buffer.len()));
-            }
-            Err(StorageError::Precondition { path: _, source: _ }) => {
-                return Err(Error::LogContentionFailure);
-            }
-            Err(err) => {
-                if start.elapsed() > Duration::from_secs(60) {
-                    return Err(Error::StorageError(Arc::new(err)));
-                }
-                let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(60) {
-                    backoff = Duration::from_secs(60);
-                }
-                tokio::time::sleep(backoff).await;
-            }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use arrow::array::Array;
+    use bytes::Bytes;
+    use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
+
+    use crate::interfaces::checksum_parquet;
+
+    const TEST_EPOCH_MICROS: u64 = 1234567890123456;
+
+    /// Verifies that construct_parquet with Some(log_position) creates absolute offsets.
+    #[test]
+    fn construct_parquet_with_some_log_position_uses_absolute_offsets() {
+        let log_position = LogPosition::from_offset(100);
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+
+        let (buffer, setsum) = construct_parquet(Some(log_position), &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+
+        // Verify that the parquet buffer is non-empty.
+        assert!(!buffer.is_empty(), "parquet buffer should not be empty");
+
+        // Verify the setsum is non-default (data was inserted).
+        assert_ne!(setsum, Setsum::default(), "setsum should not be default");
+
+        // Parse the parquet and verify the column structure.
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            // Verify that "offset" column exists (not "relative_offset").
+            let offset_column = batch.column_by_name("offset");
+            assert!(
+                offset_column.is_some(),
+                "should have 'offset' column for Some(log_position)"
+            );
+
+            let relative_offset_column = batch.column_by_name("relative_offset");
+            assert!(
+                relative_offset_column.is_none(),
+                "should not have 'relative_offset' column for Some(log_position)"
+            );
+
+            // Verify offset values are absolute (starting at 100).
+            let offset_array = offset_column
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("offset column should be UInt64Array");
+
+            assert_eq!(offset_array.len(), 3, "should have 3 records");
+            println!(
+                "construct_parquet_with_some_log_position_uses_absolute_offsets: offsets = {:?}",
+                (0..offset_array.len())
+                    .map(|i| offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(offset_array.value(0), 100, "first offset should be 100");
+            assert_eq!(offset_array.value(1), 101, "second offset should be 101");
+            assert_eq!(offset_array.value(2), 102, "third offset should be 102");
+
+            // Verify body column exists and has correct data.
+            let body_column = batch
+                .column_by_name("body")
+                .expect("body column should exist");
+            let body_array = body_column
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("body column should be BinaryArray");
+
+            assert_eq!(body_array.value(0), &[1, 2, 3]);
+            assert_eq!(body_array.value(1), &[4, 5, 6]);
+            assert_eq!(body_array.value(2), &[7, 8, 9]);
         }
     }
-}
 
-#[tracing::instrument(skip(options, storage))]
-pub async fn copy_parquet(
-    options: &LogWriterOptions,
-    storage: &Storage,
-    source: &str,
-    target: &str,
-) -> Result<(), Error> {
-    let parquet = storage
-        .get(source, GetOptions::new(StorageRequestPriority::P0))
-        .await
-        .map_err(Arc::new)?;
-    let exp_backoff: ExponentialBackoff = options.throttle_fragment.into();
-    let start = Instant::now();
-    loop {
-        match storage
-            .put_bytes(
-                target,
-                parquet.to_vec(),
-                PutOptions::if_not_exists(StorageRequestPriority::P0),
-            )
-            .await
-        {
-            Ok(_) => return Ok(()),
-            Err(StorageError::Precondition { path: _, source: _ }) => return Ok(()),
-            Err(err) => {
-                if start.elapsed() > Duration::from_secs(60) {
-                    return Err(Error::StorageError(Arc::new(err)));
-                }
-                let mut backoff = exp_backoff.next();
-                if backoff > Duration::from_secs(3_600) {
-                    backoff = Duration::from_secs(3_600);
-                }
-                tokio::time::sleep(backoff).await;
-            }
+    /// Verifies that construct_parquet with None creates relative offsets.
+    #[test]
+    fn construct_parquet_with_none_log_position_uses_relative_offsets() {
+        let messages = vec![
+            vec![10, 20, 30],
+            vec![40, 50, 60],
+            vec![70, 80, 90],
+            vec![100, 110, 120],
+        ];
+
+        let (buffer, setsum) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+
+        // Verify that the parquet buffer is non-empty.
+        assert!(!buffer.is_empty(), "parquet buffer should not be empty");
+
+        // Verify the setsum is non-default (data was inserted).
+        assert_ne!(setsum, Setsum::default(), "setsum should not be default");
+
+        // Parse the parquet and verify the column structure.
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            // Verify that "relative_offset" column exists (not "offset").
+            let relative_offset_column = batch.column_by_name("relative_offset");
+            assert!(
+                relative_offset_column.is_some(),
+                "should have 'relative_offset' column for None log_position"
+            );
+
+            let offset_column = batch.column_by_name("offset");
+            assert!(
+                offset_column.is_none(),
+                "should not have 'offset' column for None log_position"
+            );
+
+            // Verify relative offset values start at 0.
+            let relative_offset_array = relative_offset_column
+                .unwrap()
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("relative_offset column should be UInt64Array");
+
+            assert_eq!(relative_offset_array.len(), 4, "should have 4 records");
+            println!(
+                "construct_parquet_with_none_log_position_uses_relative_offsets: relative_offsets = {:?}",
+                (0..relative_offset_array.len())
+                    .map(|i| relative_offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                relative_offset_array.value(0),
+                0,
+                "first relative offset should be 0"
+            );
+            assert_eq!(
+                relative_offset_array.value(1),
+                1,
+                "second relative offset should be 1"
+            );
+            assert_eq!(
+                relative_offset_array.value(2),
+                2,
+                "third relative offset should be 2"
+            );
+            assert_eq!(
+                relative_offset_array.value(3),
+                3,
+                "fourth relative offset should be 3"
+            );
+
+            // Verify body column exists and has correct data.
+            let body_column = batch
+                .column_by_name("body")
+                .expect("body column should exist");
+            let body_array = body_column
+                .as_any()
+                .downcast_ref::<BinaryArray>()
+                .expect("body column should be BinaryArray");
+
+            assert_eq!(body_array.value(0), &[10, 20, 30]);
+            assert_eq!(body_array.value(1), &[40, 50, 60]);
+            assert_eq!(body_array.value(2), &[70, 80, 90]);
+            assert_eq!(body_array.value(3), &[100, 110, 120]);
         }
+    }
+
+    /// Verifies setsum computation differs between Some and None log_position.
+    #[test]
+    fn construct_parquet_setsum_differs_based_on_log_position() {
+        let messages = vec![vec![1, 2, 3]];
+
+        let (_, setsum_with_position) = construct_parquet(
+            Some(LogPosition::from_offset(100)),
+            &messages,
+            TEST_EPOCH_MICROS,
+        )
+        .expect("construct_parquet with Some should succeed");
+
+        let (_, setsum_without_position) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet with None should succeed");
+
+        // The setsums should differ because the offset used in the setsum calculation differs.
+        // With Some(100), offset is 100. With None, offset is 0.
+        println!(
+            "construct_parquet_setsum_differs_based_on_log_position: setsum_with_position = {}, setsum_without_position = {}",
+            setsum_with_position.hexdigest(),
+            setsum_without_position.hexdigest()
+        );
+        assert_ne!(
+            setsum_with_position, setsum_without_position,
+            "setsums should differ when log_position differs"
+        );
+    }
+
+    /// Verifies construct_parquet handles empty messages.
+    #[test]
+    fn construct_parquet_with_empty_messages() {
+        let messages: Vec<Vec<u8>> = vec![];
+
+        let (buffer_with_pos, setsum_with_pos) = construct_parquet(
+            Some(LogPosition::from_offset(1)),
+            &messages,
+            TEST_EPOCH_MICROS,
+        )
+        .expect("construct_parquet with Some and empty messages should succeed");
+
+        let (buffer_without_pos, setsum_without_pos) =
+            construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet with None and empty messages should succeed");
+
+        // Both should produce non-empty parquet files (even with 0 rows).
+        assert!(
+            !buffer_with_pos.is_empty(),
+            "parquet buffer should not be empty"
+        );
+        assert!(
+            !buffer_without_pos.is_empty(),
+            "parquet buffer should not be empty"
+        );
+
+        // Setsums should be default (no data inserted).
+        println!(
+            "construct_parquet_with_empty_messages: setsum_with_pos = {}, setsum_without_pos = {}",
+            setsum_with_pos.hexdigest(),
+            setsum_without_pos.hexdigest()
+        );
+        assert_eq!(
+            setsum_with_pos,
+            Setsum::default(),
+            "setsum should be default for empty messages"
+        );
+        assert_eq!(
+            setsum_without_pos,
+            Setsum::default(),
+            "setsum should be default for empty messages"
+        );
+    }
+
+    /// Verifies that construct_parquet with log_position starting at 0 works correctly.
+    #[test]
+    fn construct_parquet_with_zero_log_position() {
+        let log_position = LogPosition::from_offset(0);
+        let messages = vec![vec![1], vec![2]];
+
+        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            // Should have "offset" column since Some was passed.
+            let offset_column = batch
+                .column_by_name("offset")
+                .expect("should have 'offset' column");
+            let offset_array = offset_column
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("offset column should be UInt64Array");
+
+            println!(
+                "construct_parquet_with_zero_log_position: offsets = {:?}",
+                (0..offset_array.len())
+                    .map(|i| offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(offset_array.value(0), 0, "first offset should be 0");
+            assert_eq!(offset_array.value(1), 1, "second offset should be 1");
+        }
+    }
+
+    /// Verifies that construct_parquet with a large log_position offset works correctly.
+    #[test]
+    fn construct_parquet_with_large_log_position() {
+        let log_position = LogPosition::from_offset(u64::MAX - 2);
+        let messages = vec![vec![1], vec![2], vec![3]];
+
+        let (buffer, _setsum) = construct_parquet(Some(log_position), &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet should succeed");
+
+        let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(buffer))
+            .expect("parquet should be parseable");
+        let reader = builder.build().expect("parquet reader should build");
+
+        for batch in reader {
+            let batch = batch.expect("batch should be readable");
+
+            let offset_column = batch
+                .column_by_name("offset")
+                .expect("should have 'offset' column");
+            let offset_array = offset_column
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("offset column should be UInt64Array");
+
+            println!(
+                "construct_parquet_with_large_log_position: offsets = {:?}",
+                (0..offset_array.len())
+                    .map(|i| offset_array.value(i))
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(
+                offset_array.value(0),
+                u64::MAX - 2,
+                "first offset should be u64::MAX - 2"
+            );
+            assert_eq!(
+                offset_array.value(1),
+                u64::MAX - 1,
+                "second offset should be u64::MAX - 1"
+            );
+            assert_eq!(
+                offset_array.value(2),
+                u64::MAX,
+                "third offset should be u64::MAX - 0"
+            );
+        }
+    }
+
+    /// Verifies that checksum_parquet returns the same setsum as construct_parquet for relative
+    /// offsets.
+    #[test]
+    fn relative_offset_setsum_consistency() {
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+
+        // Write with relative offsets (None) - setsum computed with offsets 0, 1, 2
+        let (buffer, setsum_from_writer) = construct_parquet(None, &messages, TEST_EPOCH_MICROS)
+            .expect("construct_parquet with None should succeed");
+
+        // Read back with checksum_parquet (no starting position)
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, Some(LogPosition::from_offset(100)))
+                .expect("checksum_parquet should succeed");
+
+        println!(
+            "relative_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(
+            uses_relative_offsets,
+            "should detect relative offsets in parquet"
+        );
+        assert_eq!(records.len(), 3, "should have 3 records");
+        assert_eq!(records[0].0.offset(), 100);
+        assert_eq!(records[1].0.offset(), 101);
+        assert_eq!(records[2].0.offset(), 102);
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "writer and reader setsums should match for relative-offset files"
+        );
+    }
+
+    /// Verifies that checksum_parquet returns the same setsum as construct_parquet for absolute
+    /// offsets.
+    #[test]
+    fn absolute_offset_setsum_consistency() {
+        let messages = vec![vec![1, 2, 3], vec![4, 5, 6], vec![7, 8, 9]];
+        let starting_position = LogPosition::from_offset(100);
+
+        // Write with absolute offsets
+        let (buffer, setsum_from_writer) =
+            construct_parquet(Some(starting_position), &messages, TEST_EPOCH_MICROS)
+                .expect("construct_parquet should succeed");
+
+        // Read back with checksum_parquet
+        let (setsum_from_reader, records, uses_relative_offsets, _) =
+            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+
+        println!(
+            "absolute_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",
+            setsum_from_writer.hexdigest(),
+            setsum_from_reader.hexdigest()
+        );
+
+        assert!(
+            !uses_relative_offsets,
+            "should detect absolute offsets in parquet"
+        );
+        assert_eq!(records.len(), 3, "should have 3 records");
+        // Verify positions are absolute
+        assert_eq!(records[0].0.offset(), 100);
+        assert_eq!(records[1].0.offset(), 101);
+        assert_eq!(records[2].0.offset(), 102);
+        assert_eq!(
+            setsum_from_writer, setsum_from_reader,
+            "writer and reader setsums should match for absolute-offset files"
+        );
     }
 }

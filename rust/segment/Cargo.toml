@@ -11,6 +11,7 @@ roaring = { workspace = true }
 sea-query = { workspace = true }
 sea-query-binder = { workspace = true, features = ["sqlx-sqlite"] }
 serde = { workspace = true }
+serde_json = { workspace = true }
 sqlx = { workspace = true }
 serde-pickle = "1.2.0"
 tantivy = { workspace = true }
@@ -29,6 +30,7 @@ chroma-distance = { workspace = true }
 chroma-error = { workspace = true }
 chroma-index = { workspace = true }
 chroma-sqlite = { workspace = true }
+chroma-storage = { workspace = true }
 chroma-types = { workspace = true }
 
 [dev-dependencies]

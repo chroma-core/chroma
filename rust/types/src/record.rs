@@ -266,6 +266,7 @@ impl_base_convert_error!(VectorConversionError, {
 fn vec_to_f32(bytes: &[u8]) -> Result<&[f32], VectorConversionError> {
     // Transmutes a vector of bytes into vector of f32s
 
+    #[allow(clippy::manual_is_multiple_of)] // bytes.len() is not a multiple of 4
     if bytes.len() % 4 != 0 {
         return Err(VectorConversionError::InvalidByteLength);
     }

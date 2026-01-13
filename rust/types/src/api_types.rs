@@ -7,12 +7,19 @@ use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
+use crate::operators_generated::{
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
+    FUNCTION_STATISTICS_NAME,
+};
 use crate::plan::PlanToProtoError;
+use crate::plan::ReadLevel;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
     validate_optional_metadata, validate_schema, validate_update_metadata_vec,
 };
+use crate::AttachedFunction;
+use crate::AttachedFunctionUuid;
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
@@ -26,12 +33,14 @@ use crate::Schema;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
+use crate::SysDbError;
 use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
 use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
+use google_cloud_spanner::row::Row;
 use serde::Deserialize;
 use serde::Serialize;
 use std::time::SystemTimeError;
@@ -365,6 +374,23 @@ impl CreateDatabaseRequest {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum ClientResolutionError {
+    #[error("Not supported")]
+    McmrNotSupported,
+    #[error("Database not found")]
+    DatabaseNotFound,
+}
+
+impl ChromaError for ClientResolutionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ClientResolutionError::McmrNotSupported => ErrorCodes::InvalidArgument,
+            ClientResolutionError::DatabaseNotFound => ErrorCodes::NotFound,
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateDatabaseResponse {}
@@ -375,6 +401,8 @@ pub enum CreateDatabaseError {
     AlreadyExists(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for CreateDatabaseError {
@@ -382,6 +410,7 @@ impl ChromaError for CreateDatabaseError {
         match self {
             CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateDatabaseError::Internal(status) => status.code(),
+            CreateDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
@@ -414,6 +443,42 @@ impl Database {
     #[getter]
     pub fn tenant(&self) -> &str {
         &self.tenant
+    }
+}
+
+impl From<Database> for crate::chroma_proto::Database {
+    fn from(d: Database) -> Self {
+        crate::chroma_proto::Database {
+            id: d.id.to_string(),
+            name: d.name,
+            tenant: d.tenant,
+        }
+    }
+}
+
+// ============================================================================
+// Row Conversion Implementations (DAO layer)
+// ============================================================================
+
+impl TryFrom<Row> for Database {
+    type Error = SysDbError;
+
+    fn try_from(row: Row) -> Result<Self, Self::Error> {
+        let id: String = row
+            .column_by_name("id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let name: String = row
+            .column_by_name("name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let tenant: String = row
+            .column_by_name("tenant_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        Ok(Database {
+            id: Uuid::parse_str(&id).map_err(SysDbError::InvalidUuid)?,
+            name,
+            tenant,
+        })
     }
 }
 
@@ -493,6 +558,8 @@ pub enum GetDatabaseError {
     InvalidID(String),
     #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for GetDatabaseError {
@@ -501,6 +568,7 @@ impl ChromaError for GetDatabaseError {
             GetDatabaseError::Internal(err) => err.code(),
             GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
+            GetDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
@@ -782,11 +850,13 @@ pub enum GetCollectionsError {
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not deserialize configuration")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(#[source] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
+    #[error("Could not deserialize schema")]
+    Schema(#[source] serde_json::Error),
 }
 
 impl ChromaError for GetCollectionsError {
@@ -797,6 +867,7 @@ impl ChromaError for GetCollectionsError {
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
+            GetCollectionsError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -913,13 +984,15 @@ pub enum UpdateCollectionError {
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error("Could not serialize configuration")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(#[source] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not parse config: {0}")]
     InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
+    #[error("Could not serialize schema: {0}")]
+    Schema(#[source] serde_json::Error),
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -931,6 +1004,7 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::Internal(err) => err.code(),
             UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             UpdateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -983,6 +1057,41 @@ impl ChromaError for DeleteCollectionError {
             DeleteCollectionError::NotFound(_) => ErrorCodes::NotFound,
             DeleteCollectionError::Get(err) => err.code(),
             DeleteCollectionError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct IndexStatusResponse {
+    pub op_indexing_progress: f32,
+    pub num_unindexed_ops: u64,
+    pub num_indexed_ops: u64,
+    pub total_ops: u64,
+}
+
+#[derive(Error, Debug)]
+pub enum IndexStatusError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl From<GetCollectionError> for IndexStatusError {
+    fn from(err: GetCollectionError) -> Self {
+        match err {
+            GetCollectionError::NotFound(msg) => IndexStatusError::NotFound(msg),
+            other => IndexStatusError::Internal(Box::new(other)),
+        }
+    }
+}
+
+impl ChromaError for IndexStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            IndexStatusError::NotFound(_) => ErrorCodes::NotFound,
+            IndexStatusError::Internal(err) => err.code(),
         }
     }
 }
@@ -1077,6 +1186,26 @@ impl ChromaError for CountForksError {
             CountForksError::NotFound(_) => ErrorCodes::NotFound,
             CountForksError::Internal(chroma_error) => chroma_error.code(),
             CountForksError::Local => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ListAttachedFunctionsError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("List attached functions is not implemented")]
+    NotImplemented,
+}
+
+impl ChromaError for ListAttachedFunctionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListAttachedFunctionsError::NotFound(_) => ErrorCodes::NotFound,
+            ListAttachedFunctionsError::Internal(chroma_error) => chroma_error.code(),
+            ListAttachedFunctionsError::NotImplemented => ErrorCodes::Unimplemented,
         }
     }
 }
@@ -2062,6 +2191,10 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequestPayload {
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    /// Defaults to IndexAndWal (full consistency).
+    #[serde(default)]
+    pub read_level: ReadLevel,
 }
 
 #[non_exhaustive]
@@ -2071,7 +2204,10 @@ pub struct SearchRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    #[validate(nested)]
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    pub read_level: ReadLevel,
 }
 
 impl SearchRequest {
@@ -2080,12 +2216,14 @@ impl SearchRequest {
         database_name: String,
         collection_id: CollectionUuid,
         searches: Vec<SearchPayload>,
+        read_level: ReadLevel,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
             searches,
+            read_level,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -2094,6 +2232,7 @@ impl SearchRequest {
     pub fn into_payload(self) -> SearchRequestPayload {
         SearchRequestPayload {
             searches: self.searches,
+            read_level: self.read_level,
         }
     }
 }
@@ -2250,16 +2389,16 @@ impl ChromaError for ExecutorError {
     }
 }
 
-////////////////////////// Task Operations //////////////////////////
+//////////////////////////  Attached Function Operations //////////////////////////
 
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Serialize, Validate)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CreateTaskRequest {
+pub struct AttachFunctionRequest {
     #[validate(length(min = 1))]
-    pub task_name: String,
-    pub operator_name: String,
-    pub output_collection_name: String,
+    pub name: String,
+    pub function_id: String,
+    pub output_collection: String,
     #[serde(default = "default_empty_json_object")]
     pub params: serde_json::Value,
 }
@@ -2268,17 +2407,17 @@ fn default_empty_json_object() -> serde_json::Value {
     serde_json::json!({})
 }
 
-impl CreateTaskRequest {
+impl AttachFunctionRequest {
     pub fn try_new(
-        task_name: String,
-        operator_name: String,
-        output_collection_name: String,
+        name: String,
+        function_id: String,
+        output_collection: String,
         params: serde_json::Value,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
-            task_name,
-            operator_name,
-            output_collection_name,
+            name,
+            function_id,
+            output_collection,
             params,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -2288,33 +2427,139 @@ impl CreateTaskRequest {
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct CreateTaskResponse {
-    pub success: bool,
-    pub task_id: String,
+pub struct AttachedFunctionInfo {
+    pub id: String,
+    pub name: String,
+    pub function_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachFunctionResponse {
+    pub attached_function: AttachedFunctionInfo,
+    /// True if newly created, false if already existed (idempotent request)
+    pub created: bool,
+}
+
+/// API response struct for attached function with function_name instead of function_id
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachedFunctionApiResponse {
+    /// Unique identifier for the attached function
+    pub id: AttachedFunctionUuid,
+    /// Human-readable name for the attached function instance
+    pub name: String,
+    /// Name of the function (e.g., "record_counter", "statistics")
+    pub function_name: String,
+    /// Source collection that triggers the attached function
+    pub input_collection_id: CollectionUuid,
+    /// Name of target collection where attached function output is stored
+    #[serde(rename = "output_collection")]
+    pub output_collection_name: String,
+    /// ID of the output collection (lazily filled in after creation)
+    pub output_collection_id: Option<CollectionUuid>,
+    /// Optional JSON parameters for the function
+    pub params: Option<String>,
+    /// Tenant name this attached function belongs to
+    pub tenant_id: String,
+    /// Database name this attached function belongs to
+    pub database_id: String,
+    /// Completion offset: the WAL position up to which the attached function has processed records
+    pub completion_offset: u64,
+    /// Minimum number of new records required before the attached function runs again
+    pub min_records_for_invocation: u64,
+}
+
+impl AttachedFunctionApiResponse {
+    /// Convert an AttachedFunction to the API response format, mapping function_id UUID to function_name
+    pub fn from_attached_function(af: AttachedFunction) -> Result<Self, GetAttachedFunctionError> {
+        let function_name = match af.function_id {
+            id if id == FUNCTION_RECORD_COUNTER_ID => FUNCTION_RECORD_COUNTER_NAME.to_string(),
+            id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
+            _ => {
+                return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
+            }
+        };
+
+        Ok(Self {
+            id: af.id,
+            name: af.name,
+            function_name,
+            input_collection_id: af.input_collection_id,
+            output_collection_name: af.output_collection_name,
+            output_collection_id: af.output_collection_id,
+            params: af.params,
+            tenant_id: af.tenant_id,
+            database_id: af.database_id,
+            completion_offset: af.completion_offset,
+            min_records_for_invocation: af.min_records_for_invocation,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetAttachedFunctionResponse {
+    pub attached_function: AttachedFunctionApiResponse,
 }
 
 #[derive(Error, Debug)]
-pub enum AddTaskError {
-    #[error("Task with name [{0}] already exists")]
+pub enum AttachFunctionError {
+    #[error("{0}")]
     AlreadyExists(String),
+    #[error("{0}")]
+    CollectionAlreadyHasFunction(String),
+    #[error("Failed to get collection and segments")]
+    GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
     #[error("Output collection [{0}] already exists")]
     OutputCollectionExists(String),
+    #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
+    FunctionNotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    FinishCreate(#[from] crate::FinishCreateAttachedFunctionError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for AddTaskError {
+impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AddTaskError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            AddTaskError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
-            AddTaskError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
-            AddTaskError::Validation(err) => err.code(),
-            AddTaskError::Internal(err) => err.code(),
+            AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
+            AttachFunctionError::GetCollectionError(err) => err.code(),
+            AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
+            AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            AttachFunctionError::FunctionNotFound(_) => ErrorCodes::NotFound,
+            AttachFunctionError::Validation(err) => err.code(),
+            AttachFunctionError::FinishCreate(err) => err.code(),
+            AttachFunctionError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetAttachedFunctionError {
+    #[error("Attached Function not found")]
+    NotFound(String),
+    #[error("Unknown function ID [{0}]. Function may not be registered in the system.")]
+    UnknownFunctionId(Uuid),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for GetAttachedFunctionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetAttachedFunctionError::NotFound(_) => ErrorCodes::NotFound,
+            GetAttachedFunctionError::UnknownFunctionId(_) => ErrorCodes::Internal,
+            GetAttachedFunctionError::Internal(err) => err.code(),
         }
     }
 }
@@ -2322,20 +2567,15 @@ impl ChromaError for AddTaskError {
 #[non_exhaustive]
 #[derive(Clone, Debug, Deserialize, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct RemoveTaskRequest {
-    #[validate(length(min = 1))]
-    pub task_name: String,
+pub struct DetachFunctionRequest {
     /// Whether to delete the output collection as well
     #[serde(default)]
     pub delete_output: bool,
 }
 
-impl RemoveTaskRequest {
-    pub fn try_new(task_name: String, delete_output: bool) -> Result<Self, ChromaValidationError> {
-        let request = Self {
-            task_name,
-            delete_output,
-        };
+impl DetachFunctionRequest {
+    pub fn try_new(delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self { delete_output };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
@@ -2343,13 +2583,13 @@ impl RemoveTaskRequest {
 
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct RemoveTaskResponse {
+pub struct DetachFunctionResponse {
     pub success: bool,
 }
 
 #[derive(Error, Debug)]
-pub enum RemoveTaskError {
-    #[error("Task with name [{0}] does not exist")]
+pub enum DetachFunctionError {
+    #[error(" Attached Function with ID [{0}] does not exist")]
     NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
@@ -2357,12 +2597,12 @@ pub enum RemoveTaskError {
     Internal(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for RemoveTaskError {
+impl ChromaError for DetachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RemoveTaskError::NotFound(_) => ErrorCodes::NotFound,
-            RemoveTaskError::Validation(err) => err.code(),
-            RemoveTaskError::Internal(err) => err.code(),
+            DetachFunctionError::NotFound(_) => ErrorCodes::NotFound,
+            DetachFunctionError::Validation(err) => err.code(),
+            DetachFunctionError::Internal(err) => err.code(),
         }
     }
 }
@@ -2391,7 +2631,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
+            MetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = AddCollectionRecordsRequest::try_new(
@@ -2415,10 +2657,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
+            UpdateMetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = UpdateCollectionRecordsRequest::try_new(
@@ -2442,10 +2683,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
+            UpdateMetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = UpsertCollectionRecordsRequest::try_new(

@@ -1,0 +1,31 @@
+[package]
+name = "rust-sysdb"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "sysdb_service"
+path = "src/bin/sysdb_service.rs"
+
+[dependencies]
+async-trait = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tonic = { workspace = true }
+tonic-health = { workspace = true }
+chroma-config = { workspace = true }
+chroma-error = { workspace = true }
+chroma-storage = { workspace = true }
+chroma-types = { workspace = true }
+chroma-tracing = { workspace = true, features = ["grpc"]}
+serde = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+figment = { workspace = true }
+opentelemetry = { workspace = true }
+thiserror = { workspace = true }
+uuid = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-gax = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }

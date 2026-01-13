@@ -16,15 +16,18 @@ class SparseVector:
     Attributes:
         indices: List of dimension indices (must be non-negative integers, sorted in strictly ascending order)
         values: List of values corresponding to each index (floats)
+        labels: Optional list of string labels corresponding to each index
 
     Note:
         - Indices must be sorted in strictly ascending order (no duplicates)
         - Indices and values must have the same length
+        - If labels is provided, it must have the same length as indices and values
         - All validations are performed in __post_init__
     """
 
     indices: List[int]
     values: List[float]
+    labels: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
         """Validate the sparse vector structure."""
@@ -43,6 +46,17 @@ class SparseVector:
                 f"SparseVector indices and values must have the same length, "
                 f"got {len(self.indices)} indices and {len(self.values)} values"
             )
+
+        if self.labels is not None:
+            if not isinstance(self.labels, list):
+                raise ValueError(
+                    f"Expected SparseVector labels to be a list, got {type(self.labels).__name__}"
+                )
+            if len(self.labels) != len(self.indices):
+                raise ValueError(
+                    f"SparseVector labels must have the same length as indices and values, "
+                    f"got {len(self.labels)} labels, {len(self.indices)} indices"
+                )
 
         for i, idx in enumerate(self.indices):
             if not isinstance(idx, int):
@@ -70,21 +84,36 @@ class SparseVector:
                     )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Serialize to transport format with type tag."""
-        return {
+        """Serialize to transport format with type tag.
+        
+        Note: Uses 'tokens' as the wire format key name for compatibility
+        with the protobuf schema, even though the Python attribute is 'labels'.
+        """
+        result = {
             TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
             "indices": self.indices,
             "values": self.values,
         }
+        if self.labels is not None:
+            result["tokens"] = self.labels  # Wire format uses 'tokens'
+        return result
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SparseVector":
-        """Deserialize from transport format (strict - requires #type field)."""
+        """Deserialize from transport format (strict - requires #type field).
+        
+        Note: Reads from 'tokens' key in the wire format for compatibility
+        with the protobuf schema, mapping it to the 'labels' attribute.
+        """
         if d.get(TYPE_KEY) != SPARSE_VECTOR_TYPE_VALUE:
             raise ValueError(
                 f"Expected {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {d.get(TYPE_KEY)}"
             )
-        return cls(indices=d["indices"], values=d["values"])
+        return cls(
+            indices=d["indices"],
+            values=d["values"],
+            labels=d.get("tokens")  # Wire format uses 'tokens'
+        )
 
 
 Metadata = Mapping[str, Optional[Union[str, int, float, bool, SparseVector]]]

@@ -5,7 +5,7 @@ use crate::{
 use chroma_log::config::LogConfig;
 use chroma_segment::local_segment_manager::LocalSegmentManagerConfig;
 use chroma_sqlite::config::SqliteDBConfig;
-use chroma_sysdb::SysDbConfig;
+use chroma_sysdb::{GrpcSysDbConfig, SysDbConfig};
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::{default_default_knn_index, KnnIndex};
 use figment::providers::{Env, Format, Yaml};
@@ -58,6 +58,8 @@ pub struct FrontendConfig {
     #[serde(default = "default_sysdb_config")]
     pub sysdb: SysDbConfig,
     #[serde(default)]
+    pub mcmr_sysdb: Option<GrpcSysDbConfig>,
+    #[serde(default)]
     pub collections_with_segments_provider: CollectionsWithSegmentsProviderConfig,
     #[serde(default = "default_log_config")]
     pub log: LogConfig,
@@ -71,8 +73,8 @@ pub struct FrontendConfig {
     pub tenants_to_migrate_immediately_threshold: Option<String>,
     #[serde(default = "default_enable_schema")]
     pub enable_schema: bool,
-    #[serde(default = "default_min_records_for_task")]
-    pub min_records_for_task: u64,
+    #[serde(default = "default_min_records_for_invocation")]
+    pub min_records_for_invocation: u64,
 }
 
 impl FrontendConfig {
@@ -86,13 +88,14 @@ impl FrontendConfig {
             segment_manager: default_segment_manager_config(),
             sysdb: default_sysdb_config(),
             collections_with_segments_provider: Default::default(),
+            mcmr_sysdb: None,
             log: default_log_config(),
             executor: default_executor_config(),
             default_knn_index: default_default_knn_index(),
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
-            min_records_for_task: default_min_records_for_task(),
+            min_records_for_invocation: default_min_records_for_invocation(),
         }
     }
 }
@@ -142,10 +145,10 @@ fn default_enable_span_indexing() -> bool {
 }
 
 fn default_enable_schema() -> bool {
-    false
+    true
 }
 
-pub fn default_min_records_for_task() -> u64 {
+pub fn default_min_records_for_invocation() -> u64 {
     100
 }
 

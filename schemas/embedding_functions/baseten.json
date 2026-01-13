@@ -1,0 +1,22 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Baseten Embedding Function Schema",
+    "description": "Schema for the Baseten embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "api_base": {
+            "type": "string",
+            "description": "The Baseten URL of the deployment"
+        },
+        "api_key_env_var": {
+            "type": "string",
+            "description": "Environment variable name that contains your API key for the Baseten API"
+        }
+    },
+    "required": [
+        "api_base",
+        "api_key_env_var"
+    ],
+    "additionalProperties": false
+}

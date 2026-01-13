@@ -31,9 +31,9 @@ export const Step: React.FC<{ children: React.ReactNode; title?: string }> = ({
   title,
 }) => {
   return (
-    <div className="flex flex-col gap-1">
-      {title && <p className="text-lg font-bold">{title}</p>}
-      <div>{children}</div>
+    <div className="flex flex-col gap-0 my-0">
+      {title && <p className="font-bold my-0">{title}</p>}
+      <div className="my-0">{children}</div>
     </div>
   );
 };

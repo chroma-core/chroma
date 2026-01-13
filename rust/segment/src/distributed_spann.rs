@@ -14,6 +14,7 @@ use chroma_index::spann::types::{
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
+use chroma_types::Cmek;
 use chroma_types::Collection;
 use chroma_types::Schema;
 use chroma_types::SchemaError;
@@ -106,18 +107,19 @@ impl SpannSegmentWriter {
         gc_context: GarbageCollectionContext,
         pl_block_size: usize,
         metrics: SpannMetrics,
+        cmek: Option<Cmek>,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
 
-        let reconciled_schema = Schema::reconcile_schema_and_config(
-            collection.schema.as_ref(),
-            Some(&collection.config),
-        )
-        .map_err(SpannSegmentWriterError::InvalidSchema)?;
+        let schema = if let Some(schema) = &collection.schema {
+            schema
+        } else {
+            &Schema::try_from(&collection.config).map_err(SpannSegmentWriterError::InvalidSchema)?
+        };
 
-        let params = reconciled_schema
+        let params = schema
             .get_internal_spann_config()
             .ok_or(SpannSegmentWriterError::MissingSpannConfiguration)?;
 
@@ -206,6 +208,7 @@ impl SpannSegmentWriter {
             gc_context,
             pl_block_size,
             metrics,
+            cmek,
         )
         .await
         {
@@ -688,8 +691,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            Schema::reconcile_schema_and_config(None, Some(&collection.config))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let pl_block_size = 5 * 1024 * 1024;
@@ -702,6 +705,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -799,6 +803,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -925,8 +930,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            Schema::reconcile_schema_and_config(None, Some(&collection.config))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let pl_block_size = 5 * 1024 * 1024;
@@ -939,6 +944,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1087,8 +1093,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            Schema::reconcile_schema_and_config(None, Some(&collection.config))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let segment_id = SegmentUuid::new();
@@ -1127,6 +1133,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1218,8 +1225,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            Schema::reconcile_schema_and_config(None, Some(&collection.config))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let pl_block_size = 5 * 1024 * 1024;
@@ -1232,6 +1239,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");

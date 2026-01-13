@@ -7,7 +7,8 @@ use chroma_error::ChromaError;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_tracing::GrpcClientTraceService;
 use chroma_types::chroma_proto::{
-    log_service_client::LogServiceClient, query_executor_client::QueryExecutorClient,
+    heap_tender_service_client::HeapTenderServiceClient, log_service_client::LogServiceClient,
+    query_executor_client::QueryExecutorClient,
 };
 use parking_lot::RwLock;
 use std::{
@@ -17,8 +18,8 @@ use std::{
     sync::Arc,
 };
 use thiserror::Error;
-use tonic::transport::{Channel, Endpoint};
-use tower::{discover::Change, ServiceBuilder};
+use tonic::transport::{channel::Change, Channel, Endpoint};
+use tower::ServiceBuilder;
 
 #[derive(Debug, Clone)]
 pub struct ClientAssigner<T> {
@@ -171,6 +172,7 @@ pub struct ClientManager<T> {
     connections_per_node: usize,
     connect_timeout_ms: u64,
     request_timeout_ms: u64,
+    port: u16,
     old_memberlist: Memberlist,
     options: ClientOptions,
 }
@@ -184,6 +186,7 @@ where
         connections_per_node: usize,
         connect_timeout_ms: u64,
         request_timeout_ms: u64,
+        port: u16,
         options: ClientOptions,
     ) -> Self {
         Self {
@@ -192,6 +195,7 @@ where
             connections_per_node,
             connect_timeout_ms,
             request_timeout_ms,
+            port,
             old_memberlist: Memberlist::new(),
             options,
         }
@@ -233,8 +237,7 @@ where
     }
 
     async fn add_ip_for_node(&mut self, ip: String, node: &str) {
-        // TODO: Configure the port
-        let ip_with_port = format!("http://{}:{}", ip, 50051);
+        let ip_with_port = format!("http://{}:{}", ip, self.port);
         let endpoint = match Endpoint::from_shared(ip_with_port) {
             Ok(endpoint) => endpoint
                 .connect_timeout(std::time::Duration::from_millis(self.connect_timeout_ms))
@@ -417,6 +420,17 @@ impl ClientFactory
     }
 }
 
+impl ClientFactory
+    for HeapTenderServiceClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>
+{
+    fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
+        HeapTenderServiceClient::new(channel)
+    }
+    fn max_decoding_message_size(self, max_size: usize) -> Self {
+        self.max_decoding_message_size(max_size)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::super::memberlist_provider::Member;
@@ -436,6 +450,7 @@ mod test {
             1,
             1000,
             1000,
+            50051,
             ClientOptions::default(),
         );
         (client_manager, client_assigner)

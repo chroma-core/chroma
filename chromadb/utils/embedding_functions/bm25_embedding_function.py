@@ -5,6 +5,7 @@ from chromadb.api.types import (
 )
 from typing import Dict, Any, TypedDict, Optional
 from typing import cast, Literal
+import warnings
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
 
@@ -45,6 +46,11 @@ class Bm25EmbeddingFunction(SparseEmbeddingFunction[Documents]):
             query_config (dict, optional): Configuration for the query, can be "task"
             **kwargs: Additional arguments to pass to the Bm25 model.
         """
+        warnings.warn(
+            "Bm25EmbeddingFunction is deprecated. Please use ChromaBm25EmbeddingFunction instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         try:
             from fastembed.sparse.bm25 import Bm25
         except ImportError:

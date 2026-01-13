@@ -7,7 +7,12 @@ import rehypeStringify from "rehype-stringify";
 import { visit } from "unist-util-visit";
 import CodeBlockHeader from "@/components/markdoc/code-block-header";
 
-import "highlight.js/styles/atom-one-dark.css";
+export interface CodeBlockProps {
+  content: React.ReactNode;
+  language: string;
+  showHeader: boolean;
+  className?: string;
+}
 
 const rehypeRemovePre = () => {
   return (tree: any) => {
@@ -25,12 +30,12 @@ const rehypeRemovePre = () => {
   };
 };
 
-const CodeBlock: React.FC<{
-  content: React.ReactNode;
-  language: string;
-  showHeader: boolean;
-  className?: string;
-}> = async ({ content, language, showHeader = true, className }) => {
+const CodeBlock: React.FC<CodeBlockProps> = async ({
+  content,
+  language,
+  showHeader = true,
+  className,
+}) => {
   if (typeof content !== "string") {
     throw new Error("CodeBlock children must be a string.");
   }
@@ -49,7 +54,7 @@ const CodeBlock: React.FC<{
         <CodeBlockHeader language={language} content={content} />
       )}
       <pre
-        className={`rounded-none rounded-b-sm m-0 ${className ? className : ""}`}
+        className={`rounded-none rounded-b-sm m-0 bg-[var(--tw-prose-invert-bg)] dark:bg-black text-black dark:text-[var(--tw-prose-pre-code)] border border-t-0 dark:border-gray-700 ${className ? className : ""}`}
       >
         <div
           dangerouslySetInnerHTML={{
@@ -60,5 +65,6 @@ const CodeBlock: React.FC<{
     </div>
   );
 };
+CodeBlock.displayName = "CodeBlock";
 
 export default CodeBlock;

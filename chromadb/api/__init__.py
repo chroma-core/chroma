@@ -1,5 +1,46 @@
+from chromadb.api.types import *  # noqa: F401, F403
+from chromadb.execution.expression import (  # noqa: F401, F403
+    Search,
+    Key,
+    K,
+    SearchWhere,
+    And,
+    Or,
+    Eq,
+    Ne,
+    Gt,
+    Gte,
+    Lt,
+    Lte,
+    In,
+    Nin,
+    Regex,
+    NotRegex,
+    Contains,
+    NotContains,
+    Limit,
+    Select,
+    Rank,
+    Abs,
+    Div,
+    Exp,
+    Log,
+    Max,
+    Min,
+    Mul,
+    Knn,
+    Rrf,
+    Sub,
+    Sum,
+    Val,
+    Aggregate,
+    MinK,
+    MaxK,
+    GroupBy,
+)
+
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional, List, Dict, Any
+from typing import Sequence, Optional, List, Dict, Any, Tuple
 from uuid import UUID
 
 from overrides import override
@@ -21,6 +62,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     Loadable,
     Metadatas,
+    ReadLevel,
     Schema,
     URIs,
     Where,
@@ -30,11 +72,12 @@ from chromadb.api.types import (
     SearchResult,
     DefaultEmbeddingFunction,
 )
+
 from chromadb.auth import UserIdentity
-from chromadb.execution.expression.plan import Search
 from chromadb.config import Component, Settings
 from chromadb.types import Database, Tenant, Collection as CollectionModel
 from chromadb.api.models.Collection import Collection
+from chromadb.api.models.AttachedFunction import AttachedFunction
 
 # Re-export the async version
 from chromadb.api.async_api import (  # noqa: F401
@@ -656,12 +699,22 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "IndexingStatus":
+        pass
+
+    @abstractmethod
     def _search(
         self,
         collection_id: UUID,
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         pass
 
@@ -777,46 +830,71 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
+        function_id: str,
+        name: str,
         input_collection_id: UUID,
-        output_collection_name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> tuple[bool, str]:
-        """Create a recurring task on a collection.
+    ) -> Tuple["AttachedFunction", bool]:
+        """Attach a function to a collection.
 
         Args:
-            task_name: Unique name for this task instance
-            operator_name: Built-in operator name (e.g., 'record_counter')
-            input_collection_id: Source collection that triggers the task
-            output_collection_name: Target collection where task output is stored
-            params: Optional dictionary with operator-specific parameters
+            function_id: Built-in function identifier
+            name: Unique name for this attached function
+            input_collection_id: Source collection that triggers the function
+            output_collection: Target collection where function output is stored
+            params: Optional dictionary with function-specific parameters
             tenant: The tenant name
             database: The database name
 
         Returns:
-            tuple: (success: bool, task_id: str)
+            Tuple of (AttachedFunction, created) where created is True if newly created,
+            False if already existed (idempotent request)
         """
         pass
 
     @abstractmethod
-    def remove_task(
+    def get_attached_function(
         self,
-        task_name: str,
+        name: str,
+        input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Get an attached function by name for a specific collection.
+
+        Args:
+            name: Name of the attached function
+            input_collection_id: The collection ID
+            tenant: The tenant name
+            database: The database name
+
+        Returns:
+            AttachedFunction: The attached function object
+
+        Raises:
+            NotFoundError: If the attached function doesn't exist
+        """
+        pass
+
+    @abstractmethod
+    def detach_function(
+        self,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Delete a task and prevent any further runs.
+        """Detach a function and prevent any further runs.
 
         Args:
-            task_name: Name of the task to remove
-            input_collection_id: Id of the input collection the task is registered on
+            name: Name of the attached function to remove
+            input_collection_id: ID of the input collection
             delete_output: Whether to also delete the output collection
             tenant: The tenant name
             database: The database name

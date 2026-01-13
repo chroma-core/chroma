@@ -25,6 +25,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum BlockfileProvider {
     HashMapBlockfileProvider(MemoryBlockfileProvider),
     ArrowBlockfileProvider(ArrowBlockfileProvider),

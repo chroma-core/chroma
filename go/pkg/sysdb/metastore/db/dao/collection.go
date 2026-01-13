@@ -491,6 +491,9 @@ func generateCollectionUpdatesWithoutID(in *dbmodel.Collection) map[string]inter
 	if in.ConfigurationJsonStr != nil {
 		ret["configuration_json_str"] = *in.ConfigurationJsonStr
 	}
+	if in.SchemaStr != nil {
+		ret["schema_str"] = *in.SchemaStr
+	}
 	if in.Dimension != nil {
 		ret["dimension"] = *in.Dimension
 	}
@@ -547,6 +550,7 @@ func (s *collectionDb) UpdateLogPositionAndVersionInfo(
 		"size_bytes_post_compaction":    sizeBytesPostCompaction,
 		"last_compaction_time_secs":     lastCompactionTimeSecs,
 		"num_versions":                  numVersions,
+		"compaction_failure_count":      0, // Reset on successful compaction
 	}
 
 	if schemaStr != nil {
@@ -589,9 +593,9 @@ func (s *collectionDb) UpdateLogPositionVersionTotalRecordsAndLogicalSize(collec
 	version := currentCollectionVersion + 1
 	// only writing if schemaStr is not nil to avoid overwriting the schemaStr
 	if schemaStr != nil {
-		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant, "schema_str": schemaStr}).Error
+		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant, "schema_str": schemaStr, "compaction_failure_count": 0}).Error
 	} else {
-		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant}).Error
+		err = s.db.Model(&dbmodel.Collection{}).Where("id = ?", collectionID).Updates(map[string]interface{}{"log_position": logPosition, "version": version, "total_records_post_compaction": totalRecordsPostCompaction, "size_bytes_post_compaction": sizeBytesPostCompaction, "last_compaction_time_secs": lastCompactionTimeSecs, "tenant": tenant, "compaction_failure_count": 0}).Error
 	}
 	if err != nil {
 		return 0, err
@@ -710,4 +714,15 @@ func (s *collectionDb) BatchGetCollectionSoftDeleteStatus(collectionIDs []string
 		result[collection.ID] = collection.IsDeleted
 	}
 	return result, nil
+}
+
+func (s *collectionDb) IncrementCompactionFailureCount(collectionID string) error {
+	err := s.db.Model(&dbmodel.Collection{}).
+		Where("id = ?", collectionID).
+		UpdateColumn("compaction_failure_count", gorm.Expr("compaction_failure_count + 1")).Error
+	if err != nil {
+		log.Error("IncrementCompactionFailureCount failed", zap.Error(err), zap.String("collectionID", collectionID))
+		return err
+	}
+	return nil
 }

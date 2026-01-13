@@ -12,6 +12,7 @@ from typing import (
     get_args,
     TYPE_CHECKING,
     Final,
+    Type,
 )
 from copy import deepcopy
 from typing_extensions import TypeAlias
@@ -20,7 +21,8 @@ from numpy.typing import NDArray
 import numpy as np
 import warnings
 from typing_extensions import TypedDict, Protocol, runtime_checkable
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
+from pydantic_core import PydanticCustomError
 
 import chromadb.errors as errors
 from chromadb.base_types import (
@@ -39,7 +41,7 @@ from chromadb.base_types import (
 )
 
 if TYPE_CHECKING:
-    pass
+    from chromadb.execution.expression.operator import Key
 
 try:
     from chromadb.is_thin_client import is_thin_client
@@ -52,6 +54,8 @@ import pybase64
 from functools import lru_cache
 import struct
 import math
+import re
+from enum import Enum
 
 # Re-export types from chromadb.types
 __all__ = [
@@ -62,6 +66,7 @@ __all__ = [
     "UpdateMetadata",
     "SearchResult",
     "SearchResultRow",
+    "IndexingStatus",
     "SparseVector",
     # Index Configuration Types
     "FtsIndexConfig",
@@ -112,6 +117,9 @@ __all__ = [
     "EMBEDDING_KEY",
     "TYPE_KEY",
     "SPARSE_VECTOR_TYPE_VALUE",
+    # CMEK Support
+    "Cmek",
+    "CmekProvider",
     # Space type
     "Space",
     # Embedding Functions
@@ -213,7 +221,7 @@ def optional_base64_strings_to_embeddings(
 
 
 def normalize_embeddings(
-    target: Optional[Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]]
+    target: Optional[Union[OneOrMany[Embedding], OneOrMany[PyEmbedding]]],
 ) -> Optional[Embeddings]:
     if target is None:
         return None
@@ -448,7 +456,9 @@ def _validate_record_set_length_consistency(record_set: BaseRecordSet) -> None:
         )
 
     zero_lengths = [
-        key for key, lst in record_set.items() if lst is not None and len(lst) == 0  # type: ignore[arg-type]
+        key
+        for key, lst in record_set.items()
+        if lst is not None and len(lst) == 0  # type: ignore[arg-type]
     ]
 
     if zero_lengths:
@@ -456,7 +466,9 @@ def _validate_record_set_length_consistency(record_set: BaseRecordSet) -> None:
 
     if len(set(lengths)) > 1:
         error_str = ", ".join(
-            f"{key}: {len(lst)}" for key, lst in record_set.items() if lst is not None  # type: ignore[arg-type]
+            f"{key}: {len(lst)}"
+            for key, lst in record_set.items()
+            if lst is not None  # type: ignore[arg-type]
         )
         raise ValueError(f"Unequal lengths for fields: {error_str}")
 
@@ -608,6 +620,14 @@ class QueryResult(TypedDict):
     included: Include
 
 
+@dataclass
+class IndexingStatus:
+    num_indexed_ops: int
+    num_unindexed_ops: int
+    total_ops: int
+    op_indexing_progress: float
+
+
 class SearchResultRow(TypedDict, total=False):
     """A single row from search results.
 
@@ -738,6 +758,20 @@ class IndexMetadata(TypedDict):
 
 
 Space = Literal["cosine", "l2", "ip"]
+
+
+class ReadLevel(str, Enum):
+    """Controls whether search queries read from the write-ahead log (WAL).
+
+    Attributes:
+        INDEX_AND_WAL: Read from both the compacted index and the WAL (default).
+            All committed writes will be visible.
+        INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+            Faster, but recent writes that haven't been compacted may not be visible.
+    """
+
+    INDEX_AND_WAL = "index_and_wal"
+    INDEX_ONLY = "index_only"
 
 
 # TODO: make warnings prettier and add link to migration docs
@@ -1063,7 +1097,7 @@ def serialize_metadata(metadata: Optional[Metadata]) -> Optional[Dict[str, Any]]
 
 
 def deserialize_metadata(
-    metadata: Optional[Dict[str, Any]]
+    metadata: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Deserialize metadata from transport, converting dicts with #type=sparse_vector to dataclass instances.
 
@@ -1493,14 +1527,56 @@ def validate_sparse_embedding_function(
 
 
 # Index Configuration Types for Collection Schema
+def _create_extra_fields_validator(valid_fields: list[str]) -> Any:
+    """Create a model validator that provides helpful error messages for invalid fields."""
+
+    @model_validator(mode="before")
+    def validate_extra_fields(cls: Type[BaseModel], data: Any) -> Any:
+        if isinstance(data, dict):
+            invalid_fields = [k for k in data.keys() if k not in valid_fields]
+            if invalid_fields:
+                invalid_fields_str = ", ".join(f"'{f}'" for f in invalid_fields)
+                class_name = cls.__name__
+                # Create a clear, actionable error message
+                if len(invalid_fields) == 1:
+                    msg = (
+                        f"'{invalid_fields[0]}' is not a valid field for {class_name}. "
+                    )
+                else:
+                    msg = f"Invalid fields for {class_name}: {invalid_fields_str}. "
+
+                raise PydanticCustomError(
+                    "invalid_field",
+                    msg,
+                    {"invalid_fields": invalid_fields},
+                )
+        return data
+
+    return validate_extra_fields
+
+
 class FtsIndexConfig(BaseModel):
     """Configuration for Full-Text Search index. No parameters required."""
+
+    model_config = {"extra": "forbid"}
 
     pass
 
 
 class HnswIndexConfig(BaseModel):
     """Configuration for HNSW vector index."""
+
+    _validate_extra_fields = _create_extra_fields_validator(
+        [
+            "ef_construction",
+            "max_neighbors",
+            "ef_search",
+            "num_threads",
+            "batch_size",
+            "sync_threshold",
+            "resize_factor",
+        ]
+    )
 
     ef_construction: Optional[int] = None
     max_neighbors: Optional[int] = None
@@ -1513,6 +1589,27 @@ class HnswIndexConfig(BaseModel):
 
 class SpannIndexConfig(BaseModel):
     """Configuration for SPANN vector index."""
+
+    _validate_extra_fields = _create_extra_fields_validator(
+        [
+            "search_nprobe",
+            "search_rng_factor",
+            "search_rng_epsilon",
+            "nreplica_count",
+            "write_nprobe",
+            "write_rng_factor",
+            "write_rng_epsilon",
+            "split_threshold",
+            "num_samples_kmeans",
+            "initial_lambda",
+            "reassign_neighbor_count",
+            "merge_threshold",
+            "num_centers_to_merge_to",
+            "ef_construction",
+            "ef_search",
+            "max_neighbors",
+        ]
+    )
 
     search_nprobe: Optional[int] = None
     write_nprobe: Optional[int] = None
@@ -1527,12 +1624,40 @@ class SpannIndexConfig(BaseModel):
 class VectorIndexConfig(BaseModel):
     """Configuration for vector index with space, embedding function, and algorithm config."""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
     space: Optional[Space] = None
     embedding_function: Optional[Any] = DefaultEmbeddingFunction()
-    source_key: Optional[str] = None  # key to source the vector from
+    source_key: Optional[
+        str
+    ] = None  # key to source the vector from (accepts str or Key)
     hnsw: Optional[HnswIndexConfig] = None
     spann: Optional[SpannIndexConfig] = None
+
+    @field_validator("source_key", mode="before")
+    @classmethod
+    def validate_source_key_field(cls, v: Any) -> Optional[str]:
+        """Convert Key objects to strings automatically. Accepts both str and Key types."""
+        if v is None:
+            return None
+        # Import Key at runtime to avoid circular import
+        from chromadb.execution.expression.operator import Key as KeyType
+
+        if isinstance(v, KeyType):
+            v = v.name  # Extract string from Key
+        elif isinstance(v, str):
+            pass  # Already a string
+        else:
+            raise ValueError(f"source_key must be str or Key, got {type(v).__name__}")
+
+        # Validate: only #document is allowed if key starts with #
+        if v.startswith("#") and v != "#document":
+            raise ValueError(
+                "source_key cannot begin with '#'. "
+                "The only valid key starting with '#' is Key.DOCUMENT or '#document'."
+            )
+
+        return v  # type: ignore[no-any-return]
 
     @field_validator("embedding_function", mode="before")
     @classmethod
@@ -1550,11 +1675,39 @@ class VectorIndexConfig(BaseModel):
 class SparseVectorIndexConfig(BaseModel):
     """Configuration for sparse vector index."""
 
-    model_config = {"arbitrary_types_allowed": True}
+    model_config = {"arbitrary_types_allowed": True, "extra": "forbid"}
+
     # TODO(Sanket): Change this to the appropriate sparse ef and use a default here.
     embedding_function: Optional[Any] = None
-    source_key: Optional[str] = None  # key to source the sparse vector from
+    source_key: Optional[
+        str
+    ] = None  # key to source the sparse vector from (accepts str or Key)
     bm25: Optional[bool] = None
+
+    @field_validator("source_key", mode="before")
+    @classmethod
+    def validate_source_key_field(cls, v: Any) -> Optional[str]:
+        """Convert Key objects to strings automatically. Accepts both str and Key types."""
+        if v is None:
+            return None
+        # Import Key at runtime to avoid circular import
+        from chromadb.execution.expression.operator import Key as KeyType
+
+        if isinstance(v, KeyType):
+            v = v.name  # Extract string from Key
+        elif isinstance(v, str):
+            pass  # Already a string
+        else:
+            raise ValueError(f"source_key must be str or Key, got {type(v).__name__}")
+
+        # Validate: only #document is allowed if key starts with #
+        if v.startswith("#") and v != "#document":
+            raise ValueError(
+                "source_key cannot begin with '#'. "
+                "The only valid key starting with '#' is Key.DOCUMENT or '#document'."
+            )
+
+        return v  # type: ignore[no-any-return]
 
     @field_validator("embedding_function", mode="before")
     @classmethod
@@ -1574,11 +1727,15 @@ class SparseVectorIndexConfig(BaseModel):
 class StringInvertedIndexConfig(BaseModel):
     """Configuration for string inverted index."""
 
+    model_config = {"extra": "forbid"}
+
     pass
 
 
 class IntInvertedIndexConfig(BaseModel):
     """Configuration for integer inverted index."""
+
+    model_config = {"extra": "forbid"}
 
     pass
 
@@ -1586,11 +1743,15 @@ class IntInvertedIndexConfig(BaseModel):
 class FloatInvertedIndexConfig(BaseModel):
     """Configuration for float inverted index."""
 
+    model_config = {"extra": "forbid"}
+
     pass
 
 
 class BoolInvertedIndexConfig(BaseModel):
     """Configuration for boolean inverted index."""
+
+    model_config = {"extra": "forbid"}
 
     pass
 
@@ -1633,6 +1794,148 @@ TYPE_KEY: Final[str] = "#type"
 
 # Type value constants
 SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
+
+
+# ============================================================================
+# CMEK (Customer-Managed Encryption Key) Support
+# ============================================================================
+
+
+class CmekProvider(str, Enum):
+    """Supported cloud providers for customer-managed encryption keys.
+
+    Currently only Google Cloud Platform (GCP) is supported.
+    """
+
+    GCP = "gcp"
+
+
+# Regex pattern for validating GCP KMS resource names
+_CMEK_GCP_PATTERN = re.compile(r"^projects/.+/locations/.+/keyRings/.+/cryptoKeys/.+$")
+
+
+@dataclass
+class Cmek:
+    """Customer-managed encryption key (CMEK) for collection data encryption.
+
+    CMEK allows you to use your own encryption keys managed by cloud providers'
+    key management services (KMS) instead of default provider-managed keys. This
+    gives you greater control over key lifecycle, access policies, and audit logging.
+
+    Attributes:
+        provider: The cloud provider (currently only 'gcp' supported)
+        resource: The provider-specific resource identifier for the encryption key
+
+    Example:
+        >>> # Create a CMEK for GCP
+        >>> cmek = Cmek.gcp(
+        ...     "projects/my-project/locations/us-central1/"
+        ...     "keyRings/my-ring/cryptoKeys/my-key"
+        ... )
+        >>>
+        >>> # Validate the resource name format
+        >>> if cmek.validate_pattern():
+        ...     print("Valid CMEK format")
+
+    Note:
+        Pattern validation only checks format correctness. It does not verify
+        that the key exists or is accessible. Key permissions and access control
+        must be configured separately in your cloud provider's console.
+    """
+
+    provider: CmekProvider
+    resource: str
+
+    @classmethod
+    def gcp(cls, resource: str) -> "Cmek":
+        """Create a CMEK instance for Google Cloud Platform.
+
+        Args:
+            resource: GCP Cloud KMS resource name in the format:
+                projects/{project-id}/locations/{location}/keyRings/{key-ring}/cryptoKeys/{key-name}
+
+                Example: "projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key"
+
+        Returns:
+            Cmek: A new CMEK instance configured for GCP
+
+        Raises:
+            ValueError: If the resource format is invalid (when validate_pattern() is called)
+
+        Example:
+            >>> cmek = Cmek.gcp(
+            ...     "projects/my-project/locations/us-central1/"
+            ...     "keyRings/my-ring/cryptoKeys/my-key"
+            ... )
+        """
+        return cls(provider=CmekProvider.GCP, resource=resource)
+
+    def validate_pattern(self) -> bool:
+        """Validate the CMEK resource name format.
+
+        Validates that the resource name matches the expected pattern for the
+        provider. This is a format check only and does not verify that the key
+        exists or that you have access to it.
+
+        For GCP, the expected format is:
+            projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}
+
+        Returns:
+            bool: True if the resource name format is valid, False otherwise
+
+        Example:
+            >>> cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k")
+            >>> cmek.validate_pattern()  # Returns True
+            >>>
+            >>> bad_cmek = Cmek.gcp("invalid-format")
+            >>> bad_cmek.validate_pattern()  # Returns False
+        """
+        if self.provider == CmekProvider.GCP:
+            return _CMEK_GCP_PATTERN.match(self.resource) is not None
+        return False
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize CMEK to dictionary format for API transport.
+
+        Returns:
+            Dict containing the provider variant and resource identifier.
+
+        Example:
+            >>> cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k")
+            >>> cmek.to_dict()
+            {'gcp': 'projects/p/locations/l/keyRings/r/cryptoKeys/k'}
+        """
+        if self.provider == CmekProvider.GCP:
+            return {"gcp": self.resource}
+        # Unreachable with current providers, but future-proof
+        raise ValueError(f"Unknown CMEK provider: {self.provider}")
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Cmek":
+        """Deserialize CMEK from dictionary format.
+
+        Args:
+            data: Dictionary containing provider variant and resource.
+                  Format matches Rust serde enum serialization with snake_case.
+
+        Returns:
+            Cmek: Deserialized CMEK instance
+
+        Raises:
+            ValueError: If the provider is unsupported or data is malformed
+
+        Example:
+            >>> data = {'gcp': 'projects/p/locations/l/keyRings/r/cryptoKeys/k'}
+            >>> cmek = Cmek.from_dict(data)
+        """
+        if "gcp" in data:
+            resource = data["gcp"]
+            if not isinstance(resource, str):
+                raise ValueError(
+                    f"CMEK gcp resource must be a string, got: {type(resource)}"
+                )
+            return cls.gcp(resource)
+        raise ValueError(f"Unsupported or missing CMEK provider in data: {data}")
 
 
 # Index Type Classes
@@ -1726,22 +2029,43 @@ class ValueTypes:
 
 @dataclass
 class Schema:
+    """Collection schema for configuring indexes and encryption.
+
+    The schema controls how data is indexed and can optionally specify
+    customer-managed encryption keys (CMEK) for data at rest.
+
+    Attributes:
+        defaults: Default index configurations for each value type
+        keys: Key-specific index overrides
+        cmek: Optional customer-managed encryption key for collection data
+    """
+
     defaults: ValueTypes
     keys: Dict[str, ValueTypes]
+    cmek: Optional[Cmek] = None
 
     def __init__(self) -> None:
         # Initialize the dataclass fields first
         self.defaults = ValueTypes()
         self.keys: Dict[str, ValueTypes] = {}
+        self.cmek: Optional[Cmek] = None
 
         # Populate with sensible defaults automatically
         self._initialize_defaults()
         self._initialize_keys()
 
     def create_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+        self,
+        config: Optional[IndexConfig] = None,
+        key: Optional[Union[str, "Key"]] = None,
     ) -> "Schema":
         """Create an index configuration."""
+        # Convert Key to string if provided
+        from chromadb.execution.expression.operator import Key as KeyType
+
+        if key is not None and isinstance(key, KeyType):
+            key = key.name
+
         # Disallow config=None and key=None - too dangerous
         if config is None and key is None:
             raise ValueError(
@@ -1752,6 +2076,13 @@ class Schema:
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot create index on special key '{key}'. These keys are managed automatically by the system. Invoke create_index(VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
+            )
+
+        # Disallow any key starting with #
+        if key is not None and key.startswith("#"):
+            raise ValueError(
+                "key cannot begin with '#'. "
+                "Keys starting with '#' are reserved for system use."
             )
 
         # Special handling for vector index
@@ -1809,9 +2140,17 @@ class Schema:
         return self
 
     def delete_index(
-        self, config: Optional[IndexConfig] = None, key: Optional[str] = None
+        self,
+        config: Optional[IndexConfig] = None,
+        key: Optional[Union[str, "Key"]] = None,
     ) -> "Schema":
         """Disable an index configuration (set enabled=False)."""
+        # Convert Key to string if provided
+        from chromadb.execution.expression.operator import Key as KeyType
+
+        if key is not None and isinstance(key, KeyType):
+            key = key.name
+
         # Case 1: Both config and key are None - fail the request
         if config is None and key is None:
             raise ValueError(
@@ -1822,6 +2161,13 @@ class Schema:
         if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
             raise ValueError(
                 f"Cannot delete index on special key '{key}'. These keys are managed automatically by the system."
+            )
+
+        # Disallow any key starting with #
+        if key is not None and key.startswith("#"):
+            raise ValueError(
+                "key cannot begin with '#'. "
+                "Keys starting with '#' are reserved for system use."
             )
 
         # TODO: Consider removing these checks in the future to allow disabling vector, FTS, and sparse vector indexes
@@ -1858,6 +2204,23 @@ class Schema:
 
         return self
 
+    def set_cmek(self, cmek: Optional[Cmek]) -> "Schema":
+        """Set customer-managed encryption key for the collection (fluent interface).
+
+        Args:
+            cmek: Customer-managed encryption key configuration, or None to remove CMEK
+
+        Returns:
+            Self for method chaining
+
+        Example:
+            >>> schema = Schema().set_cmek(
+            ...     Cmek.gcp("projects/my-project/locations/us/keyRings/my-ring/cryptoKeys/my-key")
+            ... )
+        """
+        self.cmek = cmek
+        return self
+
     def _get_config_class_name(self, config: IndexConfig) -> str:
         """Get the class name for a config."""
         return config.__class__.__name__
@@ -1871,11 +2234,15 @@ class Schema:
         """
         # Update the config in defaults (preserve enabled=False)
         current_enabled = self.defaults.float_list.vector_index.enabled  # type: ignore[union-attr]
-        self.defaults.float_list.vector_index = VectorIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
+        self.defaults.float_list.vector_index = VectorIndexType(
+            enabled=current_enabled, config=config
+        )  # type: ignore[union-attr]
 
         # Update the config on #embedding key (preserve enabled=True and source_key="#document")
         current_enabled = self.keys[EMBEDDING_KEY].float_list.vector_index.enabled  # type: ignore[union-attr]
-        current_source_key = self.keys[EMBEDDING_KEY].float_list.vector_index.config.source_key  # type: ignore[union-attr]
+        current_source_key = self.keys[
+            EMBEDDING_KEY
+        ].float_list.vector_index.config.source_key  # type: ignore[union-attr]
 
         # Create a new config with user settings but preserve the original source_key
         embedding_config = VectorIndexConfig(
@@ -1885,7 +2252,9 @@ class Schema:
             spann=config.spann,
             source_key=current_source_key,  # Preserve original source_key (should be "#document")
         )
-        self.keys[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(enabled=current_enabled, config=embedding_config)  # type: ignore[union-attr]
+        self.keys[EMBEDDING_KEY].float_list.vector_index = VectorIndexType(
+            enabled=current_enabled, config=embedding_config
+        )  # type: ignore[union-attr]
 
     def _set_fts_index_config(self, config: FtsIndexConfig) -> None:
         """
@@ -1895,11 +2264,15 @@ class Schema:
         """
         # Update the config in defaults (preserve enabled=False)
         current_enabled = self.defaults.string.fts_index.enabled  # type: ignore[union-attr]
-        self.defaults.string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
+        self.defaults.string.fts_index = FtsIndexType(
+            enabled=current_enabled, config=config
+        )  # type: ignore[union-attr]
 
         # Update the config on #document key (preserve enabled=True)
         current_enabled = self.keys[DOCUMENT_KEY].string.fts_index.enabled  # type: ignore[union-attr]
-        self.keys[DOCUMENT_KEY].string.fts_index = FtsIndexType(enabled=current_enabled, config=config)  # type: ignore[union-attr]
+        self.keys[DOCUMENT_KEY].string.fts_index = FtsIndexType(
+            enabled=current_enabled, config=config
+        )  # type: ignore[union-attr]
 
     def _set_index_in_defaults(self, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration in the defaults."""
@@ -1972,6 +2345,17 @@ class Schema:
                             f"Only one sparse vector index is allowed per collection."
                         )
 
+    def _validate_sparse_vector_config(self, config: SparseVectorIndexConfig) -> None:
+        """
+        Validate that if source_key is provided then embedding_function is also provided
+        since there is no default embedding function. Raises ValueError otherwise.
+        """
+        if config.source_key is not None and config.embedding_function is None:
+            raise ValueError(
+                f"If source_key is provided then embedding_function must also be provided "
+                f"since there is no default embedding function. Config: {config}"
+            )
+
     def _set_index_for_key(self, key: str, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration for a specific key."""
         config_name = self._get_config_class_name(config)
@@ -1980,6 +2364,7 @@ class Schema:
         # Do this BEFORE creating the key entry
         if config_name == "SparseVectorIndexConfig" and enabled:
             self._validate_single_sparse_vector_index(key)
+            self._validate_sparse_vector_config(cast(SparseVectorIndexConfig, config))
 
         if key not in self.keys:
             self.keys[key] = ValueTypes()
@@ -1987,42 +2372,58 @@ class Schema:
         if config_name == "FtsIndexConfig":
             if self.keys[key].string is None:
                 self.keys[key].string = StringValueType()
-            self.keys[key].string.fts_index = FtsIndexType(enabled=enabled, config=cast(FtsIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].string.fts_index = FtsIndexType(
+                enabled=enabled, config=cast(FtsIndexConfig, config)
+            )  # type: ignore[union-attr]
 
         elif config_name == "StringInvertedIndexConfig":
             if self.keys[key].string is None:
                 self.keys[key].string = StringValueType()
-            self.keys[key].string.string_inverted_index = StringInvertedIndexType(enabled=enabled, config=cast(StringInvertedIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].string.string_inverted_index = StringInvertedIndexType(
+                enabled=enabled, config=cast(StringInvertedIndexConfig, config)
+            )  # type: ignore[union-attr]
 
         elif config_name == "VectorIndexConfig":
             if self.keys[key].float_list is None:
                 self.keys[key].float_list = FloatListValueType()
-            self.keys[key].float_list.vector_index = VectorIndexType(enabled=enabled, config=cast(VectorIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].float_list.vector_index = VectorIndexType(
+                enabled=enabled, config=cast(VectorIndexConfig, config)
+            )  # type: ignore[union-attr]
 
         elif config_name == "SparseVectorIndexConfig":
             if self.keys[key].sparse_vector is None:
                 self.keys[key].sparse_vector = SparseVectorValueType()
-            self.keys[key].sparse_vector.sparse_vector_index = SparseVectorIndexType(enabled=enabled, config=cast(SparseVectorIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].sparse_vector.sparse_vector_index = SparseVectorIndexType(
+                enabled=enabled, config=cast(SparseVectorIndexConfig, config)
+            )  # type: ignore[union-attr]
 
         elif config_name == "IntInvertedIndexConfig":
             if self.keys[key].int_value is None:
                 self.keys[key].int_value = IntValueType()
-            self.keys[key].int_value.int_inverted_index = IntInvertedIndexType(enabled=enabled, config=cast(IntInvertedIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].int_value.int_inverted_index = IntInvertedIndexType(
+                enabled=enabled, config=cast(IntInvertedIndexConfig, config)
+            )  # type: ignore[union-attr]
 
         elif config_name == "FloatInvertedIndexConfig":
             if self.keys[key].float_value is None:
                 self.keys[key].float_value = FloatValueType()
-            self.keys[key].float_value.float_inverted_index = FloatInvertedIndexType(enabled=enabled, config=cast(FloatInvertedIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].float_value.float_inverted_index = FloatInvertedIndexType(
+                enabled=enabled, config=cast(FloatInvertedIndexConfig, config)
+            )  # type: ignore[union-attr]
 
         elif config_name == "BoolInvertedIndexConfig":
             if self.keys[key].boolean is None:
                 self.keys[key].boolean = BoolValueType()
-            self.keys[key].boolean.bool_inverted_index = BoolInvertedIndexType(enabled=enabled, config=cast(BoolInvertedIndexConfig, config))  # type: ignore[union-attr]
+            self.keys[key].boolean.bool_inverted_index = BoolInvertedIndexType(
+                enabled=enabled, config=cast(BoolInvertedIndexConfig, config)
+            )  # type: ignore[union-attr]
 
     def _enable_all_indexes_for_key(self, key: str) -> None:
         """Enable all possible index types for a specific key."""
         if key not in self.keys:
             self.keys[key] = ValueTypes()
+
+        self._validate_single_sparse_vector_index(key)
 
         # Enable all index types with default configs
         self.keys[key].string = StringValueType(
@@ -2163,7 +2564,13 @@ class Schema:
         for key, value_types in self.keys.items():
             keys_json[key] = self._serialize_value_types(value_types)
 
-        return {"defaults": defaults_json, "keys": keys_json}
+        result: Dict[str, Any] = {"defaults": defaults_json, "keys": keys_json}
+
+        # Add CMEK if present
+        if self.cmek is not None:
+            result["cmek"] = self.cmek.to_dict()
+
+        return result
 
     @classmethod
     def deserialize_from_json(cls, json_data: Dict[str, Any]) -> "Schema":
@@ -2176,6 +2583,11 @@ class Schema:
         instance.keys = {}
         for key, value_types_json in json_data.get("keys", {}).items():
             instance.keys[key] = cls._deserialize_value_types(value_types_json)
+
+        # Deserialize CMEK if present
+        instance.cmek = None
+        if "cmek" in json_data and json_data["cmek"] is not None:
+            instance.cmek = Cmek.from_dict(json_data["cmek"])
 
         return instance
 
@@ -2324,6 +2736,10 @@ class Schema:
                         if embedding_func.is_legacy():
                             config_dict["embedding_function"] = {"type": "legacy"}
                         else:
+                            if hasattr(embedding_func, "validate_config"):
+                                embedding_func.validate_config(
+                                    embedding_func.get_config()
+                                )
                             config_dict["embedding_function"] = {
                                 "name": embedding_func.name(),
                                 "type": "known",
@@ -2353,6 +2769,8 @@ class Schema:
                     config_dict["embedding_function"] = {"type": "unknown"}
                 else:
                     embedding_func = cast(SparseEmbeddingFunction, embedding_func)  # type: ignore
+                    if hasattr(embedding_func, "validate_config"):
+                        embedding_func.validate_config(embedding_func.get_config())
                     config_dict["embedding_function"] = {
                         "name": embedding_func.name(),
                         "type": "known",

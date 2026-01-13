@@ -12,6 +12,79 @@ export type AddCollectionRecordsResponse = {
     [key: string]: unknown;
 };
 
+export type AttachFunctionRequest = {
+    function_id: string;
+    name: string;
+    output_collection: string;
+    params?: unknown;
+};
+
+export type AttachFunctionResponse = {
+    attached_function: AttachedFunctionInfo;
+    /**
+     * True if newly created, false if already existed (idempotent request)
+     */
+    created: boolean;
+};
+
+/**
+ * API response struct for attached function with function_name instead of function_id
+ */
+export type AttachedFunctionApiResponse = {
+    /**
+     * Completion offset: the WAL position up to which the attached function has processed records
+     */
+    completion_offset: number;
+    /**
+     * Database name this attached function belongs to
+     */
+    database_id: string;
+    /**
+     * Name of the function (e.g., "record_counter", "statistics")
+     */
+    function_name: string;
+    /**
+     * Unique identifier for the attached function
+     */
+    id: AttachedFunctionUuid;
+    /**
+     * Source collection that triggers the attached function
+     */
+    input_collection_id: CollectionUuid;
+    /**
+     * Minimum number of new records required before the attached function runs again
+     */
+    min_records_for_invocation: number;
+    /**
+     * Human-readable name for the attached function instance
+     */
+    name: string;
+    /**
+     * Name of target collection where attached function output is stored
+     */
+    output_collection: string;
+    output_collection_id?: null | CollectionUuid;
+    /**
+     * Optional JSON parameters for the function
+     */
+    params?: string | null;
+    /**
+     * Tenant name this attached function belongs to
+     */
+    tenant_id: string;
+};
+
+export type AttachedFunctionInfo = {
+    function_name: string;
+    id: string;
+    name: string;
+};
+
+/**
+ * AttachedFunctionUuid is a wrapper around Uuid to provide a type for attached function identifiers.
+ */
+export type AttachedFunctionUuid = string;
+
 export type BoolInvertedIndexConfig = {
     [key: string]: never;
 };
@@ -73,18 +146,6 @@ export type CreateDatabaseResponse = {
     [key: string]: unknown;
 };
 
-export type CreateTaskRequest = {
-    operator_name: string;
-    output_collection_name: string;
-    params?: unknown;
-    task_name: string;
-};
-
-export type CreateTaskResponse = {
-    success: boolean;
-    task_id: string;
-};
-
 export type CreateTenantPayload = {
     name: string;
 };
@@ -109,6 +170,17 @@ export type DeleteCollectionRecordsResponse = {
 
 export type DeleteDatabaseResponse = {
     [key: string]: unknown;
+};
+
+export type DetachFunctionRequest = {
+    /**
+     * Whether to delete the output collection as well
+     */
+    delete_output?: boolean;
+};
+
+export type DetachFunctionResponse = {
+    success: boolean;
 };
 
 export type EmbeddingFunctionConfiguration = {
@@ -165,6 +237,10 @@ export type FtsIndexConfig = {
 export type FtsIndexType = {
     config: FtsIndexConfig;
     enabled: boolean;
+};
+
+export type GetAttachedFunctionResponse = {
+    attached_function: AttachedFunctionApiResponse;
 };
 
 export type GetRequestPayload = RawWhereFields & {
@@ -336,17 +412,7 @@ export type RawWhereFields = {
     where_document?: unknown;
 };
 
-export type RemoveTaskRequest = {
-    /**
-     * Whether to delete the output collection as well
-     */
-    delete_output?: boolean;
-    task_name: string;
-};
-
-export type RemoveTaskResponse = {
-    success: boolean;
-};
+export type ReadLevel = 'index_and_wal' | 'index_only';
 
 /**
  * Schema representation for collection index configurations
@@ -354,6 +420,12 @@ export type RemoveTaskResponse = {
  * This represents the server-side schema structure used for index management
  */
 export type Schema = {
+    /**
+     * Customer-managed encryption key for collection data
+     */
+    cmek?: {
+        [key: string]: unknown;
+    } | null;
     /**
      * Default index configurations for each value type
      */
@@ -365,6 +437,10 @@ export type Schema = {
     keys: {
         [key: string]: ValueTypes;
     };
+    /**
+     * ID of the attached function that created this output collection (if applicable)
+     */
+    source_attached_function_id?: string | null;
 };
 
 export type SearchPayload = {
@@ -373,6 +449,12 @@ export type SearchPayload = {
         where_clause?: {
             [key: string]: unknown;
         };
+    };
+    group_by?: {
+        aggregate?: {
+            [key: string]: unknown;
+        };
+        keys?: Array<string>;
     };
     limit?: {
         limit?: number;
@@ -387,6 +469,11 @@ export type SearchPayload = {
 };
 
 export type SearchRequestPayload = {
+    /**
+     * Specifies the read level for consistency vs performance tradeoffs.
+     * Defaults to IndexAndWal (full consistency).
+     */
+    read_level?: ReadLevel;
     searches: Array<SearchPayload>;
 };
 
@@ -448,6 +535,10 @@ export type SparseVector = {
      * Dimension indices
      */
     indices: Array<number>;
+    /**
+     * Tokens corresponding to each index
+     */
+    tokens?: Array<string> | null;
     /**
      * Values corresponding to each index
      */
@@ -1290,6 +1381,52 @@ export type CollectionAddResponses = {
 
 export type CollectionAddResponse = CollectionAddResponses[keyof CollectionAddResponses];
 
+export type DetachFunctionData = {
+    body: DetachFunctionRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Input collection ID
+         */
+        collection_id: string;
+        /**
+         * Attached function name
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach';
+};
+
+export type DetachFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type DetachFunctionError = DetachFunctionErrors[keyof DetachFunctionErrors];
+
+export type DetachFunctionResponses = {
+    /**
+     * Function detached successfully
+     */
+    200: DetachFunctionResponse;
+};
+
+export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
+
 export type CollectionCountData = {
     body?: never;
     path: {
@@ -1427,6 +1564,98 @@ export type ForkCollectionResponses = {
 };
 
 export type ForkCollectionResponse = ForkCollectionResponses[keyof ForkCollectionResponses];
+
+export type AttachFunctionData = {
+    body: AttachFunctionRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection ID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach';
+};
+
+export type AttachFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type AttachFunctionError = AttachFunctionErrors[keyof AttachFunctionErrors];
+
+export type AttachFunctionResponses = {
+    /**
+     *  Function attached successfully
+     */
+    200: AttachFunctionResponse;
+};
+
+export type AttachFunctionResponse2 = AttachFunctionResponses[keyof AttachFunctionResponses];
+
+export type GetAttachedFunctionData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection ID
+         */
+        collection_id: string;
+        /**
+         * Attached function name
+         */
+        function_name: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}';
+};
+
+export type GetAttachedFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Attached function not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type GetAttachedFunctionError = GetAttachedFunctionErrors[keyof GetAttachedFunctionErrors];
+
+export type GetAttachedFunctionResponses = {
+    /**
+     * Attached function retrieved successfully
+     */
+    200: GetAttachedFunctionResponse;
+};
+
+export type GetAttachedFunctionResponse2 = GetAttachedFunctionResponses[keyof GetAttachedFunctionResponses];
 
 export type CollectionGetData = {
     body: GetRequestPayload;
@@ -1574,90 +1803,6 @@ export type CollectionSearchResponses = {
 };
 
 export type CollectionSearchResponse = CollectionSearchResponses[keyof CollectionSearchResponses];
-
-export type CreateTaskData = {
-    body: CreateTaskRequest;
-    path: {
-        /**
-         * Tenant ID
-         */
-        tenant: string;
-        /**
-         * Database name
-         */
-        database: string;
-        /**
-         * Collection ID
-         */
-        collection_id: string;
-    };
-    query?: never;
-    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/create';
-};
-
-export type CreateTaskErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorResponse;
-    /**
-     * Server error
-     */
-    500: ErrorResponse;
-};
-
-export type CreateTaskError = CreateTaskErrors[keyof CreateTaskErrors];
-
-export type CreateTaskResponses = {
-    /**
-     * Task created successfully
-     */
-    200: CreateTaskResponse;
-};
-
-export type CreateTaskResponse2 = CreateTaskResponses[keyof CreateTaskResponses];
-
-export type RemoveTaskData = {
-    body: RemoveTaskRequest;
-    path: {
-        /**
-         * Tenant ID
-         */
-        tenant: string;
-        /**
-         * Database name
-         */
-        database: string;
-        /**
-         * Collection ID
-         */
-        collection_id: string;
-    };
-    query?: never;
-    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/tasks/delete';
-};
-
-export type RemoveTaskErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorResponse;
-    /**
-     * Server error
-     */
-    500: ErrorResponse;
-};
-
-export type RemoveTaskError = RemoveTaskErrors[keyof RemoveTaskErrors];
-
-export type RemoveTaskResponses = {
-    /**
-     * Task removed successfully
-     */
-    200: RemoveTaskResponse;
-};
-
-export type RemoveTaskResponse2 = RemoveTaskResponses[keyof RemoveTaskResponses];
 
 export type CollectionUpdateData = {
     body: UpdateCollectionRecordsPayload;

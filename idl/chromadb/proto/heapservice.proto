@@ -2,7 +2,8 @@ syntax = "proto3";
 
 package chroma;
 
-import "chromadb/proto/chroma.proto";
+option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
+
 import "google/protobuf/timestamp.proto";
 
 // A task that can be scheduled and triggered in the heap.

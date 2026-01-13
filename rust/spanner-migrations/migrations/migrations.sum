@@ -1,0 +1,13 @@
+# Spanner migrations manifest - DO NOT EDIT MANUALLY
+# Format: {filename} {running_sha256_hash}
+# This file protects against merge conflicts and forgotten migration files.
+# Run `cargo run --bin spanner_migration -- generate-sum` to regenerate.
+
+0001-create_tenants.spanner.sql 87dbaa652753aba0730b9b784a2974f0b23c2017b562ec9f0b01663d9c840321
+0002-create_databases.spanner.sql e07d1f1b3d7c9ac2d7df289b7da4b46602c350a3b7589444cde87ece30db4fa8
+0003-create_databases_unique_index.spanner.sql b8486d0e94edde4e03f806930c79b1ed8c04ec4744b214d58beac1488887ba99
+0004-create_collections.spanner.sql 95b9dc74f9c982d4f579f37fb5fc1f467aba31ddbba0af9b667ff990eaf950ef
+0005-create_collection_compaction_cursors.spanner.sql 225ddad18a614b0b0f8dee5273ebd6038da0522c644a3c2c1e0301dcc5fb8333
+0006-create_segments.spanner.sql 58e84d13c15536aa1d720d70234b27dd92c3b4eb7b521d3108ec2cdc087f2f17
+0007-create_segments_unique_index.spanner.sql 0d01da69da4d861faf8a72a455f8c5e6ea0a92bfab77a87cd9b351bbb29bf898
+0008-create_collection_metadata.spanner.sql 6ee55d39c3c838f5d7d04e98594f9157205eaf4af05a30a8da02bc03a228b68c

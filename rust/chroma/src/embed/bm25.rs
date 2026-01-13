@@ -30,6 +30,8 @@ where
     T: Tokenizer,
     H: TokenHasher,
 {
+    /// Whether to store tokens in the created sparse vectors.
+    pub include_tokens: bool,
     /// Tokenizer for converting text into tokens.
     pub tokenizer: T,
     /// Hasher for converting tokens into u32 identifiers.
@@ -55,6 +57,7 @@ impl BM25SparseEmbeddingFunction<Bm25Tokenizer, Murmur3AbsHasher> {
     /// - hasher: Murmur3 with seed 0, abs() behavior
     pub fn default_murmur3_abs() -> Self {
         Self {
+            include_tokens: true,
             tokenizer: Bm25Tokenizer::default(),
             hasher: Murmur3AbsHasher::default(),
             k: 1.2,
@@ -75,26 +78,50 @@ where
 
         let doc_len = tokens.len() as f32;
 
-        let mut token_ids = Vec::with_capacity(tokens.len());
-        for token in tokens {
-            let id = self.hasher.hash(&token);
-            token_ids.push(id);
+        if self.include_tokens {
+            let mut token_ids = Vec::with_capacity(tokens.len());
+            for token in tokens {
+                let id = self.hasher.hash(&token);
+                token_ids.push((id, token));
+            }
+
+            token_ids.sort_unstable();
+
+            let sparse_triples = token_ids.chunk_by(|a, b| a.0 == b.0).map(|chunk| {
+                let id = chunk[0].0;
+                let tk = chunk[0].1.clone();
+                let tf = chunk.len() as f32;
+
+                // BM25 formula
+                let score = tf * (self.k + 1.0)
+                    / (tf + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
+
+                (tk, id, score)
+            });
+
+            Ok(SparseVector::from_triples(sparse_triples))
+        } else {
+            let mut token_ids = Vec::with_capacity(tokens.len());
+            for token in tokens {
+                let id = self.hasher.hash(&token);
+                token_ids.push(id);
+            }
+
+            token_ids.sort_unstable();
+
+            let sparse_pairs = token_ids.chunk_by(|a, b| *a == *b).map(|chunk| {
+                let id = chunk[0];
+                let tf = chunk.len() as f32;
+
+                // BM25 formula
+                let score = tf * (self.k + 1.0)
+                    / (tf + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
+
+                (id, score)
+            });
+
+            Ok(SparseVector::from_pairs(sparse_pairs))
         }
-
-        token_ids.sort_unstable();
-
-        let sparse_pairs = token_ids.chunk_by(|a, b| a == b).map(|chunk| {
-            let id = chunk[0];
-            let tf = chunk.len() as f32;
-
-            // BM25 formula
-            let score = tf * (self.k + 1.0)
-                / (tf + self.k * (1.0 - self.b + self.b * doc_len / self.avg_len));
-
-            (id, score)
-        });
-
-        Ok(SparseVector::from_pairs(sparse_pairs))
     }
 }
 

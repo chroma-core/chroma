@@ -16,6 +16,11 @@
             "type": "string",
             "description": "Environment variable name that contains your API key for the Chroma Embedding API",
             "default": "CHROMA_API_KEY"
+        },
+        "include_tokens": {
+            "type": "boolean",
+            "description": "Whether to store token labels in the sparse vector output",
+            "default": false
         }
     },
     "required": [

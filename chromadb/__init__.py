@@ -11,6 +11,7 @@ from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
 from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (
+    Cmek,
     CollectionMetadata,
     UpdateMetadata,
     Documents,
@@ -22,6 +23,7 @@ from chromadb.api.types import (
     Include,
     Metadata,
     Metadatas,
+    ReadLevel,
     Where,
     QueryResult,
     GetResult,
@@ -58,6 +60,7 @@ import os
 
 # Re-export types from chromadb.types
 __all__ = [
+    "Cmek",
     "Collection",
     "Metadata",
     "Metadatas",
@@ -105,7 +108,7 @@ logger = logging.getLogger(__name__)
 
 __settings = Settings()
 
-__version__ = "1.2.1"
+__version__ = "1.4.0"
 
 
 # Workaround to deal with Colab's old sqlite3 version

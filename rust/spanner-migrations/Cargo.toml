@@ -1,0 +1,30 @@
+[package]
+name = "spanner-migrations"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "spanner_migrations"
+path = "src/lib.rs"
+
+[[bin]]
+name = "spanner_migration"
+path = "src/main.rs"
+
+[dependencies]
+chroma-config = { workspace = true }
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "1.0"
+google-cloud-spanner = { workspace = true }
+google-cloud-googleapis = { workspace = true }
+google-cloud-gax = { workspace = true }
+rust-embed = { version = "8.0", features = ["include-exclude"] }
+regex = "1.0"
+sha2 = "0.10"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+figment = { version = "0.10", features = ["yaml", "env"] }
+chroma-tracing = { workspace = true }
+clap = { workspace = true }
+tonic = { workspace = true }

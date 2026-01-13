@@ -3,16 +3,17 @@ import { tabLabelStyle } from "@/components/markdoc/code-block-header";
 import { capitalize, cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TabProps } from "@/components/markdoc/tabs";
-import CodeBlock from "@/components/markdoc/code-block";
+import CodeBlock, { CodeBlockProps } from "@/components/markdoc/code-block";
 import CopyButton from "@/components/markdoc/copy-button";
 
 const TabbedUseCaseCodeBlock: React.FC<{
   language: string;
   children: ReactElement<TabProps>[];
+  scrollable?: boolean;
 }> = ({ language, children }) => {
   return (
     <Tabs defaultValue={children[0].props.label} className="flex flex-col">
-      <div className="flex items-center justify-between bg-gray-900 rounded-t-sm">
+      <div className="flex items-center justify-between bg-neutral-100 dark:bg-gray-900 rounded-t-sm border border-b-0 dark:border-gray-700">
         <div className="flex items-center gap-7">
           <div className={tabLabelStyle} data-state={"active"}>
             {capitalize(language)}
@@ -24,7 +25,7 @@ const TabbedUseCaseCodeBlock: React.FC<{
                 value={tab.props.label}
                 className={cn(
                   tabLabelStyle,
-                  "data-[state=active]:text-gray-200 data-[state=active]:border-gray-200 dark:data-[state=active]:bg-transparent",
+                  "data-[state=active]:text-gray-700 dark:data-[state=active]:text-gray-200 data-[state=active]:border-gray-600 dark:data-[state=active]:border-gray-200",
                 )}
               >
                 {tab.props.label}
@@ -44,19 +45,23 @@ const TabbedUseCaseCodeBlock: React.FC<{
           ))}
         </div>
       </div>
-        {children.map((tab) => (
+      {children
+        .filter((tab) => tab.props.children.type === CodeBlock)
+        .map((tab) => (
           <TabsContent
             key={`${tab.props.label}-content`}
             value={tab.props.label}
             className="m-0"
           >
-            {tab.props.children.type === CodeBlock
-              ? React.cloneElement(tab, {
-                  children: React.cloneElement(tab.props.children, {
-                    showHeader: false,
-                  }),
-                })
-              : tab}
+            {React.cloneElement<Partial<{ children: ReactElement }>>(tab, {
+              children: React.cloneElement<Partial<CodeBlockProps>>(
+                tab.props.children,
+                {
+                  showHeader: false,
+                  className: "max-h-64 overflow-y-auto",
+                },
+              ),
+            })}
           </TabsContent>
         ))}
     </Tabs>

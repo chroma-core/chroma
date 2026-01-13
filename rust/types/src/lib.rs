@@ -14,6 +14,7 @@ mod log;
 mod metadata;
 mod operation;
 pub mod operators;
+pub mod operators_generated;
 mod record;
 mod scalar_encoding;
 mod segment;
@@ -25,11 +26,13 @@ mod spann_posting_list;
 pub mod strategies;
 mod task;
 mod tenant;
+mod topology;
 mod validators;
 mod where_parsing;
 
 pub mod optional_u128;
 pub mod regex;
+pub mod sysdb_errors;
 
 // Re-export Space from hnsw_configuration
 pub use hnsw_configuration::Space;
@@ -56,8 +59,10 @@ pub use segment_scope::*;
 pub use signed_rbm::*;
 pub use spann_configuration::*;
 pub use spann_posting_list::*;
+pub use sysdb_errors::*;
 pub use task::*;
 pub use tenant::*;
+pub use topology::*;
 pub use types::*;
 pub use where_parsing::*;
 

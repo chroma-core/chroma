@@ -95,6 +95,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                                     seen_id_set.remove(log_record.record.id.as_str());
                                 }
                                 Operation::Update => {}
+                                Operation::BackfillFn => {}
                             }
                         }
                         return Ok(CountRecordsOutput {
@@ -163,6 +164,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                         non_deleted_present_in_segment.remove(log_record.record.id.as_str());
                     }
                     Operation::Update => {}
+                    Operation::BackfillFn => {}
                 }
             } else {
                 match log_record.record.operation {
@@ -173,6 +175,7 @@ impl Operator<CountRecordsInput, CountRecordsOutput> for CountRecordsOperator {
                         non_deleted_absent_in_segment.remove(log_record.record.id.as_str());
                     }
                     Operation::Update => {}
+                    Operation::BackfillFn => {}
                 }
             }
         }
@@ -236,6 +239,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &in_memory_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");

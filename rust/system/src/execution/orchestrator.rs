@@ -237,6 +237,7 @@ mod tests {
     use tokio::time::sleep;
 
     #[derive(Debug)]
+    #[allow(dead_code)]
     struct SleepingOperator {}
 
     #[async_trait]
@@ -248,13 +249,6 @@ mod tests {
             sleep(Duration::MAX).await;
             unreachable!("Should've been sleeping!")
         }
-    }
-
-    #[derive(Debug)]
-    struct TestOrchestrator {
-        context: OrchestratorContext,
-        result_channel: Option<Sender<Result<(), TestError>>>,
-        num_tasks: usize,
     }
 
     #[derive(Debug, thiserror::Error)]
@@ -273,6 +267,14 @@ mod tests {
         fn code(&self) -> chroma_error::ErrorCodes {
             chroma_error::ErrorCodes::Internal
         }
+    }
+
+    #[derive(Debug)]
+    #[allow(dead_code)]
+    struct TestOrchestrator {
+        context: OrchestratorContext,
+        result_channel: Option<Sender<Result<(), TestError>>>,
+        num_tasks: usize,
     }
 
     #[async_trait]
@@ -368,8 +370,9 @@ mod tests {
         }
     }
 
+    // TODO(tanujnay112): Write a test that actually tests cancellation
     #[tokio::test]
-    async fn test_operator_cancellation() {
+    async fn test_simple_operator() {
         let system = System::new();
         let num_workers = 2;
 
@@ -377,7 +380,8 @@ mod tests {
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: num_workers,
             task_queue_limit: 1,
-            dispatcher_queue_size: 1,
+            // 1 message for the task + 1 for each worker thread's TaskRequestMessage
+            dispatcher_queue_size: 3,
             worker_queue_size: 1,
             active_io_tasks: 10,
         });
@@ -399,7 +403,7 @@ mod tests {
         match rx.recv().await.unwrap().into_inner() {
             Ok(_) => {}
             Err(err) => panic!(
-                "Task should have finished - workers should be cancelled {:?}",
+                " Attached Function should have finished - workers should be cancelled {:?}",
                 err
             ),
         }

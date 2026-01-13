@@ -39,8 +39,14 @@ spec:
         - name: compaction-service-cache
           hostPath:
             path: {{ .Values.compactionService.cache.hostPath }}
-            type: DirectoryOrCreate
+            type: {{ .Values.compactionService.cache.type }}
         {{ end }}
+        {{- range $i, $cache := (default (list) .Values.compactionService.cache.additionalVolumes) }}
+        - name: compaction-service-cache-{{ add $i 1 }}
+          hostPath:
+            path: {{ $cache.hostPath }}
+            type: {{ $.Values.compactionService.cache.type }}
+        {{- end }}
       containers:
         - name: compaction-service
           image: "{{ .Values.compactionService.image.repository }}:{{ .Values.compactionService.image.tag }}"
@@ -59,6 +65,10 @@ spec:
             - name: compaction-service-cache
               mountPath: {{ .Values.compactionService.cache.mountPath }}
             {{ end }}
+            {{- range $i, $cache := (default (list) .Values.compactionService.cache.additionalVolumes) }}
+            - name: compaction-service-cache-{{ add $i 1 }}
+              mountPath: {{ $cache.mountPath }}
+            {{- end }}
           ports:
             - containerPort: 50051
             - containerPort: 6060

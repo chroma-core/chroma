@@ -1,15 +1,16 @@
 from chromadb.api.types import (
     SparseEmbeddingFunction,
+    SparseVector,
     SparseVectors,
     Documents,
 )
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from enum import Enum
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
-from chromadb.base_types import SparseVector
 import os
 from typing import Union
+from chromadb.utils.embedding_functions.utils import _get_shared_system_client
 
 
 class ChromaCloudSpladeEmbeddingModel(Enum):
@@ -21,6 +22,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         self,
         api_key_env_var: str = "CHROMA_API_KEY",
         model: ChromaCloudSpladeEmbeddingModel = ChromaCloudSpladeEmbeddingModel.SPLADE_PP_EN_V1,
+        include_tokens: bool = False,
     ):
         """
         Initialize the ChromaCloudSpladeEmbeddingFunction.
@@ -36,12 +38,20 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
                 "The httpx python package is not installed. Please install it with `pip install httpx`"
             )
         self.api_key_env_var = api_key_env_var
+        # First, try to get API key from environment variable
         self.api_key = os.getenv(self.api_key_env_var)
+        # If not found in env var, try to get it from existing client instances
+        if not self.api_key:
+            SharedSystemClient = _get_shared_system_client()
+            self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
+        # Raise error if still no API key found
         if not self.api_key:
             raise ValueError(
-                f"API key not found in environment variable {self.api_key_env_var}"
+                f"API key not found in environment variable {self.api_key_env_var} "
+                f"or in any existing client instances"
             )
         self.model = model
+        self.include_tokens = bool(include_tokens)
         self._api_url = "https://embed.trychroma.com/embed_sparse"
         self._session = httpx.Client()
         self._session.headers.update(
@@ -80,6 +90,7 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             "texts": list(input),
             "task": "",
             "target": "",
+            "fetch_tokens": "true" if self.include_tokens is True else "false",
         }
 
         try:
@@ -113,13 +124,17 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
             if isinstance(emb, dict):
                 indices = emb.get("indices", [])
                 values = emb.get("values", [])
+                raw_labels = emb.get("labels") if self.include_tokens else None
+                labels: Optional[List[str]] = raw_labels if raw_labels else None
             else:
                 # Already a SparseVector, extract its data
+                assert isinstance(emb, SparseVector)
                 indices = emb.indices
                 values = emb.values
+                labels = emb.labels if self.include_tokens else None
 
             normalized_vectors.append(
-                normalize_sparse_vector(indices=indices, values=values)
+                normalize_sparse_vector(indices=indices, values=values, labels=labels)
             )
 
         return normalized_vectors
@@ -141,18 +156,25 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         return ChromaCloudSpladeEmbeddingFunction(
             api_key_env_var=api_key_env_var,
             model=ChromaCloudSpladeEmbeddingModel(model),
+            include_tokens=config.get("include_tokens", False),
         )
 
     def get_config(self) -> Dict[str, Any]:
-        return {"api_key_env_var": self.api_key_env_var, "model": self.model.value}
+        return {
+            "api_key_env_var": self.api_key_env_var,
+            "model": self.model.value,
+            "include_tokens": self.include_tokens,
+        }
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        if "model" in new_config:
-            raise ValueError(
-                "model cannot be changed after the embedding function has been initialized"
-            )
+        immutable_keys = {"include_tokens", "model"}
+        for key in immutable_keys:
+            if key in new_config and new_config[key] != old_config.get(key):
+                raise ValueError(
+                    f"Updating '{key}' is not supported for chroma-cloud-splade"
+                )
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

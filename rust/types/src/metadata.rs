@@ -1,4 +1,5 @@
 use chroma_error::{ChromaError, ErrorCodes};
+use itertools::Itertools;
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{Number, Value};
 use sprs::CsVec;
@@ -13,7 +14,7 @@ use thiserror::Error;
 use crate::chroma_proto;
 
 #[cfg(feature = "pyo3")]
-use pyo3::types::PyAnyMethods;
+use pyo3::types::{PyAnyMethods, PyDictMethods};
 
 #[cfg(feature = "testing")]
 use proptest::prelude::*;
@@ -24,6 +25,7 @@ struct SparseVectorSerdeHelper {
     type_tag: Option<String>,
     indices: Vec<u32>,
     values: Vec<f32>,
+    tokens: Option<Vec<String>>,
 }
 
 /// Represents a sparse vector using parallel arrays for indices and values.
@@ -39,6 +41,8 @@ pub struct SparseVector {
     pub indices: Vec<u32>,
     /// Values corresponding to each index
     pub values: Vec<f32>,
+    /// Tokens corresponding to each index
+    pub tokens: Option<Vec<String>>,
 }
 
 // Custom deserializer: accept both old and new formats
@@ -62,6 +66,7 @@ impl<'de> Deserialize<'de> for SparseVector {
         Ok(SparseVector {
             indices: helper.indices,
             values: helper.values,
+            tokens: helper.tokens,
         })
     }
 }
@@ -76,21 +81,97 @@ impl Serialize for SparseVector {
             type_tag: Some("sparse_vector".to_string()),
             indices: self.indices.clone(),
             values: self.values.clone(),
+            tokens: self.tokens.clone(),
         };
         helper.serialize(serializer)
     }
 }
 
+/// Length mismatch between indices, values, and tokens in a sparse vector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SparseVectorLengthMismatch;
+
+impl std::fmt::Display for SparseVectorLengthMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Sparse vector indices, values, and tokens (when present) must have the same length"
+        )
+    }
+}
+
+impl std::error::Error for SparseVectorLengthMismatch {}
+
+impl ChromaError for SparseVectorLengthMismatch {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
 impl SparseVector {
     /// Create a new sparse vector from parallel arrays.
-    pub fn new(indices: Vec<u32>, values: Vec<f32>) -> Self {
-        Self { indices, values }
+    pub fn new(indices: Vec<u32>, values: Vec<f32>) -> Result<Self, SparseVectorLengthMismatch> {
+        if indices.len() != values.len() {
+            return Err(SparseVectorLengthMismatch);
+        }
+        Ok(Self {
+            indices,
+            values,
+            tokens: None,
+        })
+    }
+
+    /// Create a new sparse vector from parallel arrays.
+    pub fn new_with_tokens(
+        indices: Vec<u32>,
+        values: Vec<f32>,
+        tokens: Vec<String>,
+    ) -> Result<Self, SparseVectorLengthMismatch> {
+        if indices.len() != values.len() {
+            return Err(SparseVectorLengthMismatch);
+        }
+        if tokens.len() != indices.len() {
+            return Err(SparseVectorLengthMismatch);
+        }
+        Ok(Self {
+            indices,
+            values,
+            tokens: Some(tokens),
+        })
     }
 
     /// Create a sparse vector from an iterator of (index, value) pairs.
     pub fn from_pairs(pairs: impl IntoIterator<Item = (u32, f32)>) -> Self {
-        let (indices, values) = pairs.into_iter().unzip();
-        Self { indices, values }
+        let mut indices = vec![];
+        let mut values = vec![];
+        for (index, value) in pairs {
+            indices.push(index);
+            values.push(value);
+        }
+        let tokens = None;
+        Self {
+            indices,
+            values,
+            tokens,
+        }
+    }
+
+    /// Create a sparse vector from an iterator of (string, index, value) pairs.
+    pub fn from_triples(triples: impl IntoIterator<Item = (String, u32, f32)>) -> Self {
+        let mut tokens = vec![];
+        let mut indices = vec![];
+        let mut values = vec![];
+        for (token, index, value) in triples {
+            tokens.push(token);
+            indices.push(index);
+            values.push(value);
+        }
+        let tokens = Some(tokens);
+        Self {
+            indices,
+            values,
+            tokens,
+        }
     }
 
     /// Iterate over (index, value) pairs.
@@ -106,6 +187,13 @@ impl SparseVector {
         // Check that indices and values have the same length
         if self.indices.len() != self.values.len() {
             return Err(MetadataValueConversionError::SparseVectorLengthMismatch);
+        }
+
+        // Check that tokens (if present) align with indices
+        if let Some(tokens) = self.tokens.as_ref() {
+            if tokens.len() != self.indices.len() {
+                return Err(MetadataValueConversionError::SparseVectorLengthMismatch);
+            }
         }
 
         // Check that indices are sorted in strictly ascending order (no duplicates)
@@ -141,9 +229,15 @@ impl PartialOrd for SparseVector {
     }
 }
 
-impl From<chroma_proto::SparseVector> for SparseVector {
-    fn from(proto: chroma_proto::SparseVector) -> Self {
-        SparseVector::new(proto.indices, proto.values)
+impl TryFrom<chroma_proto::SparseVector> for SparseVector {
+    type Error = SparseVectorLengthMismatch;
+
+    fn try_from(proto: chroma_proto::SparseVector) -> Result<Self, Self::Error> {
+        if proto.tokens.is_empty() {
+            SparseVector::new(proto.indices, proto.values)
+        } else {
+            SparseVector::new_with_tokens(proto.indices, proto.values, proto.tokens)
+        }
     }
 }
 
@@ -152,6 +246,7 @@ impl From<SparseVector> for chroma_proto::SparseVector {
         chroma_proto::SparseVector {
             indices: sparse.indices,
             values: sparse.values,
+            tokens: sparse.tokens.unwrap_or_default(),
         }
     }
 }
@@ -181,9 +276,11 @@ impl<'py> pyo3::IntoPyObject<'py> for SparseVector {
 
     fn into_pyobject(self, py: pyo3::Python<'py>) -> Result<Self::Output, Self::Error> {
         use pyo3::types::PyDict;
+
         let dict = PyDict::new(py);
         dict.set_item("indices", self.indices)?;
         dict.set_item("values", self.values)?;
+        dict.set_item("tokens", self.tokens)?;
         Ok(dict.into_any())
     }
 }
@@ -195,12 +292,34 @@ impl<'py> pyo3::FromPyObject<'py> for SparseVector {
 
         let dict = ob.downcast::<PyDict>()?;
         let indices_obj = dict.get_item("indices")?;
+        if indices_obj.is_none() {
+            return Err(pyo3::exceptions::PyKeyError::new_err(
+                "missing 'indices' key",
+            ));
+        }
+        let indices: Vec<u32> = indices_obj.unwrap().extract()?;
+
         let values_obj = dict.get_item("values")?;
+        if values_obj.is_none() {
+            return Err(pyo3::exceptions::PyKeyError::new_err(
+                "missing 'values' key",
+            ));
+        }
+        let values: Vec<f32> = values_obj.unwrap().extract()?;
 
-        let indices: Vec<u32> = indices_obj.extract()?;
-        let values: Vec<f32> = values_obj.extract()?;
+        let tokens_obj = dict.get_item("tokens")?;
+        let tokens = match tokens_obj {
+            Some(obj) if obj.is_none() => None,
+            Some(obj) => Some(obj.extract::<Vec<String>>()?),
+            None => None,
+        };
 
-        Ok(SparseVector::new(indices, values))
+        let result = match tokens {
+            Some(tokens) => SparseVector::new_with_tokens(indices, values, tokens),
+            None => SparseVector::new(indices, values),
+        };
+
+        result.map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))
     }
 }
 
@@ -327,7 +446,11 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
                 Ok(UpdateMetadataValue::Str(value.clone()))
             }
             Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
-                Ok(UpdateMetadataValue::SparseVector(value.clone().into()))
+                let sparse = value
+                    .clone()
+                    .try_into()
+                    .map_err(|_| UpdateMetadataValueConversionError::InvalidValue)?;
+                Ok(UpdateMetadataValue::SparseVector(sparse))
             }
             // Used to communicate that the user wants to delete this key.
             None => Ok(UpdateMetadataValue::None),
@@ -407,6 +530,18 @@ pub enum MetadataValue {
     Str(String),
     #[cfg_attr(feature = "testing", proptest(skip))]
     SparseVector(SparseVector),
+}
+
+impl std::fmt::Display for MetadataValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetadataValue::Bool(v) => write!(f, "{}", v),
+            MetadataValue::Int(v) => write!(f, "{}", v),
+            MetadataValue::Float(v) => write!(f, "{}", v),
+            MetadataValue::Str(v) => write!(f, "\"{}\"", v),
+            MetadataValue::SparseVector(v) => write!(f, "SparseVector(len={})", v.values.len()),
+        }
+    }
 }
 
 impl Eq for MetadataValue {}
@@ -630,7 +765,7 @@ pub enum MetadataValueConversionError {
     InvalidValue,
     #[error("Metadata key cannot start with '#' or '$': {0}")]
     InvalidKey(String),
-    #[error("Sparse vector indices and values must have the same length")]
+    #[error("Sparse vector indices, values, and tokens (when present) must have the same length")]
     SparseVectorLengthMismatch,
     #[error("Sparse vector indices must be sorted in strictly ascending order (no duplicates)")]
     SparseVectorIndicesNotSorted,
@@ -667,7 +802,11 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
                 Ok(MetadataValue::Str(value.clone()))
             }
             Some(chroma_proto::update_metadata_value::Value::SparseVectorValue(value)) => {
-                Ok(MetadataValue::SparseVector(value.clone().into()))
+                let sparse = value
+                    .clone()
+                    .try_into()
+                    .map_err(|_| MetadataValueConversionError::SparseVectorLengthMismatch)?;
+                Ok(MetadataValue::SparseVector(sparse))
             }
             _ => Err(MetadataValueConversionError::InvalidValue),
         }
@@ -923,6 +1062,27 @@ pub enum Where {
     Metadata(MetadataExpression),
 }
 
+impl std::fmt::Display for Where {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Where::Composite(composite) => {
+                let fragment = composite
+                    .children
+                    .iter()
+                    .map(|child| format!("{}", child))
+                    .collect::<Vec<_>>()
+                    .join(match composite.operator {
+                        BooleanOperator::And => " & ",
+                        BooleanOperator::Or => " | ",
+                    });
+                write!(f, "({})", fragment)
+            }
+            Where::Metadata(expr) => write!(f, "{}", expr),
+            Where::Document(expr) => write!(f, "{}", expr),
+        }
+    }
+}
+
 impl serde::Serialize for Where {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -995,14 +1155,70 @@ impl serde::Serialize for Where {
     }
 }
 
+impl From<bool> for Where {
+    fn from(value: bool) -> Self {
+        if value {
+            Where::conjunction(vec![])
+        } else {
+            Where::disjunction(vec![])
+        }
+    }
+}
+
 impl Where {
-    pub fn conjunction(children: Vec<Where>) -> Self {
+    pub fn conjunction(children: impl IntoIterator<Item = Where>) -> Self {
+        // If children.len() == 0, we will return a conjunction that is always true.
+        // If children.len() == 1, we will return the single child.
+        // Otherwise, we will return a conjunction of the children.
+
+        let mut children: Vec<_> = children
+            .into_iter()
+            .flat_map(|expr| {
+                if let Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::And,
+                    children,
+                }) = expr
+                {
+                    return children;
+                }
+                vec![expr]
+            })
+            .dedup()
+            .collect();
+
+        if children.len() == 1 {
+            return children.pop().expect("just checked len is 1");
+        }
+
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::And,
             children,
         })
     }
-    pub fn disjunction(children: Vec<Where>) -> Self {
+    pub fn disjunction(children: impl IntoIterator<Item = Where>) -> Self {
+        // If children.len() == 0, we will return a disjunction that is always false.
+        // If children.len() == 1, we will return the single child.
+        // Otherwise, we will return a disjunction of the children.
+
+        let mut children: Vec<_> = children
+            .into_iter()
+            .flat_map(|expr| {
+                if let Where::Composite(CompositeExpression {
+                    operator: BooleanOperator::Or,
+                    children,
+                }) = expr
+                {
+                    return children;
+                }
+                vec![expr]
+            })
+            .dedup()
+            .collect();
+
+        if children.len() == 1 {
+            return children.pop().expect("just checked len is 1");
+        }
+
         Self::Composite(CompositeExpression {
             operator: BooleanOperator::Or,
             children,
@@ -1049,43 +1265,7 @@ impl BitAnd for Where {
     type Output = Where;
 
     fn bitand(self, rhs: Self) -> Self::Output {
-        match self {
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::And,
-                mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    children: rhs_children,
-                }) => {
-                    children.extend(rhs_children);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-                _ => {
-                    children.push(rhs);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-            },
-            _ => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::And,
-                    mut children,
-                }) => {
-                    children.insert(0, self);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::And,
-                        children,
-                    })
-                }
-                _ => Where::conjunction(vec![self, rhs]),
-            },
-        }
+        Self::conjunction([self, rhs])
     }
 }
 
@@ -1093,43 +1273,7 @@ impl BitOr for Where {
     type Output = Where;
 
     fn bitor(self, rhs: Self) -> Self::Output {
-        match self {
-            Where::Composite(CompositeExpression {
-                operator: BooleanOperator::Or,
-                mut children,
-            }) => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::Or,
-                    children: rhs_children,
-                }) => {
-                    children.extend(rhs_children);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-                _ => {
-                    children.push(rhs);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-            },
-            _ => match rhs {
-                Where::Composite(CompositeExpression {
-                    operator: BooleanOperator::Or,
-                    mut children,
-                }) => {
-                    children.insert(0, self);
-                    Where::Composite(CompositeExpression {
-                        operator: BooleanOperator::Or,
-                        children,
-                    })
-                }
-                _ => Where::disjunction(vec![self, rhs]),
-            },
-        }
+        Self::disjunction([self, rhs])
     }
 }
 
@@ -1245,6 +1389,18 @@ pub struct DocumentExpression {
     pub pattern: String,
 }
 
+impl std::fmt::Display for DocumentExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self.operator {
+            DocumentOperator::Contains => "CONTAINS",
+            DocumentOperator::NotContains => "NOT CONTAINS",
+            DocumentOperator::Regex => "REGEX",
+            DocumentOperator::NotRegex => "NOT REGEX",
+        };
+        write!(f, "#document {} \"{}\"", op_str, self.pattern)
+    }
+}
+
 impl From<chroma_proto::DirectWhereDocument> for DocumentExpression {
     fn from(value: chroma_proto::DirectWhereDocument) -> Self {
         Self {
@@ -1298,6 +1454,19 @@ impl From<DocumentOperator> for chroma_proto::WhereDocumentOperator {
 pub struct MetadataExpression {
     pub key: String,
     pub comparison: MetadataComparison,
+}
+
+impl std::fmt::Display for MetadataExpression {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.comparison {
+            MetadataComparison::Primitive(op, value) => {
+                write!(f, "{} {} {}", self.key, op, value)
+            }
+            MetadataComparison::Set(op, set_value) => {
+                write!(f, "{} {} {}", self.key, op, set_value)
+            }
+        }
+    }
 }
 
 impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
@@ -1443,6 +1612,20 @@ pub enum PrimitiveOperator {
     LessThanOrEqual,
 }
 
+impl std::fmt::Display for PrimitiveOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            PrimitiveOperator::Equal => "=",
+            PrimitiveOperator::NotEqual => "≠",
+            PrimitiveOperator::GreaterThan => ">",
+            PrimitiveOperator::GreaterThanOrEqual => "≥",
+            PrimitiveOperator::LessThan => "<",
+            PrimitiveOperator::LessThanOrEqual => "≤",
+        };
+        write!(f, "{}", op_str)
+    }
+}
+
 impl From<chroma_proto::GenericComparator> for PrimitiveOperator {
     fn from(value: chroma_proto::GenericComparator) -> Self {
         match value {
@@ -1491,11 +1674,21 @@ impl TryFrom<PrimitiveOperator> for chroma_proto::NumberComparator {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum SetOperator {
     In,
     NotIn,
+}
+
+impl std::fmt::Display for SetOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            SetOperator::In => "∈",
+            SetOperator::NotIn => "∉",
+        };
+        write!(f, "{}", op_str)
+    }
 }
 
 impl From<chroma_proto::ListOperator> for SetOperator {
@@ -1523,6 +1716,45 @@ pub enum MetadataSetValue {
     Int(Vec<i64>),
     Float(Vec<f64>),
     Str(Vec<String>),
+}
+
+impl std::fmt::Display for MetadataSetValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetadataSetValue::Bool(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| format!("\"{}\"", v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+            MetadataSetValue::Int(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+            MetadataSetValue::Float(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| v.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+            MetadataSetValue::Str(values) => {
+                let values_str = values
+                    .iter()
+                    .map(|v| format!("\"{}\"", v))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "[{}]", values_str)
+            }
+        }
+    }
 }
 
 impl MetadataSetValue {
@@ -1629,7 +1861,18 @@ impl TryFrom<chroma_proto::WhereDocument> for Where {
 
 #[cfg(test)]
 mod tests {
+    use crate::operator::Key;
+
     use super::*;
+
+    // This is needed for the tests that round trip to the python world.
+    #[cfg(feature = "pyo3")]
+    fn ensure_python_interpreter() {
+        static PYTHON_INIT: std::sync::Once = std::sync::Once::new();
+        PYTHON_INIT.call_once(|| {
+            pyo3::prepare_freethreaded_python();
+        });
+    }
 
     #[test]
     fn test_update_metadata_try_from() {
@@ -1665,6 +1908,7 @@ mod tests {
                         chroma_proto::SparseVector {
                             indices: vec![0, 5, 10],
                             values: vec![0.1, 0.5, 0.9],
+                            tokens: vec!["foo".to_string(), "bar".to_string(), "baz".to_string()],
                         },
                     ),
                 ),
@@ -1686,10 +1930,14 @@ mod tests {
         );
         assert_eq!(
             converted_metadata.get("sparse").unwrap(),
-            &UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![0, 5, 10],
-                vec![0.1, 0.5, 0.9]
-            ))
+            &UpdateMetadataValue::SparseVector(
+                SparseVector::new_with_tokens(
+                    vec![0, 5, 10],
+                    vec![0.1, 0.5, 0.9],
+                    vec!["foo".to_string(), "bar".to_string(), "baz".to_string(),],
+                )
+                .unwrap()
+            )
         );
     }
 
@@ -1727,6 +1975,7 @@ mod tests {
                         chroma_proto::SparseVector {
                             indices: vec![1, 10, 100],
                             values: vec![0.2, 0.4, 0.6],
+                            tokens: vec!["foo".to_string(), "bar".to_string(), "baz".to_string()],
                         },
                     ),
                 ),
@@ -1748,7 +1997,14 @@ mod tests {
         );
         assert_eq!(
             converted_metadata.get("sparse").unwrap(),
-            &MetadataValue::SparseVector(SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6]))
+            &MetadataValue::SparseVector(
+                SparseVector::new_with_tokens(
+                    vec![1, 10, 100],
+                    vec![0.2, 0.4, 0.6],
+                    vec!["foo".to_string(), "bar".to_string(), "baz".to_string(),],
+                )
+                .unwrap()
+            )
         );
     }
 
@@ -1902,7 +2158,7 @@ mod tests {
     fn test_sparse_vector_new() {
         let indices = vec![0, 5, 10];
         let values = vec![0.1, 0.5, 0.9];
-        let sparse = SparseVector::new(indices.clone(), values.clone());
+        let sparse = SparseVector::new(indices.clone(), values.clone()).unwrap();
         assert_eq!(sparse.indices, indices);
         assert_eq!(sparse.values, values);
     }
@@ -1916,18 +2172,30 @@ mod tests {
     }
 
     #[test]
+    fn test_sparse_vector_from_triples() {
+        let triples = vec![
+            ("foo".to_string(), 0, 0.1),
+            ("bar".to_string(), 5, 0.5),
+            ("baz".to_string(), 10, 0.9),
+        ];
+        let sparse = SparseVector::from_triples(triples.clone());
+        assert_eq!(sparse.indices, vec![0, 5, 10]);
+        assert_eq!(sparse.values, vec![0.1, 0.5, 0.9]);
+    }
+
+    #[test]
     fn test_sparse_vector_iter() {
-        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]).unwrap();
         let collected: Vec<(u32, f32)> = sparse.iter().collect();
         assert_eq!(collected, vec![(0, 0.1), (5, 0.5), (10, 0.9)]);
     }
 
     #[test]
     fn test_sparse_vector_ordering() {
-        let sparse1 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]);
-        let sparse2 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]);
-        let sparse3 = SparseVector::new(vec![0, 6], vec![0.1, 0.5]);
-        let sparse4 = SparseVector::new(vec![0, 5], vec![0.1, 0.6]);
+        let sparse1 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]).unwrap();
+        let sparse2 = SparseVector::new(vec![0, 5], vec![0.1, 0.5]).unwrap();
+        let sparse3 = SparseVector::new(vec![0, 6], vec![0.1, 0.5]).unwrap();
+        let sparse4 = SparseVector::new(vec![0, 5], vec![0.1, 0.6]).unwrap();
 
         assert_eq!(sparse1, sparse2);
         assert!(sparse1 < sparse3);
@@ -1936,23 +2204,44 @@ mod tests {
 
     #[test]
     fn test_sparse_vector_proto_conversion() {
-        let sparse = SparseVector::new(vec![1, 10, 100], vec![0.2, 0.4, 0.6]);
+        let tokens = vec![
+            "token1".to_string(),
+            "token2".to_string(),
+            "token3".to_string(),
+        ];
+        let sparse =
+            SparseVector::new_with_tokens(vec![1, 10, 100], vec![0.2, 0.4, 0.6], tokens.clone())
+                .unwrap();
         let proto: chroma_proto::SparseVector = sparse.clone().into();
         assert_eq!(proto.indices, vec![1, 10, 100]);
         assert_eq!(proto.values, vec![0.2, 0.4, 0.6]);
+        assert_eq!(proto.tokens, tokens.clone());
 
-        let converted: SparseVector = proto.into();
+        let converted: SparseVector = proto.try_into().unwrap();
         assert_eq!(converted, sparse);
+        assert_eq!(converted.tokens, Some(tokens));
+    }
+
+    #[test]
+    fn test_sparse_vector_proto_conversion_empty_tokens() {
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]).unwrap();
+        let proto: chroma_proto::SparseVector = sparse.clone().into();
+        assert_eq!(proto.indices, vec![0, 5, 10]);
+        assert_eq!(proto.values, vec![0.1, 0.5, 0.9]);
+        assert_eq!(proto.tokens, Vec::<String>::new());
+
+        let converted: SparseVector = proto.try_into().unwrap();
+        assert_eq!(converted, sparse);
+        assert_eq!(converted.tokens, None);
     }
 
     #[test]
     fn test_sparse_vector_logical_size() {
         let metadata = Metadata::from([(
             "sparse".to_string(),
-            MetadataValue::SparseVector(SparseVector::new(
-                vec![0, 1, 2, 3, 4],
-                vec![0.1, 0.2, 0.3, 0.4, 0.5],
-            )),
+            MetadataValue::SparseVector(
+                SparseVector::new(vec![0, 1, 2, 3, 4], vec![0.1, 0.2, 0.3, 0.4, 0.5]).unwrap(),
+            ),
         )]);
 
         let size = logical_size_of_metadata(&metadata);
@@ -1964,20 +2253,27 @@ mod tests {
     #[test]
     fn test_sparse_vector_validation() {
         // Valid sparse vector
-        let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3]);
+        let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3]).unwrap();
         assert!(sparse.validate().is_ok());
 
         // Length mismatch
         let sparse = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2]);
-        let result = sparse.validate();
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            MetadataValueConversionError::SparseVectorLengthMismatch
-        ));
+        assert!(sparse.is_err());
+        let result = SparseVector::new(vec![1, 2, 3], vec![0.1, 0.2, 0.3])
+            .unwrap()
+            .validate();
+        assert!(result.is_ok());
+
+        // Tokens length mismatch with indices/values
+        let sparse = SparseVector::new_with_tokens(
+            vec![1, 2, 3],
+            vec![0.1, 0.2, 0.3],
+            vec!["a".to_string(), "b".to_string()],
+        );
+        assert!(sparse.is_err());
 
         // Unsorted indices (descending order)
-        let sparse = SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]);
+        let sparse = SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap();
         let result = sparse.validate();
         assert!(result.is_err());
         assert!(matches!(
@@ -1986,7 +2282,7 @@ mod tests {
         ));
 
         // Duplicate indices (not strictly ascending)
-        let sparse = SparseVector::new(vec![1, 2, 2, 3], vec![0.1, 0.2, 0.3, 0.4]);
+        let sparse = SparseVector::new(vec![1, 2, 2, 3], vec![0.1, 0.2, 0.3, 0.4]).unwrap();
         let result = sparse.validate();
         assert!(result.is_err());
         assert!(matches!(
@@ -1995,7 +2291,7 @@ mod tests {
         ));
 
         // Descending at one point
-        let sparse = SparseVector::new(vec![1, 3, 2], vec![0.1, 0.3, 0.2]);
+        let sparse = SparseVector::new(vec![1, 3, 2], vec![0.1, 0.3, 0.2]).unwrap();
         let result = sparse.validate();
         assert!(result.is_err());
         assert!(matches!(
@@ -2045,7 +2341,7 @@ mod tests {
     #[test]
     fn test_sparse_vector_serialize_always_has_type() {
         // Serialization should always include #type field
-        let sv = SparseVector::new(vec![0, 1, 2], vec![1.0, 2.0, 3.0]);
+        let sv = SparseVector::new(vec![0, 1, 2], vec![1.0, 2.0, 3.0]).unwrap();
         let json = serde_json::to_value(&sv).unwrap();
 
         assert_eq!(json["#type"], "sparse_vector");
@@ -2056,7 +2352,7 @@ mod tests {
     #[test]
     fn test_sparse_vector_roundtrip_with_type() {
         // Test that serialize -> deserialize preserves the data
-        let original = SparseVector::new(vec![0, 5, 10, 15], vec![0.1, 0.5, 1.0, 1.5]);
+        let original = SparseVector::new(vec![0, 5, 10, 15], vec![0.1, 0.5, 1.0, 1.5]).unwrap();
         let json = serde_json::to_string(&original).unwrap();
 
         // Verify the serialized JSON contains #type
@@ -2088,5 +2384,224 @@ mod tests {
         let sv: SparseVector = serde_json::from_value(sparse_value.clone()).unwrap();
         assert_eq!(sv.indices, vec![0, 1]);
         assert_eq!(sv.values, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_sparse_vector_tokens_roundtrip_old_to_new() {
+        // Old format without tokens field should deserialize with tokens=None
+        let json = r#"{"indices": [0, 1, 2], "values": [1.0, 2.0, 3.0]}"#;
+        let sv: SparseVector = serde_json::from_str(json).unwrap();
+        assert_eq!(sv.indices, vec![0, 1, 2]);
+        assert_eq!(sv.values, vec![1.0, 2.0, 3.0]);
+        assert_eq!(sv.tokens, None);
+
+        // Serialize and verify it includes #type but no tokens field when None
+        let serialized = serde_json::to_value(&sv).unwrap();
+        assert_eq!(serialized["#type"], "sparse_vector");
+        assert_eq!(serialized["indices"], serde_json::json!([0, 1, 2]));
+        assert_eq!(serialized["values"], serde_json::json!([1.0, 2.0, 3.0]));
+        assert_eq!(serialized["tokens"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_sparse_vector_tokens_roundtrip_new_to_new() {
+        // New format with tokens field
+        let sv_with_tokens = SparseVector::new_with_tokens(
+            vec![0, 1, 2],
+            vec![1.0, 2.0, 3.0],
+            vec!["foo".to_string(), "bar".to_string(), "baz".to_string()],
+        )
+        .unwrap();
+
+        // Serialize
+        let serialized = serde_json::to_string(&sv_with_tokens).unwrap();
+        assert!(serialized.contains("\"#type\":\"sparse_vector\""));
+        assert!(serialized.contains("\"tokens\""));
+
+        // Deserialize and verify tokens are preserved
+        let deserialized: SparseVector = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized.indices, vec![0, 1, 2]);
+        assert_eq!(deserialized.values, vec![1.0, 2.0, 3.0]);
+        assert_eq!(
+            deserialized.tokens,
+            Some(vec![
+                "foo".to_string(),
+                "bar".to_string(),
+                "baz".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn test_sparse_vector_tokens_deserialize_with_tokens_field() {
+        // Test deserializing JSON that explicitly includes tokens field
+        let json = r##"{"#type": "sparse_vector", "indices": [5, 10], "values": [0.5, 1.0], "tokens": ["token1", "token2"]}"##;
+        let sv: SparseVector = serde_json::from_str(json).unwrap();
+        assert_eq!(sv.indices, vec![5, 10]);
+        assert_eq!(sv.values, vec![0.5, 1.0]);
+        assert_eq!(
+            sv.tokens,
+            Some(vec!["token1".to_string(), "token2".to_string()])
+        );
+    }
+
+    #[test]
+    fn test_sparse_vector_tokens_backward_compatibility() {
+        // Verify old format (no tokens, no #type) deserializes correctly
+        let old_json = r#"{"indices": [1, 2], "values": [0.1, 0.2]}"#;
+        let old_sv: SparseVector = serde_json::from_str(old_json).unwrap();
+
+        // Verify new format (with #type, with tokens) deserializes correctly
+        let new_json = r##"{"#type": "sparse_vector", "indices": [1, 2], "values": [0.1, 0.2], "tokens": ["a", "b"]}"##;
+        let new_sv: SparseVector = serde_json::from_str(new_json).unwrap();
+
+        // Both should have same indices and values
+        assert_eq!(old_sv.indices, new_sv.indices);
+        assert_eq!(old_sv.values, new_sv.values);
+
+        // Old should have None tokens, new should have Some tokens
+        assert_eq!(old_sv.tokens, None);
+        assert_eq!(new_sv.tokens, Some(vec!["a".to_string(), "b".to_string()]));
+    }
+
+    #[test]
+    fn test_sparse_vector_from_triples_preserves_tokens() {
+        let triples = vec![
+            ("apple".to_string(), 10, 0.5),
+            ("banana".to_string(), 20, 0.7),
+            ("cherry".to_string(), 30, 0.9),
+        ];
+        let sv = SparseVector::from_triples(triples.clone());
+
+        assert_eq!(sv.indices, vec![10, 20, 30]);
+        assert_eq!(sv.values, vec![0.5, 0.7, 0.9]);
+        assert_eq!(
+            sv.tokens,
+            Some(vec![
+                "apple".to_string(),
+                "banana".to_string(),
+                "cherry".to_string()
+            ])
+        );
+
+        // Roundtrip through serialization
+        let serialized = serde_json::to_string(&sv).unwrap();
+        let deserialized: SparseVector = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.indices, sv.indices);
+        assert_eq!(deserialized.values, sv.values);
+        assert_eq!(deserialized.tokens, sv.tokens);
+    }
+
+    #[cfg(feature = "pyo3")]
+    #[test]
+    fn test_sparse_vector_pyo3_roundtrip_with_tokens() {
+        ensure_python_interpreter();
+
+        pyo3::Python::with_gil(|py| {
+            use pyo3::types::PyDict;
+            use pyo3::IntoPyObject;
+
+            let dict_in = PyDict::new(py);
+            dict_in.set_item("indices", vec![0u32, 1, 2]).unwrap();
+            dict_in
+                .set_item("values", vec![0.1f32, 0.2f32, 0.3f32])
+                .unwrap();
+            dict_in
+                .set_item("tokens", vec!["foo", "bar", "baz"])
+                .unwrap();
+
+            let sparse: SparseVector = dict_in.clone().into_any().extract().unwrap();
+            assert_eq!(sparse.indices, vec![0, 1, 2]);
+            assert_eq!(sparse.values, vec![0.1, 0.2, 0.3]);
+            assert_eq!(
+                sparse.tokens,
+                Some(vec![
+                    "foo".to_string(),
+                    "bar".to_string(),
+                    "baz".to_string()
+                ])
+            );
+
+            let py_obj = sparse.clone().into_pyobject(py).unwrap();
+            let dict_out = py_obj.downcast::<PyDict>().unwrap();
+            let tokens_obj = dict_out.get_item("tokens").unwrap();
+            let tokens: Vec<String> = tokens_obj
+                .expect("expected tokens key in Python dict")
+                .extract()
+                .unwrap();
+            assert_eq!(
+                tokens,
+                vec!["foo".to_string(), "bar".to_string(), "baz".to_string()]
+            );
+        });
+    }
+
+    #[cfg(feature = "pyo3")]
+    #[test]
+    fn test_sparse_vector_pyo3_roundtrip_without_tokens() {
+        ensure_python_interpreter();
+
+        pyo3::Python::with_gil(|py| {
+            use pyo3::types::PyDict;
+            use pyo3::IntoPyObject;
+
+            let dict_in = PyDict::new(py);
+            dict_in.set_item("indices", vec![5u32]).unwrap();
+            dict_in.set_item("values", vec![1.5f32]).unwrap();
+
+            let sparse: SparseVector = dict_in.clone().into_any().extract().unwrap();
+            assert_eq!(sparse.indices, vec![5]);
+            assert_eq!(sparse.values, vec![1.5]);
+            assert!(sparse.tokens.is_none());
+
+            let py_obj = sparse.into_pyobject(py).unwrap();
+            let dict_out = py_obj.downcast::<PyDict>().unwrap();
+            let tokens_obj = dict_out.get_item("tokens").unwrap();
+            let tokens_value = tokens_obj.expect("expected tokens key in Python dict");
+            assert!(
+                tokens_value.is_none(),
+                "expected tokens value in Python dict to be None"
+            );
+        });
+    }
+
+    #[test]
+    fn test_simplifies_identities() {
+        let all: Where = true.into();
+        assert_eq!(all.clone() & all.clone(), true.into());
+        assert_eq!(all.clone() | all.clone(), true.into());
+
+        let foo = Key::field("foo").eq("bar");
+        assert_eq!(foo.clone() & all.clone(), foo.clone());
+        assert_eq!(all.clone() & foo.clone(), foo.clone());
+
+        let none: Where = false.into();
+        assert_eq!(foo.clone() | none.clone(), foo.clone());
+        assert_eq!(none | foo.clone(), foo);
+    }
+
+    #[test]
+    fn test_flattens() {
+        let foo = Key::field("foo").eq("bar");
+        let baz = Key::field("baz").eq("quux");
+
+        let and_nested = foo.clone() & (baz.clone() & foo.clone());
+        assert_eq!(
+            and_nested,
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::And,
+                children: vec![foo.clone(), baz.clone(), foo.clone()]
+            })
+        );
+
+        let or_nested = foo.clone() | (baz.clone() | foo.clone());
+        assert_eq!(
+            or_nested,
+            Where::Composite(CompositeExpression {
+                operator: BooleanOperator::Or,
+                children: vec![foo.clone(), baz.clone(), foo.clone()]
+            })
+        );
     }
 }

@@ -1,3 +1,5 @@
+from typing import TYPE_CHECKING
+
 from chromadb import (
     CollectionMetadata,
     Embeddings,
@@ -12,6 +14,9 @@ from chromadb import (
     URIs,
 )
 from chromadb.api import ServerAPI
+
+if TYPE_CHECKING:
+    from chromadb.api.models.AttachedFunction import AttachedFunction
 from chromadb.api.collection_configuration import (
     CreateCollectionConfiguration,
     UpdateCollectionConfiguration,
@@ -34,6 +39,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    ReadLevel,
     Schema,
     SearchResult,
 )
@@ -44,7 +50,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List, Dict, Any
+from typing import Optional, Sequence, List, Dict, Any, Tuple
 from overrides import override
 from uuid import UUID
 import json
@@ -193,7 +199,7 @@ class RustBindingsAPI(ServerAPI):
             CollectionModel(
                 id=collection.id,
                 name=collection.name,
-                serialized_schema=None,
+                serialized_schema=collection.schema,
                 configuration_json=collection.configuration,
                 metadata=collection.metadata,
                 dimension=collection.dimension,
@@ -229,14 +235,25 @@ class RustBindingsAPI(ServerAPI):
         else:
             configuration_json_str = None
 
+        if schema:
+            schema_str = json.dumps(schema.serialize_to_json())
+        else:
+            schema_str = None
+
         collection = self.bindings.create_collection(
-            name, configuration_json_str, metadata, get_or_create, tenant, database
+            name,
+            configuration_json_str,
+            schema_str,
+            metadata,
+            get_or_create,
+            tenant,
+            database,
         )
         collection_model = CollectionModel(
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
-            serialized_schema=None,
+            serialized_schema=collection.schema,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -256,7 +273,7 @@ class RustBindingsAPI(ServerAPI):
             id=collection.id,
             name=collection.name,
             configuration_json=collection.configuration,
-            serialized_schema=None,
+            serialized_schema=collection.schema,
             metadata=collection.metadata,
             dimension=collection.dimension,
             tenant=collection.tenant,
@@ -319,12 +336,22 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "IndexingStatus":
+        raise NotImplementedError("Indexing status is not implemented for Local Chroma")
+
+    @override
     def _search(
         self,
         collection_id: UUID,
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         raise NotImplementedError("Search is not implemented for Local Chroma")
 
@@ -588,35 +615,49 @@ class RustBindingsAPI(ServerAPI):
         return self.bindings.get_max_batch_size()
 
     @override
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
+        function_id: str,
+        name: str,
         input_collection_id: UUID,
-        output_collection_name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> tuple[bool, str]:
-        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+    ) -> Tuple["AttachedFunction", bool]:
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
-            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
-            "The Rust bindings (embedded mode) do not support task operations."
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
         )
 
     @override
-    def remove_task(
+    def get_attached_function(
         self,
-        task_name: str,
+        name: str,
+        input_collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "AttachedFunction":
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
+        raise NotImplementedError(
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
+        )
+
+    @override
+    def detach_function(
+        self,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Tasks are not supported in the Rust bindings (local embedded mode)."""
+        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
-            "Tasks are only supported when connecting to a Chroma server via HttpClient. "
-            "The Rust bindings (embedded mode) do not support task operations."
+            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
+            "The Rust bindings (embedded mode) do not support attached function operations."
         )
 
     # TODO: Remove this if it's not planned to be used

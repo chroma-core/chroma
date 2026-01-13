@@ -389,6 +389,7 @@ where
         let mut device_options = DirectFsDeviceOptions::new(dir)
             .with_capacity(config.disk * MIB)
             .with_file_size(config.file_size * MIB);
+
         if config.admission_rate_limit > 0 {
             device_options = device_options.with_throttle(
                 Throttle::new().with_write_throughput(config.admission_rate_limit * MIB),
@@ -455,7 +456,7 @@ where
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.get_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(key).await?.map(|v| v.value().clone());
         if res.is_some() {
@@ -467,25 +468,25 @@ where
     }
 
     async fn insert(&self, key: K, value: V) {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.remove_latency, hostname, StopWatchUnit::Millis);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         Ok(self.cache.clear().await?)
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.obtain(key).await?.map(|v| v.value().clone());
         if res.is_some() {
@@ -638,7 +639,7 @@ where
     V: Clone + Send + Sync + Weighted + 'static,
 {
     async fn get(&self, key: &K) -> Result<Option<V>, CacheError> {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.get_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(key).map(|v| v.value().clone());
         if res.is_some() {
@@ -650,26 +651,26 @@ where
     }
 
     async fn insert(&self, key: K, value: V) {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         self.cache.insert(key, value);
     }
 
     async fn remove(&self, key: &K) {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.remove_latency, hostname, StopWatchUnit::Millis);
         self.cache.remove(key);
     }
 
     async fn clear(&self) -> Result<(), CacheError> {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.clear_latency, hostname, StopWatchUnit::Millis);
         self.cache.clear();
         Ok(())
     }
 
     async fn obtain(&self, key: K) -> Result<Option<V>, CacheError> {
-        let hostname = &[self.hostname.clone()];
+        let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.obtain_latency, hostname, StopWatchUnit::Millis);
         let res = self.cache.get(&key).map(|v| v.value().clone());
         if res.is_some() {

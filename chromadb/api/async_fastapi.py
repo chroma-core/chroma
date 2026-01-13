@@ -2,7 +2,7 @@ import asyncio
 from uuid import UUID
 import urllib.parse
 import orjson
-from typing import Any, Optional, cast, Tuple, Sequence, Dict, List
+from typing import Any, Mapping, Optional, cast, Tuple, Sequence, Dict, List
 import logging
 import httpx
 from overrides import override
@@ -32,8 +32,10 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    IndexingStatus,
     Schema,
     Metadatas,
+    ReadLevel,
     URIs,
     Where,
     WhereDocument,
@@ -130,15 +132,22 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
                 + " (https://github.com/chroma-core/chroma)"
             )
 
-            limits = httpx.Limits(keepalive_expiry=self.keepalive_secs)
             self._clients[loop_hash] = httpx.AsyncClient(
                 timeout=None,
                 headers=headers,
                 verify=self._settings.chroma_server_ssl_verify or False,
-                limits=limits,
+                limits=self.http_limits,
             )
 
         return self._clients[loop_hash]
+
+    @override
+    def get_request_headers(self) -> Mapping[str, str]:
+        return dict(self._get_client().headers)
+
+    @override
+    def get_api_url(self) -> str:
+        return self._api_url
 
     async def _make_request(
         self, method: str, path: str, **kwargs: Dict[str, Any]
@@ -407,6 +416,27 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method(
+        "AsyncFastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION
+    )
+    @override
+    async def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> IndexingStatus:
+        resp_json = await self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+        )
+        return IndexingStatus(
+            num_indexed_ops=resp_json["num_indexed_ops"],
+            num_unindexed_ops=resp_json["num_unindexed_ops"],
+            total_ops=resp_json["total_ops"],
+            op_indexing_progress=resp_json["op_indexing_progress"],
+        )
+
     @trace_method("AsyncFastAPI._search", OpenTelemetryGranularity.OPERATION)
     @override
     async def _search(
@@ -415,9 +445,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
-        payload = {"searches": [s.to_dict() for s in searches]}
+        payload = {
+            "searches": [s.to_dict() for s in searches],
+            "read_level": read_level,
+        }
 
         resp_json = await self._make_request(
             "post",
@@ -527,7 +561,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         return GetResult(
             ids=resp_json["ids"],
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadatas,  # type: ignore
+            metadatas=metadatas,
             documents=resp_json.get("documents", None),
             data=None,
             uris=resp_json.get("uris", None),
@@ -723,7 +757,7 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             ids=resp_json["ids"],
             distances=resp_json.get("distances", None),
             embeddings=resp_json.get("embeddings", None),
-            metadatas=metadata_batches,  # type: ignore
+            metadatas=metadata_batches,
             documents=resp_json.get("documents", None),
             uris=resp_json.get("uris", None),
             data=None,

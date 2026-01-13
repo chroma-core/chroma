@@ -12,7 +12,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[cfg(feature = "pyo3")]
-use pyo3::types::PyAnyMethods;
+use pyo3::{exceptions::PyValueError, types::PyAnyMethods};
 
 /// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
@@ -132,6 +132,10 @@ pub struct Collection {
     pub updated_at: SystemTime,
     #[serde(skip)]
     pub database_id: DatabaseUuid,
+    /// Number of consecutive compaction failures for this collection.
+    /// Used by the scheduler to track and skip collections that repeatedly fail compaction.
+    #[serde(skip)]
+    pub compaction_failure_count: i32,
 }
 
 impl Default for Collection {
@@ -155,6 +159,7 @@ impl Default for Collection {
             lineage_file_path: None,
             updated_at: SystemTime::now(),
             database_id: DatabaseUuid::new(),
+            compaction_failure_count: 0,
         }
     }
 }
@@ -184,6 +189,24 @@ impl Collection {
     }
 
     #[getter]
+    fn schema<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<Option<pyo3::Bound<'py, pyo3::PyAny>>> {
+        match self.schema.as_ref() {
+            Some(schema) => {
+                let schema_json = serde_json::to_string(schema)
+                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+                let res = pyo3::prelude::PyModule::import(py, "json")?
+                    .getattr("loads")?
+                    .call1((schema_json,))?;
+                Ok(Some(res))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[getter]
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -210,14 +233,18 @@ impl Collection {
 }
 
 impl Collection {
-    /// Reconcile the collection schema and configuration, ensuring both are consistent.
-    pub fn reconcile_schema_with_config(&mut self) -> Result<(), SchemaError> {
-        let reconciled_schema =
-            Schema::reconcile_schema_and_config(self.schema.as_ref(), Some(&self.config))?;
-
-        self.config = InternalCollectionConfiguration::try_from(&reconciled_schema)
-            .map_err(|reason| SchemaError::InvalidSchema { reason })?;
-        self.schema = Some(reconciled_schema);
+    /// Reconcile the collection schema and configuration when serving read requests.
+    ///
+    /// The read path needs to tolerate collections that only have a configuration persisted.
+    /// This helper hydrates `schema` from the stored configuration when needed, or regenerates
+    /// the configuration from the existing schema to keep both representations consistent.
+    pub fn reconcile_schema_for_read(&mut self) -> Result<(), SchemaError> {
+        if let Some(schema) = self.schema.as_ref() {
+            self.config = InternalCollectionConfiguration::try_from(schema)
+                .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+        } else {
+            self.schema = Some(Schema::try_from(&self.config)?);
+        }
 
         Ok(())
     }
@@ -311,6 +338,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             lineage_file_path: proto_collection.lineage_file_path,
             updated_at,
             database_id,
+            compaction_failure_count: proto_collection.compaction_failure_count,
         })
     }
 }
@@ -355,6 +383,7 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             lineage_file_path: value.lineage_file_path,
             updated_at: Some(value.updated_at.into()),
             database_id: Some(value.database_id.0.to_string()),
+            compaction_failure_count: value.compaction_failure_count,
         })
     }
 }
@@ -438,6 +467,7 @@ mod test {
                 nanos: 1,
             }),
             database_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+            compaction_failure_count: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(

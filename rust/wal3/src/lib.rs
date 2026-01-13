@@ -4,32 +4,45 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use setsum::Setsum;
+use uuid::Uuid;
 
 mod backoff;
-mod batch_manager;
 mod copy;
 mod cursors;
 mod destroy;
 mod gc;
+pub mod interfaces;
 mod manifest;
-mod manifest_manager;
+mod quorum_writer;
 mod reader;
 mod snapshot_cache;
 mod writer;
 
 pub use backoff::ExponentialBackoff;
-pub use batch_manager::BatchManager;
 pub use copy::copy;
-pub use cursors::{Cursor, CursorName, CursorStore, Witness};
+pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
-pub use manifest::{
-    unprefixed_snapshot_path, Manifest, ManifestAndETag, Snapshot, SnapshotPointer,
+pub use interfaces::repl::{
+    create_repl_factories, ReplicatedFragmentManagerFactory, ReplicatedFragmentOptions,
+    ReplicatedManifestManagerFactory, StorageWrapper,
 };
-pub use manifest_manager::ManifestManager;
-pub use reader::{Limits, LogReader};
+pub use interfaces::s3::{
+    create_s3_factories, upload_parquet, ManifestManager, ManifestReader, S3FragmentManagerFactory,
+    S3FragmentPuller, S3FragmentUploader, S3ManifestManagerFactory,
+};
+pub use interfaces::{
+    BatchManager, FragmentConsumer, FragmentManagerFactory, FragmentPointer, FragmentPublisher,
+    FragmentUploader, ManifestConsumer, ManifestManagerFactory, ManifestPublisher, ManifestWitness,
+    PositionWitness,
+};
+pub use manifest::{
+    unprefixed_snapshot_path, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
+};
+pub use quorum_writer::write_quorum;
+pub use reader::{scan_from_manifest, Limits, LogReader};
 pub use snapshot_cache::SnapshotCache;
-pub use writer::{upload_parquet, LogWriter, MarkDirty};
+pub use writer::{now_micros, LogWriter, MarkDirty};
 
 /////////////////////////////////////////////// Error //////////////////////////////////////////////
 
@@ -74,10 +87,12 @@ pub enum Error {
     EmptyBatch,
     #[error("perform exponential backoff and retry")]
     Backoff,
-    #[error("an internal, otherwise unclassifiable error")]
-    Internal,
+    #[error("an internal, otherwise unclassifiable error ({file}:{line})")]
+    Internal { file: String, line: u32 },
     #[error("could not find FSN in path: {0}")]
     MissingFragmentSequenceNumber(String),
+    #[error("manifest missing for log {log_id}")]
+    ManifestMissing { log_id: Uuid },
     #[error("corrupt manifest: {0}")]
     CorruptManifest(String),
     #[error("corrupt fragment: {0}")]
@@ -91,13 +106,37 @@ pub enum Error {
     #[error("garbage collection: {0}")]
     GarbageCollection(String),
     #[error("garbage collection precondition failed: manifest missing this: {0}")]
-    GarbageCollectionPrecondition(SnapshotPointerOrFragmentSeqNo),
+    GarbageCollectionPrecondition(SnapshotPointerOrFragmentIdentifier),
     #[error("scrub error: {0}")]
     ScrubError(#[from] Box<ScrubError>),
     #[error("parquet error: {0}")]
     ParquetError(#[from] Arc<parquet::errors::ParquetError>),
     #[error("storage error: {0}")]
     StorageError(#[from] Arc<chroma_storage::StorageError>),
+    #[error("overflow error: {0}")]
+    Overflow(String),
+    #[error("replication error:  failed to replicate")]
+    ReplicationError,
+    #[error("replication consistency error: {0}")]
+    ReplicationConsistencyError(String),
+    #[error("replication batch too large: {messages_len} messages exceeds limit {limit}")]
+    ReplicationBatchTooLarge { messages_len: u64, limit: u64 },
+    #[error("spanner-related error: {0}")]
+    SpannerError(#[from] Arc<google_cloud_spanner::client::Error>),
+    #[error("spanner-row-related error: {0}")]
+    SpannerRowError(#[from] Arc<google_cloud_spanner::row::Error>),
+    #[error("spanner-session-related error: {0}")]
+    SpannerSessionError(#[from] Arc<google_cloud_spanner::session::SessionError>),
+    #[error("tonic-related error: {0}")]
+    TonicError(#[from] tonic::Status),
+}
+
+impl Error {
+    pub fn internal(file: impl Into<String>, line: impl Into<u32>) -> Self {
+        let file = file.into();
+        let line = line.into();
+        Self::Internal { file, line }
+    }
 }
 
 impl chroma_error::ChromaError for Error {
@@ -114,8 +153,9 @@ impl chroma_error::ChromaError for Error {
             Self::LogClosed => chroma_error::ErrorCodes::FailedPrecondition,
             Self::EmptyBatch => chroma_error::ErrorCodes::InvalidArgument,
             Self::Backoff => chroma_error::ErrorCodes::Unavailable,
-            Self::Internal => chroma_error::ErrorCodes::Internal,
+            Self::Internal { .. } => chroma_error::ErrorCodes::Internal,
             Self::MissingFragmentSequenceNumber(_) => chroma_error::ErrorCodes::Internal,
+            Self::ManifestMissing { .. } => chroma_error::ErrorCodes::NotFound,
             Self::CorruptManifest(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptFragment(_) => chroma_error::ErrorCodes::DataLoss,
             Self::CorruptCursor(_) => chroma_error::ErrorCodes::DataLoss,
@@ -126,6 +166,42 @@ impl chroma_error::ChromaError for Error {
             Self::ScrubError(_) => chroma_error::ErrorCodes::DataLoss,
             Self::ParquetError(_) => chroma_error::ErrorCodes::Unknown,
             Self::StorageError(storage) => storage.code(),
+            Self::Overflow(_) => chroma_error::ErrorCodes::InvalidArgument,
+            Self::ReplicationError => chroma_error::ErrorCodes::Unavailable,
+            Self::ReplicationConsistencyError(_) => chroma_error::ErrorCodes::DataLoss,
+            Self::ReplicationBatchTooLarge { .. } => chroma_error::ErrorCodes::InvalidArgument,
+            Self::SpannerError(_) => chroma_error::ErrorCodes::Internal,
+            Self::SpannerRowError(_) => chroma_error::ErrorCodes::Internal,
+            Self::SpannerSessionError(_) => chroma_error::ErrorCodes::Internal,
+            Self::TonicError(t) => t.code().into(),
+        }
+    }
+}
+
+impl From<google_cloud_spanner::client::Error> for Error {
+    fn from(err: google_cloud_spanner::client::Error) -> Self {
+        Self::SpannerError(Arc::new(err))
+    }
+}
+
+impl From<google_cloud_spanner::row::Error> for Error {
+    fn from(err: google_cloud_spanner::row::Error) -> Self {
+        Self::SpannerRowError(Arc::new(err))
+    }
+}
+
+impl From<google_cloud_spanner::session::SessionError> for Error {
+    fn from(err: google_cloud_spanner::session::SessionError) -> Self {
+        Self::SpannerSessionError(Arc::new(err))
+    }
+}
+
+impl google_cloud_gax::retry::TryAs<tonic::Status> for Error {
+    fn try_as(&self) -> Option<&tonic::Status> {
+        if let Self::TonicError(t) = self {
+            Some(t)
+        } else {
+            None
         }
     }
 }
@@ -133,29 +209,29 @@ impl chroma_error::ChromaError for Error {
 ///////////////////////////////////// SnapshotPointerOrFragment ////////////////////////////////////
 
 #[derive(Clone, Debug)]
-pub enum SnapshotPointerOrFragmentSeqNo {
+pub enum SnapshotPointerOrFragmentIdentifier {
     SnapshotPointer(SnapshotPointer),
-    FragmentSeqNo(u64),
+    FragmentIdentifier(FragmentIdentifier),
     Stringy(String),
 }
 
-impl From<SnapshotPointer> for SnapshotPointerOrFragmentSeqNo {
+impl From<SnapshotPointer> for SnapshotPointerOrFragmentIdentifier {
     fn from(inner: SnapshotPointer) -> Self {
         Self::SnapshotPointer(inner)
     }
 }
 
-impl From<u64> for SnapshotPointerOrFragmentSeqNo {
-    fn from(inner: u64) -> Self {
-        Self::FragmentSeqNo(inner)
+impl From<FragmentIdentifier> for SnapshotPointerOrFragmentIdentifier {
+    fn from(inner: FragmentIdentifier) -> Self {
+        Self::FragmentIdentifier(inner)
     }
 }
 
-impl std::fmt::Display for SnapshotPointerOrFragmentSeqNo {
+impl std::fmt::Display for SnapshotPointerOrFragmentIdentifier {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             Self::SnapshotPointer(ptr) => write!(f, "Snapshot({:?})", ptr.path_to_snapshot),
-            Self::FragmentSeqNo(seq) => write!(f, "Fragment({})", *seq),
+            Self::FragmentIdentifier(ident) => write!(f, "Fragment({ident})"),
             Self::Stringy(s) => write!(f, "Stringy({s})"),
         }
     }
@@ -179,7 +255,7 @@ pub enum ScrubError {
     #[error("CorruptFragment: {seq_no} {what}")]
     CorruptFragment {
         manifest: String,
-        seq_no: FragmentSeqNo,
+        seq_no: FragmentIdentifier,
         what: String,
     },
     #[error("MismatchedPath: {reference:?} expected {:?} got {:?}", reference.path, empirical.path)]
@@ -494,17 +570,41 @@ pub struct GarbageCollectionOptions {
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
 
-/// A FragmentSeqNo is an identifier that corresponds to the the number of fragments that have been
-/// issued prior to the segment with this FragmentSeqNo.
-#[derive(
-    Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
-)]
-pub struct FragmentSeqNo(pub u64);
+/// A FragmentSeqNo is a form of strongly-typed identifier for sequence numbers that identify
+/// fragments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
+pub struct FragmentSeqNo(u64);
+
+impl PartialOrd for FragmentSeqNo {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FragmentSeqNo {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
+    }
+}
 
 impl FragmentSeqNo {
-    const BEGIN: FragmentSeqNo = FragmentSeqNo(1);
+    /// The first fragment sequence number.
+    pub const BEGIN: FragmentSeqNo = FragmentSeqNo(1);
 
-    /// Returns the successor of this FragmentSeqNo, or None if this FragmentSeqNo is the maximum
+    /// The zero fragment sequence number (before any fragments).
+    pub const ZERO: FragmentSeqNo = FragmentSeqNo(0);
+
+    /// Creates a new FragmentSeqNo from a u64.
+    pub fn from_u64(value: u64) -> Self {
+        FragmentSeqNo(value)
+    }
+
+    /// Returns the inner u64 value.
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+
+    /// Returns the successor of this FragmentSeqNo, or None if this is the maximum.
     pub fn successor(&self) -> Option<Self> {
         if self.0 == u64::MAX {
             None
@@ -513,7 +613,7 @@ impl FragmentSeqNo {
         }
     }
 
-    // Round down to the nearest multiple of 5k.
+    /// Round down to the nearest multiple of 4k.
     pub fn bucket(&self) -> u64 {
         (self.0 / 4_096) * 4_096
     }
@@ -525,33 +625,122 @@ impl std::fmt::Display for FragmentSeqNo {
     }
 }
 
-impl std::ops::Add<FragmentSeqNo> for u64 {
-    type Output = FragmentSeqNo;
+/////////////////////////////////////////// FragmentUuid ///////////////////////////////////////////
 
-    fn add(self, rhs: FragmentSeqNo) -> Self::Output {
-        FragmentSeqNo(self.wrapping_add(rhs.0))
+/// A FragmentUuid is a form of strongly-typed identifier for uuids that identify fragments.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize)]
+pub struct FragmentUuid(Uuid);
+
+impl FragmentUuid {
+    pub fn generate() -> Self {
+        Self(Uuid::now_v7())
     }
 }
 
-impl std::ops::Add<u64> for FragmentSeqNo {
-    type Output = FragmentSeqNo;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        FragmentSeqNo(self.0.wrapping_add(rhs))
+impl PartialOrd for FragmentUuid {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
     }
 }
 
-impl std::ops::Sub<FragmentSeqNo> for FragmentSeqNo {
-    type Output = u64;
-
-    fn sub(self, rhs: FragmentSeqNo) -> Self::Output {
-        self.0.wrapping_sub(rhs.0)
+impl Ord for FragmentUuid {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.cmp(&other.0)
     }
 }
 
-impl std::ops::AddAssign<u64> for FragmentSeqNo {
-    fn add_assign(&mut self, rhs: u64) {
-        self.0 = self.0.wrapping_add(rhs);
+impl FragmentUuid {
+    /// Creates a new FragmentUuid from a Uuid.
+    pub fn from_uuid(uuid: Uuid) -> Self {
+        FragmentUuid(uuid)
+    }
+
+    /// Returns the underlying UUID as a little-endian u128.
+    pub fn as_u128_le(&self) -> u128 {
+        self.0.to_u128_le()
+    }
+}
+
+impl std::fmt::Display for FragmentUuid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+//////////////////////////////////////// FragmentIdentifier ////////////////////////////////////////
+
+/// A FragmentIdentifier uniquely identifies a fragment within a log.
+///
+/// There are two variants:
+/// - `SeqNo(u64)`: A sequential number assigned in order of fragment creation. This variant
+///   supports operations like `successor()` and range-based garbage collection.
+/// - `Uuid(Uuid)`: A universally unique identifier. UUIDs are ordered by their byte
+///   representation, which for UUID v7 corresponds to temporal ordering.
+///
+/// A manifest must contain fragments of only one variant type (enforced by scrubbing).
+///
+/// Ordering: `SeqNo` variants compare by their inner u64. `Uuid` variants compare by their byte
+/// representation. Cross-variant comparison orders all `SeqNo` values before all `Uuid` values,
+/// but this should not occur in practice since manifests enforce uniformity.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash, serde::Deserialize, serde::Serialize,
+)]
+#[serde(untagged)]
+pub enum FragmentIdentifier {
+    /// Sequential fragment identifier. Supports successor() and range-based operations.
+    SeqNo(FragmentSeqNo),
+    /// UUID-based fragment identifier. Ordered by byte representation.
+    Uuid(FragmentUuid),
+}
+
+impl FragmentIdentifier {
+    /// The first fragment identifier.
+    pub const BEGIN: FragmentIdentifier = FragmentIdentifier::SeqNo(FragmentSeqNo::BEGIN);
+
+    /// Returns the inner u64 for SeqNo variants, or None for Uuid variants.
+    pub fn as_seq_no(&self) -> Option<FragmentSeqNo> {
+        match self {
+            FragmentIdentifier::SeqNo(x) => Some(*x),
+            FragmentIdentifier::Uuid(_) => None,
+        }
+    }
+
+    /// Returns the inner Uuid for Uuid variants, or None for SeqNo variants.
+    pub fn as_uuid(&self) -> Option<FragmentUuid> {
+        match self {
+            FragmentIdentifier::SeqNo(_) => None,
+            FragmentIdentifier::Uuid(u) => Some(*u),
+        }
+    }
+
+    /// Returns the successor of this FragmentIdentifier, or None if this is the maximum or is a
+    /// Uuid.
+    pub fn successor(&self) -> Option<Self> {
+        match self {
+            FragmentIdentifier::SeqNo(x) => x.successor().map(FragmentIdentifier::SeqNo),
+            FragmentIdentifier::Uuid(_) => None,
+        }
+    }
+}
+
+impl std::fmt::Display for FragmentIdentifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FragmentIdentifier::SeqNo(x) => write!(f, "{x}"),
+            FragmentIdentifier::Uuid(u) => write!(f, "{u}"),
+        }
+    }
+}
+
+impl From<FragmentSeqNo> for FragmentIdentifier {
+    fn from(seq_no: FragmentSeqNo) -> Self {
+        Self::SeqNo(seq_no)
+    }
+}
+
+impl From<FragmentUuid> for FragmentIdentifier {
+    fn from(uuid: FragmentUuid) -> Self {
+        Self::Uuid(uuid)
     }
 }
 
@@ -561,7 +750,7 @@ impl std::ops::AddAssign<u64> for FragmentSeqNo {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct Fragment {
     pub path: String,
-    pub seq_no: FragmentSeqNo,
+    pub seq_no: FragmentIdentifier,
     pub start: LogPosition,
     pub limit: LogPosition,
     pub num_bytes: u64,
@@ -602,34 +791,57 @@ where
 
 ////////////////////////////////////////// Fragment Paths //////////////////////////////////////////
 
-pub fn fragment_prefix() -> String {
-    "log/".to_string()
+const FRAGMENT_PREFIX_WITH_TRAILING_SLASH: &str = "log/";
+
+pub fn prefixed_fragment_path(prefix: &str, fragment_id: FragmentIdentifier) -> String {
+    format!("{prefix}/{}", unprefixed_fragment_path(fragment_id))
 }
 
-pub fn prefixed_fragment_path(prefix: &str, fragment_seq_no: FragmentSeqNo) -> String {
-    format!(
-        "{}/{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
-        prefix,
-        fragment_prefix(),
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
-    )
+pub fn unprefixed_fragment_path(fragment_id: FragmentIdentifier) -> String {
+    // NOTE(rescrv):  The SeqNo case uses a bucket prefix to FragmentSeqNo.  This was done to aid
+    // in spreading reads out.  Research since then has shown this to be unnecessary since 2018
+    // when Amazon started splitting at more than just '/' characters.
+    //
+    // For that reason we don't prefix the UUID.
+    match fragment_id {
+        FragmentIdentifier::SeqNo(seq_no) => {
+            let bucket = seq_no.bucket();
+            format!(
+                "{}Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
+                FRAGMENT_PREFIX_WITH_TRAILING_SLASH,
+                bucket,
+                seq_no.as_u64(),
+            )
+        }
+        FragmentIdentifier::Uuid(uuid) => {
+            format!(
+                "{}Uuid={}.parquet",
+                FRAGMENT_PREFIX_WITH_TRAILING_SLASH, uuid,
+            )
+        }
+    }
 }
 
-pub fn unprefixed_fragment_path(fragment_seq_no: FragmentSeqNo) -> String {
-    format!(
-        "log/Bucket={:016x}/FragmentSeqNo={:016x}.parquet",
-        fragment_seq_no.bucket(),
-        fragment_seq_no.0,
-    )
-}
-
-pub fn parse_fragment_path(path: &str) -> Option<FragmentSeqNo> {
-    // FragmentSeqNo is always in the basename.
+pub fn parse_fragment_path(path: &str) -> Option<FragmentIdentifier> {
+    // FragmentIdentifier is always in the basename.
     let (_, basename) = path.rsplit_once('/')?;
-    let fsn_equals_number = basename.strip_suffix(".parquet")?;
-    let number = fsn_equals_number.strip_prefix("FragmentSeqNo=")?;
-    u64::from_str_radix(number, 16).ok().map(FragmentSeqNo)
+    let name = basename.strip_suffix(".parquet")?;
+    if let Some(number) = name.strip_prefix("FragmentSeqNo=") {
+        u64::from_str_radix(number, 16)
+            .ok()
+            .map(|n| FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(n)))
+    } else if let Some(uuid_str) = name.strip_prefix("Uuid=") {
+        uuid_str
+            .parse()
+            .ok()
+            .map(|u| FragmentIdentifier::Uuid(FragmentUuid::from_uuid(u)))
+    } else {
+        None
+    }
+}
+
+pub fn fragment_path(prefix: &str, path: &str) -> String {
+    format!("{prefix}/{path}")
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -642,7 +854,235 @@ mod tests {
     fn paths() {
         assert_eq!(
             "THIS_IS_THE_COLLECTION/log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet",
-            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentSeqNo(1))
+            prefixed_fragment_path("THIS_IS_THE_COLLECTION", FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)))
+        );
+    }
+
+    #[test]
+    fn paths_uuid() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let path = prefixed_fragment_path(
+            "THIS_IS_THE_COLLECTION",
+            FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid)),
+        );
+        println!("prefixed_fragment_path(Uuid(...)): {path}");
+        assert_eq!(
+            "THIS_IS_THE_COLLECTION/log/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet",
+            path
+        );
+    }
+
+    #[test]
+    fn prefixed_fragment_path_seq_no_round_trip() {
+        let original = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(4097));
+        let path = prefixed_fragment_path("test_prefix", original);
+        println!("prefixed_fragment_path(SeqNo(4097)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn prefixed_fragment_path_uuid_round_trip() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let original = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid));
+        let path = prefixed_fragment_path("test_prefix", original);
+        println!("prefixed_fragment_path(Uuid(...)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn fragment_identifier_serde_round_trip() {
+        let original = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42));
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42)): {serialized}");
+        let deserialized: FragmentIdentifier =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn fragment_identifier_uuid_serde_round_trip() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let original = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid));
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized FragmentIdentifier::Uuid(...): {serialized}");
+        let deserialized: FragmentIdentifier =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn parse_fragment_path_seq_no() {
+        let path = "prefix/log/Bucket=0000000000001000/FragmentSeqNo=0000000000001234.parquet";
+        let result = parse_fragment_path(path);
+        assert_eq!(
+            result,
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0x1234)))
+        );
+    }
+
+    #[test]
+    fn parse_fragment_path_uuid() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let path = "prefix/log/Uuid=550e8400-e29b-41d4-a716-446655440000.parquet";
+        let result = parse_fragment_path(path);
+        assert_eq!(
+            result,
+            Some(FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid)))
+        );
+    }
+
+    #[test]
+    fn parse_fragment_path_invalid() {
+        let path = "prefix/log/Unknown=something.parquet";
+        let result = parse_fragment_path(path);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn unprefixed_fragment_path_seq_no_round_trip() {
+        let original = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(4097));
+        let path = unprefixed_fragment_path(original);
+        println!("unprefixed_fragment_path(SeqNo(4097)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn unprefixed_fragment_path_uuid_round_trip() {
+        let uuid = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let original = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid));
+        let path = unprefixed_fragment_path(original);
+        println!("unprefixed_fragment_path(Uuid(...)): {path}");
+        let parsed = parse_fragment_path(&path);
+        assert_eq!(parsed, Some(original));
+    }
+
+    #[test]
+    fn fragment_identifier_seq_no_ordering() {
+        let a = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1));
+        let b = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2));
+        let c = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100));
+
+        assert!(a < b);
+        assert!(b < c);
+        assert!(a < c);
+        assert!(b > a);
+        assert!(c > b);
+        assert!(c > a);
+
+        let same1 = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42));
+        let same2 = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42));
+        assert_eq!(same1.cmp(&same2), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn fragment_identifier_uuid_ordering() {
+        // UUIDs are ordered by their byte representation.
+        // These UUIDs differ in their last byte for easy comparison.
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let uuid3 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap();
+
+        let a = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1));
+        let b = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2));
+        let c = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid3));
+
+        println!("uuid1: {uuid1}");
+        println!("uuid2: {uuid2}");
+        println!("uuid3: {uuid3}");
+
+        assert!(a < b, "uuid1 should be less than uuid2");
+        assert!(b < c, "uuid2 should be less than uuid3");
+        assert!(a < c, "uuid1 should be less than uuid3");
+        assert!(b > a, "uuid2 should be greater than uuid1");
+        assert!(c > b, "uuid3 should be greater than uuid2");
+        assert!(c > a, "uuid3 should be greater than uuid1");
+
+        let same1 = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2));
+        let same2 = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2));
+        assert_eq!(same1.cmp(&same2), std::cmp::Ordering::Equal);
+    }
+
+    #[test]
+    fn fragment_identifier_cross_variant_ordering() {
+        // Cross-variant comparison: SeqNo < Uuid
+        let seq_no = FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(u64::MAX));
+        let uuid = FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid::Uuid::nil()));
+
+        assert!(
+            seq_no < uuid,
+            "SeqNo should always be less than Uuid in cross-variant comparison"
+        );
+        assert!(
+            uuid > seq_no,
+            "Uuid should always be greater than SeqNo in cross-variant comparison"
+        );
+    }
+
+    #[test]
+    fn fragment_identifier_sorting() {
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+
+        let mut seq_nos = vec![
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+        ];
+        seq_nos.sort();
+        assert_eq!(
+            seq_nos,
+            vec![
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
+            ]
+        );
+
+        let mut uuids = vec![
+            FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+        ];
+        uuids.sort();
+        assert_eq!(
+            uuids,
+            vec![
+                FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+                FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            ]
+        );
+    }
+
+    #[test]
+    fn fragment_identifier_max_finds_correct_value() {
+        // Test that .max() works correctly for SeqNo
+        let fragments_seq = [
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(8)),
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+        ];
+        let max_seq = fragments_seq.iter().max();
+        assert_eq!(
+            max_seq,
+            Some(&FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(8)))
+        );
+
+        // Test that .max() works correctly for Uuid
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let uuid3 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440003").unwrap();
+        let fragments_uuid = [
+            FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+            FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid3)),
+        ];
+        let max_uuid = fragments_uuid.iter().max();
+        assert_eq!(
+            max_uuid,
+            Some(&FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid3)))
         );
     }
 }

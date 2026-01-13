@@ -321,6 +321,33 @@ message FlushCollectionCompactionResponse {
   int64 last_compaction_time = 3;
 }
 
+// AttachedFunction update information for transactional flush operations
+message AttachedFunctionUpdateInfo {
+  string id = 1;
+  uint64 completion_offset = 2;
+}
+
+// Combined request to flush collection compaction and update attached function atomically in a single transaction
+message FlushCollectionCompactionAndAttachedFunctionRequest {
+  repeated FlushCollectionCompactionRequest flush_compactions = 1;
+  AttachedFunctionUpdateInfo attached_function_update = 2;
+}
+
+message CollectionCompactionInfo {
+  string collection_id = 1;
+  int32 collection_version = 2;
+  int64 last_compaction_time = 3;
+}
+
+message AttachedFunctionState {
+  uint64 completion_offset = 1;
+}
+
+message FlushCollectionCompactionAndAttachedFunctionResponse {
+  repeated CollectionCompactionInfo collections = 1;
+  AttachedFunctionState attached_function_state = 2;
+}
+
 // Used for serializing contents in collection version history file.
 message CollectionVersionFile {
   CollectionInfoImmutable collection_info_immutable = 1;
@@ -526,85 +553,119 @@ message BatchGetCollectionSoftDeleteStatusResponse {
   map<string, bool> collection_id_to_is_soft_deleted = 1;
 }
 
-message CreateTaskRequest {
+message AttachFunctionRequest {
   string name = 1;
-  string operator_name = 2;
+  string function_name = 2;
   string input_collection_id = 3;
   string output_collection_name = 4;
   optional google.protobuf.Struct params = 5;
   string tenant_id = 6;
   string database = 7;
-  uint64 min_records_for_task = 8;
+  uint64 min_records_for_invocation = 8;
 }
 
-message CreateTaskResponse {
-  string task_id = 1;
+message AttachFunctionResponse {
+  AttachedFunction attached_function = 1;
+  bool created = 2;  // True if newly created, false if already existed (idempotent)
 }
 
-message GetTaskByNameRequest {
-  string input_collection_id = 1;
-  string task_name = 2;
-}
-
-message GetTaskByNameResponse {
-  optional string task_id = 1;
+message GetAttachedFunctionsRequest {
+  // All parameters are optional - nil means don't filter on that field
+  // - id: Filter by attached function ID (UUID string)
+  // - name: Filter by attached function name
+  // - input_collection_id: Filter by input collection ID
+  // - only_ready: If true, only returns attached functions where is_ready = true (default: true)
+  optional string id = 1;
   optional string name = 2;
-  optional string operator_name = 3;
-  optional string input_collection_id = 4;
-  optional string output_collection_name = 5;
+  optional string input_collection_id = 3;
+  optional bool only_ready = 4;
+}
+
+message GetAttachedFunctionsResponse {
+  repeated AttachedFunction attached_functions = 1;
+}
+
+message AttachedFunction {
+  string id = 1;
+  string name = 2;
+  string function_name = 3;
+  string input_collection_id = 4;
+  string output_collection_name = 5;
   optional string output_collection_id = 6;
   optional google.protobuf.Struct params = 7;
-  optional int64 completion_offset = 8;
-  optional uint64 min_records_for_task = 9;
-  optional string tenant_id = 10;
-  optional string database_id = 11;
+  uint64 completion_offset = 8;
+  uint64 min_records_for_invocation = 9;
+  string tenant_id = 10;
+  string database_id = 11;
+  uint64 created_at = 15;
+  uint64 updated_at = 16;
+  string function_id = 17;
 }
 
-message DeleteTaskRequest {
-  string input_collection_id = 1;
-  string task_name = 2;
-  bool delete_output = 3; // If true and output_collection_id is not null, atomically soft-delete the output collection
+message DetachFunctionRequest {
+  string name = 1;
+  bool delete_output = 2; // If true and output_collection_id is not null, atomically soft-delete the output collection
+  string input_collection_id = 3;
 }
 
-message DeleteTaskResponse {
+message DetachFunctionResponse {
   bool success = 1;
 }
 
-message AdvanceTaskRequest {
-  optional string collection_id = 1;
-  optional string task_id = 2;
-  optional string task_run_nonce = 3;
+message FinishCreateAttachedFunctionRequest {
+  string id = 1;
+  string output_collection_schema_str = 2;  // Schema JSON for the output collection
 }
 
-message AdvanceTaskResponse {}
+message FinishCreateAttachedFunctionResponse {
+  bool created = 1;  // True if newly created, false if already existed (idempotent)
+}
 
-message Operator {
+message CleanupExpiredPartialAttachedFunctionsRequest {
+  // Attached functions older than this will be deleted
+  uint64 max_age_seconds = 1;
+}
+
+message CleanupExpiredPartialAttachedFunctionsResponse {
+  // Number of attached functions that were cleaned up
+  uint64 cleaned_up_count = 1;
+  // List of attached function IDs that were cleaned up
+  repeated string cleaned_up_ids = 2;
+}
+
+message Function {
   string id = 1;
   string name = 2;
 }
 
-message GetOperatorsRequest {
-  // Empty request - returns all operators
+message GetFunctionsRequest {
+  // Empty request - returns all functions
 }
 
-message GetOperatorsResponse {
-  repeated Operator operators = 1;
+message GetFunctionsResponse {
+  repeated Function functions = 1;
 }
 
-message PeekScheduleByCollectionIdRequest {
-  repeated string collection_id = 1;
+message GetAttachedFunctionsToGcRequest {
+  google.protobuf.Timestamp cutoff_time = 1;
+  int32 limit = 2;
 }
 
-message ScheduleEntry {
-  optional string collection_id = 1;
-  optional string task_id = 2;
-  optional string task_run_nonce = 3;
-  optional uint64 when_to_run = 4;
+message GetAttachedFunctionsToGcResponse {
+  repeated AttachedFunction attached_functions = 1;
 }
 
-message PeekScheduleByCollectionIdResponse {
-  repeated ScheduleEntry schedule = 1;
+message FinishAttachedFunctionDeletionRequest {
+  string attached_function_id = 1;
 }
+
+message FinishAttachedFunctionDeletionResponse {}
+
+message IncrementCompactionFailureCountRequest {
+  string collection_id = 1;
+}
+
+message IncrementCompactionFailureCountResponse {}
 
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
@@ -634,7 +695,6 @@ service SysDB {
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
-  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
   rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
   rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
   rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
@@ -643,10 +703,15 @@ service SysDB {
   rpc DeleteCollectionVersion(DeleteCollectionVersionRequest) returns (DeleteCollectionVersionResponse) {}
   rpc BatchGetCollectionVersionFilePaths(BatchGetCollectionVersionFilePathsRequest) returns (BatchGetCollectionVersionFilePathsResponse) {}
   rpc BatchGetCollectionSoftDeleteStatus(BatchGetCollectionSoftDeleteStatusRequest) returns (BatchGetCollectionSoftDeleteStatusResponse) {}
-  rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse) {}
-  rpc GetTaskByName(GetTaskByNameRequest) returns (GetTaskByNameResponse) {}
-  rpc DeleteTask(DeleteTaskRequest) returns (DeleteTaskResponse) {}
-  rpc AdvanceTask(AdvanceTaskRequest) returns (AdvanceTaskResponse) {}
-  rpc GetOperators(GetOperatorsRequest) returns (GetOperatorsResponse) {}
-  rpc PeekScheduleByCollectionId(PeekScheduleByCollectionIdRequest) returns (PeekScheduleByCollectionIdResponse) {}
+  rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
+  rpc AttachFunction(AttachFunctionRequest) returns (AttachFunctionResponse) {}
+  rpc GetAttachedFunctions(GetAttachedFunctionsRequest) returns (GetAttachedFunctionsResponse) {}
+  rpc DetachFunction(DetachFunctionRequest) returns (DetachFunctionResponse) {}
+  rpc FinishCreateAttachedFunction(FinishCreateAttachedFunctionRequest) returns (FinishCreateAttachedFunctionResponse) {}
+  rpc CleanupExpiredPartialAttachedFunctions(CleanupExpiredPartialAttachedFunctionsRequest) returns (CleanupExpiredPartialAttachedFunctionsResponse) {}
+  rpc GetFunctions(GetFunctionsRequest) returns (GetFunctionsResponse) {}
+  rpc GetAttachedFunctionsToGc(GetAttachedFunctionsToGcRequest) returns (GetAttachedFunctionsToGcResponse) {}
+  rpc FinishAttachedFunctionDeletion(FinishAttachedFunctionDeletionRequest) returns (FinishAttachedFunctionDeletionResponse) {}
+  rpc FlushCollectionCompactionAndAttachedFunction(FlushCollectionCompactionAndAttachedFunctionRequest) returns (FlushCollectionCompactionAndAttachedFunctionResponse) {}
+  rpc IncrementCompactionFailureCount(IncrementCompactionFailureCountRequest) returns (IncrementCompactionFailureCountResponse) {}
 }

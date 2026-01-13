@@ -5,8 +5,8 @@ use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
-    CollectionUuid, ForkCollectionError, ForkLogsResponse, LogRecord, OperationRecord, ResetError,
-    ResetResponse,
+    Cmek, CollectionUuid, ForkCollectionError, ForkLogsResponse, LogRecord, OperationRecord,
+    ResetError, ResetResponse,
 };
 use std::fmt::Debug;
 
@@ -99,6 +99,7 @@ impl Log {
         tenant: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(log) => log
@@ -106,7 +107,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .push_logs(collection_id, records)
+                .push_logs(collection_id, records, cmek)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
@@ -166,8 +167,7 @@ impl Log {
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => {
                 log.update_collection_log_offset(collection_id, new_offset)
-                    .await;
-                Ok(())
+                    .await
             }
         }
     }

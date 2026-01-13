@@ -14,6 +14,10 @@ fn default_max_query_service_response_size_bytes() -> usize {
     1024 * 1024 * 32
 }
 
+fn default_query_service_port() -> u16 {
+    50051
+}
+
 /// Configuration for the distributed executor.
 /// # Fields
 /// - `connections_per_node` - The number of connections to maintain per node
@@ -22,6 +26,7 @@ fn default_max_query_service_response_size_bytes() -> usize {
 /// - `request_timeout_ms` - The timeout for the request
 /// - `assignment` - The assignment policy to use for routing requests
 /// - `memberlist_provider` - The memberlist provider to use for getting the list of nodes
+/// - `port` - The port the query service listens on. Defaults to 50051.
 #[derive(Deserialize, Clone, Serialize, Debug)]
 pub struct DistributedExecutorConfig {
     pub connections_per_node: usize,
@@ -35,7 +40,9 @@ pub struct DistributedExecutorConfig {
     #[serde(default = "default_max_query_service_response_size_bytes")]
     pub max_query_service_response_size_bytes: usize,
     #[serde(default = "ClientSelectionConfig::default")]
-    pub client_selection_config: ClientSelectionConfig,
+    pub client_selection: ClientSelectionConfig,
+    #[serde(default = "default_query_service_port")]
+    pub port: u16,
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]

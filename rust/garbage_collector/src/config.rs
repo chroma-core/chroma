@@ -28,12 +28,22 @@ pub struct GarbageCollectorConfig {
     )]
     pub(super) collection_soft_delete_grace_period: Duration,
     #[serde(
+        rename = "attached_function_soft_delete_grace_period_seconds",
+        deserialize_with = "deserialize_duration_from_seconds",
+        default = "GarbageCollectorConfig::default_attached_function_soft_delete_grace_period"
+    )]
+    pub(super) attached_function_soft_delete_grace_period: Duration,
+    #[serde(
         rename = "version_relative_cutoff_time_seconds",
         alias = "relative_cutoff_time_seconds",
         deserialize_with = "deserialize_duration_from_seconds"
     )]
     pub(super) version_cutoff_time: Duration,
     pub(super) max_collections_to_gc: u32,
+    #[serde(
+        default = "GarbageCollectorConfig::default_max_concurrent_list_files_operations_per_collection"
+    )]
+    pub(super) max_concurrent_list_files_operations_per_collection: usize,
     pub(super) max_collections_to_fetch: Option<u32>,
     pub(super) gc_interval_mins: u32,
     #[serde(default = "GarbageCollectorConfig::default_min_versions_to_keep")]
@@ -42,6 +52,8 @@ pub struct GarbageCollectorConfig {
     pub(super) filter_min_versions_if_alive: Option<u64>,
     pub(super) disallow_collections: HashSet<CollectionUuid>,
     pub sysdb_config: chroma_sysdb::GrpcSysDbConfig,
+    #[serde(default)]
+    pub mcmr_sysdb_config: Option<chroma_sysdb::GrpcSysDbConfig>,
     pub dispatcher_config: DispatcherConfig,
     pub storage_config: StorageConfig,
     #[serde(default)]
@@ -63,11 +75,21 @@ pub struct GarbageCollectorConfig {
     pub log: LogConfig,
     #[serde(default)]
     pub enable_dangerous_option_to_ignore_min_versions_for_wal3: bool,
+    #[serde(default = "GarbageCollectorConfig::default_heap_prune_buckets_to_read")]
+    pub heap_prune_buckets_to_read: u32,
+    #[serde(default = "GarbageCollectorConfig::default_heap_prune_max_items")]
+    pub heap_prune_max_items: u32,
+    #[serde(default = "GarbageCollectorConfig::default_max_attached_functions_to_gc_per_run")]
+    pub max_attached_functions_to_gc_per_run: i32,
 }
 
 impl GarbageCollectorConfig {
     fn default_min_versions_to_keep() -> u32 {
         2
+    }
+
+    fn default_max_concurrent_list_files_operations_per_collection() -> usize {
+        10
     }
 
     fn default_filter_min_versions_if_alive() -> Option<u64> {
@@ -109,6 +131,22 @@ impl GarbageCollectorConfig {
 
     fn default_collection_soft_delete_grace_period() -> Duration {
         Duration::from_secs(60 * 60 * 24) // 1 day
+    }
+
+    fn default_attached_function_soft_delete_grace_period() -> Duration {
+        Duration::from_secs(60 * 60 * 24) // 1 day
+    }
+
+    fn default_heap_prune_buckets_to_read() -> u32 {
+        10 // Scan up to 10 time buckets per shard
+    }
+
+    fn default_heap_prune_max_items() -> u32 {
+        10000 // Prune up to 10k items per shard per GC pass
+    }
+
+    fn default_max_attached_functions_to_gc_per_run() -> i32 {
+        100
     }
 
     fn enable_log_gc_for_tenant_threshold() -> String {

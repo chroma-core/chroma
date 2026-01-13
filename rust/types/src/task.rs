@@ -1,144 +1,160 @@
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 use std::time::SystemTime;
-use uuid::Uuid;
 
 use crate::CollectionUuid;
 
-/// TaskUuid is a wrapper around Uuid to provide a type for task identifiers.
-#[derive(
-    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
-)]
-#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct TaskUuid(pub Uuid);
+define_uuid_newtype!(
+    /// JobId is a wrapper around Uuid to provide a unified type for job identifiers.
+    /// Jobs can be either collection compaction jobs or task execution jobs.
+    JobId,
+    new_v4
+);
 
-impl TaskUuid {
-    pub fn new() -> Self {
-        TaskUuid(Uuid::new_v4())
+// Custom From implementations for JobId
+impl From<CollectionUuid> for JobId {
+    fn from(collection_uuid: CollectionUuid) -> Self {
+        JobId(collection_uuid.0)
     }
 }
 
-impl std::str::FromStr for TaskUuid {
-    type Err = uuid::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match Uuid::parse_str(s) {
-            Ok(uuid) => Ok(TaskUuid(uuid)),
-            Err(err) => Err(err),
-        }
+impl From<AttachedFunctionUuid> for JobId {
+    fn from(attached_function_uuid: AttachedFunctionUuid) -> Self {
+        JobId(attached_function_uuid.0)
     }
 }
 
-impl std::fmt::Display for TaskUuid {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+define_uuid_newtype!(
+    /// AttachedFunctionUuid is a wrapper around Uuid to provide a type for attached function identifiers.
+    #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+    AttachedFunctionUuid,
+    new_v4
+);
 
-/// Task represents an asynchronous task that is triggered by collection writes
+/// AttachedFunction represents an asynchronous function that is triggered by collection writes
 /// to map records from a source collection to a target collection.
+fn default_systemtime() -> SystemTime {
+    SystemTime::UNIX_EPOCH
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct Task {
-    /// Unique identifier for the task
-    pub id: TaskUuid,
-    /// Human-readable name for the task instance
+pub struct AttachedFunction {
+    /// Unique identifier for the attached function
+    pub id: AttachedFunctionUuid,
+    /// Human-readable name for the attached function instance
     pub name: String,
-    /// Name of the operator/built-in definition this task uses (despite field name, this is a name not a UUID)
-    pub operator_id: String,
-    /// Source collection that triggers the task
+    /// UUID of the function/built-in definition this attached function uses
+    pub function_id: uuid::Uuid,
+    /// Source collection that triggers the attached function
     pub input_collection_id: CollectionUuid,
-    /// Name of target collection where task output is stored
+    /// Name of target collection where attached function output is stored
     pub output_collection_name: String,
     /// ID of the output collection (lazily filled in after creation)
-    pub output_collection_id: Option<String>,
-    /// Optional JSON parameters for the operator
+    pub output_collection_id: Option<CollectionUuid>,
+    /// Optional JSON parameters for the function
     pub params: Option<String>,
-    /// Tenant name this task belongs to (despite field name, this is a name not a UUID)
+    /// Tenant name this attached function belongs to (despite field name, this is a name not a UUID)
     pub tenant_id: String,
-    /// Database name this task belongs to (despite field name, this is a name not a UUID)
+    /// Database name this attached function belongs to (despite field name, this is a name not a UUID)
     pub database_id: String,
-    /// Timestamp of the last successful task run
+    /// Timestamp of the last successful function run
     #[serde(skip, default)]
     pub last_run: Option<SystemTime>,
-    /// Timestamp when the task should next run (None if not yet scheduled)
-    #[serde(skip, default)]
-    pub next_run: Option<SystemTime>,
-    /// Completion offset: the WAL position up to which the task has processed records
+    /// Completion offset: the WAL position up to which the attached function has processed records
     pub completion_offset: u64,
-    /// Minimum number of new records required before the task runs again
-    pub min_records_for_task: u64,
-    /// Whether the task has been soft-deleted
+    /// Minimum number of new records required before the attached function runs again
+    pub min_records_for_invocation: u64,
+    /// Whether the attached function has been soft-deleted
     #[serde(skip, default)]
     pub is_deleted: bool,
-    /// Timestamp when the task was created
+    /// Timestamp when the attached function was created
+    #[serde(default = "default_systemtime")]
     pub created_at: SystemTime,
-    /// Timestamp when the task was last updated
+    /// Timestamp when the attached function was last updated
+    #[serde(default = "default_systemtime")]
     pub updated_at: SystemTime,
-}
-
-/// ScheduleEntry represents a scheduled task run for a collection.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct ScheduleEntry {
-    pub collection_id: CollectionUuid,
-    pub task_id: Uuid,
-    pub task_run_nonce: Uuid,
-    pub when_to_run: Option<DateTime<Utc>>,
-}
-
-impl TryFrom<crate::chroma_proto::ScheduleEntry> for ScheduleEntry {
-    type Error = ScheduleEntryConversionError;
-
-    fn try_from(proto: crate::chroma_proto::ScheduleEntry) -> Result<Self, Self::Error> {
-        let collection_id = proto
-            .collection_id
-            .ok_or(ScheduleEntryConversionError::MissingField(
-                "collection_id".to_string(),
-            ))
-            .and_then(|id| {
-                CollectionUuid::from_str(&id).map_err(|_| {
-                    ScheduleEntryConversionError::InvalidUuid("collection_id".to_string())
-                })
-            })?;
-
-        let task_id = proto
-            .task_id
-            .ok_or(ScheduleEntryConversionError::MissingField(
-                "task_id".to_string(),
-            ))
-            .and_then(|id| {
-                Uuid::parse_str(&id)
-                    .map_err(|_| ScheduleEntryConversionError::InvalidUuid("task_id".to_string()))
-            })?;
-
-        let task_run_nonce = proto
-            .task_run_nonce
-            .ok_or(ScheduleEntryConversionError::MissingField(
-                "task_run_nonce".to_string(),
-            ))
-            .and_then(|nonce| {
-                Uuid::parse_str(&nonce).map_err(|_| {
-                    ScheduleEntryConversionError::InvalidUuid("task_run_nonce".to_string())
-                })
-            })?;
-
-        let when_to_run = proto
-            .when_to_run
-            .and_then(|ms| DateTime::from_timestamp_millis(ms as i64));
-
-        Ok(ScheduleEntry {
-            collection_id,
-            task_id,
-            task_run_nonce,
-            when_to_run,
-        })
-    }
+    // is_ready is a column in the database, but not in the struct because
+    // it is not meant to be used in rust code. If it is false, rust code
+    // should never even see it.
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum ScheduleEntryConversionError {
-    #[error("Missing required field: {0}")]
-    MissingField(String),
-    #[error("Invalid UUID for field: {0}")]
+pub enum AttachedFunctionConversionError {
+    #[error("Invalid UUID: {0}")]
     InvalidUuid(String),
+    #[error("Attached function params aren't supported yet")]
+    ParamsNotSupported,
+}
+
+impl TryFrom<crate::chroma_proto::AttachedFunction> for AttachedFunction {
+    type Error = AttachedFunctionConversionError;
+
+    fn try_from(
+        attached_function: crate::chroma_proto::AttachedFunction,
+    ) -> Result<Self, Self::Error> {
+        // Parse attached_function_id
+        let attached_function_id = attached_function
+            .id
+            .parse::<AttachedFunctionUuid>()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("attached_function_id".to_string())
+            })?;
+
+        // Parse function_id
+        let function_id = attached_function
+            .function_id
+            .parse::<uuid::Uuid>()
+            .map_err(|_| AttachedFunctionConversionError::InvalidUuid("function_id".to_string()))?;
+
+        // Parse input_collection_id
+        let input_collection_id = attached_function
+            .input_collection_id
+            .parse::<CollectionUuid>()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("input_collection_id".to_string())
+            })?;
+
+        // Parse output_collection_id if available
+        let output_collection_id = attached_function
+            .output_collection_id
+            .map(|id| id.parse::<CollectionUuid>())
+            .transpose()
+            .map_err(|_| {
+                AttachedFunctionConversionError::InvalidUuid("output_collection_id".to_string())
+            })?;
+
+        // Parse params if available - only allow empty JSON "{}" or empty struct for now.
+        // TODO(tanujnay112): Process params when we allow them
+        let params = if let Some(params_struct) = &attached_function.params {
+            if !params_struct.fields.is_empty() {
+                return Err(AttachedFunctionConversionError::ParamsNotSupported);
+            }
+            Some("{}".to_string())
+        } else {
+            None
+        };
+
+        // Parse timestamps
+        let created_at = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.created_at);
+        let updated_at = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_micros(attached_function.updated_at);
+
+        Ok(AttachedFunction {
+            id: attached_function_id,
+            name: attached_function.name,
+            function_id,
+            input_collection_id,
+            output_collection_name: attached_function.output_collection_name,
+            output_collection_id,
+            params,
+            tenant_id: attached_function.tenant_id,
+            database_id: attached_function.database_id,
+            last_run: None, // Not available in proto
+            completion_offset: attached_function.completion_offset,
+            min_records_for_invocation: attached_function.min_records_for_invocation,
+            is_deleted: false, // Not available in proto, would need to be fetched separately
+            created_at,
+            updated_at,
+        })
+    }
 }

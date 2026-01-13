@@ -2,7 +2,7 @@
 # distributed chroma. It is used in our Tiltfile as well.
 open_telemetry:
   service_name: "rust-frontend-service"
-  endpoint: "http://otel-collector:4317"
+  endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   filters:
     - crate_name: "chroma_frontend"
       filter_level: "trace"
@@ -28,6 +28,11 @@ log:
     port: 50051
     connect_timeout_ms: 5000
     request_timeout_ms: 60000 # 1 minute
+    memberlist_provider:
+      custom_resource:
+        kube_namespace: "chroma"
+        memberlist_name: "rust-log-service-memberlist"
+        queue_size: 100
 
 executor:
   distributed:

@@ -3,7 +3,7 @@ use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{
-    config::default_min_records_for_task,
+    config::default_min_records_for_invocation,
     executor::config::{ExecutorConfig, LocalExecutorConfig},
     get_collection_with_segments_provider::{
         CacheInvalidationRetryConfig, CollectionsWithSegmentsProviderConfig,
@@ -113,13 +113,14 @@ impl Bindings {
         let executor_config = ExecutorConfig::Local(LocalExecutorConfig {});
 
         let knn_index = KnnIndex::Hnsw;
-        let enable_schema = false;
+        let enable_schema = true;
 
         let frontend_config = FrontendConfig {
             allow_reset,
             segment_manager: Some(segment_manager_config),
             sqlitedb: Some(sqlite_db_config),
             sysdb: sysdb_config,
+            mcmr_sysdb: None,
             collections_with_segments_provider: collection_cache_config,
             log: log_config,
             executor: executor_config,
@@ -127,7 +128,7 @@ impl Bindings {
             tenants_to_migrate_immediately: vec![],
             tenants_to_migrate_immediately_threshold: None,
             enable_schema,
-            min_records_for_task: default_min_records_for_task(),
+            min_records_for_invocation: default_min_records_for_invocation(),
         };
 
         let frontend = runtime.block_on(async {
@@ -252,12 +253,13 @@ impl Bindings {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(
-        signature = (name, configuration_json_str, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (name, configuration_json_str = None, schema_str = None, metadata = None, get_or_create = false, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     fn create_collection(
         &self,
         name: String,
         configuration_json_str: Option<String>,
+        schema_str: Option<String>,
         metadata: Option<Metadata>,
         get_or_create: bool,
         tenant: String,
@@ -265,9 +267,8 @@ impl Bindings {
     ) -> ChromaPyResult<Collection> {
         let configuration_json = match configuration_json_str {
             Some(configuration_json_str) => {
-                let configuration_json =
-                    serde_json::from_str::<CollectionConfiguration>(&configuration_json_str)
-                        .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
+                let configuration_json = serde_json::from_str(&configuration_json_str)
+                    .map_err(WrappedSerdeJsonError::SerdeJsonError)?;
 
                 Some(configuration_json)
             }
@@ -291,13 +292,20 @@ impl Bindings {
             )?),
         };
 
+        let schema = match schema_str {
+            Some(schema_str) => {
+                serde_json::from_str(&schema_str).map_err(WrappedSerdeJsonError::SerdeJsonError)?
+            }
+            None => None,
+        };
+
         let request = CreateCollectionRequest::try_new(
             tenant,
             database,
             name,
             metadata,
             configuration,
-            None,
+            schema,
             get_or_create,
         )?;
 
@@ -554,7 +562,7 @@ impl Bindings {
 
         let mut frontend_clone = self.frontend.clone();
         self.runtime
-            .block_on(async { frontend_clone.delete(request).await })?;
+            .block_on(async { Box::pin(frontend_clone.delete(request)).await })?;
         Ok(())
     }
 

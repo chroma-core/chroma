@@ -1,6 +1,6 @@
 [package]
 name = "chroma-error"
-version = "0.5.0"
+version = "0.10.0"
 edition = "2021"
 description = "Chroma-provided crate for errors returned from Chroma."
 license = "Apache-2.0"

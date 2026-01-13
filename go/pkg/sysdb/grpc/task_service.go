@@ -8,30 +8,19 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/status"
 )
 
-func (s *Server) CreateTask(ctx context.Context, req *coordinatorpb.CreateTaskRequest) (*coordinatorpb.CreateTaskResponse, error) {
-	log.Info("CreateTask", zap.String("name", req.Name), zap.String("operator_name", req.OperatorName))
+func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
+	log.Info("AttachFunction", zap.String("name", req.Name), zap.String("function_name", req.FunctionName))
 
-	res, err := s.coordinator.CreateTask(ctx, req)
+	res, err := s.coordinator.AttachFunction(ctx, req)
 	if err != nil {
-		log.Error("CreateTask failed", zap.Error(err))
-		if err == common.ErrTaskAlreadyExists {
+		log.Error("AttachFunction failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionAlreadyExists {
 			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskByNameRequest) (*coordinatorpb.GetTaskByNameResponse, error) {
-	log.Info("GetTaskByName", zap.String("input_collection_id", req.InputCollectionId), zap.String("task_name", req.TaskName))
-
-	res, err := s.coordinator.GetTaskByName(ctx, req)
-	if err != nil {
-		log.Error("GetTaskByName failed", zap.Error(err))
-		if err == common.ErrTaskNotFound {
+		if err == common.ErrFunctionNotFound {
 			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return nil, err
@@ -40,50 +29,101 @@ func (s *Server) GetTaskByName(ctx context.Context, req *coordinatorpb.GetTaskBy
 	return res, nil
 }
 
-func (s *Server) DeleteTask(ctx context.Context, req *coordinatorpb.DeleteTaskRequest) (*coordinatorpb.DeleteTaskResponse, error) {
-	log.Info("DeleteTask", zap.String("input_collection_id", req.InputCollectionId), zap.String("task_name", req.TaskName))
+func (s *Server) GetAttachedFunctions(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsRequest) (*coordinatorpb.GetAttachedFunctionsResponse, error) {
+	log.Info("GetAttachedFunctions",
+		zap.Any("id", req.Id),
+		zap.Any("name", req.Name),
+		zap.Any("input_collection_id", req.InputCollectionId),
+		zap.Any("only_ready", req.OnlyReady))
 
-	res, err := s.coordinator.DeleteTask(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctions(ctx, req)
 	if err != nil {
-		log.Error("DeleteTask failed", zap.Error(err))
+		log.Error("GetAttachedFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) AdvanceTask(ctx context.Context, req *coordinatorpb.AdvanceTaskRequest) (*coordinatorpb.AdvanceTaskResponse, error) {
-	log.Info("AdvanceTask", zap.String("collection_id", req.GetCollectionId()), zap.String("task_id", req.GetTaskId()))
+func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
+	log.Info("DetachFunction", zap.String("name", req.Name), zap.String("input_collection_id", req.InputCollectionId))
 
-	res, err := s.coordinator.AdvanceTask(ctx, req)
+	res, err := s.coordinator.DetachFunction(ctx, req)
 	if err != nil {
-		log.Error("AdvanceTask failed", zap.Error(err))
+		log.Error("DetachFunction failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) GetOperators(ctx context.Context, req *coordinatorpb.GetOperatorsRequest) (*coordinatorpb.GetOperatorsResponse, error) {
-	log.Info("GetOperators")
+func (s *Server) GetFunctions(ctx context.Context, req *coordinatorpb.GetFunctionsRequest) (*coordinatorpb.GetFunctionsResponse, error) {
+	log.Info("GetFunctions")
 
-	res, err := s.coordinator.GetOperators(ctx, req)
+	res, err := s.coordinator.GetFunctions(ctx, req)
 	if err != nil {
-		log.Error("GetOperators failed", zap.Error(err))
+		log.Error("GetFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
 	return res, nil
 }
 
-func (s *Server) PeekScheduleByCollectionId(ctx context.Context, req *coordinatorpb.PeekScheduleByCollectionIdRequest) (*coordinatorpb.PeekScheduleByCollectionIdResponse, error) {
-	log.Info("PeekScheduleByCollectionId", zap.Int64("num_collections", int64(len(req.CollectionId))))
+func (s *Server) CleanupExpiredPartialAttachedFunctions(ctx context.Context, req *coordinatorpb.CleanupExpiredPartialAttachedFunctionsRequest) (*coordinatorpb.CleanupExpiredPartialAttachedFunctionsResponse, error) {
+	log.Info("CleanupExpiredPartialAttachedFunctions", zap.Uint64("max_age_seconds", req.MaxAgeSeconds))
 
-	res, err := s.coordinator.PeekScheduleByCollectionId(ctx, req)
+	res, err := s.coordinator.CleanupExpiredPartialAttachedFunctions(ctx, req)
 	if err != nil {
-		log.Error("PeekScheduleByCollectionId failed", zap.Error(err))
+		log.Error("CleanupExpiredPartialAttachedFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
+	log.Info("CleanupExpiredPartialAttachedFunctions succeeded", zap.Uint64("cleaned_up_count", res.CleanedUpCount))
+	return res, nil
+}
+
+func (s *Server) GetAttachedFunctionsToGc(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsToGcRequest) (*coordinatorpb.GetAttachedFunctionsToGcResponse, error) {
+	log.Info("GetAttachedFunctionsToGc", zap.Time("cutoff_time", req.CutoffTime.AsTime()), zap.Int32("limit", req.Limit))
+
+	res, err := s.coordinator.GetAttachedFunctionsToGc(ctx, req)
+	if err != nil {
+		log.Error("GetAttachedFunctionsToGc failed", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("GetAttachedFunctionsToGc succeeded", zap.Int("count", len(res.AttachedFunctions)))
+	return res, nil
+}
+
+func (s *Server) FinishCreateAttachedFunction(ctx context.Context, req *coordinatorpb.FinishCreateAttachedFunctionRequest) (*coordinatorpb.FinishCreateAttachedFunctionResponse, error) {
+	log.Info("FinishCreateAttachedFunction", zap.String("id", req.Id))
+
+	res, err := s.coordinator.FinishCreateAttachedFunction(ctx, req)
+	if err != nil {
+		log.Error("FinishCreateAttachedFunction failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("FinishCreateAttachedFunction succeeded", zap.String("id", req.Id))
+	return res, nil
+}
+
+func (s *Server) FinishAttachedFunctionDeletion(ctx context.Context, req *coordinatorpb.FinishAttachedFunctionDeletionRequest) (*coordinatorpb.FinishAttachedFunctionDeletionResponse, error) {
+	log.Info("FinishAttachedFunctionDeletion", zap.String("id", req.AttachedFunctionId))
+
+	res, err := s.coordinator.FinishAttachedFunctionDeletion(ctx, req)
+	if err != nil {
+		log.Error("FinishAttachedFunctionDeletion failed", zap.Error(err))
+		return nil, grpcutils.BuildInternalGrpcError(err.Error())
+	}
+
+	log.Info("FinishAttachedFunctionDeletion succeeded", zap.String("id", req.AttachedFunctionId))
 	return res, nil
 }

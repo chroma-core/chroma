@@ -135,6 +135,41 @@ const sidebarConfig: AppSection[] = [
         pages: [{ id: "collection-forking", name: "Collection Forking" }],
       },
       {
+        id: "schema",
+        name: "Schema",
+        pages: [
+          { id: "overview", name: "Overview" },
+          { id: "schema-basics", name: "Schema Basics" },
+          { id: "sparse-vector-search", name: "Sparse Vector Search Setup" },
+          { id: "index-reference", name: "Index Configuration Reference" },
+        ],
+      },
+      {
+        id: "search-api",
+        name: "Search API",
+        pages: [
+          { id: "overview", name: "Overview" },
+          { id: "search-basics", name: "Search Basics" },
+          { id: "filtering", name: "Filtering with Where" },
+          { id: "ranking", name: "Ranking and Scoring" },
+          { id: "group-by", name: "Group By & Aggregation" },
+          { id: "hybrid-search", name: "Hybrid Search with RRF" },
+          { id: "pagination-selection", name: "Pagination & Selection" },
+          { id: "batch-operations", name: "Batch Operations" },
+          { id: "examples", name: "Examples & Patterns" },
+          { id: "migration", name: "Migration Guide" },
+        ],
+      },
+      {
+        id: "sync",
+        name: "Sync",
+        pages: [
+          { id: "overview", name: "Overview" },
+          { id: "github", name: "GitHub" },
+          { id: "web", name: "Web" },
+        ],
+      },
+      {
         id: "package-search",
         name: "Package Search",
         pages: [
@@ -156,9 +191,10 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "building-with-ai", name: "Building With AI" },
           { id: "intro-to-retrieval", name: "Introduction to Retrieval" },
-          // { id: "chunking", name: "Chunking" },
-          // { id: "embeddings", name: "Embeddings" },
-          // { id: "organizing-collections", name: "Organizing Collections" },
+          { id: "look-at-your-data", name: "Look at Your Data" },
+          { id: "chunking", name: "Chunking" },
+          { id: "agentic-search", name: "Agentic Search" },
+          { id: "agentic-memory", name: "Agentic Memory" },
         ],
       },
       // { id: "develop", name: "Develop", generatePages: true },

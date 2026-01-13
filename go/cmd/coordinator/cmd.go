@@ -67,6 +67,11 @@ func init() {
 	Cmd.Flags().StringVar(&conf.LogServiceMemberlistName, "log-memberlist-name", "rust-log-service-memberlist", "Log service memberlist name")
 	Cmd.Flags().StringVar(&conf.LogServicePodLabel, "log-pod-label", "rust-log-service", "Log service pod label")
 
+	// Heap service config (colocated with log service)
+	Cmd.Flags().BoolVar(&conf.HeapServiceEnabled, "heap-service-enabled", false, "Enable heap service client")
+	Cmd.Flags().IntVar(&conf.HeapServicePort, "heap-service-port", 50052, "Heap service port (colocated with log service)")
+	Cmd.Flags().StringVar(&conf.HeapServiceAssignmentHasher, "heap-service-assignment-hasher", "murmur3", "Heap service assignment policy hasher (murmur3, rendezvous)")
+
 	// S3 config
 	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.CreateBucketIfNotExists, "create-bucket-if-not-exists", false, "Create bucket if not exists")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.BucketName, "bucket-name", "chroma-storage", "Bucket name")
@@ -75,6 +80,7 @@ func init() {
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.AccessKeyID, "s3-access-key-id", "", "S3 access key ID")
 	Cmd.Flags().StringVar(&conf.MetaStoreConfig.SecretAccessKey, "s3-secret-access-key", "", "S3 secret access key")
 	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.ForcePathStyle, "s3-force-path-style", false, "S3 force path style")
+	Cmd.Flags().BoolVar(&conf.MetaStoreConfig.GCSInterop, "s3-gcs-interop", false, "Enable Google Cloud Storage support for S3 client")
 
 	// Version file
 	Cmd.Flags().BoolVar(&conf.VersionFileEnabled, "version-file-enabled", false, "Enable version file")

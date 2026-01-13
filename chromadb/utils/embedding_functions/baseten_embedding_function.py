@@ -2,6 +2,7 @@ import os
 from chromadb.utils.embedding_functions.openai_embedding_function import (
     OpenAIEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.schemas import validate_config_schema
 from typing import Dict, Any, Optional, List
 from chromadb.api.types import Space
 import warnings
@@ -35,12 +36,16 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
                 DeprecationWarning,
             )
 
-        self.api_key_env_var = api_key_env_var
+        if os.getenv("BASETEN_API_KEY") is not None:
+            self.api_key_env_var = "BASETEN_API_KEY"
+        else:
+            self.api_key_env_var = api_key_env_var
+
         # Prioritize api_key argument, then environment variable
-        resolved_api_key = api_key or os.getenv(api_key_env_var)
+        resolved_api_key = api_key or os.getenv(self.api_key_env_var)
         if not resolved_api_key:
             raise ValueError(
-                f"API key not provided and {api_key_env_var} environment variable is not set."
+                f"API key not provided and {self.api_key_env_var} environment variable is not set."
             )
         self.api_key = resolved_api_key
         if not api_base:
@@ -96,3 +101,16 @@ class BasetenEmbeddingFunction(OpenAIEmbeddingFunction):
             api_base=api_base,
             api_key_env_var=api_key_env_var,
         )
+
+    @staticmethod
+    def validate_config(config: Dict[str, Any]) -> None:
+        """
+        Validate the configuration using the JSON schema.
+
+        Args:
+            config: Configuration to validate
+
+        Raises:
+            ValidationError: If the configuration does not match the schema
+        """
+        validate_config_schema(config, "baseten")

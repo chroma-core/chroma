@@ -22,27 +22,27 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AddTaskError, Collection, CollectionUuid, CountCollectionsError, CountCollectionsRequest,
-    CountCollectionsResponse, CountRequest, CountResponse, CreateCollectionError,
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseError, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTaskRequest, CreateTaskResponse, CreateTenantError,
+    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
+    CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
+    CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
+    CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
     CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
     DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, ForkCollectionError,
-    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
-    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
-    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
-    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include, KnnIndex,
+    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionError,
+    DetachFunctionRequest, DetachFunctionResponse, ForkCollectionError, ForkCollectionRequest,
+    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
+    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
+    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
+    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
+    HeartbeatError, Include, IndexStatusError, IndexStatusResponse, KnnIndex,
     ListCollectionsRequest, ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest,
     ListDatabasesResponse, Operation, OperationRecord, QueryError, QueryRequest, QueryResponse,
-    RemoveTaskError, RemoveTaskRequest, RemoveTaskResponse, ResetError, ResetResponse, Schema,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    ResetError, ResetResponse, Schema, SchemaError, SearchRequest, SearchResponse, Segment,
+    SegmentScope, SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -80,7 +80,7 @@ pub struct ServiceBasedFrontend {
     default_knn_index: KnnIndex,
     enable_schema: bool,
     retries_builder: ExponentialBuilder,
-    min_records_for_task: u64,
+    min_records_for_invocation: u64,
 }
 
 impl ServiceBasedFrontend {
@@ -94,7 +94,7 @@ impl ServiceBasedFrontend {
         max_batch_size: u32,
         default_knn_index: KnnIndex,
         enable_schema: bool,
-        min_records_for_task: u64,
+        min_records_for_invocation: u64,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -148,7 +148,7 @@ impl ServiceBasedFrontend {
             default_knn_index,
             enable_schema,
             retries_builder,
-            min_records_for_task,
+            min_records_for_invocation,
         }
     }
 
@@ -182,20 +182,6 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
-    async fn get_collection_dimension(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Option<u32>, GetCollectionError> {
-        Ok(self
-            .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
-            .collection
-            .dimension
-            .map(|dim| dim as u32))
-    }
-
     async fn set_collection_dimension(
         &mut self,
         collection_id: CollectionUuid,
@@ -219,10 +205,11 @@ impl ServiceBasedFrontend {
         option_embeddings: Option<&Vec<Embedding>>,
         update_if_not_present: bool,
         read_length: F,
-    ) -> Result<(), ValidationError>
+    ) -> Result<Collection, ValidationError>
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
+        let collection = self.get_cached_collection(collection_id).await?;
         if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
                 .iter()
@@ -237,28 +224,23 @@ impl ServiceBasedFrontend {
                 low as u32
             } else {
                 // No embedding to check, return
-                return Ok(());
+                return Ok(collection);
             };
-            match self.get_collection_dimension(collection_id).await {
-                Ok(Some(expected_dim)) => {
+            match collection.dimension.map(|dim| dim as u32) {
+                Some(expected_dim) => {
                     if expected_dim != emb_dim {
                         return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
                     }
-
-                    Ok(())
                 }
-                Ok(None) => {
+                None => {
                     if update_if_not_present {
                         self.set_collection_dimension(collection_id, emb_dim)
                             .await?;
                     }
-                    Ok(())
                 }
-                Err(err) => Err(err.into()),
-            }
-        } else {
-            Ok(())
+            };
         }
+        Ok(collection)
     }
 
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
@@ -381,7 +363,7 @@ impl ServiceBasedFrontend {
         if self.enable_schema {
             for collection in collections.iter_mut() {
                 collection
-                    .reconcile_schema_with_config()
+                    .reconcile_schema_for_read()
                     .map_err(GetCollectionsError::InvalidSchema)?;
             }
         }
@@ -425,7 +407,7 @@ impl ServiceBasedFrontend {
         if self.enable_schema {
             for collection in &mut collections {
                 collection
-                    .reconcile_schema_with_config()
+                    .reconcile_schema_for_read()
                     .map_err(GetCollectionError::InvalidSchema)?;
             }
         }
@@ -450,7 +432,7 @@ impl ServiceBasedFrontend {
 
         if self.enable_schema {
             collection
-                .reconcile_schema_with_config()
+                .reconcile_schema_for_read()
                 .map_err(GetCollectionByCrnError::InvalidSchema)?;
         }
         Ok(collection)
@@ -517,6 +499,7 @@ impl ServiceBasedFrontend {
             match Schema::reconcile_schema_and_config(
                 schema.as_ref(),
                 config_for_reconcile.as_ref(),
+                self.default_knn_index,
             ) {
                 Ok(schema) => Some(schema),
                 Err(e) => {
@@ -571,6 +554,19 @@ impl ServiceBasedFrontend {
                 ]
             }
             Executor::Local(_) => {
+                if self.enable_schema {
+                    if let Some(schema) = reconciled_schema.as_ref() {
+                        if schema.is_sparse_index_enabled() {
+                            return Err(CreateCollectionError::InvalidSchema(
+                                SchemaError::InvalidUserInput {
+                                    reason: "Sparse vector indexing is not enabled in local"
+                                        .to_string(),
+                                },
+                            ));
+                        }
+                    }
+                }
+
                 vec![
                     Segment {
                         id: SegmentUuid::new(),
@@ -616,9 +612,10 @@ impl ServiceBasedFrontend {
         // that was retrieved from sysdb, rather than the one that was passed in
         if self.enable_schema {
             collection
-                .reconcile_schema_with_config()
+                .reconcile_schema_for_read()
                 .map_err(CreateCollectionError::InvalidSchema)?;
         }
+
         Ok(collection)
     }
 
@@ -721,7 +718,7 @@ impl ServiceBasedFrontend {
             .await?;
         collection_and_segments
             .collection
-            .reconcile_schema_with_config()
+            .reconcile_schema_for_read()
             .map_err(ForkCollectionError::InvalidSchema)?;
         let collection = collection_and_segments.collection.clone();
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -795,9 +792,10 @@ impl ServiceBasedFrontend {
         tenant_id: &str,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         self.log_client
-            .push_logs(tenant_id, collection_id, records)
+            .push_logs(tenant_id, collection_id, records, cmek)
             .await
     }
 
@@ -814,14 +812,15 @@ impl ServiceBasedFrontend {
             ..
         }: AddCollectionRecordsRequest,
     ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
-        self.validate_embedding(
-            collection_id,
-            Some(&embeddings),
-            true,
-            |embedding: &Vec<f32>| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
+        let collection = self
+            .validate_embedding(
+                collection_id,
+                Some(&embeddings),
+                true,
+                |embedding: &Vec<f32>| Some(embedding.len()),
+            )
+            .await
+            .map_err(|err| err.boxed())?;
 
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
@@ -834,9 +833,13 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -901,11 +904,12 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRecordsRequest,
     ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
-        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-            embedding.as_ref().map(|emb| emb.len())
-        })
-        .await
-        .map_err(|err| err.boxed())?;
+        let collection = self
+            .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+                embedding.as_ref().map(|emb| emb.len())
+            })
+            .await
+            .map_err(|err| err.boxed())?;
 
         let (records, log_size_bytes) = to_records(
             ids,
@@ -922,9 +926,13 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -989,14 +997,15 @@ impl ServiceBasedFrontend {
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
-        self.validate_embedding(
-            collection_id,
-            Some(&embeddings),
-            true,
-            |embedding: &Vec<f32>| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
+        let collection = self
+            .validate_embedding(
+                collection_id,
+                Some(&embeddings),
+                true,
+                |embedding: &Vec<f32>| Some(embedding.len()),
+            )
+            .await
+            .map_err(|err| err.boxed())?;
 
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
@@ -1015,9 +1024,13 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone, cmek_clone)
                     .await
             }
         };
@@ -1198,8 +1211,13 @@ impl ServiceBasedFrontend {
 
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
-            self.log_client
-                .push_logs(&tenant_id, collection_id, records)
+            let cmek = self
+                .get_cached_collection(collection_id)
+                .await
+                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
+                .schema
+                .and_then(|schema| schema.cmek.clone());
+            self.retryable_push_logs(&tenant_id, collection_id, records, cmek)
                 .await
                 .map_err(|err| {
                     if err.code() == ErrorCodes::Unavailable {
@@ -1253,7 +1271,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_delete(request_clone).await;
+                let res = Box::pin(self_clone.retryable_delete(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1269,20 +1287,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = delete_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying delete() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            delete_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying delete() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .delete_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
@@ -1396,6 +1416,51 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn indexing_status(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<IndexStatusResponse, IndexStatusError> {
+        let collection = self.get_cached_collection(collection_id).await?;
+
+        let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
+            IndexStatusError::Internal(Box::new(chroma_error::TonicError(tonic::Status::internal(
+                "Invalid log_position value: must be >= 0 and convertible to u64",
+            ))))
+        })?;
+
+        // It is important that we do scout_logs AFTER we get the collection +
+        // compaction offset in order to give a strictly conservative estimate
+        // of the unindexed ops.
+
+        // Saturating sub 1 to account for scout_logs returning the next log to be inserted
+        // The same logic is used in get_enum_offset_on_server in log-service/src/lib.rs
+        let enumeration_offset = self
+            .log_client
+            .scout_logs(&collection.tenant, collection_id, 0)
+            .await?
+            .saturating_sub(1);
+
+        let total_ops = enumeration_offset;
+        let num_unindexed_ops = total_ops.saturating_sub(num_indexed_ops);
+        let op_indexing_progress = if total_ops == 0 {
+            1.0
+        } else {
+            num_indexed_ops as f32 / total_ops as f32
+        };
+
+        chroma_metering::with_current(|context| {
+            context.latest_collection_logical_size_bytes(0);
+            context.finish_request(Instant::now());
+        });
+
+        Ok(IndexStatusResponse {
+            op_indexing_progress,
+            num_unindexed_ops,
+            num_indexed_ops,
+            total_ops,
+        })
+    }
+
     async fn retryable_get(
         &mut self,
         GetRequest {
@@ -1505,7 +1570,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_get(request_clone).await;
+                let res = Box::pin(self_clone.retryable_get(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1521,20 +1586,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = get_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying get() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            get_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying get() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .get_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
@@ -1772,6 +1839,7 @@ impl ServiceBasedFrontend {
                 collection_and_segments,
             },
             payloads: request.searches,
+            read_level: request.read_level,
         };
 
         // Execute the single search plan using the executor
@@ -1867,25 +1935,23 @@ impl ServiceBasedFrontend {
         res
     }
 
-    pub async fn create_task(
+    pub async fn attach_function(
         &mut self,
         tenant_name: String,
         database_name: String,
         collection_id: String,
-        CreateTaskRequest {
-            task_name,
-            operator_name,
-            output_collection_name,
+        AttachFunctionRequest {
+            name,
+            function_id,
+            output_collection,
             params,
             ..
-        }: CreateTaskRequest,
-    ) -> Result<CreateTaskResponse, AddTaskError> {
-        // TODO: Trigger initial task run via heaptender
-
+        }: AttachFunctionRequest,
+    ) -> Result<AttachFunctionResponse, chroma_types::AttachFunctionError> {
         // Parse collection_id from path parameter - client-side validation
         let input_collection_id =
             CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
-                AddTaskError::Internal(Box::new(chroma_error::TonicError(
+                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
                     tonic::Status::invalid_argument(format!(
                         "Client validation error: Invalid collection_id UUID format: {}",
                         e
@@ -1893,52 +1959,153 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        let task_id = self
+        // Step 1: Create attached function with is_ready = false
+        let (attached_function_id, created) = self
             .sysdb_client
-            .create_task(
-                task_name.clone(),
-                operator_name,
+            .create_attached_function(
+                name.clone(),
+                function_id.clone(),
                 input_collection_id,
-                output_collection_name.clone(),
+                output_collection.clone(),
                 params,
-                tenant_name,
+                tenant_name.clone(),
                 database_name,
-                self.min_records_for_task,
+                self.min_records_for_invocation,
             )
+            .await?;
+
+        // If this was an idempotent request (function already exists and is ready),
+        // skip backfill and finish steps - just return the existing function
+        if !created {
+            return Ok(AttachFunctionResponse {
+                attached_function: chroma_types::AttachedFunctionInfo {
+                    id: attached_function_id.to_string(),
+                    name,
+                    function_name: function_id,
+                },
+                created,
+            });
+        }
+
+        // Step 2: Start backfill (only for newly created functions)
+        self.start_backfill(tenant_name, input_collection_id, attached_function_id)
+            .await?;
+
+        // Step 3: Create output collection and set is_ready = true
+        // Generate a default HNSW schema for the output collection with the attached function ID
+        let mut output_schema = Schema::new_default(KnnIndex::Hnsw);
+        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
+            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                tonic::Status::internal(format!(
+                    "Failed to serialize output collection schema: {}",
+                    e
+                )),
+            )))
+        })?;
+
+        // The returned `created` flag from finish is for idempotency at this layer,
+        // but we already handle it via the initial create call's `created` flag
+        let _finish_created = self
+            .sysdb_client
+            .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
             .map_err(|e| match e {
-                chroma_sysdb::CreateTaskError::AlreadyExists => {
-                    AddTaskError::AlreadyExists(task_name.clone())
+                chroma_types::FinishCreateAttachedFunctionError::OutputCollectionExists => {
+                    chroma_types::AttachFunctionError::OutputCollectionExists(
+                        output_collection.clone(),
+                    )
                 }
-                chroma_sysdb::CreateTaskError::FailedToCreateTask(s) => {
-                    AddTaskError::Internal(Box::new(chroma_error::TonicError(s)))
-                }
-                chroma_sysdb::CreateTaskError::ServerReturnedInvalidData => AddTaskError::Internal(
-                    Box::new(chroma_sysdb::CreateTaskError::ServerReturnedInvalidData),
-                ),
+                other => chroma_types::AttachFunctionError::from(other),
             })?;
 
-        Ok(CreateTaskResponse {
-            success: true,
-            task_id: task_id.to_string(),
+        Ok(AttachFunctionResponse {
+            attached_function: chroma_types::AttachedFunctionInfo {
+                id: attached_function_id.to_string(),
+                name,
+                function_name: function_id,
+            },
+            created,
         })
     }
 
-    pub async fn remove_task(
+    // Stub method for backfill - will be implemented later
+    async fn start_backfill(
+        &mut self,
+        tenant: String,
+        collection_id: CollectionUuid,
+        _attached_function_id: chroma_types::AttachedFunctionUuid,
+    ) -> Result<(), chroma_types::AttachFunctionError> {
+        let collection = self.get_cached_collection(collection_id).await?;
+        let embedding_dim = collection.dimension.unwrap_or(1);
+        let fake_embedding = vec![0.0; embedding_dim as usize];
+        // TODO(tanujnay112): Make this either a configurable or better yet a separate
+        // RPC to the logs service.
+        let num_fake_logs = 250;
+        let logs = vec![
+            OperationRecord {
+                id: "backfill_id".to_string(),
+                embedding: Some(fake_embedding),
+                encoding: None,
+                metadata: None,
+                document: None,
+                operation: Operation::BackfillFn,
+            };
+            num_fake_logs
+        ];
+
+        let cmek = collection.schema.and_then(|schema| schema.cmek.clone());
+        self.retryable_push_logs(&tenant, collection_id, logs, cmek)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn get_attached_function(
+        &mut self,
+        _tenant_name: String,
+        _database_name: String,
+        collection_id: String,
+        function_name: String,
+    ) -> Result<chroma_types::AttachedFunction, chroma_sysdb::GetAttachedFunctionError> {
+        // Parse collection_id from path parameter - client-side validation
+        let collection_uuid =
+            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                chroma_sysdb::GetAttachedFunctionError::FailedToGetAttachedFunction(
+                    tonic::Status::invalid_argument(format!(
+                        "Client validation error: Invalid collection_id UUID format: {}",
+                        e
+                    )),
+                )
+            })?);
+
+        // Get the attached function by name
+        let attached_functions = self
+            .sysdb_client
+            .get_attached_functions(
+                None,
+                Some(function_name.clone()),
+                Some(collection_uuid),
+                true,
+            )
+            .await?;
+        attached_functions
+            .into_iter()
+            .next()
+            .ok_or_else(|| chroma_sysdb::GetAttachedFunctionError::NotFound)
+    }
+
+    pub async fn detach_function(
         &mut self,
         _tenant_id: String,
         _database_name: String,
         collection_id: String,
-        RemoveTaskRequest {
-            task_name,
-            delete_output,
-            ..
-        }: RemoveTaskRequest,
-    ) -> Result<RemoveTaskResponse, RemoveTaskError> {
+        name: String,
+        DetachFunctionRequest { delete_output, .. }: DetachFunctionRequest,
+    ) -> Result<DetachFunctionResponse, DetachFunctionError> {
         // Parse collection_id from path parameter - client-side validation
         let collection_uuid =
-            CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
-                RemoveTaskError::Internal(Box::new(chroma_error::TonicError(
+            chroma_types::CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
+                DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
                     tonic::Status::invalid_argument(format!(
                         "Client validation error: Invalid collection_id UUID format: {}",
                         e
@@ -1946,20 +2113,26 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        // Delete task by name - the coordinator handles output collection deletion atomically
+        // Detach function - soft delete it to prevent further runs
+        // If delete_output is true, also delete the output collection
         self.sysdb_client
-            .delete_task_by_name(collection_uuid, task_name.clone(), delete_output)
+            .soft_delete_attached_function(name.clone(), collection_uuid, delete_output)
             .await
             .map_err(|e| match e {
-                chroma_sysdb::DeleteTaskError::NotFound => {
-                    RemoveTaskError::NotFound(task_name.clone())
+                chroma_sysdb::DeleteAttachedFunctionError::NotFound => {
+                    DetachFunctionError::NotFound(name.clone())
                 }
-                chroma_sysdb::DeleteTaskError::FailedToDeleteTask(s) => {
-                    RemoveTaskError::Internal(Box::new(chroma_error::TonicError(s)))
+                chroma_sysdb::DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(s) => {
+                    DetachFunctionError::Internal(Box::new(chroma_error::TonicError(s)))
+                }
+                chroma_sysdb::DeleteAttachedFunctionError::NotImplemented => {
+                    DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                        tonic::Status::unimplemented("Not implemented"),
+                    )))
                 }
             })?;
 
-        Ok(RemoveTaskResponse { success: true })
+        Ok(DetachFunctionResponse { success: true })
     }
 
     pub async fn healthcheck(&self) -> HealthCheckResponse {
@@ -1988,7 +2161,9 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             LocalSegmentManager::try_from_config(segment_manager_conf, registry).await?;
         };
 
-        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let sysdb =
+            SysDb::try_from_config(&(config.sysdb.clone(), config.mcmr_sysdb.clone()), registry)
+                .await?;
         let mut log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let max_batch_size = log.get_max_batch_size().await?;
 
@@ -2026,7 +2201,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             max_batch_size,
             config.default_knn_index,
             config.enable_schema,
-            config.min_records_for_task,
+            config.min_records_for_invocation,
         ))
     }
 }
@@ -2106,7 +2281,7 @@ mod tests {
             port: 50051,
             ..Default::default()
         });
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+        let mut sysdb = SysDb::try_from_config(&(sysdb_config, None), &registry)
             .await
             .unwrap();
         let segments = sysdb
@@ -2131,19 +2306,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_operator_constants() {
-        // Validate that hardcoded Rust operator constants match the live database.
+    async fn test_k8s_integration_function_constants() {
+        // Validate that hardcoded Rust function constants match the live database.
         // This prevents drift between constants and database migrations.
-        use chroma_types::{OPERATOR_RECORD_COUNTER_ID, OPERATOR_RECORD_COUNTER_NAME};
+        use chroma_types::{
+            FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
+            FUNCTION_STATISTICS_NAME,
+        };
         use std::collections::HashMap;
 
-        // Map of operator names to their expected UUID constants
-        // Add new operators here as they are added to rust/types/src/operators.rs
-        let expected_operators: HashMap<&str, uuid::Uuid> =
-            [(OPERATOR_RECORD_COUNTER_NAME, OPERATOR_RECORD_COUNTER_ID)]
-                .iter()
-                .cloned()
-                .collect();
+        // Map of function names to their expected UUID constants
+        // Add new functions here as they are added to rust/types/src/functions.rs
+        let expected_functions: HashMap<&str, uuid::Uuid> = [
+            (FUNCTION_RECORD_COUNTER_NAME, FUNCTION_RECORD_COUNTER_ID),
+            (FUNCTION_STATISTICS_NAME, FUNCTION_STATISTICS_ID),
+        ]
+        .iter()
+        .cloned()
+        .collect();
 
         // Connect to sysdb via gRPC
         let registry = Registry::new();
@@ -2152,41 +2332,41 @@ mod tests {
             port: 50051,
             ..Default::default()
         });
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+        let mut sysdb = SysDb::try_from_config(&(sysdb_config, None), &registry)
             .await
             .unwrap();
 
-        // Get all operators from the database via gRPC
-        let operators = sysdb.get_all_operators().await.unwrap();
+        // Get all functions from the database via gRPC
+        let functions = sysdb.get_all_functions().await.unwrap();
 
         // Verify count matches expectations
         assert_eq!(
-            operators.len(),
-            expected_operators.len(),
-            "Operator count mismatch. If you added a new operator to migrations, \
+            functions.len(),
+            expected_functions.len(),
+            "Function count mismatch. If you added a new function to migrations, \
              rebuild Rust (cargo build -p chroma-types) to auto-generate constants and update this test. \
              Expected: {}, Actual: {}",
-            expected_operators.len(),
-            operators.len()
+            expected_functions.len(),
+            functions.len()
         );
 
-        // Verify each operator constant matches the database
-        for (operator_name, expected_uuid) in &expected_operators {
-            let db_operator = operators
+        // Verify each function constant matches the database
+        for (function_name, expected_uuid) in &expected_functions {
+            let db_function = functions
                 .iter()
-                .find(|(name, _)| name == operator_name)
-                .unwrap_or_else(|| panic!("Operator '{}' not found in database", operator_name));
+                .find(|(name, _)| name == function_name)
+                .unwrap_or_else(|| panic!("Function '{}' not found in database", function_name));
 
             assert_eq!(
-                *expected_uuid, db_operator.1,
-                "Operator '{}' UUID mismatch. Code: {}, DB: {}",
-                operator_name, expected_uuid, db_operator.1
+                *expected_uuid, db_function.1,
+                "Function '{}' UUID mismatch. Code: {}, DB: {}",
+                function_name, expected_uuid, db_function.1
             );
         }
 
         println!(
-            "Verified {} operator(s) match database",
-            expected_operators.len()
+            "Verified {} function(s) match database",
+            expected_functions.len()
         );
     }
 
@@ -2210,5 +2390,49 @@ mod tests {
         assert!(GetCollectionByCrnRequest::try_new(":db1:coll1".to_string()).is_err());
         assert!(GetCollectionByCrnRequest::try_new(":db1:coll1:".to_string()).is_err());
         assert!(GetCollectionByCrnRequest::try_new(":db1::".to_string()).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_indexing_status_basic() {
+        // Test the indexing status endpoint for a newly created collection
+        let client = reqwest::Client::new();
+        let create_response = client
+            .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .json(
+                &CreateCollectionPayload {
+                    name: Uuid::new_v4().to_string(),
+                    configuration: None,
+                    schema: None,
+                    metadata: None,
+                    get_or_create: false
+                },
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), 200);
+        let collection: Collection = create_response.json().await.unwrap();
+
+        let status_url = format!(
+            "http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections/{}/indexing_status",
+            collection.collection_id
+        );
+        let status_response = client.get(&status_url).send().await.unwrap();
+
+        let status_code = status_response.status();
+        if status_code != 200 {
+            let body = status_response.text().await.unwrap();
+            panic!(
+                "Expected 200, got {}. URL: {}. Response: {}",
+                status_code, status_url, body
+            );
+        }
+        let status: IndexStatusResponse = status_response.json().await.unwrap();
+
+        assert_eq!(status.num_indexed_ops, 0);
+        assert_eq!(status.num_unindexed_ops, 0);
+        assert_eq!(status.total_ops, 0);
+        assert_eq!(status.op_indexing_progress, 1.0);
     }
 }

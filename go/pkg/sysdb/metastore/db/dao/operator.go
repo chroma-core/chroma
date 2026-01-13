@@ -10,51 +10,68 @@ import (
 	"gorm.io/gorm"
 )
 
-type operatorDb struct {
+type functionDb struct {
 	db *gorm.DB
 }
 
-var _ dbmodel.IOperatorDb = &operatorDb{}
+var _ dbmodel.IFunctionDb = &functionDb{}
 
-func (s *operatorDb) GetByName(operatorName string) (*dbmodel.Operator, error) {
-	var operator dbmodel.Operator
+func (s *functionDb) GetByName(name string) (*dbmodel.Function, error) {
+	var function dbmodel.Function
 	err := s.db.
-		Where("operator_name = ?", operatorName).
-		First(&operator).Error
+		Where("name = ?", name).
+		First(&function).Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		log.Error("GetOperatorByName failed", zap.Error(err))
+		log.Error("GetFunctionByName failed", zap.Error(err))
 		return nil, err
 	}
-	return &operator, nil
+	return &function, nil
 }
 
-func (s *operatorDb) GetByID(operatorID uuid.UUID) (*dbmodel.Operator, error) {
-	var operator dbmodel.Operator
+func (s *functionDb) GetByID(id uuid.UUID) (*dbmodel.Function, error) {
+	var function dbmodel.Function
 	err := s.db.
-		Where("operator_id = ?", operatorID).
-		First(&operator).Error
+		Where("id = ?", id).
+		First(&function).Error
 
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
-		log.Error("GetOperatorByID failed", zap.Error(err))
+		log.Error("GetFunctionByID failed", zap.Error(err))
 		return nil, err
 	}
-	return &operator, nil
+	return &function, nil
 }
 
-func (s *operatorDb) GetAll() ([]*dbmodel.Operator, error) {
-	var operators []*dbmodel.Operator
-	err := s.db.Find(&operators).Error
+func (s *functionDb) GetByIDs(ids []uuid.UUID) ([]*dbmodel.Function, error) {
+	if len(ids) == 0 {
+		return []*dbmodel.Function{}, nil
+	}
+
+	var functions []*dbmodel.Function
+	err := s.db.
+		Where("id IN ?", ids).
+		Find(&functions).Error
 
 	if err != nil {
-		log.Error("GetAllOperators failed", zap.Error(err))
+		log.Error("GetFunctionsByIDs failed", zap.Error(err))
 		return nil, err
 	}
-	return operators, nil
+	return functions, nil
+}
+
+func (s *functionDb) GetAll() ([]*dbmodel.Function, error) {
+	var functions []*dbmodel.Function
+	err := s.db.Find(&functions).Error
+
+	if err != nil {
+		log.Error("GetAllFunctions failed", zap.Error(err))
+		return nil, err
+	}
+	return functions, nil
 }

@@ -2,6 +2,53 @@ use chroma_error::{ChromaError, ErrorCodes};
 use thiserror::Error;
 use tonic::Status;
 
+/// Macro to define UUID newtype wrappers with standard implementations.
+/// Reduces boilerplate for UUID wrapper types.
+///
+/// Generates:
+/// - Struct with standard derives (Copy, Clone, Debug, etc.)
+/// - new() method with configurable UUID generation (v4 for random, v7 for time-ordered)
+/// - FromStr implementation for parsing from strings
+/// - Display implementation for formatting
+///
+/// # Examples
+///
+/// ```ignore
+/// define_uuid_newtype!(
+///     /// My custom UUID type.
+///     MyUuid,
+///     new_v4
+/// );
+/// ```
+macro_rules! define_uuid_newtype {
+    ($(#[$meta:meta])* $name:ident, $uuid_fn:ident) => {
+        $(#[$meta])*
+        #[derive(
+            Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
+        )]
+        pub struct $name(pub uuid::Uuid);
+
+        impl $name {
+            pub fn new() -> Self {
+                $name(uuid::Uuid::$uuid_fn())
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = uuid::Error;
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                uuid::Uuid::parse_str(s).map($name)
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    };
+}
+
 /// A macro for easily implementing match arms for a base error type with common errors.
 /// Other types can wrap it and still implement the ChromaError trait
 /// without boilerplate.

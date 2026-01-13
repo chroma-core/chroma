@@ -23,6 +23,7 @@ from chromadb.utils.embedding_functions.google_embedding_function import (
     GooglePalmEmbeddingFunction,
     GoogleGenerativeAiEmbeddingFunction,
     GoogleVertexEmbeddingFunction,
+    GoogleGenaiEmbeddingFunction,
 )
 from chromadb.utils.embedding_functions.ollama_embedding_function import (
     OllamaEmbeddingFunction,
@@ -68,6 +69,10 @@ from chromadb.utils.embedding_functions.mistral_embedding_function import (
 from chromadb.utils.embedding_functions.morph_embedding_function import (
     MorphEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.nomic_embedding_function import (
+    NomicEmbeddingFunction,
+    NomicQueryConfig,
+)
 from chromadb.utils.embedding_functions.huggingface_sparse_embedding_function import (
     HuggingFaceSparseEmbeddingFunction,
 )
@@ -83,6 +88,9 @@ from chromadb.utils.embedding_functions.chroma_cloud_qwen_embedding_function imp
 from chromadb.utils.embedding_functions.chroma_cloud_splade_embedding_function import (
     ChromaCloudSpladeEmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
+    ChromaBm25EmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -95,11 +103,13 @@ _all_classes: Set[str] = {
     "GooglePalmEmbeddingFunction",
     "GoogleGenerativeAiEmbeddingFunction",
     "GoogleVertexEmbeddingFunction",
+    "GoogleGenaiEmbeddingFunction",
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
+    "NomicEmbeddingFunction",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
@@ -116,6 +126,7 @@ _all_classes: Set[str] = {
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
+    "ChromaBm25EmbeddingFunction",
 }
 
 
@@ -133,11 +144,13 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "google_palm": GooglePalmEmbeddingFunction,
     "google_generative_ai": GoogleGenerativeAiEmbeddingFunction,
     "google_vertex": GoogleVertexEmbeddingFunction,
+    "google_genai": GoogleGenaiEmbeddingFunction,
     "ollama": OllamaEmbeddingFunction,
     "instructor": InstructorEmbeddingFunction,
     "jina": JinaEmbeddingFunction,
     "mistral": MistralEmbeddingFunction,
     "morph": MorphEmbeddingFunction,
+    "nomic": NomicEmbeddingFunction,
     "voyageai": VoyageAIEmbeddingFunction,
     "onnx_mini_lm_l6_v2": ONNXMiniLM_L6_V2,
     "open_clip": OpenCLIPEmbeddingFunction,
@@ -157,6 +170,7 @@ sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  
     "fastembed_sparse": FastembedSparseEmbeddingFunction,
     "bm25": Bm25EmbeddingFunction,
     "chroma-cloud-splade": ChromaCloudSpladeEmbeddingFunction,
+    "chroma_bm25": ChromaBm25EmbeddingFunction,
 }
 
 
@@ -254,12 +268,15 @@ __all__ = [
     "GooglePalmEmbeddingFunction",
     "GoogleGenerativeAiEmbeddingFunction",
     "GoogleVertexEmbeddingFunction",
+    "GoogleGenaiEmbeddingFunction",
     "OllamaEmbeddingFunction",
     "InstructorEmbeddingFunction",
     "JinaEmbeddingFunction",
     "JinaQueryConfig",
     "MistralEmbeddingFunction",
     "MorphEmbeddingFunction",
+    "NomicEmbeddingFunction",
+    "NomicQueryConfig",
     "VoyageAIEmbeddingFunction",
     "ONNXMiniLM_L6_V2",
     "OpenCLIPEmbeddingFunction",
@@ -273,6 +290,7 @@ __all__ = [
     "Bm25EmbeddingFunction",
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
+    "ChromaBm25EmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",

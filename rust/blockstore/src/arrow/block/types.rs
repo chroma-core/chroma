@@ -856,6 +856,7 @@ fn verify_buffers_layout(bytes: &[u8]) -> Result<(), ArrowLayoutVerificationErro
             for block in blocks.iter().skip(1) {
                 let curr_offset = block.offset();
                 let len = (curr_offset - prev_offset) as usize;
+                #[allow(clippy::manual_is_multiple_of)]
                 if len % ARROW_ALIGNMENT != 0 {
                     return Err(ArrowLayoutVerificationError::BufferLengthNotAligned);
                 }
@@ -863,6 +864,7 @@ fn verify_buffers_layout(bytes: &[u8]) -> Result<(), ArrowLayoutVerificationErro
             }
             // Check the remaining buffer length based on the body length
             let last_buffer_len = record_batch_body_len - prev_offset as usize;
+            #[allow(clippy::manual_is_multiple_of)]
             if last_buffer_len % ARROW_ALIGNMENT != 0 {
                 return Err(ArrowLayoutVerificationError::BufferLengthNotAligned);
             }

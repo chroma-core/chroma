@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/google-gemini",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "Google Gemini embedding provider for Chroma",
   "main": "dist/cjs/google-gemini.cjs",
@@ -43,7 +43,7 @@
     "chromadb": "workspace:^"
   },
   "dependencies": {
-    "@chroma-core/ai-embeddings-common": "workspace:^0.1.0",
+    "@chroma-core/ai-embeddings-common": "workspace:^",
     "@google/genai": "^0.14.1"
   },
   "engines": {

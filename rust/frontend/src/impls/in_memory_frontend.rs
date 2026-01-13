@@ -6,7 +6,8 @@ use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection,
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
     test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
-    IncludeList, InternalCollectionConfiguration, Segment, VectorIndexConfiguration,
+    IncludeList, InternalCollectionConfiguration, KnnIndex, Schema, SchemaError, Segment,
+    VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -221,13 +222,24 @@ impl InMemoryFrontend {
             ));
         }
 
+        let schema = Schema::reconcile_schema_and_config(
+            request.schema.as_ref(),
+            request.configuration.as_ref(),
+            KnnIndex::Hnsw,
+        )
+        .map_err(CreateCollectionError::InvalidSchema)?;
+
+        let config = InternalCollectionConfiguration::try_from(&schema).map_err(|e| {
+            CreateCollectionError::InvalidSchema(SchemaError::InvalidUserInput { reason: e })
+        })?;
+
         let collection = Collection {
-            name: request.name,
-            tenant: request.tenant_id,
-            database: request.database_name,
-            config: request
-                .configuration
-                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+            name: request.name.clone(),
+            tenant: request.tenant_id.clone(),
+            database: request.database_name.clone(),
+            metadata: request.metadata,
+            config,
+            schema: Some(schema),
             ..Default::default()
         };
 
@@ -433,6 +445,7 @@ impl InMemoryFrontend {
         Ok(chroma_types::UpsertCollectionRecordsResponse {})
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn delete(
         &mut self,
         request: chroma_types::DeleteCollectionRecordsRequest,
@@ -493,6 +506,7 @@ impl InMemoryFrontend {
         Ok(chroma_types::DeleteCollectionRecordsResponse {})
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn count(
         &self,
         request: chroma_types::CountRequest,
@@ -528,6 +542,7 @@ impl InMemoryFrontend {
         Ok(count.count)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn get(
         &self,
         request: chroma_types::GetRequest,
@@ -586,6 +601,7 @@ impl InMemoryFrontend {
         Ok((get_response, include).into())
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn query(
         &mut self,
         request: chroma_types::QueryRequest,
@@ -620,10 +636,15 @@ impl InMemoryFrontend {
 
         let params = collection
             .collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            .schema
+            .as_ref()
+            .map(|schema| {
+                schema.get_internal_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            })
+            .transpose()
             .map_err(|e| e.boxed())?
-            .unwrap();
+            .flatten()
+            .expect("HNSW configuration missing for collection schema");
         let distance_function: DistanceFunction = params.space.into();
 
         let query_response = collection

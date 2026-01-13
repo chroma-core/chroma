@@ -21,6 +21,7 @@ Features like:
 - The new [Chroma CLI](https://www.youtube.com/watch?v=lHassGpmvK8) that lets you browse your collections locally, manage your Chroma Cloud DBs, and more!
 - [Chroma Cloud](https://www.trychroma.com/cloud)!
 - [Package Search MCP](https://www.trychroma.com/package-search) - Allow your coding agent to search and understand the source code of thousands of dependencies from npm, pypi and crates.
+- [Github Sync](https://www.trychroma.com/changelog/introducing-chroma-sync) - Chroma can handle ingesting, parsing, chunking, and embedding your codebase.
 
 ## What will Chroma prioritize over the next 6mo?
 
@@ -30,7 +31,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 
 - **Workflow**: Building tools for answer questions like: what embedding model should I use? And how should I chunk up my documents?
 - **Visualization**: Building visualization tool to give developers greater intuition embedding spaces
-- **Query Planner**: Building tools to enable per-query and post-query transforms
+- **Query Planner**: Building tools to enable pre-query and post-query transforms
 - **Developer experience**: Adding more features to our CLI
 - **Easier Data Sharing**: Working on formats for serialization and easier data sharing of embedding Collections
 - **Improving recall**: Fine-tuning embedding transforms through human feedback
@@ -40,7 +41,7 @@ Not an exhaustive list, but these are some of the core team’s biggest prioriti
 
 This is where you have a lot more free reign to contribute (without having to sync with us first)!
 
-If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel on [our Discord](https://discord.gg/rahcMUU5XV)! We'd love to support you however we can.
+If you're unsure about your contribution idea, feel free to chat with us (@chroma) in the `#general` channel on [our Discord](https://discord.com/invite/MMeYNTmh3x)! We'd love to support you however we can.
 
 ### Example Templates
 
@@ -84,4 +85,4 @@ If you have a research background, we welcome contributions in the following are
 - Expanded vector search (MMR, Polytope)
 - Your research
 
-Please [reach out](https://discord.gg/MMeYNTmh3x) and talk to us before you get too far in your projects so that we can offer technical guidance/align on roadmap.
+Please [reach out](https://discord.com/invite/MMeYNTmh3x) and talk to us before you get too far in your projects so that we can offer technical guidance/align on roadmap.

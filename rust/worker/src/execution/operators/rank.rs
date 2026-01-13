@@ -261,6 +261,7 @@ mod tests {
             query: chroma_types::operator::QueryVector::Sparse(chroma_types::SparseVector {
                 indices: vec![0],
                 values: vec![1.0],
+                tokens: None,
             }),
             key: Key::field("sparse"),
             limit: 2,

@@ -1,12 +1,15 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb", "rust/spanner-migrations"]
 
 [workspace.dependencies]
 anyhow = "1.0"
 arrow = "55.1"
 async-trait = "0.1"
+aws-config = { version = "1.5", features = ["behavior-version-latest"] }
+aws-sdk-s3 = "1.63"
+aws-smithy-types = "1.2"
 axum = { version = "0.8", features = ["macros"] }
 bytes = "1.10"
 chrono = { version = "0.4", features = ["serde"] }
@@ -16,6 +19,7 @@ flatbuffers = "25.2.10"
 futures = "0.3"
 futures-core = "0.3"
 http-body-util = "0.1.3"
+object_store = { version = "0.12", features = ["gcp"] }
 lazy_static = { version = "1.4" }
 lexical-core = "1.0"
 murmur3 = "0.5.2"
@@ -28,8 +32,8 @@ opentelemetry_sdk = { version = "0.27", features = ["rt-tokio"] }
 parking_lot = { version = "0.12.3", features = ["serde"] }
 parquet = { version = "55.1", features = ["async"] }
 pin-project = "1.1.10"
-prost = "0.13"
-prost-types = "0.13.5"
+prost = "0.14"
+prost-types = "0.14"
 regex = "1.11.1"
 regex-syntax = "0.8.5"
 roaring = "0.10.6"
@@ -43,15 +47,15 @@ tantivy = "0.22.0"
 thiserror = "1.0.69"
 tokio = { version = "1.41", features = ["fs", "macros", "rt-multi-thread", "time", "io-util", "signal"] }
 tokio-util = "0.7.12"
-tonic = "0.12"
-tonic-health = "0.12.3"
-tower = { version = "0.4.13", features = ["discover"] }
+tonic = "0.14"
+tonic-health = "0.14"
+tower = { version = "0.5.2", features = ["discover"] }
 backon = "1.3.0"
 tracing = { version = "0.1" }
 tracing-bunyan-formatter = "0.3"
 tracing-opentelemetry = "0.28.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "1.11.0", features = ["v4", "fast-rng", "macro-diagnostics", "serde"] }
+uuid = { version = "1.11.0", features = ["v4", "v7", "fast-rng", "macro-diagnostics", "serde"] }
 utoipa = { version = "5", features = ["macros", "axum_extras", "debug", "uuid"] }
 sqlx = { version = "0.8.3", features = ["runtime-tokio", "sqlite", "postgres", "chrono"] }
 sha2 = "0.10.8"
@@ -63,7 +67,7 @@ bytemuck = "1.21.0"
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
-hnswlib = { version = "0.8.1", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
+hnswlib = { version = "0.8.2", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
@@ -71,15 +75,18 @@ humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
 base64 = "0.22"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
+google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner" }
+google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }
+google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"] }
 
-chroma = { path = "rust/chroma", version = "0.6.0" }
-chroma-api-types = { path = "rust/api-types", version = "0.5.0" }
+chroma = { path = "rust/chroma", version = "0.10.0" }
+chroma-api-types = { path = "rust/api-types", version = "0.10.0" }
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
-chroma-error = { path = "rust/error", version = "0.5.0" }
+chroma-error = { path = "rust/error", version = "0.10.0" }
 chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
@@ -91,7 +98,7 @@ chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
-chroma-types = { path = "rust/types", version = "0.5.0" }
+chroma-types = { path = "rust/types", version = "0.10.0" }
 chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }

@@ -1,35 +1,39 @@
 from chromadb.api.types import Embeddings, Documents, EmbeddingFunction, Space
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 import os
 import numpy as np
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
+from chromadb.utils.embedding_functions.utils import _get_shared_system_client
 from enum import Enum
+
 
 class ChromaCloudQwenEmbeddingModel(Enum):
     QWEN3_EMBEDDING_0p6B = "Qwen/Qwen3-Embedding-0.6B"
 
-class ChromaCloudQwenEmbeddingTask(Enum):
-    NL_TO_CODE = "nl_to_code"
 
 class ChromaCloudQwenEmbeddingTarget(Enum):
     DOCUMENTS = "documents"
     QUERY = "query"
 
-ChromaCloudQwenEmbeddingInstructions = Dict[ChromaCloudQwenEmbeddingTask, Dict[ChromaCloudQwenEmbeddingTarget, str]]
+
+ChromaCloudQwenEmbeddingInstructions = Dict[
+    str, Dict[ChromaCloudQwenEmbeddingTarget, str]
+]
 
 CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS: ChromaCloudQwenEmbeddingInstructions = {
-    ChromaCloudQwenEmbeddingTask.NL_TO_CODE: {
+    "nl_to_code": {
         ChromaCloudQwenEmbeddingTarget.DOCUMENTS: "",
         # Taken from https://github.com/QwenLM/Qwen3-Embedding/blob/main/evaluation/task_prompts.json
         ChromaCloudQwenEmbeddingTarget.QUERY: "Given a question about coding, retrieval code or passage that can solve user's question",
-    }        
+    }
 }
+
 
 class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         model: ChromaCloudQwenEmbeddingModel,
-        task: ChromaCloudQwenEmbeddingTask,
+        task: Optional[str],
         instructions: ChromaCloudQwenEmbeddingInstructions = CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS,
         api_key_env_var: str = "CHROMA_API_KEY",
     ):
@@ -38,11 +42,12 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Args:
             model (ChromaCloudQwenEmbeddingModel): The specific Qwen model to use for embeddings.
-            task (ChromaCloudQwenEmbeddingTask): The task for which embeddings are being generated.
+            task (str, optional): The task for which embeddings are being generated. If None or empty,
+                empty instructions will be used for both documents and queries.
             instructions (ChromaCloudQwenEmbeddingInstructions, optional): A dictionary containing
                 custom instructions to use for the specified Qwen model. Defaults to CHROMA_CLOUD_QWEN_DEFAULT_INSTRUCTIONS.
             api_key_env_var (str, optional): Environment variable name that contains your API key.
-                Defaults to "CHROMA_API_KEY".                
+                Defaults to "CHROMA_API_KEY".
         """
         try:
             import httpx
@@ -52,9 +57,18 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
             )
 
         self.api_key_env_var = api_key_env_var
+        # First, try to get API key from environment variable
         self.api_key = os.getenv(api_key_env_var)
+        # If not found in env var, try to get it from existing client instances
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            SharedSystemClient = _get_shared_system_client()
+            self.api_key = SharedSystemClient.get_chroma_cloud_api_key_from_clients()
+        # Raise error if still no API key found
+        if not self.api_key:
+            raise ValueError(
+                f"API key not found in environment variable {api_key_env_var} "
+                f"or in any existing client instances"
+            )
 
         self.model = model
         self.task = task
@@ -63,7 +77,10 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         self._api_url = "https://embed.trychroma.com"
         self._session = httpx.Client()
         self._session.headers.update(
-            {"x-chroma-token": self.api_key, "x-chroma-embedding-model": self.model.value}
+            {
+                "x-chroma-token": self.api_key,
+                "x-chroma-embedding-model": self.model.value,
+            }
         )
 
     def _parse_response(self, response: Any) -> Embeddings:
@@ -83,7 +100,6 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
 
         return np.array(embeddings, dtype=np.float32)
 
-
     def __call__(self, input: Documents) -> Embeddings:
         """
         Generate embeddings for the given documents.
@@ -97,8 +113,14 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         if not input:
             return []
 
+        instruction = ""
+        if self.task and self.task in self.instructions:
+            instruction = self.instructions[self.task][
+                ChromaCloudQwenEmbeddingTarget.DOCUMENTS
+            ]
+
         payload: Dict[str, Union[str, Documents]] = {
-            "instructions": self.instructions[self.task][ChromaCloudQwenEmbeddingTarget.DOCUMENTS],
+            "instructions": instruction,
             "texts": input,
         }
 
@@ -113,8 +135,14 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         if not input:
             return []
 
+        instruction = ""
+        if self.task and self.task in self.instructions:
+            instruction = self.instructions[self.task][
+                ChromaCloudQwenEmbeddingTarget.QUERY
+            ]
+
         payload: Dict[str, Union[str, Documents]] = {
-            "instructions": self.instructions[self.task][ChromaCloudQwenEmbeddingTarget.QUERY],
+            "instructions": instruction,
             "texts": input,
         }
 
@@ -147,17 +175,16 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         if instructions is not None:
             deserialized_instructions = {}
             for task_key, targets in instructions.items():
-                # Convert string key to enum
-                task_enum = ChromaCloudQwenEmbeddingTask(task_key)
-                deserialized_instructions[task_enum] = {}
+                deserialized_instructions[task_key] = {}
                 for target_key, instruction in targets.items():
                     # Convert string key to enum
                     target_enum = ChromaCloudQwenEmbeddingTarget(target_key)
-                    deserialized_instructions[task_enum][target_enum] = instruction
+                    deserialized_instructions[task_key][target_enum] = instruction
+                    deserialized_instructions[task_key][target_enum] = instruction
 
         return ChromaCloudQwenEmbeddingFunction(
             model=ChromaCloudQwenEmbeddingModel(model),
-            task=ChromaCloudQwenEmbeddingTask(task),
+            task=task,
             instructions=deserialized_instructions,
             api_key_env_var=api_key_env_var or "CHROMA_API_KEY",
         )
@@ -165,16 +192,13 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
     def get_config(self) -> Dict[str, Any]:
         # Serialize instructions dict with enum keys to string keys for JSON compatibility
         serialized_instructions = {
-            task.value: {
-                target.value: instruction
-                for target, instruction in targets.items()
-            }
+            task: {target.value: instruction for target, instruction in targets.items()}
             for task, targets in self.instructions.items()
         }
         return {
             "api_key_env_var": self.api_key_env_var,
             "model": self.model.value,
-            "task": self.task.value,
+            "task": self.task,
             "instructions": serialized_instructions,
         }
 
@@ -192,7 +216,7 @@ class ChromaCloudQwenEmbeddingFunction(EmbeddingFunction[Documents]):
         elif "instructions" in new_config:
             raise ValueError(
                 "The instructions cannot be changed after the embedding function has been initialized."
-            )        
+            )
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:

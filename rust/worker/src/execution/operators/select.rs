@@ -82,15 +82,20 @@ impl Operator<SelectInput, SelectOutput> for Select {
             Err(e) => Err(*e),
         }?;
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
-
         let offset_id_set = input
             .records
             .iter()
             .map(|record| record.offset_id)
             .collect::<HashSet<_>>();
+
+        // Load data for offset ids
+        if let Some(reader) = &record_segment_reader {
+            reader.load_id_to_data(offset_id_set.iter().cloned()).await;
+        }
+
+        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         let offset_id_to_log_record = materialized_logs

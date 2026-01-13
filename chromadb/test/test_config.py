@@ -189,3 +189,21 @@ def test_runtime_dependencies() -> None:
     assert data.starts == ["D", "C"]
     system.stop()
     assert data.stops == ["C", "D"]
+
+
+def test_http_client_setting_defaults() -> None:
+    settings = Settings()
+    assert settings.chroma_http_keepalive_secs == 40.0
+    assert settings.chroma_http_max_connections is None
+    assert settings.chroma_http_max_keepalive_connections is None
+
+
+def test_http_client_setting_overrides() -> None:
+    settings = Settings(
+        chroma_http_keepalive_secs=5.5,
+        chroma_http_max_connections=123,
+        chroma_http_max_keepalive_connections=17,
+    )
+    assert settings.chroma_http_keepalive_secs == 5.5
+    assert settings.chroma_http_max_connections == 123
+    assert settings.chroma_http_max_keepalive_connections == 17

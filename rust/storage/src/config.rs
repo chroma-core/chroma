@@ -4,12 +4,17 @@ use serde::{Deserialize, Serialize};
 /// The configuration for the chosen storage.
 /// # Options
 /// - S3: The configuration for the s3 storage.
+/// - Object: The configuration for the object storage.
+/// - Local: The configuration for local filesystem storage.
+/// - AdmissionControlledS3: S3 with rate limiting and request coalescing.
 /// # Notes
 /// See config.rs in the root of the worker crate for an example of how to use
 /// config files to configure the worker.
 pub enum StorageConfig {
     #[serde(alias = "s3")]
     S3(S3StorageConfig),
+    #[serde(alias = "object")]
+    Object(ObjectStorageConfig),
     #[serde(alias = "local")]
     Local(LocalStorageConfig),
     #[serde(alias = "admissioncontrolleds3")]
@@ -113,9 +118,13 @@ pub struct LocalStorageConfig {
 #[derive(Deserialize, Debug, Default, Clone, Serialize)]
 pub struct AdmissionControlledS3StorageConfig {
     #[serde(default)]
-    pub s3_config: S3StorageConfig,
+    pub object_store_config: ObjectStorageConfig,
     #[serde(default)]
     pub rate_limiting_policy: RateLimitingConfig,
+    #[serde(default)]
+    pub s3_config: S3StorageConfig,
+    #[serde(default)]
+    pub use_object_store_client: bool,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
@@ -127,12 +136,12 @@ pub struct CountBasedPolicyConfig {
 }
 
 impl CountBasedPolicyConfig {
-    fn default_max_concurrent_requests() -> usize {
-        30
-    }
-
     fn default_bandwidth_allocation() -> Vec<f32> {
         vec![0.7, 0.3]
+    }
+
+    fn default_max_concurrent_requests() -> usize {
+        30
     }
 }
 
@@ -154,5 +163,82 @@ pub enum RateLimitingConfig {
 impl Default for RateLimitingConfig {
     fn default() -> Self {
         RateLimitingConfig::CountBasedPolicy(CountBasedPolicyConfig::default())
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+pub enum ObjectStorageProvider {
+    /// GCS uses Application Default Credentials (ADC) automatically
+    GCS,
+}
+
+#[derive(Deserialize, Debug, Clone, Serialize)]
+/// The configuration for the ObjectStorage type
+/// # Fields
+/// - bucket: The name of the bucket to use.
+/// - connect_timeout_ms: Connection timeout in milliseconds.
+/// - download_part_size_bytes: Size of each part for parallel range downloads.
+/// - provider: Which backend to use for storage.
+/// - request_retry_count: Number of retry attempts for failed requests.
+/// - request_timeout_ms: Request timeout in milliseconds.
+/// - upload_part_size_bytes: Size of each part in multipart uploads.
+pub struct ObjectStorageConfig {
+    #[serde(default = "ObjectStorageConfig::default_bucket")]
+    pub bucket: String,
+    #[serde(default = "ObjectStorageConfig::default_connect_timeout_ms")]
+    pub connect_timeout_ms: u64,
+    #[serde(default = "ObjectStorageConfig::default_download_part_size_bytes")]
+    pub download_part_size_bytes: u64,
+    #[serde(default = "ObjectStorageConfig::default_provider")]
+    pub provider: ObjectStorageProvider,
+    #[serde(default = "ObjectStorageConfig::default_request_retry_count")]
+    pub request_retry_count: usize,
+    #[serde(default = "ObjectStorageConfig::default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+    #[serde(default = "ObjectStorageConfig::default_upload_part_size_bytes")]
+    pub upload_part_size_bytes: u64,
+}
+
+impl ObjectStorageConfig {
+    fn default_bucket() -> String {
+        "chroma-storage".to_string()
+    }
+
+    fn default_connect_timeout_ms() -> u64 {
+        5000
+    }
+
+    fn default_download_part_size_bytes() -> u64 {
+        8 * 1024 * 1024 // 8 MB
+    }
+
+    fn default_provider() -> ObjectStorageProvider {
+        ObjectStorageProvider::GCS
+    }
+
+    fn default_request_retry_count() -> usize {
+        3
+    }
+
+    fn default_request_timeout_ms() -> u64 {
+        60000
+    }
+
+    fn default_upload_part_size_bytes() -> u64 {
+        512 * 1024 * 1024 // 512 MB
+    }
+}
+
+impl Default for ObjectStorageConfig {
+    fn default() -> Self {
+        ObjectStorageConfig {
+            bucket: Self::default_bucket(),
+            connect_timeout_ms: Self::default_connect_timeout_ms(),
+            download_part_size_bytes: Self::default_download_part_size_bytes(),
+            provider: Self::default_provider(),
+            request_retry_count: Self::default_request_retry_count(),
+            request_timeout_ms: Self::default_request_timeout_ms(),
+            upload_part_size_bytes: Self::default_upload_part_size_bytes(),
+        }
     }
 }

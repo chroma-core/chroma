@@ -28,6 +28,7 @@ type Collection struct {
 	VersionFileName            string
 	CreatedAt                  time.Time
 	DatabaseId                 types.UniqueID
+	CompactionFailureCount     int32
 }
 
 type CollectionToGc struct {
@@ -98,6 +99,12 @@ type FlushCollectionInfo struct {
 	ID                       string
 	CollectionVersion        int32
 	TenantLastCompactionTime int64
+	// Optional attached function fields (only populated for attached-function-based compactions)
+	AttachedFunctionCompletionOffset *int64
+}
+
+type ExtendedFlushCollectionInfo struct {
+	Collections []*FlushCollectionInfo
 }
 
 func FilterCollection(collection *Collection, collectionID types.UniqueID, collectionName *string) bool {

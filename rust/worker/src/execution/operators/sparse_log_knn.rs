@@ -149,6 +149,7 @@ mod tests {
                     0.2 * offset as f32,
                     0.3 * offset as f32,
                 ],
+                tokens: None,
             }),
         );
 
@@ -194,6 +195,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 2, 4],
             values: vec![1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let sparse_knn_operator = SparseLogKnn {
@@ -237,6 +239,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 2, 4],
             values: vec![1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let sparse_knn_operator = SparseLogKnn {
@@ -268,6 +271,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 1, 3], // Only index 0 overlaps with generated vectors
             values: vec![2.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let sparse_knn_operator = SparseLogKnn {
@@ -302,6 +306,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![0, 2, 4],
             values: vec![1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let sparse_knn_operator = SparseLogKnn {
@@ -333,6 +338,7 @@ mod tests {
         let query_vector = SparseVector {
             indices: vec![1, 3, 5], // Generated vectors have indices [0, 2, 4]
             values: vec![1.0, 1.0, 1.0],
+            tokens: None,
         };
 
         let sparse_knn_operator = SparseLogKnn {

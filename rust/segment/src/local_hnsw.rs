@@ -106,8 +106,11 @@ impl LocalHnswSegmentReader {
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentReaderError> {
         let hnsw_configuration = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(segment)?
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
+            .transpose()?
+            .flatten()
             .ok_or(LocalHnswSegmentReaderError::MissingHnswConfiguration)?;
 
         match persist_root {
@@ -490,8 +493,11 @@ impl LocalHnswSegmentWriter {
         sql_db: SqliteDb,
     ) -> Result<Self, LocalHnswSegmentWriterError> {
         let hnsw_configuration = collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(segment)?
+            .schema
+            .as_ref()
+            .map(|schema| schema.get_internal_hnsw_config_with_legacy_fallback(segment))
+            .transpose()?
+            .flatten()
             .ok_or(LocalHnswSegmentWriterError::MissingHnswConfiguration)?;
 
         match persist_root {
@@ -660,6 +666,10 @@ impl LocalHnswSegmentWriter {
             guard.num_elements_since_last_persist += 1;
             max_seq_id = max_seq_id.max(log.log_offset as u64);
             match log.record.operation {
+                Operation::BackfillFn => {
+                    tracing::warn!("BackfillFn not supported for hnsw index");
+                    continue;
+                }
                 Operation::Add => {
                     // only update if the id is not already present
                     if !guard.id_map.id_to_label.contains_key(&log.record.id) {
@@ -778,6 +788,9 @@ impl LocalHnswSegmentWriter {
             .map(|(_, records)| {
                 for (label, log_record) in records {
                     match log_record.operation {
+                        Operation::BackfillFn => {
+                            continue;
+                        }
                         Operation::Add | Operation::Upsert | Operation::Update => {
                             let embedding = log_record.embedding.as_ref().expect(
                                 "Add, update or upsert should have an embedding at this point",

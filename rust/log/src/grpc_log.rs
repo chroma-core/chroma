@@ -18,7 +18,7 @@ use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
-    CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
+    Cmek, CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
 };
 use std::fmt::Debug;
 use std::time::Duration;
@@ -263,6 +263,7 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
             1,
             my_config.connect_timeout_ms,
             my_config.request_timeout_ms,
+            my_config.port,
             ClientOptions::new(Some(my_config.max_decoding_message_size)),
         );
         let client_manager_handle = system.start_component(client_manager);
@@ -335,10 +336,7 @@ impl GrpcLog {
         batch_size: i32,
         end_timestamp: Option<i64>,
     ) -> Result<Vec<LogRecord>, GrpcPullLogsError> {
-        let end_timestamp = match end_timestamp {
-            Some(end_timestamp) => end_timestamp,
-            None => i64::MAX,
-        };
+        let end_timestamp = end_timestamp.unwrap_or(i64::MAX);
         let mut client = self.client_for(collection_id)?;
         let request = client.pull_logs(chroma_proto::PullLogsRequest {
             // NOTE(rescrv):  Use the untyped string representation of the collection ID.
@@ -383,8 +381,13 @@ impl GrpcLog {
         &mut self,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), GrpcPushLogsError> {
         let num_records = records.len();
+
+        // Convert Cmek to protobuf format
+        let cmek_proto = cmek.map(|c| c.into());
+
         let request = chroma_proto::PushLogsRequest {
             collection_id: collection_id.0.to_string(),
 
@@ -393,6 +396,7 @@ impl GrpcLog {
                     Vec<chroma_types::chroma_proto::OperationRecord>,
                     RecordConversionError,
                 >>()?,
+            cmek: cmek_proto,
         };
 
         let resp = self
@@ -488,6 +492,7 @@ impl GrpcLog {
         Self::post_process_get_all(combined_response)
     }
 
+    #[allow(clippy::result_large_err)]
     fn post_process_get_all(
         combined_response: Vec<GetAllCollectionInfoToCompactResponse>,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
@@ -640,13 +645,14 @@ impl GrpcLog {
         ordinal: u64,
     ) -> Result<(), GarbageCollectError> {
         // NOTE(rescrv): Use a raw LogServiceClient so we can open by stateful set ordinal.
+        let port = self.config.port;
         let endpoint_res = match Endpoint::from_shared(format!(
-            "grpc://rust-log-service-{ordinal}.rust-log-service:50051"
+            "grpc://rust-log-service-{ordinal}.rust-log-service:{port}"
         )) {
             Ok(endpoint) => endpoint,
             Err(e) => {
                 return Err(GarbageCollectError::Resolution(format!(
-                    "could not connect to rust-log-service-{ordinal}:50051: {}",
+                    "could not connect to rust-log-service-{ordinal}:{port}: {}",
                     e
                 )));
             }
@@ -656,7 +662,7 @@ impl GrpcLog {
             .timeout(Duration::from_millis(self.config.request_timeout_ms));
         let channel = endpoint_res.connect().await.map_err(|err| {
             GarbageCollectError::Resolution(format!(
-                "could not connect to rust-log-service-{ordinal}:50051: {}",
+                "could not connect to rust-log-service-{ordinal}:{port}: {}",
                 err
             ))
         })?;

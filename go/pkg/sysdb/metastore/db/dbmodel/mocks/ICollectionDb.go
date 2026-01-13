@@ -326,6 +326,24 @@ func (_m *ICollectionDb) GetSoftDeletedCollections(collectionID *string, tenantI
 	return r0, r1
 }
 
+// IncrementCompactionFailureCount provides a mock function with given fields: collectionID
+func (_m *ICollectionDb) IncrementCompactionFailureCount(collectionID string) error {
+	ret := _m.Called(collectionID)
+
+	if len(ret) == 0 {
+		panic("no return value specified for IncrementCompactionFailureCount")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(string) error); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
 // Insert provides a mock function with given fields: in
 func (_m *ICollectionDb) Insert(in *dbmodel.Collection) error {
 	ret := _m.Called(in)
