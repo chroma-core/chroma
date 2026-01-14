@@ -14,16 +14,18 @@ import {
 const offlineError = (error: any): boolean => {
   return Boolean(
     (error?.name === "TypeError" || error?.name === "FetchError") &&
-    (error.message?.includes("fetch failed") ||
-      error.message?.includes("Failed to fetch") ||
-      error.message?.includes("ENOTFOUND")),
+      (error.message?.includes("fetch failed") ||
+        error.message?.includes("Failed to fetch") ||
+        error.message?.includes("ENOTFOUND")),
   );
 };
 
 const getErrorMessage = async (response: Response): Promise<string> => {
   try {
     const body = await response.clone().json();
-    return body.message || body.error || `${response.status}: ${response.statusText}`;
+    return (
+      body.message || body.error || `${response.status}: ${response.statusText}`
+    );
   } catch {
     return `${response.status}: ${response.statusText}`;
   }
@@ -52,9 +54,10 @@ export const chromaFetch: typeof fetch = async (input, init) => {
       try {
         const responseBody = await response.json();
         status = responseBody.message || status;
-      } catch { }
+      } catch {}
       throw new ChromaClientError(
-        `Bad request to ${(input as Request).url || "Chroma"
+        `Bad request to ${
+          (input as Request).url || "Chroma"
         } with status: ${status}`,
       );
     case 401:
@@ -82,10 +85,15 @@ export const chromaFetch: typeof fetch = async (input, init) => {
         }
         throw new ChromaClientError(body?.message || "Unprocessable Entity");
       } catch (error) {
-        if (error instanceof ChromaQuotaExceededError || error instanceof ChromaClientError) {
+        if (
+          error instanceof ChromaQuotaExceededError ||
+          error instanceof ChromaClientError
+        ) {
           throw error;
         }
-        throw new ChromaClientError(`Unprocessable Entity: ${response.statusText}`);
+        throw new ChromaClientError(
+          `Unprocessable Entity: ${response.statusText}`,
+        );
       }
     case 429:
       throw new ChromaRateLimitError("Rate limit exceeded");

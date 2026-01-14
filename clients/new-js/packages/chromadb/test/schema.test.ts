@@ -1826,13 +1826,13 @@ describe("Schema", () => {
   });
 
   it("CMEK serialization and deserialization", () => {
-    const cmek = Cmek.gcp(
-      "projects/p/locations/l/keyRings/r/cryptoKeys/k",
-    );
+    const cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k");
 
     // Serialize - should use snake_case format matching Rust serde
     const json = cmek.toJSON();
-    expect(json).toEqual({ gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k" });
+    expect(json).toEqual({
+      gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    });
     expect(json.gcp).toBe("projects/p/locations/l/keyRings/r/cryptoKeys/k");
 
     // Deserialize
@@ -1872,8 +1872,12 @@ describe("Schema", () => {
 
     // Verify CMEK is in JSON with snake_case format
     expect(json.cmek).toBeDefined();
-    expect(json.cmek).toEqual({ gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k" });
-    expect((json.cmek as any).gcp).toBe("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+    expect(json.cmek).toEqual({
+      gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    });
+    expect((json.cmek as any).gcp).toBe(
+      "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    );
 
     // Deserialize
     const deserialized = await Schema.deserializeFromJSON(json, client);

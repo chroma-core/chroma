@@ -59,10 +59,7 @@ export abstract class Aggregate {
 }
 
 export class MinK extends Aggregate {
-  constructor(
-    public readonly keys: Key[],
-    public readonly k: number,
-  ) {
+  constructor(public readonly keys: Key[], public readonly k: number) {
     super();
     if (keys.length === 0) {
       throw new Error("MinK keys cannot be empty");
@@ -83,10 +80,7 @@ export class MinK extends Aggregate {
 }
 
 export class MaxK extends Aggregate {
-  constructor(
-    public readonly keys: Key[],
-    public readonly k: number,
-  ) {
+  constructor(public readonly keys: Key[], public readonly k: number) {
     super();
     if (keys.length === 0) {
       throw new Error("MaxK keys cannot be empty");
@@ -143,7 +137,9 @@ export class GroupBy {
         Aggregate.from(data.aggregate),
       );
     }
-    throw new TypeError("GroupBy input must be a GroupBy instance or plain object");
+    throw new TypeError(
+      "GroupBy input must be a GroupBy instance or plain object",
+    );
   }
 
   public toJSON(): GroupByJSON {
