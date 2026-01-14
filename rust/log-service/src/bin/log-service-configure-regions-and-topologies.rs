@@ -303,7 +303,7 @@ fn main() {
                 .expect("failed to write");
             writeln!(writer, "Configuration Complete!").expect("failed to write");
             writeln!(writer, "========================================").expect("failed to write");
-            writeln!(writer, "\nJSON output:").expect("failed to write");
+            writeln!(writer, "\nYAML output:").expect("failed to write");
             let yaml = serde_yml::to_string(&config).expect("failed to serialize");
             writeln!(writer, "{}", yaml).expect("failed to write");
         }
