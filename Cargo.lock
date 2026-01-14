@@ -7171,6 +7171,7 @@ dependencies = [
  "chroma-storage",
  "chroma-tracing",
  "chroma-types",
+ "chrono",
  "figment",
  "gcloud-gax",
  "gcloud-spanner",

@@ -6,11 +6,24 @@
 //! - Backend-specific optimizations without affecting the API
 //! - Cleaner internal APIs that aren't tied to protobuf conventions
 
-use chroma_types::{chroma_proto, Database, Tenant};
-use google_cloud_spanner::row::Row;
+use chroma_types::{
+    chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseUuid,
+    InternalCollectionConfiguration, Metadata, MetadataValue, MetadataValueConversionError, Schema,
+    Segment, SegmentConversionError, Tenant,
+};
 use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
+
+use std::num::TryFromIntError;
+
+use chroma_error::{ChromaError, ErrorCodes};
+use google_cloud_gax::grpc::Status as GrpcStatus;
+use google_cloud_gax::retry::TryAs;
+use google_cloud_spanner::session::SessionError;
+use google_cloud_spanner::{client::Error as SpannerClientError, row::Row};
+use thiserror::Error;
+use tonic::Status;
 
 // ============================================================================
 // Request Types (proto -> internal)
@@ -105,6 +118,76 @@ impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
     }
 }
 
+/// Internal request for creating a collection.
+#[derive(Debug, Clone)]
+pub struct CreateCollectionRequest {
+    pub id: CollectionUuid,
+    pub name: String,
+    pub dimension: Option<u32>,
+    pub index_schema: Schema,
+    pub segments: Vec<Segment>,
+    pub metadata: Option<Metadata>,
+    pub get_or_create: bool,
+    pub tenant_id: String,
+    pub database_name: String,
+}
+
+impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateCollectionRequest) -> Result<Self, Self::Error> {
+        // Validate schema_str is provided and parse as strongly-typed Schema
+        let schema_str = req
+            .schema_str
+            .ok_or_else(|| SysDbError::SchemaMissing("schema_str is required".to_string()))?;
+
+        let index_schema: Schema = serde_json::from_str(&schema_str)?;
+
+        // Convert and validate segments
+        let segments: Result<Vec<Segment>, _> =
+            req.segments.into_iter().map(Segment::try_from).collect();
+
+        let segments = segments.map_err(SysDbError::InvalidSegment)?;
+
+        // Validate exactly 3 segments
+        if segments.len() != 3 {
+            return Err(SysDbError::InvalidSegmentsCount);
+        }
+
+        // Convert metadata if provided, filtering out legacy "hnsw:" keys
+        let metadata = req
+            .metadata
+            .map(|proto_metadata| -> Result<Metadata, SysDbError> {
+                let mut metadata =
+                    Metadata::try_from(proto_metadata).map_err(SysDbError::InvalidMetadata)?;
+
+                // Filter out legacy metadata keys starting with "hnsw:"
+                metadata.retain(|key, _| !key.starts_with("hnsw:"));
+
+                Ok(metadata)
+            })
+            .transpose()?;
+
+        // Convert dimension from i32 to u32 (validate non-negative)
+        let dimension = req
+            .dimension
+            .map(|d| u32::try_from(d).map_err(SysDbError::InvalidDimension))
+            .transpose()?;
+
+        Ok(Self {
+            id: CollectionUuid(validate_uuid(&req.id)?),
+            name: req.name,
+            dimension,
+            index_schema,
+            segments,
+            metadata,
+            get_or_create: req.get_or_create.unwrap_or(false),
+            tenant_id: req.tenant,
+            database_name: req.database,
+        })
+    }
+}
+
 // ============================================================================
 // Assignable Trait Implementations
 // ============================================================================
@@ -162,6 +245,16 @@ impl Assignable for GetDatabaseRequest {
     }
 }
 
+impl Assignable for CreateCollectionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by database_name prefix (for now, default to Spanner)
+        // TODO: Check self.database_name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
 // ============================================================================
 // Runnable Trait Implementations
 // ============================================================================
@@ -171,9 +264,9 @@ impl Runnable for CreateTenantRequest {
     type Response = CreateTenantResponse;
     type Input = Vec<Backend>;
 
-    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
         for backend in backends {
-            backend.create_tenant(self).await?;
+            backend.create_tenant(self.clone()).await?;
         }
         Ok(CreateTenantResponse {})
     }
@@ -184,7 +277,7 @@ impl Runnable for GetTenantRequest {
     type Response = GetTenantResponse;
     type Input = Backend;
 
-    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_tenant(self).await
     }
 }
@@ -194,9 +287,9 @@ impl Runnable for SetTenantResourceNameRequest {
     type Response = SetTenantResourceNameResponse;
     type Input = Vec<Backend>;
 
-    async fn run(&self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
         for backend in backends {
-            backend.set_tenant_resource_name(self).await?;
+            backend.set_tenant_resource_name(self.clone()).await?;
         }
         Ok(SetTenantResourceNameResponse {})
     }
@@ -207,7 +300,7 @@ impl Runnable for CreateDatabaseRequest {
     type Response = CreateDatabaseResponse;
     type Input = Backend;
 
-    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.create_database(self).await
     }
 }
@@ -217,8 +310,18 @@ impl Runnable for GetDatabaseRequest {
     type Response = GetDatabaseResponse;
     type Input = Backend;
 
-    async fn run(&self, backend: Backend) -> Result<Self::Response, SysDbError> {
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_database(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CreateCollectionRequest {
+    type Response = CreateCollectionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.create_collection(self).await
     }
 }
 
@@ -349,17 +452,160 @@ impl TryFrom<SpannerRow> for Tenant {
     }
 }
 
-/// Unified error types for the SysDb service.
+pub struct SpannerRows {
+    pub rows: Vec<Row>,
+}
+
+// ============================================================================
+// Row Conversion Implementation (Spanner DAO layer)
+// ============================================================================
+
+/// Convert a vector of Spanner rows (from a JOIN query) into a Collection.
 ///
-/// This module provides a backend-agnostic error type that all backends return.
-/// The server layer only sees `SysDbError`, not backend-specific errors.
-use chroma_error::{ChromaError, ErrorCodes};
-use google_cloud_gax::grpc::Status as GrpcStatus;
-use google_cloud_gax::retry::TryAs;
-use google_cloud_spanner::client::Error as SpannerClientError;
-use google_cloud_spanner::session::SessionError;
-use thiserror::Error;
-use tonic::Status;
+/// The rows are expected to come from a query that JOINs:
+/// - collections table
+/// - collection_metadata table (LEFT JOIN, may have multiple rows per metadata key)
+/// - collection_compaction_cursors table (LEFT JOIN, single row for a specific region)
+///
+/// Column names expected:
+/// - collection_id, name, dimension, database_id, database_name, tenant_id, updated_at
+/// - metadata_key, metadata_str_value, metadata_int_value, metadata_float_value, metadata_bool_value
+/// - last_compacted_offset, version, total_records_post_compaction, size_bytes_post_compaction,
+///   last_compaction_time_secs, version_file_name, index_schema
+impl TryFrom<SpannerRows> for Collection {
+    type Error = SysDbError;
+
+    fn try_from(rows: SpannerRows) -> Result<Self, Self::Error> {
+        if rows.rows.is_empty() {
+            return Err(SysDbError::NotFound("no rows returned".to_string()));
+        }
+
+        // Extract collection fields from the first row (same for all rows)
+        let first_row = &rows.rows[0];
+
+        let collection_id_str: String = first_row
+            .column_by_name("collection_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let name: String = first_row
+            .column_by_name("name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let dimension: Option<i64> = first_row
+            .column_by_name("dimension")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let database_id_str: String = first_row
+            .column_by_name("database_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let database_name: String = first_row
+            .column_by_name("database_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let tenant_id: String = first_row
+            .column_by_name("tenant_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Spanner returns TIMESTAMP as i64 microseconds since Unix epoch
+        let updated_at_us: i64 = first_row
+            .column_by_name("updated_at")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        let last_compacted_offset: Option<i64> = first_row
+            .column_by_name("last_compacted_offset")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let version: Option<i64> = first_row
+            .column_by_name("version")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let last_compaction_time_us: Option<i64> = first_row
+            .column_by_name("last_compaction_time_secs")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let version_file_name: Option<String> = first_row
+            .column_by_name("version_file_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let total_records_post_compaction: i64 = first_row
+            .column_by_name("total_records_post_compaction")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let size_bytes_post_compaction: i64 = first_row
+            .column_by_name("size_bytes_post_compaction")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let compaction_failure_count: i64 = first_row
+            .column_by_name("compaction_failure_count")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let schema_json: String = first_row
+            .column_by_name("index_schema")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Aggregate metadata from all rows
+        let mut collection_metadata = Metadata::new();
+        for row in &rows.rows {
+            // metadata_key may be NULL if there's no metadata (LEFT JOIN)
+            if let Ok(Some(key)) = row.column_by_name::<Option<String>>("metadata_key") {
+                let str_val: Option<String> = row
+                    .column_by_name("metadata_str_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let int_val: Option<i64> = row
+                    .column_by_name("metadata_int_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let float_val: Option<f64> = row
+                    .column_by_name("metadata_float_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let bool_val: Option<bool> = row
+                    .column_by_name("metadata_bool_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+
+                if let Some(s) = str_val {
+                    collection_metadata.insert(key, MetadataValue::Str(s));
+                } else if let Some(i) = int_val {
+                    collection_metadata.insert(key, MetadataValue::Int(i));
+                } else if let Some(f) = float_val {
+                    collection_metadata.insert(key, MetadataValue::Float(f));
+                } else if let Some(b) = bool_val {
+                    collection_metadata.insert(key, MetadataValue::Bool(b));
+                }
+            }
+        }
+
+        // Parse schema JSON (index_schema is NOT NULL, so parsing should succeed)
+        let parsed_schema: Schema =
+            serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
+
+        // Convert microseconds to SystemTime
+        let updated_at_system_time =
+            std::time::UNIX_EPOCH + std::time::Duration::from_micros(updated_at_us as u64);
+
+        // Convert last_compaction_time from microseconds to seconds
+        let last_compaction_time_secs_u64 = last_compaction_time_us
+            .map(|us| (us / 1_000_000) as u64)
+            .unwrap_or(0);
+
+        Ok(Collection {
+            collection_id: CollectionUuid(
+                Uuid::parse_str(&collection_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
+            name,
+            config: InternalCollectionConfiguration::default_hnsw(),
+            schema: Some(parsed_schema),
+            metadata: if collection_metadata.is_empty() {
+                None
+            } else {
+                Some(collection_metadata)
+            },
+            dimension: dimension.map(|d| d as i32),
+            tenant: tenant_id,
+            database: database_name,
+            log_position: last_compacted_offset.unwrap_or(0),
+            version: version.map(|v| v as i32).unwrap_or(0),
+            total_records_post_compaction: total_records_post_compaction as u64,
+            size_bytes_post_compaction: size_bytes_post_compaction as u64,
+            last_compaction_time_secs: last_compaction_time_secs_u64,
+            version_file_path: version_file_name,
+            root_collection_id: None,
+            lineage_file_path: None,
+            updated_at: updated_at_system_time,
+            database_id: DatabaseUuid(
+                Uuid::parse_str(&database_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
+            compaction_failure_count: compaction_failure_count as i32,
+        })
+    }
+}
 
 /// Unified error type for all SysDb operations.
 ///
@@ -383,10 +629,6 @@ pub enum SysDbError {
     #[error("Invalid argument: {0}")]
     InvalidArgument(String),
 
-    /// Operation not supported on this backend
-    #[error("Operation not supported on this backend: {0}")]
-    NotSupported(&'static str),
-
     /// Internal/unexpected error
     #[error("Internal error: {0}")]
     Internal(String),
@@ -398,6 +640,34 @@ pub enum SysDbError {
     /// Failed to read column
     #[error("Failed to read column: {0}")]
     FailedToReadColumn(#[source] google_cloud_spanner::row::Error),
+
+    /// Schema missing
+    #[error("Schema missing: {0}")]
+    SchemaMissing(String),
+
+    /// Schema must be valid JSON
+    #[error("Schema must be valid JSON: {0}")]
+    InvalidSchemaJson(#[from] serde_json::Error),
+
+    /// Invalid segment
+    #[error("Invalid segment: {0}")]
+    InvalidSegment(#[from] SegmentConversionError),
+
+    /// Segments must be exactly 3
+    #[error("Segments must be exactly 3")]
+    InvalidSegmentsCount,
+
+    /// Invalid metadata
+    #[error("Invalid metadata: {0}")]
+    InvalidMetadata(#[from] MetadataValueConversionError),
+
+    /// Dimension must be non-negative
+    #[error("Failed to convert i32 dim to u32: {0}")]
+    InvalidDimension(#[from] TryFromIntError),
+
+    /// Failed to convert collection to proto
+    #[error("Failed to convert collection to proto: {0}")]
+    CollectionToProtoError(#[from] CollectionToProtoError),
 }
 
 impl ChromaError for SysDbError {
@@ -407,26 +677,23 @@ impl ChromaError for SysDbError {
             SysDbError::NotFound(_) => ErrorCodes::NotFound,
             SysDbError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             SysDbError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
-            SysDbError::NotSupported(_) => ErrorCodes::Internal,
             SysDbError::Internal(_) => ErrorCodes::Internal,
             SysDbError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
             SysDbError::FailedToReadColumn(_) => ErrorCodes::Internal,
+            SysDbError::SchemaMissing(_) => ErrorCodes::Internal,
+            SysDbError::InvalidSchemaJson(_) => ErrorCodes::Internal,
+            SysDbError::InvalidSegment(e) => e.code(),
+            SysDbError::InvalidSegmentsCount => ErrorCodes::Internal,
+            SysDbError::InvalidMetadata(e) => e.code(),
+            SysDbError::InvalidDimension(_) => ErrorCodes::Internal,
+            SysDbError::CollectionToProtoError(e) => e.code(),
         }
     }
 }
 
 impl From<SysDbError> for Status {
     fn from(e: SysDbError) -> Status {
-        match e {
-            SysDbError::NotFound(msg) => Status::not_found(msg),
-            SysDbError::AlreadyExists(msg) => Status::already_exists(msg),
-            SysDbError::InvalidArgument(msg) => Status::invalid_argument(msg),
-            SysDbError::NotSupported(msg) => Status::unimplemented(msg),
-            SysDbError::Spanner(err) => Status::internal(err.to_string()),
-            SysDbError::Internal(msg) => Status::internal(msg),
-            SysDbError::InvalidUuid(err) => Status::invalid_argument(err.to_string()),
-            SysDbError::FailedToReadColumn(msg) => Status::internal(msg.to_string()),
-        }
+        Status::new(e.code().into(), e.to_string())
     }
 }
 
@@ -455,5 +722,23 @@ impl TryAs<GrpcStatus> for SysDbError {
             // for domain errors like NotFound, AlreadyExists, etc.
             _ => None,
         }
+    }
+}
+
+/// Internal response for creating a collection.
+#[derive(Debug, Clone)]
+pub struct CreateCollectionResponse {
+    pub collection: Collection,
+    pub created: bool,
+}
+
+impl TryFrom<CreateCollectionResponse> for chroma_proto::CreateCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: CreateCollectionResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::CreateCollectionResponse {
+            collection: Some(r.collection.try_into()?),
+            created: r.created,
+        })
     }
 }

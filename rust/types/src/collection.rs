@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
@@ -7,7 +8,6 @@ use crate::{
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime};
 use thiserror::Error;
 use uuid::Uuid;
 
