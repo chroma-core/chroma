@@ -1007,8 +1007,8 @@ mod tests {
         match outcome {
             QuorumOutcome::ConsistencyError(msg) => {
                 assert!(
-                    msg.contains("record-count mismatch"),
-                    "expected record-count mismatch error, got: {}",
+                    msg.contains("byte-size mismatch"),
+                    "expected byte-size mismatch error, got: {}",
                     msg
                 );
                 assert!(msg.contains("100"), "should contain first count");
