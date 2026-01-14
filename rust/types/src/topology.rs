@@ -824,7 +824,7 @@ impl<
     ///     RegionName, TopologyName,
     /// };
     ///
-    /// let config = MultiCloudMultiRegionConfiguration::<i32, &str>::new(
+    /// let config = MultiCloudMultiRegionConfiguration::<i32, String>::new(
     ///     RegionName::new("aws-us-east-1").unwrap(),
     ///     vec![ProviderRegion::new(
     ///         RegionName::new("aws-us-east-1").unwrap(),
@@ -835,7 +835,7 @@ impl<
     ///     vec![Topology::new(
     ///         TopologyName::new("default").unwrap(),
     ///         vec![RegionName::new("aws-us-east-1").unwrap()],
-    ///         "topology-config",
+    ///         "topology-config".to_string(),
     ///     )],
     /// ).expect("valid configuration");
     ///
@@ -893,13 +893,13 @@ impl<
     ///     RegionName, TopologyName,
     /// };
     ///
-    /// let config = MultiCloudMultiRegionConfiguration::<&str, i32>::new(
+    /// let config = MultiCloudMultiRegionConfiguration::<String, i32>::new(
     ///     RegionName::new("aws-us-east-1").unwrap(),
     ///     vec![ProviderRegion::new(
     ///         RegionName::new("aws-us-east-1").unwrap(),
     ///         "aws",
     ///         "us-east-1",
-    ///         "42",
+    ///         "42".to_string(),
     ///     )],
     ///     vec![Topology::new(
     ///         TopologyName::new("default").unwrap(),
