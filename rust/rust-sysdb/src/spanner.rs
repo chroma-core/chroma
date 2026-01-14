@@ -1254,7 +1254,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_database_duplicate_name_tenant() {
+    async fn test_k8s_mcmr_integration_create_database_duplicate_name_tenant() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1478,7 +1478,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection() {
+    async fn test_k8s_mcmr_integration_create_collection() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1536,7 +1536,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_duplicate_fails() {
+    async fn test_k8s_mcmr_integration_create_collection_duplicate_fails() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1611,7 +1611,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_get_or_create() {
+    async fn test_k8s_mcmr_integration_create_collection_get_or_create() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1705,7 +1705,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_empty_name() {
+    async fn test_k8s_mcmr_integration_create_collection_empty_name() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1738,7 +1738,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_nonexistent_database() {
+    async fn test_k8s_mcmr_integration_create_collection_nonexistent_database() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1786,7 +1786,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_with_metadata() {
+    async fn test_k8s_mcmr_integration_create_collection_with_metadata() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1855,7 +1855,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_duplicate_id_fails() {
+    async fn test_k8s_mcmr_integration_create_collection_duplicate_id_fails() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1936,7 +1936,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_duplicate_id_get_or_create() {
+    async fn test_k8s_mcmr_integration_create_collection_duplicate_id_get_or_create() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2029,7 +2029,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_same_name_different_databases() {
+    async fn test_k8s_mcmr_integration_create_collection_same_name_different_databases() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2157,7 +2157,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_get_or_create_with_metadata() {
+    async fn test_k8s_mcmr_integration_create_collection_get_or_create_with_metadata() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2270,7 +2270,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_get_or_create_with_custom_schema() {
+    async fn test_k8s_mcmr_integration_create_collection_get_or_create_with_custom_schema() {
         use chroma_types::{
             FtsIndexConfig, FtsIndexType, StringInvertedIndexConfig, StringInvertedIndexType,
             StringValueType, ValueTypes,
@@ -2410,7 +2410,7 @@ mod tests {
     // ============================================================
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_by_id() {
+    async fn test_k8s_mcmr_integration_get_collections_by_id() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2472,7 +2472,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_by_name() {
+    async fn test_k8s_mcmr_integration_get_collections_by_name() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2537,7 +2537,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_multiple_ids() {
+    async fn test_k8s_mcmr_integration_get_collections_multiple_ids() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2605,7 +2605,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_pagination() {
+    async fn test_k8s_mcmr_integration_get_collections_pagination() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2700,7 +2700,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_empty_result() {
+    async fn test_k8s_mcmr_integration_get_collections_empty_result() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2744,7 +2744,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_tenant_database_isolation() {
+    async fn test_k8s_mcmr_integration_get_collections_tenant_database_isolation() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2821,7 +2821,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_with_metadata() {
+    async fn test_k8s_mcmr_integration_get_collections_with_metadata() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2901,7 +2901,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_ordering() {
+    async fn test_k8s_mcmr_integration_get_collections_ordering() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2976,7 +2976,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_get_collections_null_dimension() {
+    async fn test_k8s_mcmr_integration_get_collections_null_dimension() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
