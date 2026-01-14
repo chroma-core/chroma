@@ -425,7 +425,7 @@ impl SpannerBackend {
                         }
                     }
 
-                    let now_timestamp_us = chrono::Utc::now().timestamp_micros();
+                    let now_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
                     let mut mutations = Vec::new();
 
                     // Insert the collection
@@ -450,8 +450,8 @@ impl SpannerBackend {
                             &database_name,
                             &tenant_id_str,
                             &false,
-                            &now_timestamp_us,
-                            &now_timestamp_us,
+                            &now_timestamp,
+                            &now_timestamp,
                         ],
                     ));
 
@@ -470,8 +470,8 @@ impl SpannerBackend {
                                 &collection_id,
                                 region,
                                 &index_schema_json,
-                                &now_timestamp_us,
-                                &now_timestamp_us,
+                                &now_timestamp,
+                                &now_timestamp,
                             ],
                         ));
                     }
@@ -511,8 +511,8 @@ impl SpannerBackend {
                                     &segment_type_str,
                                     &segment_scope_str,
                                     &false,
-                                    &now_timestamp_us,
-                                    &now_timestamp_us,
+                                    &now_timestamp,
+                                    &now_timestamp,
                                     &file_paths_json,
                                 ],
                             ));
@@ -549,8 +549,8 @@ impl SpannerBackend {
                                     &int_val,
                                     &float_val,
                                     &bool_val,
-                                    &now_timestamp_us,
-                                    &now_timestamp_us,
+                                    &now_timestamp,
+                                    &now_timestamp,
                                 ],
                             ));
                         }
@@ -706,6 +706,7 @@ impl SpannerBackend {
                 ccc.size_bytes_post_compaction,
                 ccc.last_compaction_time_secs,
                 ccc.version_file_name,
+                ccc.compaction_failure_count,
                 ccc.index_schema
             FROM filtered_collections fc
             JOIN collections c ON c.collection_id = fc.collection_id

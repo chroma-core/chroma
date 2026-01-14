@@ -11,6 +11,7 @@ use chroma_types::{
     InternalCollectionConfiguration, Metadata, MetadataValue, MetadataValueConversionError, Schema,
     Segment, SegmentConversionError, Tenant,
 };
+use prost_types::Timestamp;
 use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
@@ -668,8 +669,8 @@ impl TryFrom<SpannerRows> for Collection {
             .column_by_name("tenant_id")
             .map_err(SysDbError::FailedToReadColumn)?;
 
-        // Spanner returns TIMESTAMP as i64 microseconds since Unix epoch
-        let updated_at_us: i64 = first_row
+        // Spanner returns TIMESTAMP as prost_types::Timestamp
+        let updated_at: Timestamp = first_row
             .column_by_name("updated_at")
             .map_err(SysDbError::FailedToReadColumn)?;
 
@@ -679,7 +680,7 @@ impl TryFrom<SpannerRows> for Collection {
         let version: Option<i64> = first_row
             .column_by_name("version")
             .map_err(SysDbError::FailedToReadColumn)?;
-        let last_compaction_time_us: Option<i64> = first_row
+        let last_compaction_time_ts: Option<Timestamp> = first_row
             .column_by_name("last_compaction_time_secs")
             .map_err(SysDbError::FailedToReadColumn)?;
         let version_file_name: Option<String> = first_row
@@ -732,13 +733,13 @@ impl TryFrom<SpannerRows> for Collection {
         let parsed_schema: Schema =
             serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
 
-        // Convert microseconds to SystemTime
-        let updated_at_system_time =
-            std::time::UNIX_EPOCH + std::time::Duration::from_micros(updated_at_us as u64);
+        // Convert prost_types::Timestamp to SystemTime
+        let updated_at_system_time = std::time::UNIX_EPOCH
+            + std::time::Duration::new(updated_at.seconds as u64, updated_at.nanos as u32);
 
-        // Convert last_compaction_time from microseconds to seconds
-        let last_compaction_time_secs_u64 = last_compaction_time_us
-            .map(|us| (us / 1_000_000) as u64)
+        // Convert last_compaction_time from Timestamp to seconds
+        let last_compaction_time_secs_u64 = last_compaction_time_ts
+            .map(|ts| ts.seconds as u64)
             .unwrap_or(0);
 
         Ok(Collection {
