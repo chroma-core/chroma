@@ -1,4 +1,9 @@
-import { GetUserIdentityResponse, Include, IndexStatusResponse, SparseVector } from "./api";
+import {
+  GetUserIdentityResponse,
+  Include,
+  IndexStatusResponse,
+  SparseVector,
+} from "./api";
 
 /**
  * User identity information including tenant and database access.

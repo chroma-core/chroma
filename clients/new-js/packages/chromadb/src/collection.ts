@@ -205,8 +205,17 @@ export interface Collection {
    * @param searches - Single search payload or array of payloads
    * @returns Promise resolving to column-major search results
    */
-  search(searches: SearchLike | SearchLike[]): Promise<SearchResult>;
-
+  search(
+    searches: SearchLike | SearchLike[],
+    options?: {
+      /**
+       * Controls whether to read from the write-ahead log.
+       * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
+       * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+       */
+      readLevel?: ReadLevel;
+    },
+  ): Promise<SearchResult>;
   /**
    * Gets the indexing status of the collection.
    * @returns Promise resolving to indexing status information
@@ -896,11 +905,6 @@ export class CollectionImpl implements Collection {
   public async search(
     searches: SearchLike | SearchLike[],
     options?: {
-      /**
-       * Controls whether to read from the write-ahead log.
-       * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
-       * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
-       */
       readLevel?: ReadLevel;
     },
   ): Promise<SearchResult> {
@@ -949,12 +953,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-        collectionName: this.name,
-        currentConfiguration: this.configuration,
-        newConfiguration: configuration,
-        currentEmbeddingFunction: this.embeddingFunction,
-        client: this.chromaClient,
-      })
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+          client: this.chromaClient,
+        })
       : {};
 
     if (updateEmbeddingFunction) {

@@ -3,10 +3,19 @@ import { deepClone, isPlainObject, IterableInput } from "./common";
 import { Key } from "./key";
 
 export type RankLiteral = Record<string, unknown>;
-export type RankInput = RankExpression | RankLiteral | number | null | undefined;
+export type RankInput =
+  | RankExpression
+  | RankLiteral
+  | number
+  | null
+  | undefined;
 
 const requireNumber = (value: unknown, message: string): number => {
-  if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+  if (
+    typeof value !== "number" ||
+    Number.isNaN(value) ||
+    !Number.isFinite(value)
+  ) {
     throw new TypeError(message);
   }
   return value;
@@ -39,7 +48,9 @@ abstract class RankExpressionBase {
     }
     const expressions = [
       this as unknown as RankExpression,
-      ...others.map((item, index) => requireRank(item, `multiply operand ${index}`)),
+      ...others.map((item, index) =>
+        requireRank(item, `multiply operand ${index}`),
+      ),
     ];
     return MulRankExpression.create(expressions);
   }
@@ -104,7 +115,9 @@ export abstract class RankExpression extends RankExpressionBase {
     if (isPlainObject(input)) {
       return new RawRankExpression(input);
     }
-    throw new TypeError("Rank input must be a RankExpression, number, or plain object");
+    throw new TypeError(
+      "Rank input must be a RankExpression, number, or plain object",
+    );
   }
 }
 
@@ -355,7 +368,11 @@ const normalizeDenseVector = (vector: IterableInput<number>): number[] => {
     return vector.slice();
   }
   return Array.from(vector as Iterable<number>, (value) => {
-    if (typeof value !== "number" || Number.isNaN(value) || !Number.isFinite(value)) {
+    if (
+      typeof value !== "number" ||
+      Number.isNaN(value) ||
+      !Number.isFinite(value)
+    ) {
       throw new TypeError("Dense query vector values must be finite numbers");
     }
     return value;
@@ -387,7 +404,8 @@ const normalizeKnnOptions = (options: KnnOptions): KnnOptionsNormalized => {
     query = normalizeDenseVector(queryInput as IterableInput<number>);
   }
 
-  const key = options.key instanceof Key ? options.key.name : options.key ?? "#embedding";
+  const key =
+    options.key instanceof Key ? options.key.name : options.key ?? "#embedding";
   if (typeof key !== "string") {
     throw new TypeError("Knn key must be a string or Key instance");
   }
@@ -402,7 +420,10 @@ const normalizeKnnOptions = (options: KnnOptions): KnnOptionsNormalized => {
   }
 
   return {
-    query: Array.isArray(query) || typeof query === "string" ? query : deepClone(query),
+    query:
+      Array.isArray(query) || typeof query === "string"
+        ? query
+        : deepClone(query),
     key,
     limit,
     defaultValue,
@@ -431,7 +452,12 @@ export interface RrfOptions {
   normalize?: boolean;
 }
 
-export const Rrf = ({ ranks, k = 60, weights, normalize = false }: RrfOptions): RankExpression => {
+export const Rrf = ({
+  ranks,
+  k = 60,
+  weights,
+  normalize = false,
+}: RrfOptions): RankExpression => {
   if (!Number.isInteger(k) || k <= 0) {
     throw new TypeError("Rrf k must be a positive integer");
   }
@@ -439,9 +465,13 @@ export const Rrf = ({ ranks, k = 60, weights, normalize = false }: RrfOptions): 
     throw new TypeError("Rrf requires at least one rank expression");
   }
 
-  const expressions = ranks.map((rank, index) => requireRank(rank, `ranks[${index}]`));
+  const expressions = ranks.map((rank, index) =>
+    requireRank(rank, `ranks[${index}]`),
+  );
 
-  let weightValues = weights ? weights.slice() : new Array(expressions.length).fill(1);
+  let weightValues = weights
+    ? weights.slice()
+    : new Array(expressions.length).fill(1);
   if (weightValues.length !== expressions.length) {
     throw new Error("Number of weights must match number of ranks");
   }
@@ -452,7 +482,9 @@ export const Rrf = ({ ranks, k = 60, weights, normalize = false }: RrfOptions): 
   if (normalize) {
     const total = weightValues.reduce((sum, value) => sum + value, 0);
     if (total <= 0) {
-      throw new Error("Weights must sum to a positive value when normalize=true");
+      throw new Error(
+        "Weights must sum to a positive value when normalize=true",
+      );
     }
     weightValues = weightValues.map((value) => value / total);
   }
@@ -472,35 +504,50 @@ export const Sum = (...inputs: RankInput[]): RankExpression => {
   if (inputs.length === 0) {
     throw new Error("Sum requires at least one rank expression");
   }
-  const expressions = inputs.map((rank, index) => requireRank(rank, `Sum operand ${index}`));
+  const expressions = inputs.map((rank, index) =>
+    requireRank(rank, `Sum operand ${index}`),
+  );
   return SumRankExpression.create(expressions);
 };
 
 export const Sub = (left: RankInput, right: RankInput): RankExpression =>
-  new SubRankExpression(requireRank(left, "Sub left"), requireRank(right, "Sub right"));
+  new SubRankExpression(
+    requireRank(left, "Sub left"),
+    requireRank(right, "Sub right"),
+  );
 
 export const Mul = (...inputs: RankInput[]): RankExpression => {
   if (inputs.length === 0) {
     throw new Error("Mul requires at least one rank expression");
   }
-  const expressions = inputs.map((rank, index) => requireRank(rank, `Mul operand ${index}`));
+  const expressions = inputs.map((rank, index) =>
+    requireRank(rank, `Mul operand ${index}`),
+  );
   return MulRankExpression.create(expressions);
 };
 
 export const Div = (left: RankInput, right: RankInput): RankExpression =>
-  new DivRankExpression(requireRank(left, "Div left"), requireRank(right, "Div right"));
+  new DivRankExpression(
+    requireRank(left, "Div left"),
+    requireRank(right, "Div right"),
+  );
 
-export const Abs = (input: RankInput): RankExpression => requireRank(input, "Abs").abs();
+export const Abs = (input: RankInput): RankExpression =>
+  requireRank(input, "Abs").abs();
 
-export const Exp = (input: RankInput): RankExpression => requireRank(input, "Exp").exp();
+export const Exp = (input: RankInput): RankExpression =>
+  requireRank(input, "Exp").exp();
 
-export const Log = (input: RankInput): RankExpression => requireRank(input, "Log").log();
+export const Log = (input: RankInput): RankExpression =>
+  requireRank(input, "Log").log();
 
 export const Max = (...inputs: RankInput[]): RankExpression => {
   if (inputs.length === 0) {
     throw new Error("Max requires at least one rank expression");
   }
-  const expressions = inputs.map((rank, index) => requireRank(rank, `Max operand ${index}`));
+  const expressions = inputs.map((rank, index) =>
+    requireRank(rank, `Max operand ${index}`),
+  );
   return MaxRankExpression.create(expressions);
 };
 
@@ -508,6 +555,8 @@ export const Min = (...inputs: RankInput[]): RankExpression => {
   if (inputs.length === 0) {
     throw new Error("Min requires at least one rank expression");
   }
-  const expressions = inputs.map((rank, index) => requireRank(rank, `Min operand ${index}`));
+  const expressions = inputs.map((rank, index) =>
+    requireRank(rank, `Min operand ${index}`),
+  );
   return MinRankExpression.create(expressions);
 };

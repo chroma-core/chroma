@@ -222,7 +222,7 @@ export class VectorIndexConfig {
     this.sourceKey =
       options.sourceKey instanceof Key
         ? options.sourceKey.name
-        : (options.sourceKey ?? null);
+        : options.sourceKey ?? null;
     this.hnsw = options.hnsw ?? null;
     this.spann = options.spann ?? null;
   }
@@ -245,16 +245,13 @@ export class SparseVectorIndexConfig {
     this.sourceKey =
       options.sourceKey instanceof Key
         ? options.sourceKey.name
-        : (options.sourceKey ?? null);
+        : options.sourceKey ?? null;
     this.bm25 = options.bm25 ?? null;
   }
 }
 
 export class FtsIndexType {
-  constructor(
-    public enabled: boolean,
-    public config: FtsIndexConfig,
-  ) {}
+  constructor(public enabled: boolean, public config: FtsIndexConfig) {}
 }
 
 export class StringInvertedIndexType {
@@ -265,10 +262,7 @@ export class StringInvertedIndexType {
 }
 
 export class VectorIndexType {
-  constructor(
-    public enabled: boolean,
-    public config: VectorIndexConfig,
-  ) {}
+  constructor(public enabled: boolean, public config: VectorIndexConfig) {}
 }
 
 export class SparseVectorIndexType {
@@ -279,10 +273,7 @@ export class SparseVectorIndexType {
 }
 
 export class IntInvertedIndexType {
-  constructor(
-    public enabled: boolean,
-    public config: IntInvertedIndexConfig,
-  ) {}
+  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) {}
 }
 
 export class FloatInvertedIndexType {
@@ -883,7 +874,9 @@ export class Schema {
       !config.embeddingFunction
     ) {
       throw new Error(
-        `If sourceKey is provided then embeddingFunction must also be provided since there is no default embedding function. Config: ${JSON.stringify(config)}`,
+        `If sourceKey is provided then embeddingFunction must also be provided since there is no default embedding function. Config: ${JSON.stringify(
+          config,
+        )}`,
       );
     }
   }
@@ -1082,7 +1075,9 @@ export class Schema {
       !embeddingFunction.supportedSpaces().includes(resolvedSpace)
     ) {
       console.warn(
-        `Space '${resolvedSpace}' is not supported by embedding function '${resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"}'. Supported spaces: ${embeddingFunction
+        `Space '${resolvedSpace}' is not supported by embedding function '${
+          resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"
+        }'. Supported spaces: ${embeddingFunction
           .supportedSpaces()
           .join(", ")}`,
       );
