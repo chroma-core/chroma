@@ -786,13 +786,19 @@ impl TryFrom<SpannerRows> for Collection {
             serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
 
         // Convert prost_types::Timestamp to SystemTime
-        let updated_at_system_time = std::time::UNIX_EPOCH
-            + std::time::Duration::new(updated_at.seconds as u64, updated_at.nanos as u32);
+        let updated_at_system_time = std::time::SystemTime::try_from(updated_at)
+            .map_err(|e| SysDbError::Internal(format!("invalid updated_at timestamp: {}", e)))?;
 
         // Convert last_compaction_time from Timestamp to seconds
-        let last_compaction_time_secs_u64 = last_compaction_time_ts
-            .map(|ts| ts.seconds as u64)
-            .unwrap_or(0);
+        let last_compaction_time_secs_u64 = match last_compaction_time_ts {
+            Some(ts) => u64::try_from(ts.seconds).map_err(|_| {
+                SysDbError::Internal(format!(
+                    "last_compaction_time_secs must be non-negative, got {}",
+                    ts.seconds
+                ))
+            })?,
+            None => 0,
+        };
 
         Ok(Collection {
             collection_id: CollectionUuid(
@@ -854,8 +860,9 @@ impl<'a> TryFrom<SpannerRowRef<'a>> for Segment {
         let segment_collection_id_str: String = row
             .column_by_name("segment_collection_id")
             .map_err(SysDbError::FailedToReadColumn)?;
-        let file_paths_json: Option<String> =
-            row.column_by_name("segment_file_paths").ok().flatten();
+        let file_paths_json: Option<String> = row
+            .column_by_name("segment_file_paths")
+            .map_err(SysDbError::FailedToReadColumn)?;
 
         // Parse segment type and scope
         let segment_type =
@@ -864,9 +871,12 @@ impl<'a> TryFrom<SpannerRowRef<'a>> for Segment {
             .map_err(|e| SysDbError::InvalidArgument(e.to_string()))?;
 
         // Parse file_paths JSON
-        let file_path: HashMap<String, Vec<String>> = file_paths_json
-            .map(|json| serde_json::from_str(&json).unwrap_or_default())
-            .unwrap_or_default();
+        let file_path: HashMap<String, Vec<String>> = match file_paths_json {
+            Some(json) => serde_json::from_str(&json).map_err(|e| {
+                SysDbError::Internal(format!("failed to parse segment file_paths JSON: {}", e))
+            })?,
+            None => HashMap::new(),
+        };
 
         Ok(Segment {
             id: SegmentUuid(Uuid::parse_str(&segment_id_str).map_err(SysDbError::InvalidUuid)?),

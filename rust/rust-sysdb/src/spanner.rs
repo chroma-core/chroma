@@ -3,6 +3,7 @@
 //! This module provides the `SpannerBackend` which implements all SysDb
 //! operations using Google Cloud Spanner as the underlying database.
 
+use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 
 use chroma_config::{registry::Registry, Configurable};
@@ -917,9 +918,12 @@ impl SpannerBackend {
         let mut segments_map: HashMap<String, Segment> = HashMap::new();
 
         for row in &rows {
-            // Check if segment columns are present (LEFT JOIN may return NULLs)
-            if let Ok(Some(segment_id_str)) = row.column_by_name::<Option<String>>("segment_id") {
-                use std::collections::hash_map::Entry;
+            // Read the optional segment_id (NULL means no segment from LEFT JOIN)
+            let segment_id_opt: Option<String> = row
+                .column_by_name("segment_id")
+                .map_err(SysDbError::FailedToReadColumn)?;
+
+            if let Some(segment_id_str) = segment_id_opt {
                 if let Entry::Vacant(entry) = segments_map.entry(segment_id_str) {
                     let segment = Segment::try_from(SpannerRowRef { row })?;
                     entry.insert(segment);
