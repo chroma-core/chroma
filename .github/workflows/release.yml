@@ -14,7 +14,6 @@ jobs:
       release-js: ${{ steps.check-labels.outputs.release-js }}
       release-rust: ${{ steps.check-labels.outputs.release-rust }}
       release-all: ${{ steps.check-labels.outputs.release-all }}
-      is-release: ${{ steps.check-labels.outputs.is-release }}
     steps:
       - name: Check PR labels
         id: check-labels
@@ -30,7 +29,6 @@ jobs:
             echo "release-js=false" >> $GITHUB_OUTPUT
             echo "release-rust=false" >> $GITHUB_OUTPUT
             echo "release-all=false" >> $GITHUB_OUTPUT
-            echo "is-release=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
@@ -63,13 +61,6 @@ jobs:
             echo "release-all=true" >> $GITHUB_OUTPUT
           else
             echo "release-all=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check if any release label is present
-          if echo "$LABELS" | grep -qE "^release-(python|js|rust|all)$"; then
-            echo "is-release=true" >> $GITHUB_OUTPUT
-          else
-            echo "is-release=false" >> $GITHUB_OUTPUT
           fi
 
   python-tests-linux:
@@ -230,6 +221,11 @@ jobs:
     name: Release JS Client
     needs:
       - detect-release
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
       - release-js-bindings
     if: always() && !failure() && !cancelled()
     uses: ./.github/workflows/_release-js.yml
@@ -250,3 +246,31 @@ jobs:
     secrets: inherit
     with:
       publish_to_crates_io: ${{ needs.detect-release.outputs.release-rust == 'true' || needs.detect-release.outputs.release-all == 'true' }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on Release Failure
+    if: failure()
+    needs:
+      - release-docker
+      - release-github
+      - deploy-staging
+      - release-python
+      - release-cli
+      - release-js-bindings
+      - release-js
+      - release-rust
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Release workflow failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.ref_name }}>
+              *Author:* ${{ github.actor }}
