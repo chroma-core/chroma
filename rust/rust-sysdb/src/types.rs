@@ -10,6 +10,7 @@ use chroma_types::{
     chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseUuid,
     InternalCollectionConfiguration, Metadata, MetadataValue, MetadataValueConversionError, Schema,
     Segment, SegmentConversionError, SegmentScope, SegmentType, SegmentUuid, Tenant,
+    UpdateCollectionConfiguration,
 };
 use prost_types::Timestamp;
 use uuid::Uuid;
@@ -399,11 +400,13 @@ pub struct UpdateCollectionRequest {
     /// New name (optional - None means don't change)
     pub name: Option<String>,
     /// New dimension (optional - None means don't change)
-    pub dimension: Option<i32>,
+    pub dimension: Option<u32>,
     /// New metadata to set (optional - None means don't change, unless reset_metadata is true)
     pub metadata: Option<Metadata>,
     /// If true, delete all existing metadata (metadata field must be None)
     pub reset_metadata: bool,
+    // New configuration to set (optional - None means don't change)
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
 }
 
 impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
@@ -434,22 +437,31 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             None => (None, false),
         };
 
+        let new_configuration: Option<UpdateCollectionConfiguration> = match req
+            .configuration_json_str
+        {
+            Some(configuration_json_str) => {
+                Some(serde_json::from_str(&configuration_json_str).map_err(|e| {
+                    SysDbError::InvalidArgument(format!("failed to parse new configuration: {}", e))
+                })?)
+            }
+            None => None,
+        };
+
         Ok(Self {
             id,
             name: req.name,
-            dimension: req.dimension,
+            dimension: req.dimension.map(|dim| dim as u32),
             metadata,
             reset_metadata,
+            new_configuration,
         })
     }
 }
 
 /// Internal response for updating a collection.
 #[derive(Debug, Clone)]
-pub struct UpdateCollectionResponse {
-    /// The updated collection
-    pub collection: Collection,
-}
+pub struct UpdateCollectionResponse {}
 
 impl TryFrom<UpdateCollectionResponse> for chroma_proto::UpdateCollectionResponse {
     type Error = SysDbError;
@@ -1069,6 +1081,10 @@ pub enum SysDbError {
     /// Failed to convert collection to proto
     #[error("Failed to convert collection to proto: {0}")]
     CollectionToProtoError(#[from] CollectionToProtoError),
+
+    /// Schema error
+    #[error("Schema error: {0}")]
+    Schema(#[from] chroma_types::SchemaError),
 }
 
 impl ChromaError for SysDbError {
@@ -1088,6 +1104,7 @@ impl ChromaError for SysDbError {
             SysDbError::InvalidMetadata(e) => e.code(),
             SysDbError::InvalidDimension(_) => ErrorCodes::Internal,
             SysDbError::CollectionToProtoError(e) => e.code(),
+            SysDbError::Schema(e) => e.code(),
         }
     }
 }

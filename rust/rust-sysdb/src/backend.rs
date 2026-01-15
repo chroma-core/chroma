@@ -269,7 +269,7 @@ impl Backend {
 
     /// Update a collection.
     ///
-    /// Supports updating name, dimension, and metadata.
+    /// Supports updating name, dimension, metadata, and configuration.
     /// Returns `SysDbError::NotFound` if the collection does not exist.
     /// Returns `SysDbError::AlreadyExists` if the new name conflicts with an existing collection.
     pub async fn update_collection(
