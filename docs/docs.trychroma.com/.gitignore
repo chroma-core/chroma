@@ -4,3 +4,4 @@ node_modules/
 .vercel
 package-lock.json
 yarn.lock
+tsconfig.tsbuildinfo
