@@ -11,6 +11,7 @@ use chroma_types::{
     InternalCollectionConfiguration, Metadata, MetadataValue, MetadataValueConversionError, Schema,
     Segment, SegmentConversionError, Tenant,
 };
+use prost_types::Timestamp;
 use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
@@ -188,6 +189,163 @@ impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest 
     }
 }
 
+/// Filter for querying collections.
+///
+/// All fields are optional - use the builder methods to construct filters fluently.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Get by IDs
+/// let filter = CollectionFilter::default().ids(vec![collection_id]);
+///
+/// // Get by name in a database
+/// let filter = CollectionFilter::default()
+///     .tenant_id("tenant-uuid")
+///     .database_name("my_db")
+///     .name("my_collection");
+///
+/// // List with pagination
+/// let filter = CollectionFilter::default()
+///     .tenant_id(tenant)
+///     .database_name(db)
+///     .limit(10)
+///     .offset(0);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct CollectionFilter {
+    /// Filter by collection ID(s)
+    pub ids: Option<Vec<CollectionUuid>>,
+    /// Filter by collection name (within a database)
+    pub name: Option<String>,
+    /// Filter by tenant ID
+    pub tenant_id: Option<String>,
+    /// Filter by database name
+    pub database_name: Option<String>,
+    /// Include soft-deleted collections (default: false)
+    pub include_soft_deleted: bool,
+    /// Maximum number of results to return
+    pub limit: Option<u32>,
+    /// Number of results to skip
+    pub offset: Option<u32>,
+}
+
+impl CollectionFilter {
+    /// Filter by collection IDs
+    pub fn ids(mut self, ids: Vec<CollectionUuid>) -> Self {
+        self.ids = Some(ids);
+        self
+    }
+
+    /// Filter by collection name
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Filter by tenant ID
+    pub fn tenant_id(mut self, tenant_id: impl Into<String>) -> Self {
+        self.tenant_id = Some(tenant_id.into());
+        self
+    }
+
+    /// Filter by database name
+    pub fn database_name(mut self, name: impl Into<String>) -> Self {
+        self.database_name = Some(name.into());
+        self
+    }
+
+    /// Include soft-deleted collections
+    pub fn include_soft_deleted(mut self, include: bool) -> Self {
+        self.include_soft_deleted = include;
+        self
+    }
+
+    /// Set maximum number of results to return
+    pub fn limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Set number of results to skip
+    pub fn offset(mut self, offset: u32) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+}
+
+/// Internal request for getting collections.
+#[derive(Debug, Clone)]
+pub struct GetCollectionsRequest {
+    pub filter: CollectionFilter,
+}
+
+impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetCollectionsRequest) -> Result<Self, Self::Error> {
+        // Build filter from proto fields
+        let mut filter = CollectionFilter::default();
+
+        // Collect all IDs from both `id` and `ids_filter`
+        let mut all_ids: Vec<CollectionUuid> = Vec::new();
+
+        if let Some(id_str) = req.id {
+            let id = CollectionUuid(validate_uuid(&id_str)?);
+            all_ids.push(id);
+        }
+
+        if let Some(ids_filter) = req.ids_filter {
+            for id_str in ids_filter.ids {
+                let id = CollectionUuid(validate_uuid(&id_str)?);
+                all_ids.push(id);
+            }
+        }
+
+        if !all_ids.is_empty() {
+            filter = filter.ids(all_ids);
+        }
+
+        // Add optional fields if provided
+        if let Some(name) = req.name {
+            filter = filter.name(name);
+        }
+
+        if !req.tenant.is_empty() {
+            filter = filter.tenant_id(req.tenant);
+        }
+        if !req.database.is_empty() {
+            filter = filter.database_name(req.database);
+        }
+
+        // Handle limit and offset
+        if let Some(limit) = req.limit {
+            let limit = u32::try_from(limit).map_err(|_| {
+                SysDbError::InvalidArgument(format!("limit must be non-negative, got {}", limit))
+            })?;
+            filter = filter.limit(limit);
+        }
+        if let Some(offset) = req.offset {
+            if req.limit.is_none() {
+                return Err(SysDbError::InvalidArgument(
+                    "offset requires limit to be specified".to_string(),
+                ));
+            }
+            let offset = u32::try_from(offset).map_err(|_| {
+                SysDbError::InvalidArgument(format!("offset must be non-negative, got {}", offset))
+            })?;
+            filter = filter.offset(offset);
+        }
+
+        // Handle include_soft_deleted
+        if let Some(include_soft_deleted) = req.include_soft_deleted {
+            filter = filter.include_soft_deleted(include_soft_deleted);
+        }
+
+        Ok(Self { filter })
+    }
+}
+
 // ============================================================================
 // Assignable Trait Implementations
 // ============================================================================
@@ -251,6 +409,16 @@ impl Assignable for CreateCollectionRequest {
     fn assign(&self, factory: &BackendFactory) -> Backend {
         // Route by database_name prefix (for now, default to Spanner)
         // TODO: Check self.database_name prefix to route to Aurora if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for GetCollectionsRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by database_name prefix (for now, default to Spanner)
+        // TODO: Check self.filter.database_name prefix to route to Aurora if needed
         Backend::Spanner(factory.spanner().clone())
     }
 }
@@ -322,6 +490,16 @@ impl Runnable for CreateCollectionRequest {
 
     async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.create_collection(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetCollectionsRequest {
+    type Response = GetCollectionsResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_collections(self).await
     }
 }
 
@@ -502,8 +680,8 @@ impl TryFrom<SpannerRows> for Collection {
             .column_by_name("tenant_id")
             .map_err(SysDbError::FailedToReadColumn)?;
 
-        // Spanner returns TIMESTAMP as i64 microseconds since Unix epoch
-        let updated_at_us: i64 = first_row
+        // Spanner returns TIMESTAMP as prost_types::Timestamp
+        let updated_at: Timestamp = first_row
             .column_by_name("updated_at")
             .map_err(SysDbError::FailedToReadColumn)?;
 
@@ -513,7 +691,7 @@ impl TryFrom<SpannerRows> for Collection {
         let version: Option<i64> = first_row
             .column_by_name("version")
             .map_err(SysDbError::FailedToReadColumn)?;
-        let last_compaction_time_us: Option<i64> = first_row
+        let last_compaction_time_ts: Option<Timestamp> = first_row
             .column_by_name("last_compaction_time_secs")
             .map_err(SysDbError::FailedToReadColumn)?;
         let version_file_name: Option<String> = first_row
@@ -566,13 +744,13 @@ impl TryFrom<SpannerRows> for Collection {
         let parsed_schema: Schema =
             serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
 
-        // Convert microseconds to SystemTime
-        let updated_at_system_time =
-            std::time::UNIX_EPOCH + std::time::Duration::from_micros(updated_at_us as u64);
+        // Convert prost_types::Timestamp to SystemTime
+        let updated_at_system_time = std::time::UNIX_EPOCH
+            + std::time::Duration::new(updated_at.seconds as u64, updated_at.nanos as u32);
 
-        // Convert last_compaction_time from microseconds to seconds
-        let last_compaction_time_secs_u64 = last_compaction_time_us
-            .map(|us| (us / 1_000_000) as u64)
+        // Convert last_compaction_time from Timestamp to seconds
+        let last_compaction_time_secs_u64 = last_compaction_time_ts
+            .map(|ts| ts.seconds as u64)
             .unwrap_or(0);
 
         Ok(Collection {
@@ -739,6 +917,24 @@ impl TryFrom<CreateCollectionResponse> for chroma_proto::CreateCollectionRespons
         Ok(chroma_proto::CreateCollectionResponse {
             collection: Some(r.collection.try_into()?),
             created: r.created,
+        })
+    }
+}
+
+/// Internal response for getting collections.
+#[derive(Debug, Clone)]
+pub struct GetCollectionsResponse {
+    pub collections: Vec<Collection>,
+}
+
+impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: GetCollectionsResponse) -> Result<Self, Self::Error> {
+        let collections: Result<Vec<_>, _> =
+            r.collections.into_iter().map(|c| c.try_into()).collect();
+        Ok(chroma_proto::GetCollectionsResponse {
+            collections: collections?,
         })
     }
 }

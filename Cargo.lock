@@ -7187,6 +7187,7 @@ dependencies = [
  "gcloud-gax",
  "gcloud-spanner",
  "opentelemetry",
+ "prost-types",
  "reqwest",
  "serde",
  "serde_json",

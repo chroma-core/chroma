@@ -64,9 +64,9 @@ use crate::spanner::SpannerBackend;
 use crate::types::SysDbError;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetDatabaseRequest,
-    GetDatabaseResponse, GetTenantRequest, GetTenantResponse, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
+    GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
 };
 use chroma_types::chroma_proto::Database;
 
@@ -238,6 +238,18 @@ impl Backend {
     ) -> Result<CreateCollectionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.create_collection(req).await,
+        }
+    }
+
+    /// Get collections by filter.
+    ///
+    /// Returns an empty list if no matching collections are found.
+    pub async fn get_collections(
+        &self,
+        req: GetCollectionsRequest,
+    ) -> Result<GetCollectionsResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.get_collections(req).await,
         }
     }
 

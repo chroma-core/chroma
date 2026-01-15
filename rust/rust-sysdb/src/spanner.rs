@@ -8,6 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::client::{Client, ClientConfig};
 use google_cloud_spanner::mutation::insert;
+use google_cloud_spanner::row::Row;
 use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
 use uuid::Uuid;
@@ -15,11 +16,11 @@ use uuid::Uuid;
 use crate::config::SpannerConfig;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetDatabaseRequest,
-    GetDatabaseResponse, GetTenantRequest, GetTenantResponse, SetTenantResourceNameRequest,
-    SetTenantResourceNameResponse, SpannerRow,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
+    GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
+    SpannerRows, SysDbError,
 };
-use crate::types::{SpannerRows, SysDbError};
 use chroma_types::{Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Tenant};
 
 #[derive(Error, Debug)]
@@ -424,7 +425,7 @@ impl SpannerBackend {
                         }
                     }
 
-                    let now_timestamp_us = chrono::Utc::now().timestamp_micros();
+                    let now_timestamp = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
                     let mut mutations = Vec::new();
 
                     // Insert the collection
@@ -449,8 +450,8 @@ impl SpannerBackend {
                             &database_name,
                             &tenant_id_str,
                             &false,
-                            &now_timestamp_us,
-                            &now_timestamp_us,
+                            &now_timestamp,
+                            &now_timestamp,
                         ],
                     ));
 
@@ -469,8 +470,8 @@ impl SpannerBackend {
                                 &collection_id,
                                 region,
                                 &index_schema_json,
-                                &now_timestamp_us,
-                                &now_timestamp_us,
+                                &now_timestamp,
+                                &now_timestamp,
                             ],
                         ));
                     }
@@ -510,8 +511,8 @@ impl SpannerBackend {
                                     &segment_type_str,
                                     &segment_scope_str,
                                     &false,
-                                    &now_timestamp_us,
-                                    &now_timestamp_us,
+                                    &now_timestamp,
+                                    &now_timestamp,
                                     &file_paths_json,
                                 ],
                             ));
@@ -548,8 +549,8 @@ impl SpannerBackend {
                                     &int_val,
                                     &float_val,
                                     &bool_val,
-                                    &now_timestamp_us,
-                                    &now_timestamp_us,
+                                    &now_timestamp,
+                                    &now_timestamp,
                                 ],
                             ));
                         }
@@ -603,6 +604,171 @@ impl SpannerBackend {
             collection,
             created,
         })
+    }
+
+    /// Get collections by filter.
+    ///
+    /// Supports filtering by:
+    /// - `ids`: One or more collection IDs
+    /// - `name` + `tenant_id` + `database_name`: Collection by name within a database
+    /// - `include_soft_deleted`: Whether to include soft-deleted collections (default: false)
+    /// - `limit` and `offset`: Pagination
+    ///
+    /// Returns a list of matching collections.
+    pub async fn get_collections(
+        &self,
+        req: GetCollectionsRequest,
+    ) -> Result<GetCollectionsResponse, SysDbError> {
+        let filter = req.filter;
+
+        // TODO(Sanket): Get region from config based on db name topology
+        let region = "us";
+
+        // Build dynamic query based on which filters are provided
+        let mut where_clauses: Vec<String> = Vec::new();
+
+        // Filter by collection IDs
+        let ids_str: Option<Vec<String>> = filter
+            .ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0.to_string()).collect());
+
+        if ids_str.is_some() {
+            where_clauses.push("c.collection_id IN UNNEST(@collection_ids)".to_string());
+        }
+
+        // Filter by name
+        if filter.name.is_some() {
+            where_clauses.push("c.name = @name".to_string());
+        }
+
+        // Filter by tenant_id
+        if filter.tenant_id.is_some() {
+            where_clauses.push("c.tenant_id = @tenant_id".to_string());
+        }
+
+        // Filter by database_name
+        if filter.database_name.is_some() {
+            where_clauses.push("c.database_name = @database_name".to_string());
+        }
+
+        // Filter by soft-deleted status
+        if !filter.include_soft_deleted {
+            where_clauses.push("c.is_deleted = FALSE".to_string());
+        }
+
+        // AND.
+        let where_clause = if where_clauses.is_empty() {
+            "TRUE".to_string()
+        } else {
+            where_clauses.join(" AND ")
+        };
+
+        // Build LIMIT/OFFSET clause for pagination
+        // Note: We apply pagination to a subquery to get collection IDs first,
+        // then join with metadata to avoid limiting metadata rows instead of collections
+        let pagination = match (filter.limit, filter.offset) {
+            (Some(limit), Some(offset)) => format!("LIMIT {} OFFSET {}", limit, offset),
+            (Some(limit), None) => format!("LIMIT {}", limit),
+            (None, None) => String::new(),
+            (None, Some(_)) => {
+                return Err(SysDbError::InvalidArgument(
+                    "offset requires limit to be specified".to_string(),
+                ));
+            }
+        };
+
+        let query = format!(
+            r#"
+            WITH filtered_collections AS (
+                SELECT c.collection_id
+                FROM collections c
+                WHERE {where_clause}
+                ORDER BY c.created_at ASC
+                {pagination}
+            )
+            SELECT 
+                c.collection_id,
+                c.name,
+                c.dimension,
+                c.database_id,
+                c.database_name,
+                c.tenant_id,
+                c.updated_at,
+                c.created_at,
+                cm.key as metadata_key,
+                cm.str_value as metadata_str_value,
+                cm.int_value as metadata_int_value,
+                cm.float_value as metadata_float_value,
+                cm.bool_value as metadata_bool_value,
+                ccc.last_compacted_offset,
+                ccc.version,
+                ccc.total_records_post_compaction,
+                ccc.size_bytes_post_compaction,
+                ccc.last_compaction_time_secs,
+                ccc.version_file_name,
+                ccc.compaction_failure_count,
+                ccc.index_schema
+            FROM filtered_collections fc
+            JOIN collections c ON c.collection_id = fc.collection_id
+            LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
+            LEFT JOIN collection_compaction_cursors ccc 
+                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            ORDER BY c.created_at ASC
+            "#,
+            where_clause = where_clause,
+            pagination = pagination,
+        );
+
+        let mut stmt = Statement::new(&query);
+        stmt.add_param("region", &region);
+
+        // Bind parameters based on which filters are set
+        if let Some(ref ids) = ids_str {
+            stmt.add_param("collection_ids", ids);
+        }
+        if let Some(ref name) = filter.name {
+            stmt.add_param("name", name);
+        }
+        if let Some(ref tenant_id) = filter.tenant_id {
+            stmt.add_param("tenant_id", tenant_id);
+        }
+        if let Some(ref database_name) = filter.database_name {
+            stmt.add_param("database_name", database_name);
+        }
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx.query(stmt).await?;
+
+        // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
+        let mut collection_order: Vec<String> = Vec::new();
+        let mut rows_by_collection: std::collections::HashMap<String, Vec<Row>> =
+            std::collections::HashMap::new();
+
+        while let Some(row) = result_set.next().await? {
+            let collection_id: String = row
+                .column_by_name("collection_id")
+                .map_err(SysDbError::FailedToReadColumn)?;
+
+            if !rows_by_collection.contains_key(&collection_id) {
+                collection_order.push(collection_id.clone());
+            }
+            rows_by_collection
+                .entry(collection_id)
+                .or_default()
+                .push(row);
+        }
+
+        // Convert each group of rows to a Collection, preserving the query order
+        let mut collections = Vec::new();
+        for collection_id in collection_order {
+            if let Some(rows) = rows_by_collection.remove(&collection_id) {
+                let collection = Collection::try_from(SpannerRows { rows })?;
+                collections.push(collection);
+            }
+        }
+
+        Ok(GetCollectionsResponse { collections })
     }
 
     /// Fetch a collection from the database within a transaction.
@@ -722,8 +888,8 @@ impl Configurable<SpannerConfig> for SpannerBackend {
 mod tests {
     use super::*;
     use crate::types::{
-        CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, GetDatabaseRequest,
-        GetTenantRequest,
+        CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
+        GetCollectionsRequest, GetDatabaseRequest, GetTenantRequest,
     };
     use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
     use uuid::Uuid;
@@ -1086,7 +1252,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_database_duplicate_name_tenant() {
+    async fn test_k8s_mcmr_integration_create_database_duplicate_name_tenant() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1310,7 +1476,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection() {
+    async fn test_k8s_mcmr_integration_create_collection() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1368,7 +1534,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_duplicate_fails() {
+    async fn test_k8s_mcmr_integration_create_collection_duplicate_fails() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1443,7 +1609,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_get_or_create() {
+    async fn test_k8s_mcmr_integration_create_collection_get_or_create() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1537,7 +1703,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_empty_name() {
+    async fn test_k8s_mcmr_integration_create_collection_empty_name() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1570,7 +1736,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_nonexistent_database() {
+    async fn test_k8s_mcmr_integration_create_collection_nonexistent_database() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1618,7 +1784,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_with_metadata() {
+    async fn test_k8s_mcmr_integration_create_collection_with_metadata() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1687,7 +1853,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_duplicate_id_fails() {
+    async fn test_k8s_mcmr_integration_create_collection_duplicate_id_fails() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1768,7 +1934,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_duplicate_id_get_or_create() {
+    async fn test_k8s_mcmr_integration_create_collection_duplicate_id_get_or_create() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1861,7 +2027,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_same_name_different_databases() {
+    async fn test_k8s_mcmr_integration_create_collection_same_name_different_databases() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -1989,7 +2155,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_get_or_create_with_metadata() {
+    async fn test_k8s_mcmr_integration_create_collection_get_or_create_with_metadata() {
         let Some(backend) = setup_test_backend().await else {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2102,7 +2268,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_create_collection_get_or_create_with_custom_schema() {
+    async fn test_k8s_mcmr_integration_create_collection_get_or_create_with_custom_schema() {
         use chroma_types::{
             FtsIndexConfig, FtsIndexType, StringInvertedIndexConfig, StringInvertedIndexType,
             StringValueType, ValueTypes,
@@ -2234,6 +2400,638 @@ mod tests {
                 .keys
                 .contains_key("custom_key"),
             "Schema should still contain custom_key after get_or_create"
+        );
+    }
+
+    // ============================================================
+    // get_collections tests
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_by_id() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_get_by_id_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get by ID
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_by_name() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_get_by_name_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(256),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get by name + tenant + database
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name(collection_name.clone())
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            Some(256),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_multiple_ids() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create multiple collections
+        let mut collection_ids = Vec::new();
+        for i in 0..3 {
+            let collection_id = CollectionUuid(Uuid::new_v4());
+            collection_ids.push(collection_id);
+
+            let collection_name = format!(
+                "test_multi_{}_{}_{}",
+                i,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                Uuid::new_v4()
+            );
+
+            let create_req = CreateCollectionRequest {
+                id: collection_id,
+                name: collection_name,
+                dimension: Some(128),
+                index_schema: Schema::default(),
+                segments: create_test_segments(collection_id),
+                metadata: None,
+                get_or_create: false,
+                tenant_id: tenant_id.clone(),
+                database_name: db_name.clone(),
+            };
+
+            backend
+                .create_collection(create_req)
+                .await
+                .expect("Failed to create collection");
+        }
+
+        // Get by multiple IDs
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(collection_ids.clone()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 3);
+
+        // Verify all IDs are present
+        let returned_ids: std::collections::HashSet<_> = response
+            .collections
+            .iter()
+            .map(|c| c.collection_id)
+            .collect();
+        for id in &collection_ids {
+            assert!(returned_ids.contains(id), "Missing collection ID: {:?}", id);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_pagination() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create 5 collections
+        let mut collection_ids = Vec::new();
+        for i in 0..5 {
+            let collection_id = CollectionUuid(Uuid::new_v4());
+            collection_ids.push(collection_id);
+
+            let collection_name = format!(
+                "test_pagination_{}_{}_{}",
+                i,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                Uuid::new_v4()
+            );
+
+            let create_req = CreateCollectionRequest {
+                id: collection_id,
+                name: collection_name,
+                dimension: Some(128),
+                index_schema: Schema::default(),
+                segments: create_test_segments(collection_id),
+                metadata: None,
+                get_or_create: false,
+                tenant_id: tenant_id.clone(),
+                database_name: db_name.clone(),
+            };
+
+            backend
+                .create_collection(create_req)
+                .await
+                .expect("Failed to create collection");
+
+            // Small delay to ensure different created_at timestamps
+            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+        }
+
+        // Get first 2
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone())
+                .limit(2),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 2);
+
+        let first_page_ids: Vec<_> = response
+            .collections
+            .iter()
+            .map(|c| c.collection_id)
+            .collect();
+
+        // Get next 2 with offset
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone())
+                .limit(2)
+                .offset(2),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 2);
+
+        // Verify no overlap between pages
+        for c in &response.collections {
+            assert!(
+                !first_page_ids.contains(&c.collection_id),
+                "Second page should not contain collections from first page"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_empty_result() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Get non-existent collection by ID
+        let non_existent_id = CollectionUuid(Uuid::new_v4());
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![non_existent_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Should return Ok with empty list: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert!(
+            response.collections.is_empty(),
+            "Should return empty list for non-existent ID"
+        );
+
+        // Get by non-existent name
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name("non_existent_collection_name_xyz")
+                .tenant_id(tenant_id)
+                .database_name(db_name),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Should return Ok with empty list: {:?}",
+            result.err()
+        );
+        assert!(result.unwrap().collections.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_tenant_database_isolation() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Create two separate tenant/database pairs
+        let (tenant_id1, db_name1) = setup_tenant_and_database(&backend).await;
+        let (tenant_id2, db_name2) = setup_tenant_and_database(&backend).await;
+
+        // Create collection in first tenant/database
+        let collection_id1 = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "isolated_collection_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id1,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id1),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id1.clone(),
+            database_name: db_name1.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Query from second tenant/database - should not find the collection
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name(collection_name.clone())
+                .tenant_id(tenant_id2)
+                .database_name(db_name2),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(result.is_ok());
+        assert!(
+            result.unwrap().collections.is_empty(),
+            "Should not find collection from different tenant/database"
+        );
+
+        // Query from first tenant/database - should find the collection
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .name(collection_name.clone())
+                .tenant_id(tenant_id1.clone())
+                .database_name(db_name1.clone()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(result.is_ok());
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id1,
+            &collection_name,
+            Some(128),
+            &tenant_id1,
+            &db_name1,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_with_metadata() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection with all 4 metadata types
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_get_with_metadata_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let metadata: chroma_types::Metadata = [
+            (
+                "str_key".to_string(),
+                chroma_types::MetadataValue::Str("test_value".to_string()),
+            ),
+            ("int_key".to_string(), chroma_types::MetadataValue::Int(42)),
+            (
+                "float_key".to_string(),
+                chroma_types::MetadataValue::Float(1.23456),
+            ),
+            (
+                "bool_key".to_string(),
+                chroma_types::MetadataValue::Bool(true),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(512),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: Some(metadata.clone()),
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get collection and verify all fields including metadata
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            Some(512),
+            &tenant_id,
+            &db_name,
+            Some(&metadata),
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_ordering() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create 3 collections with small delays to ensure different created_at
+        let mut created_ids = Vec::new();
+        for i in 0..3 {
+            let collection_id = CollectionUuid(Uuid::new_v4());
+            created_ids.push(collection_id);
+
+            let collection_name = format!(
+                "test_order_{}_{}_{}",
+                i,
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                Uuid::new_v4()
+            );
+
+            let create_req = CreateCollectionRequest {
+                id: collection_id,
+                name: collection_name,
+                dimension: Some(128),
+                index_schema: Schema::default(),
+                segments: create_test_segments(collection_id),
+                metadata: None,
+                get_or_create: false,
+                tenant_id: tenant_id.clone(),
+                database_name: db_name.clone(),
+            };
+
+            backend
+                .create_collection(create_req)
+                .await
+                .expect("Failed to create collection");
+
+            // Small delay to ensure different created_at timestamps
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
+
+        // Get all collections in the database
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .tenant_id(tenant_id)
+                .database_name(db_name),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collections: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 3);
+
+        // Verify order matches creation order (created_at ASC)
+        let returned_ids: Vec<_> = response
+            .collections
+            .iter()
+            .map(|c| c.collection_id)
+            .collect();
+
+        assert_eq!(
+            returned_ids, created_ids,
+            "Collections should be returned in created_at ASC order"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_collections_null_dimension() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection with NULL dimension
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_null_dim_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: None, // NULL dimension
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        backend
+            .create_collection(create_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Get by ID and verify NULL dimension
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+
+        verify_new_collection(
+            &response.collections[0],
+            collection_id,
+            &collection_name,
+            None, // Verify dimension is None
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
         );
     }
 }
