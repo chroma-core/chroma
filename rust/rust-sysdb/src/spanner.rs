@@ -1033,7 +1033,7 @@ impl SpannerBackend {
                     let has_collection_changes = name.is_some() || dimension.is_some();
                     let has_metadata_changes = metadata.is_some() || reset_metadata;
                     let has_config_changes = new_configuration.as_ref().is_some_and(|c| {
-                        c.spann.is_some() || c.embedding_function.is_some()
+                        c.hnsw.is_some() || c.spann.is_some() || c.embedding_function.is_some()
                     });
 
                     // Build collection update mutation if name or dimension changed
@@ -1129,39 +1129,47 @@ impl SpannerBackend {
                     }
 
                     // Handle configuration updates (spann and embedding_function only)
+                    // Updates schema for ALL regions
                     if has_config_changes {
-                        // Safe to unwrap: has_config_changes implies new_configuration is Some with spann or embedding_function
+                        // Safe to unwrap: has_config_changes implies new_configuration is Some with hnsw, spann, or embedding_function
                         let config = new_configuration.as_ref().unwrap();
-                        // TODO(Sanket): Get region from config instead of hardcoding
-                        let region = "us";
 
-                        // Read current schema from compaction cursor
+                        // Read current schemas from all regions
                         let mut schema_stmt = Statement::new(
-                            "SELECT index_schema FROM collection_compaction_cursors WHERE collection_id = @collection_id AND region = @region",
+                            "SELECT region, index_schema FROM collection_compaction_cursors WHERE collection_id = @collection_id",
                         );
                         schema_stmt.add_param("collection_id", &collection_id);
-                        schema_stmt.add_param("region", &region);
 
                         let mut schema_iter = tx.query(schema_stmt).await?;
-                        let current_schema_json: String = match schema_iter.next().await? {
-                            Some(row) => row.column_by_name("index_schema").map_err(SysDbError::FailedToReadColumn)?,
-                            None => return Err(SysDbError::Internal("collection has no schema".to_string())),
-                        };
+                        let mut region_schemas: Vec<(String, String)> = Vec::new();
 
-                        let mut schema: chroma_types::Schema = serde_json::from_str(&current_schema_json)
-                            .map_err(|e| SysDbError::Internal(format!("failed to parse schema: {}", e)))?;
+                        while let Some(row) = schema_iter.next().await? {
+                            let region: String = row.column_by_name("region").map_err(SysDbError::FailedToReadColumn)?;
+                            let schema_json: String = row.column_by_name("index_schema").map_err(SysDbError::FailedToReadColumn)?;
+                            region_schemas.push((region, schema_json));
+                        }
 
-                        // Apply updates (errors if hnsw is set)
-                        schema.apply_update_configuration(config)?;
+                        if region_schemas.is_empty() {
+                            return Err(SysDbError::Internal("collection has no schema in any region".to_string()));
+                        }
 
-                        let new_schema_json = serde_json::to_string(&schema)
-                            .map_err(|e| SysDbError::Internal(format!("failed to serialize schema: {}", e)))?;
+                        // Update schema for each region
+                        for (region, current_schema_json) in region_schemas {
+                            let mut schema: chroma_types::Schema = serde_json::from_str(&current_schema_json)
+                                .map_err(|e| SysDbError::Internal(format!("failed to parse schema for region {}: {}", region, e)))?;
 
-                        mutations.push(update(
-                            "collection_compaction_cursors",
-                            &["collection_id", "region", "index_schema", "updated_at"],
-                            &[&collection_id, &region, &new_schema_json, &commit_ts],
-                        ));
+                            // Apply updates (errors if hnsw is set)
+                            schema.apply_update_configuration(config)?;
+
+                            let new_schema_json = serde_json::to_string(&schema)
+                                .map_err(|e| SysDbError::Internal(format!("failed to serialize schema for region {}: {}", region, e)))?;
+
+                            mutations.push(update(
+                                "collection_compaction_cursors",
+                                &["collection_id", "region", "index_schema", "updated_at"],
+                                &[&collection_id, &region, &new_schema_json, &commit_ts],
+                            ));
+                        }
                     }
 
                     // Buffer all mutations - they will be applied atomically at commit
