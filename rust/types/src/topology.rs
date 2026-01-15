@@ -267,10 +267,10 @@ impl std::fmt::Display for TopologyName {
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "T: Clone + Debug + Eq + PartialEq + Serialize",
-    deserialize = "T: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned"
+    serialize = "T: Clone + Debug + Serialize",
+    deserialize = "T: Clone + Debug + serde::de::DeserializeOwned"
 ))]
-pub struct ProviderRegion<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> {
+pub struct ProviderRegion<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> {
     /// The unique name for this provider-region combination.
     name: RegionName,
     /// The cloud provider (e.g., "aws", "gcp").
@@ -281,7 +281,7 @@ pub struct ProviderRegion<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a
     config: T,
 }
 
-impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> ProviderRegion<T> {
+impl<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> ProviderRegion<T> {
     /// Creates a new provider region.
     ///
     /// # Example
@@ -329,6 +329,39 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Pr
     pub fn config(&self) -> &T {
         &self.config
     }
+
+    /// Transforms this provider region into a new type by applying a function to the config.
+    pub fn cast<U, F>(self, f: F) -> ProviderRegion<U>
+    where
+        U: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        F: FnOnce(T) -> U,
+    {
+        ProviderRegion {
+            name: self.name,
+            provider: self.provider,
+            region: self.region,
+            config: f(self.config),
+        }
+    }
+
+    /// Transforms this provider region into a new type by applying a fallible function to the
+    /// config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transformation function returns an error.
+    pub fn try_cast<U, E, F>(self, f: F) -> Result<ProviderRegion<U>, E>
+    where
+        U: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        F: FnOnce(T) -> Result<U, E>,
+    {
+        Ok(ProviderRegion {
+            name: self.name,
+            provider: self.provider,
+            region: self.region,
+            config: f(self.config)?,
+        })
+    }
 }
 
 /// A named replication topology spanning multiple provider regions.
@@ -351,10 +384,10 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Pr
 /// ```
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "T: Clone + Debug + Eq + PartialEq + Serialize",
-    deserialize = "T: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned"
+    serialize = "T: Clone + Debug + Serialize",
+    deserialize = "T: Clone + Debug + serde::de::DeserializeOwned"
 ))]
-pub struct Topology<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> {
+pub struct Topology<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> {
     /// The unique name for this topology.
     name: TopologyName,
     /// The names of provider regions included in this topology.
@@ -363,7 +396,7 @@ pub struct Topology<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Dese
     config: T,
 }
 
-impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> Topology<T> {
+impl<T: Clone + Debug + Serialize + for<'a> Deserialize<'a>> Topology<T> {
     /// Creates a new topology.
     ///
     /// # Example
@@ -398,6 +431,36 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> To
     /// Returns the additional per-topology configuration data.
     pub fn config(&self) -> &T {
         &self.config
+    }
+
+    /// Transforms this topology into a new type by applying a function to the config.
+    pub fn cast<U, F>(self, f: F) -> Topology<U>
+    where
+        U: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        F: FnOnce(T) -> U,
+    {
+        Topology {
+            name: self.name,
+            regions: self.regions,
+            config: f(self.config),
+        }
+    }
+
+    /// Transforms this topology into a new type by applying a fallible function to the config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the transformation function returns an error.
+    pub fn try_cast<U, E, F>(self, f: F) -> Result<Topology<U>, E>
+    where
+        U: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        F: FnOnce(T) -> Result<U, E>,
+    {
+        Ok(Topology {
+            name: self.name,
+            regions: self.regions,
+            config: f(self.config)?,
+        })
     }
 }
 
@@ -434,8 +497,8 @@ impl<T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>> To
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(into = "RawMultiCloudMultiRegionConfiguration<R, T>")]
 pub struct MultiCloudMultiRegionConfiguration<
-    R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-    T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+    R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+    T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
 > {
     /// The name of the preferred region for operations with region affinity.
     preferred: RegionName,
@@ -448,12 +511,12 @@ pub struct MultiCloudMultiRegionConfiguration<
 /// Raw representation for serde deserialization before validation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound(
-    serialize = "R: Clone + Debug + Eq + PartialEq + Serialize, T: Clone + Debug + Eq + PartialEq + Serialize",
-    deserialize = "R: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned, T: Clone + Debug + Eq + PartialEq + serde::de::DeserializeOwned",
+    serialize = "R: Clone + Debug + Serialize, T: Clone + Debug + Serialize",
+    deserialize = "R: Clone + Debug + serde::de::DeserializeOwned, T: Clone + Debug + serde::de::DeserializeOwned",
 ))]
 struct RawMultiCloudMultiRegionConfiguration<
-    R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-    T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+    R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+    T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
 > {
     preferred: RegionName,
     regions: Vec<ProviderRegion<R>>,
@@ -461,8 +524,8 @@ struct RawMultiCloudMultiRegionConfiguration<
 }
 
 impl<
-        R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-        T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+        R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+        T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
     > From<MultiCloudMultiRegionConfiguration<R, T>>
     for RawMultiCloudMultiRegionConfiguration<R, T>
 {
@@ -476,8 +539,8 @@ impl<
 }
 
 impl<
-        R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-        T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+        R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+        T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
     > TryFrom<RawMultiCloudMultiRegionConfiguration<R, T>>
     for MultiCloudMultiRegionConfiguration<R, T>
 {
@@ -490,8 +553,8 @@ impl<
 
 impl<
         'de,
-        R: Clone + Debug + Eq + PartialEq + Serialize + serde::de::DeserializeOwned,
-        T: Clone + Debug + Eq + PartialEq + Serialize + serde::de::DeserializeOwned,
+        R: Clone + Debug + Serialize + serde::de::DeserializeOwned,
+        T: Clone + Debug + Serialize + serde::de::DeserializeOwned,
     > Deserialize<'de> for MultiCloudMultiRegionConfiguration<R, T>
 {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -603,8 +666,8 @@ fn format_name_list<T: std::fmt::Display>(names: &[T]) -> String {
 }
 
 impl<
-        R: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
-        T: Clone + Debug + Eq + PartialEq + Serialize + for<'a> Deserialize<'a>,
+        R: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
+        T: Clone + Debug + Serialize + for<'a> Deserialize<'a>,
     > MultiCloudMultiRegionConfiguration<R, T>
 {
     /// Creates and validates a new multi-cloud, multi-region configuration.
@@ -711,6 +774,175 @@ impl<
         } else {
             Ok(())
         }
+    }
+
+    /// Returns the configuration for the preferred region, if found.
+    ///
+    /// Since the configuration validates that the preferred region exists during construction,
+    /// this method returns `Some` for valid configurations. It returns `None` only if the
+    /// internal state is inconsistent, which should not occur with properly constructed instances.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::{
+    ///     MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName,
+    /// };
+    ///
+    /// let config = MultiCloudMultiRegionConfiguration::<String, ()>::new(
+    ///     RegionName::new("aws-us-east-1").unwrap(),
+    ///     vec![ProviderRegion::new(
+    ///         RegionName::new("aws-us-east-1").unwrap(),
+    ///         "aws",
+    ///         "us-east-1",
+    ///         "custom-config".to_string(),
+    ///     )],
+    ///     vec![],
+    /// ).expect("valid configuration");
+    ///
+    /// assert_eq!(config.preferred_region_config(), Some(&"custom-config".to_string()));
+    /// ```
+    pub fn preferred_region_config(&self) -> Option<&R> {
+        self.regions
+            .iter()
+            .find(|r| r.name == self.preferred)
+            .map(|r| r.config())
+    }
+
+    /// Transforms this configuration into a new type by applying functions to the region and
+    /// topology configs.
+    ///
+    /// This method consumes the configuration and produces a new one with different generic
+    /// type parameters. The transformation functions are applied to each region config and
+    /// topology config respectively.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::{
+    ///     MultiCloudMultiRegionConfiguration, ProviderRegion, Topology,
+    ///     RegionName, TopologyName,
+    /// };
+    ///
+    /// let config = MultiCloudMultiRegionConfiguration::<i32, String>::new(
+    ///     RegionName::new("aws-us-east-1").unwrap(),
+    ///     vec![ProviderRegion::new(
+    ///         RegionName::new("aws-us-east-1").unwrap(),
+    ///         "aws",
+    ///         "us-east-1",
+    ///         42,
+    ///     )],
+    ///     vec![Topology::new(
+    ///         TopologyName::new("default").unwrap(),
+    ///         vec![RegionName::new("aws-us-east-1").unwrap()],
+    ///         "topology-config".to_string(),
+    ///     )],
+    /// ).expect("valid configuration");
+    ///
+    /// let transformed = config.cast(
+    ///     |r| r.to_string(),
+    ///     |t| t.len(),
+    /// );
+    ///
+    /// assert_eq!(transformed.preferred_region_config(), Some(&"42".to_string()));
+    /// assert_eq!(transformed.topologies()[0].config(), &15);
+    /// ```
+    pub fn cast<R2, T2, FR, FT>(
+        self,
+        region_fn: FR,
+        topology_fn: FT,
+    ) -> MultiCloudMultiRegionConfiguration<R2, T2>
+    where
+        R2: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        T2: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        FR: Fn(R) -> R2,
+        FT: Fn(T) -> T2,
+    {
+        MultiCloudMultiRegionConfiguration {
+            preferred: self.preferred,
+            regions: self
+                .regions
+                .into_iter()
+                .map(|r| r.cast(&region_fn))
+                .collect(),
+            topologies: self
+                .topologies
+                .into_iter()
+                .map(|t| t.cast(&topology_fn))
+                .collect(),
+        }
+    }
+
+    /// Transforms this configuration into a new type by applying fallible functions to the
+    /// region and topology configs.
+    ///
+    /// This method consumes the configuration and produces a new one with different generic
+    /// type parameters. The transformation functions are applied to each region config and
+    /// topology config respectively. If any transformation fails, the error is returned
+    /// immediately.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any region or topology transformation function returns an error.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::{
+    ///     MultiCloudMultiRegionConfiguration, ProviderRegion, Topology,
+    ///     RegionName, TopologyName,
+    /// };
+    ///
+    /// let config = MultiCloudMultiRegionConfiguration::<String, i32>::new(
+    ///     RegionName::new("aws-us-east-1").unwrap(),
+    ///     vec![ProviderRegion::new(
+    ///         RegionName::new("aws-us-east-1").unwrap(),
+    ///         "aws",
+    ///         "us-east-1",
+    ///         "42".to_string(),
+    ///     )],
+    ///     vec![Topology::new(
+    ///         TopologyName::new("default").unwrap(),
+    ///         vec![RegionName::new("aws-us-east-1").unwrap()],
+    ///         100,
+    ///     )],
+    /// ).expect("valid configuration");
+    ///
+    /// let result: Result<_, std::num::ParseIntError> = config.try_cast(
+    ///     |r| r.parse::<i32>(),
+    ///     |t| Ok(t.to_string()),
+    /// );
+    ///
+    /// let transformed = result.expect("transformation should succeed");
+    /// assert_eq!(transformed.preferred_region_config(), Some(&42));
+    /// assert_eq!(transformed.topologies()[0].config(), "100");
+    /// ```
+    pub fn try_cast<R2, T2, E, FR, FT>(
+        self,
+        region_fn: FR,
+        topology_fn: FT,
+    ) -> Result<MultiCloudMultiRegionConfiguration<R2, T2>, E>
+    where
+        R2: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        T2: Clone + Debug + Serialize + for<'b> Deserialize<'b>,
+        FR: Fn(R) -> Result<R2, E>,
+        FT: Fn(T) -> Result<T2, E>,
+    {
+        let regions: Result<Vec<_>, E> = self
+            .regions
+            .into_iter()
+            .map(|r| r.try_cast(&region_fn))
+            .collect();
+        let topologies: Result<Vec<_>, E> = self
+            .topologies
+            .into_iter()
+            .map(|t| t.try_cast(&topology_fn))
+            .collect();
+        Ok(MultiCloudMultiRegionConfiguration {
+            preferred: self.preferred,
+            regions: regions?,
+            topologies: topologies?,
+        })
     }
 }
 
@@ -1617,6 +1849,243 @@ mod tests {
             err_msg.contains("non-ASCII"),
             "Expected error message to contain 'non-ASCII', got: {}",
             err_msg
+        );
+    }
+
+    #[test]
+    fn preferred_region_config_returns_config() {
+        let config = MultiCloudMultiRegionConfiguration::<String, ()>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "custom-config".to_string(),
+            )],
+            vec![],
+        )
+        .expect("valid configuration");
+
+        assert_eq!(
+            config.preferred_region_config(),
+            Some(&"custom-config".to_string())
+        );
+    }
+
+    #[test]
+    fn preferred_region_config_selects_correct_region() {
+        let config = MultiCloudMultiRegionConfiguration::<String, ()>::new(
+            region_name("gcp-europe-west1"),
+            vec![
+                ProviderRegion::new(
+                    region_name("aws-us-east-1"),
+                    "aws",
+                    "us-east-1",
+                    "aws-config".to_string(),
+                ),
+                ProviderRegion::new(
+                    region_name("gcp-europe-west1"),
+                    "gcp",
+                    "europe-west1",
+                    "gcp-config".to_string(),
+                ),
+            ],
+            vec![],
+        )
+        .expect("valid configuration");
+
+        assert_eq!(
+            config.preferred_region_config(),
+            Some(&"gcp-config".to_string())
+        );
+    }
+
+    #[test]
+    fn provider_region_cast() {
+        let region = ProviderRegion::new(region_name("aws-us-east-1"), "aws", "us-east-1", 42i32);
+        let casted = region.cast(|n| n.to_string());
+        assert_eq!(casted.name(), &region_name("aws-us-east-1"));
+        assert_eq!(casted.provider(), "aws");
+        assert_eq!(casted.region(), "us-east-1");
+        assert_eq!(casted.config(), "42");
+    }
+
+    #[test]
+    fn provider_region_try_cast_success() {
+        let region = ProviderRegion::new(
+            region_name("aws-us-east-1"),
+            "aws",
+            "us-east-1",
+            "42".to_string(),
+        );
+        let result: Result<ProviderRegion<i32>, std::num::ParseIntError> =
+            region.try_cast(|s| s.parse());
+        let casted = result.expect("parsing should succeed");
+        assert_eq!(casted.config(), &42);
+    }
+
+    #[test]
+    fn provider_region_try_cast_failure() {
+        let region = ProviderRegion::new(
+            region_name("aws-us-east-1"),
+            "aws",
+            "us-east-1",
+            "not-a-number".to_string(),
+        );
+        let result: Result<ProviderRegion<i32>, std::num::ParseIntError> =
+            region.try_cast(|s| s.parse());
+        assert!(result.is_err());
+        println!(
+            "provider_region_try_cast_failure error: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn topology_cast() {
+        let t = Topology::new(
+            topology_name("global"),
+            vec![region_name("aws-us-east-1")],
+            100i32,
+        );
+        let casted = t.cast(|n| n * 2);
+        assert_eq!(casted.name(), &topology_name("global"));
+        assert_eq!(casted.regions(), &[region_name("aws-us-east-1")]);
+        assert_eq!(casted.config(), &200);
+    }
+
+    #[test]
+    fn topology_try_cast_success() {
+        let t = Topology::new(
+            topology_name("global"),
+            vec![region_name("aws-us-east-1")],
+            "123".to_string(),
+        );
+        let result: Result<Topology<i32>, std::num::ParseIntError> = t.try_cast(|s| s.parse());
+        let casted = result.expect("parsing should succeed");
+        assert_eq!(casted.config(), &123);
+    }
+
+    #[test]
+    fn topology_try_cast_failure() {
+        let t = Topology::new(
+            topology_name("global"),
+            vec![region_name("aws-us-east-1")],
+            "invalid".to_string(),
+        );
+        let result: Result<Topology<i32>, std::num::ParseIntError> = t.try_cast(|s| s.parse());
+        assert!(result.is_err());
+        println!("topology_try_cast_failure error: {:?}", result.unwrap_err());
+    }
+
+    #[test]
+    fn configuration_cast() {
+        let config = MultiCloudMultiRegionConfiguration::<i32, i32>::new(
+            region_name("aws-us-east-1"),
+            vec![
+                ProviderRegion::new(region_name("aws-us-east-1"), "aws", "us-east-1", 10),
+                ProviderRegion::new(region_name("gcp-europe-west1"), "gcp", "europe-west1", 20),
+            ],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![
+                    region_name("aws-us-east-1"),
+                    region_name("gcp-europe-west1"),
+                ],
+                100,
+            )],
+        )
+        .expect("valid configuration");
+
+        let casted = config.cast(|r| r.to_string(), |t| t * 2);
+
+        assert_eq!(casted.preferred(), &region_name("aws-us-east-1"));
+        assert_eq!(casted.regions().len(), 2);
+        assert_eq!(casted.regions()[0].config(), "10");
+        assert_eq!(casted.regions()[1].config(), "20");
+        assert_eq!(casted.topologies().len(), 1);
+        assert_eq!(casted.topologies()[0].config(), &200);
+    }
+
+    #[test]
+    fn configuration_try_cast_success() {
+        let config = MultiCloudMultiRegionConfiguration::<String, String>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "42".to_string(),
+            )],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![region_name("aws-us-east-1")],
+                "100".to_string(),
+            )],
+        )
+        .expect("valid configuration");
+
+        let result: Result<MultiCloudMultiRegionConfiguration<i32, i32>, std::num::ParseIntError> =
+            config.try_cast(|r| r.parse(), |t| t.parse());
+
+        let casted = result.expect("parsing should succeed");
+        assert_eq!(casted.preferred_region_config(), Some(&42));
+        assert_eq!(casted.topologies()[0].config(), &100);
+    }
+
+    #[test]
+    fn configuration_try_cast_region_failure() {
+        let config = MultiCloudMultiRegionConfiguration::<String, String>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "not-a-number".to_string(),
+            )],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![region_name("aws-us-east-1")],
+                "100".to_string(),
+            )],
+        )
+        .expect("valid configuration");
+
+        let result: Result<MultiCloudMultiRegionConfiguration<i32, i32>, std::num::ParseIntError> =
+            config.try_cast(|r| r.parse(), |t| t.parse());
+
+        assert!(result.is_err());
+        println!(
+            "configuration_try_cast_region_failure error: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[test]
+    fn configuration_try_cast_topology_failure() {
+        let config = MultiCloudMultiRegionConfiguration::<String, String>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "42".to_string(),
+            )],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![region_name("aws-us-east-1")],
+                "not-a-number".to_string(),
+            )],
+        )
+        .expect("valid configuration");
+
+        let result: Result<MultiCloudMultiRegionConfiguration<i32, i32>, std::num::ParseIntError> =
+            config.try_cast(|r| r.parse(), |t| t.parse());
+
+        assert!(result.is_err());
+        println!(
+            "configuration_try_cast_topology_failure error: {:?}",
+            result.unwrap_err()
         );
     }
 }
