@@ -48,19 +48,11 @@ use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
     create_s3_factories, scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions,
-    CursorWitness, Fragment, FragmentConsumer, FragmentManagerFactory, FragmentSeqNo,
-    GarbageCollectionOptions, Limits, LogPosition, LogReader, LogReaderOptions, LogWriter,
-    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManagerFactory, ManifestReader,
-    MarkDirty as MarkDirtyTrait, S3FragmentManagerFactory, S3FragmentPuller,
-    S3ManifestManagerFactory, Snapshot, SnapshotCache, SnapshotPointer,
+    CursorWitness, Fragment, FragmentConsumer, FragmentManagerFactory, GarbageCollectionOptions,
+    Limits, LogPosition, LogReader, LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions,
+    LogWriterTrait, Manifest, ManifestAndWitness, ManifestManagerFactory,
+    MarkDirty as MarkDirtyTrait, S3FragmentPuller, Snapshot, SnapshotCache, SnapshotPointer,
 };
-
-/// Concrete type alias for the LogWriter with S3 factories.
-type S3LogWriter =
-    LogWriter<(FragmentSeqNo, LogPosition), S3FragmentManagerFactory, S3ManifestManagerFactory>;
-
-/// Concrete type alias for the LogReader with S3 consumers.
-type S3LogReader = LogReader<(FragmentSeqNo, LogPosition), S3FragmentPuller, ManifestReader>;
 
 mod scrub;
 pub mod state_hash_table;
@@ -200,7 +192,7 @@ struct ActiveLog {
     /// writer in sync, every time a writer is created here, a background task that watches
     /// collect_after will set this to None and exit itself.  Thus, we should spawn one background
     /// task for each None->Some transition on this field.
-    log: Option<Arc<S3LogWriter>>,
+    log: Option<Arc<dyn LogWriterTrait>>,
     /// An instant in time after which the background task will set the log to None and exit.
     /// Writers to the log should bump this to be into the future to "heartbeat" the log.  The
     /// method for this is called `keep_alive`.
@@ -268,15 +260,15 @@ impl From<LogKey> for LogStub {
 /// makes sure that it won't be allowed to exist past the lifetime of the handle.  Alternatively,
 /// it keeps the handle alive as long as you have a log-writer reference.
 struct LogRef<'a> {
-    log: Arc<S3LogWriter>,
+    log: Arc<dyn LogWriterTrait>,
     _phantom: std::marker::PhantomData<&'a ()>,
 }
 
 impl std::ops::Deref for LogRef<'_> {
-    type Target = S3LogWriter;
+    type Target = dyn LogWriterTrait;
 
     fn deref(&self) -> &Self::Target {
-        &self.log
+        &*self.log
     }
 }
 
@@ -333,7 +325,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
         mark_dirty_arc,
         snapshot_cache,
     );
-    let opened = S3LogWriter::open_or_initialize(
+    let opened = LogWriter::open_or_initialize(
         options.clone(),
         Arc::clone(storage),
         prefix,
@@ -346,7 +338,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
     .await?;
     active.keep_alive(Duration::from_secs(60));
     tracing::info!("Opened log at {}", prefix);
-    let opened = Arc::new(opened);
+    let opened: Arc<dyn LogWriterTrait> = Arc::new(opened);
     active.log = Some(Arc::clone(&opened));
     let handle_clone = handle.clone();
     let epoch = active.epoch;
@@ -609,7 +601,7 @@ fn coalesce_markers(
 #[derive(Clone, Debug)]
 pub struct MarkDirty {
     collection_id: CollectionUuid,
-    dirty_log: Option<Arc<S3LogWriter>>,
+    dirty_log: Option<Arc<dyn LogWriterTrait>>,
 }
 
 impl MarkDirty {
@@ -664,7 +656,7 @@ pub struct LogServer {
     config: LogServerConfig,
     storage: Arc<Storage>,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
-    dirty_log: Option<Arc<S3LogWriter>>,
+    dirty_log: Option<Arc<dyn LogWriterTrait>>,
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
     need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
@@ -690,7 +682,10 @@ impl LogServer {
     }
 
     /// Creates a LogReader for the given prefix with default (no-op) mark_dirty and snapshot_cache.
-    async fn make_log_reader(&self, prefix: String) -> Result<S3LogReader, wal3::Error> {
+    async fn make_log_reader(
+        &self,
+        prefix: String,
+    ) -> Result<Arc<dyn LogReaderTrait>, wal3::Error> {
         let (fragment_factory, manifest_factory) = create_s3_factories(
             self.config.writer.clone(),
             self.config.reader.clone(),
@@ -702,18 +697,18 @@ impl LogServer {
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
-        Ok(LogReader::new(
+        Ok(Arc::new(LogReader::new(
             self.config.reader.clone(),
             fragment_consumer,
             manifest_consumer,
-        ))
+        )))
     }
 
     /// Creates a LogReader with default options for the given storage and prefix.
     async fn make_log_reader_with_defaults(
         storage: Arc<Storage>,
         prefix: String,
-    ) -> Result<S3LogReader, wal3::Error> {
+    ) -> Result<Arc<dyn LogReaderTrait>, wal3::Error> {
         let writer_options = LogWriterOptions::default();
         let reader_options = LogReaderOptions::default();
         let (fragment_factory, manifest_factory) = create_s3_factories(
@@ -727,11 +722,11 @@ impl LogServer {
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
-        Ok(LogReader::new(
+        Ok(Arc::new(LogReader::new(
             reader_options,
             fragment_consumer,
             manifest_consumer,
-        ))
+        )))
     }
 
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
@@ -977,7 +972,7 @@ impl LogServer {
             tracing::error!("roll dirty log called with no dirty log configured");
             return Err(Error::CouldNotGetDirtyLogReader);
         };
-        let mut rollup = self.read_and_coalesce_dirty_log(dirty_log).await?;
+        let mut rollup = self.read_and_coalesce_dirty_log(&**dirty_log).await?;
         if rollup.rollups.is_empty() {
             tracing::info!("rollups is empty");
             let backpressure = vec![];
@@ -996,13 +991,13 @@ impl LogServer {
             .dirty_log_collections
             .record(collections as u64, &[]);
         self.enrich_dirty_log(&mut rollup.rollups).await?;
-        self.save_dirty_log(rollup, dirty_log).await
+        self.save_dirty_log(rollup, &**dirty_log).await
     }
 
     async fn save_dirty_log(
         &self,
         mut rollup: Rollup,
-        dirty_log: &S3LogWriter,
+        dirty_log: &dyn LogWriterTrait,
     ) -> Result<(), Error> {
         let mut markers = vec![];
         let mut backpressure = vec![];
@@ -1083,7 +1078,10 @@ impl LogServer {
     /// Read the entirety of a prefix of the dirty log.
     #[tracing::instrument(skip(self), err(Display))]
     #[allow(clippy::type_complexity)]
-    async fn read_and_coalesce_dirty_log(&self, dirty_log: &S3LogWriter) -> Result<Rollup, Error> {
+    async fn read_and_coalesce_dirty_log(
+        &self,
+        dirty_log: &dyn LogWriterTrait,
+    ) -> Result<Rollup, Error> {
         let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
             return Err(Error::CouldNotGetDirtyLogReader);
         };
@@ -1683,7 +1681,7 @@ impl LogServer {
                     )
                 })?;
         wal3::copy(
-            &log_reader,
+            &*log_reader,
             cursor.unwrap_or(LogPosition::from_offset(1)),
             &target_fragment_publisher,
             target_manifest_factory,
@@ -2633,7 +2631,7 @@ impl Configurable<LogServerConfig> for LogServer {
         )
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
-        let dirty_log = Some(Arc::new(dirty_log));
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
         let rolling_up = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
@@ -2704,7 +2702,10 @@ mod tests {
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
     use tonic::{Code, IntoRequest};
-    use wal3::{SnapshotOptions, ThrottleOptions};
+    use wal3::{
+        FragmentSeqNo, S3FragmentManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
+        ThrottleOptions,
+    };
 
     #[test]
     fn unsafe_constants() {
@@ -3844,8 +3845,8 @@ mod tests {
             Arc::new(()),
             Arc::new(()),
         );
-        let dirty_log = Some(Arc::new(
-            S3LogWriter::open_or_initialize(
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
+            LogWriter::open_or_initialize(
                 writer_options.clone(),
                 storage.clone(),
                 "test-rust-log-service",
@@ -4426,7 +4427,7 @@ mod tests {
             Arc::new(()),
             Arc::new(()),
         );
-        let dirty_log = S3LogWriter::open_or_initialize(
+        let dirty_log = LogWriter::open_or_initialize(
             options,
             Arc::clone(&storage),
             "dirty-test",
@@ -4437,7 +4438,7 @@ mod tests {
         )
         .await
         .expect("Failed to create dirty log");
-        let dirty_log = Some(Arc::new(dirty_log));
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
 
         // Create LogServer manually
         let config = LogServerConfig::default();
@@ -4468,7 +4469,7 @@ mod tests {
             Arc::new(()),
             Arc::new(()),
         );
-        let _log_writer = S3LogWriter::open_or_initialize(
+        let _log_writer = LogWriter::open_or_initialize(
             options2,
             Arc::clone(&log_server.storage),
             &storage_prefix,

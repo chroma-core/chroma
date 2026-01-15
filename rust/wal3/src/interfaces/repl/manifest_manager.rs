@@ -1025,7 +1025,7 @@ mod tests {
         let setsum = make_setsum(1);
 
         let result = manager
-            .publish_fragment(&pointer, &[], path, messages_len, num_bytes, setsum)
+            .publish_fragment(&pointer, &["dummy"], path, messages_len, num_bytes, setsum)
             .await;
 
         assert!(
@@ -1077,7 +1077,7 @@ mod tests {
         // Publish first fragment.
         let pointer1 = FragmentUuid::generate();
         let pos1 = manager
-            .publish_fragment(&pointer1, &[], "path1", 10, 100, make_setsum(1))
+            .publish_fragment(&pointer1, &["dummy"], "path1", 10, 100, make_setsum(1))
             .await
             .expect("first publish failed");
         assert_eq!(pos1.offset(), 0);
@@ -1085,7 +1085,7 @@ mod tests {
         // Publish second fragment.
         let pointer2 = FragmentUuid::generate();
         let pos2 = manager
-            .publish_fragment(&pointer2, &[], "path2", 20, 200, make_setsum(2))
+            .publish_fragment(&pointer2, &["dummy"], "path2", 20, 200, make_setsum(2))
             .await
             .expect("second publish failed");
         assert_eq!(pos2.offset(), 10);
@@ -1093,7 +1093,7 @@ mod tests {
         // Publish third fragment.
         let pointer3 = FragmentUuid::generate();
         let pos3 = manager
-            .publish_fragment(&pointer3, &[], "path3", 30, 300, make_setsum(3))
+            .publish_fragment(&pointer3, &["dummy"], "path3", 30, 300, make_setsum(3))
             .await
             .expect("third publish failed");
         assert_eq!(pos3.offset(), 30);
@@ -1133,7 +1133,14 @@ mod tests {
 
         let messages_len = (i64::MAX as u64) + 1;
         let result = manager
-            .publish_fragment(&pointer, &[], "path", messages_len, 100, Setsum::default())
+            .publish_fragment(
+                &pointer,
+                &["dummy"],
+                "path",
+                messages_len,
+                100,
+                Setsum::default(),
+            )
             .await;
 
         match result {
@@ -1165,14 +1172,21 @@ mod tests {
         let pointer1 = FragmentUuid::generate();
         let setsum1 = make_setsum(1);
         manager
-            .publish_fragment(&pointer1, &[], "path/frag1.parquet", 5, 500, setsum1)
+            .publish_fragment(&pointer1, &["dummy"], "path/frag1.parquet", 5, 500, setsum1)
             .await
             .expect("publish failed");
 
         let pointer2 = FragmentUuid::generate();
         let setsum2 = make_setsum(2);
         manager
-            .publish_fragment(&pointer2, &[], "path/frag2.parquet", 10, 1000, setsum2)
+            .publish_fragment(
+                &pointer2,
+                &["dummy"],
+                "path/frag2.parquet",
+                10,
+                1000,
+                setsum2,
+            )
             .await
             .expect("publish failed");
 
@@ -1300,7 +1314,14 @@ mod tests {
                 let pointer = FragmentUuid::generate();
                 let path = format!("path/fragment_{}.parquet", i);
                 manager
-                    .publish_fragment(&pointer, &[], &path, 10, 100, make_setsum((i + 1) as u8))
+                    .publish_fragment(
+                        &pointer,
+                        &["dummy"],
+                        &path,
+                        10,
+                        100,
+                        make_setsum((i + 1) as u8),
+                    )
                     .await
             });
             handles.push(handle);
@@ -1387,7 +1408,7 @@ mod tests {
 
         // Try to publish a fragment that would overflow enumeration_offset.
         let result = manager
-            .publish_fragment(&pointer, &[], "path", 100, 100, Setsum::default())
+            .publish_fragment(&pointer, &["dummy"], "path", 100, 100, Setsum::default())
             .await;
 
         match result {
@@ -1754,7 +1775,7 @@ mod tests {
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, &[], "path1", 5, 100, setsum1)
+            .publish_fragment(&pointer1, &["dummy"], "path1", 5, 100, setsum1)
             .await
             .expect("first publish failed");
 
@@ -1772,7 +1793,7 @@ mod tests {
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, &[], "path2", 5, 100, setsum2)
+            .publish_fragment(&pointer2, &["dummy"], "path2", 5, 100, setsum2)
             .await
             .expect("second publish failed");
 
