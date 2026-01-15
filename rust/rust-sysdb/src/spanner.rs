@@ -5893,7 +5893,7 @@ mod tests {
             Some(&Schema::default()),
         );
 
-        // ===== Verify segments =====
+        // ===== Verify segments field by field =====
         assert_eq!(response.segments.len(), 3, "Should return all 3 segments");
 
         let returned_segment_ids: std::collections::HashSet<SegmentUuid> =
