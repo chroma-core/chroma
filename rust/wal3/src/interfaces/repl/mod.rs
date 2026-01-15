@@ -377,7 +377,7 @@ mod tests {
         let result = publisher
             .publish_fragment(
                 &pointer,
-                &[],
+                &["dummy"],
                 "test/path.parquet",
                 10,
                 100,
