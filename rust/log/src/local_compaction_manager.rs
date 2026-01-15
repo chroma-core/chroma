@@ -184,6 +184,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .log
             .read(
                 &collection_and_segments.collection.tenant,
+                // It is up to the log impl to use or not use this.
                 dbname,
                 collection_and_segments.collection.collection_id,
                 mt_max_seq_id.min(hnsw_max_seq_id) as i64,

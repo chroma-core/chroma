@@ -18,7 +18,7 @@ use chroma_types::{
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
     GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionRequest,
@@ -748,7 +748,10 @@ async fn create_database(
     let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
+    let database_name = DatabaseName::new(name).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let create_database_request = CreateDatabaseRequest::try_new(tenant, database_name)?;
     let res = server
         .frontend
         .create_database(create_database_request)
@@ -839,7 +842,10 @@ async fn get_database(
         .await?;
     let _guard =
         server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()])?;
-    let request = GetDatabaseRequest::try_new(tenant, database)?;
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let request = GetDatabaseRequest::try_new(tenant, database_name)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
 }
@@ -1873,11 +1879,14 @@ async fn indexing_status(
 
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
 
     Ok(Json(
         server
             .frontend
-            .indexing_status(database, collection_id)
+            .indexing_status(database_name, collection_id)
             .meter(metering_context_container)
             .await?,
     ))
@@ -2281,9 +2290,12 @@ async fn attach_function(
         format!("database:{}", database).as_str(),
     ])?;
 
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let res = server
         .frontend
-        .attach_function(tenant, database, collection_id, request)
+        .attach_function(tenant, database_name, collection_id, request)
         .await?;
     Ok(Json(res))
 }
@@ -2329,9 +2341,12 @@ async fn get_attached_function(
         format!("database:{}", database).as_str(),
     ])?;
 
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let attached_function = server
         .frontend
-        .get_attached_function(tenant, database, collection_id, function_name)
+        .get_attached_function(tenant, database_name, collection_id, function_name)
         .await?;
     let attached_function_api =
         chroma_types::AttachedFunctionApiResponse::from_attached_function(attached_function)?;
@@ -2382,9 +2397,12 @@ async fn detach_function(
         format!("database:{}", database_name).as_str(),
     ])?;
 
+    let database_name_typed = DatabaseName::new(database_name).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let res = server
         .frontend
-        .detach_function(tenant, database_name, collection_id, name, request)
+        .detach_function(tenant, database_name_typed, collection_id, name, request)
         .await?;
     Ok(Json(res))
 }

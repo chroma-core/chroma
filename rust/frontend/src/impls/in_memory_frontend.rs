@@ -86,16 +86,16 @@ impl InMemoryFrontend {
     ) -> Result<chroma_types::CreateDatabaseResponse, chroma_types::CreateDatabaseError> {
         if self.inner.databases.iter().any(|db| {
             db.id == request.database_id
-                || (db.name == request.database_name && db.tenant == request.tenant_id)
+                || (request.database_name == db.name && db.tenant == request.tenant_id)
         }) {
             return Err(chroma_types::CreateDatabaseError::AlreadyExists(
-                request.database_name,
+                request.database_name.into_string(),
             ));
         }
 
         self.inner.databases.push(Database {
             id: request.database_id,
-            name: request.database_name,
+            name: request.database_name.into_string(),
             tenant: request.tenant_id,
         });
 
@@ -127,12 +127,12 @@ impl InMemoryFrontend {
             .inner
             .databases
             .iter()
-            .find(|db| db.name == request.database_name && db.tenant == request.tenant_id)
+            .find(|db| request.database_name == db.name && db.tenant == request.tenant_id)
         {
             Ok(db.clone())
         } else {
             Err(chroma_types::GetDatabaseError::NotFound(
-                request.database_name,
+                request.database_name.into_string(),
             ))
         }
     }
@@ -145,7 +145,7 @@ impl InMemoryFrontend {
             .inner
             .databases
             .iter()
-            .position(|db| db.name == request.database_name && db.tenant == request.tenant_id)
+            .position(|db| request.database_name == db.name && db.tenant == request.tenant_id)
         {
             self.inner.databases.remove(pos);
             Ok(chroma_types::DeleteDatabaseResponse {})
@@ -693,15 +693,15 @@ impl InMemoryFrontend {
 #[cfg(test)]
 mod tests {
     use chroma_types::{
-        DocumentExpression, IncludeList, Metadata, MetadataComparison, MetadataExpression,
-        MetadataValue, PrimitiveOperator, Where,
+        DatabaseName, DocumentExpression, IncludeList, Metadata, MetadataComparison,
+        MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
 
     use super::*;
 
     fn create_test_collection() -> (InMemoryFrontend, Collection) {
         let tenant_name = "test".to_string();
-        let database_name = "test".to_string();
+        let database_name = DatabaseName::new("test").unwrap();
         let collection_name = "test".to_string();
 
         let mut frontend = InMemoryFrontend::new();
@@ -717,7 +717,7 @@ mod tests {
 
         let request = chroma_types::CreateCollectionRequest::try_new(
             tenant_name.clone(),
-            database_name.clone(),
+            database_name.into_string(),
             collection_name.clone(),
             None,
             None,

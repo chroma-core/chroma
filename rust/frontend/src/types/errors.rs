@@ -29,6 +29,8 @@ pub enum ValidationError {
     UpdateCollection(#[from] UpdateCollectionError),
     #[error("Error parsing collection configuration: {0}")]
     ParseCollectionConfiguration(#[from] CollectionConfigurationToInternalConfigurationError),
+    #[error("{0}")]
+    InvalidArgument(String),
 }
 
 impl ChromaError for ValidationError {
@@ -41,6 +43,7 @@ impl ChromaError for ValidationError {
             ValidationError::GetCollection(err) => err.code(),
             ValidationError::UpdateCollection(err) => err.code(),
             ValidationError::ParseCollectionConfiguration(_) => ErrorCodes::InvalidArgument,
+            ValidationError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
         }
     }
 }

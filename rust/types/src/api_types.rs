@@ -24,6 +24,7 @@ use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DatabaseName;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
@@ -352,14 +353,13 @@ impl ChromaError for UpdateTenantError {
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
-    #[validate(length(min = 3))]
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CreateDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let database_id = Uuid::new_v4();
         let request = Self {
@@ -503,13 +503,13 @@ impl ChromaError for ListDatabasesError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl GetDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -2602,8 +2602,10 @@ mod test {
 
     #[test]
     fn test_create_database_min_length() {
-        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
-        assert!(request.is_err());
+        // DatabaseName requires at least 3 characters
+        assert!(DatabaseName::new("a").is_none());
+        assert!(DatabaseName::new("ab").is_none());
+        assert!(DatabaseName::new("abc").is_some());
     }
 
     #[test]

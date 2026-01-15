@@ -296,7 +296,7 @@ impl ServiceBasedFrontend {
         }: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         self.sysdb_client
-            .create_database(database_id, database_name, tenant_id)
+            .create_database(database_id, database_name.into_string(), tenant_id)
             .await
     }
 
@@ -323,7 +323,7 @@ impl ServiceBasedFrontend {
         }: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         self.sysdb_client
-            .get_database(database_name, tenant_id)
+            .get_database(database_name.into_string(), tenant_id)
             .await
     }
 
@@ -1467,14 +1467,9 @@ impl ServiceBasedFrontend {
 
     pub async fn indexing_status(
         &mut self,
-        database_name: String,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<IndexStatusResponse, IndexStatusError> {
-        let database_name = DatabaseName::new(database_name).ok_or_else(|| {
-            IndexStatusError::Internal(Box::new(chroma_error::TonicError(tonic::Status::internal(
-                "database_name cannot be empty",
-            ))))
-        })?;
         let collection = self.get_cached_collection(collection_id).await?;
 
         let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
@@ -1993,7 +1988,7 @@ impl ServiceBasedFrontend {
     pub async fn attach_function(
         &mut self,
         tenant_name: String,
-        database_name: String,
+        database_name: DatabaseName,
         collection_id: String,
         AttachFunctionRequest {
             name,
@@ -2014,12 +2009,6 @@ impl ServiceBasedFrontend {
                 )))
             })?);
 
-        let database_name_typed = DatabaseName::new(database_name.clone()).ok_or_else(|| {
-            chroma_types::AttachFunctionError::InvalidArgument(
-                "database_name cannot be empty".to_string(),
-            )
-        })?;
-
         // Step 1: Create attached function with is_ready = false
         let (attached_function_id, created) = self
             .sysdb_client
@@ -2030,7 +2019,7 @@ impl ServiceBasedFrontend {
                 output_collection.clone(),
                 params,
                 tenant_name.clone(),
-                database_name,
+                database_name.clone().into_string(),
                 self.min_records_for_invocation,
             )
             .await?;
@@ -2051,7 +2040,7 @@ impl ServiceBasedFrontend {
         // Step 2: Start backfill (only for newly created functions)
         self.start_backfill(
             tenant_name,
-            database_name_typed,
+            database_name,
             input_collection_id,
             attached_function_id,
         )
@@ -2130,7 +2119,7 @@ impl ServiceBasedFrontend {
     pub async fn get_attached_function(
         &mut self,
         _tenant_name: String,
-        _database_name: String,
+        _database_name: DatabaseName,
         collection_id: String,
         function_name: String,
     ) -> Result<chroma_types::AttachedFunction, chroma_sysdb::GetAttachedFunctionError> {
@@ -2164,7 +2153,7 @@ impl ServiceBasedFrontend {
     pub async fn detach_function(
         &mut self,
         _tenant_id: String,
-        _database_name: String,
+        _database_name: DatabaseName,
         collection_id: String,
         name: String,
         DetachFunctionRequest { delete_output, .. }: DetachFunctionRequest,
