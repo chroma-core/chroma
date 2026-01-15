@@ -6,20 +6,55 @@ import { Metadata } from "next";
 import { capitalize } from "@/lib/utils";
 import fs from "fs";
 import path from "path";
+import matter from "gray-matter";
+
+// Ensure all pages are statically generated at build time
+export const dynamicParams = false;
+
+// Helper to read pages from filesystem for generatePages subsections
+const getGeneratedPages = (slugPath: string[]): { id: string; name: string }[] => {
+  const dirPath = path.join(process.cwd(), "markdoc", "content", ...slugPath);
+  try {
+    const files = fs.readdirSync(dirPath);
+    const pages: { id: string; name: string }[] = [];
+
+    for (const file of files) {
+      if (file.endsWith(".md")) {
+        const filePath = path.join(dirPath, file);
+        const content = fs.readFileSync(filePath, "utf-8");
+        const { data } = matter(content);
+        if (data.id && data.name) {
+          pages.push({ id: data.id, name: data.name });
+        }
+      }
+    }
+    return pages;
+  } catch {
+    return [];
+  }
+};
 
 export const generateStaticParams = async () => {
   const slugs: string[][] = [];
 
-  const traverseSection = (section: AppSection, path: string[] = []) => {
+  const traverseSection = (section: AppSection, currentPath: string[] = []) => {
     if (section.pages) {
       section.pages.forEach((page) => {
-        slugs.push([...path, page.id]);
+        slugs.push([...currentPath, page.id]);
       });
     }
 
     if (section.subsections) {
       section.subsections.forEach((subsection) => {
-        traverseSection(subsection, [...path, subsection.id]);
+        // Handle subsections with generatePages: true
+        if (subsection.generatePages) {
+          const generatedPages = getGeneratedPages([...currentPath, subsection.id]);
+          generatedPages.forEach((page) => {
+            slugs.push([...currentPath, subsection.id, page.id]);
+          });
+        } else {
+          traverseSection(subsection, [...currentPath, subsection.id]);
+        }
       });
     }
   };

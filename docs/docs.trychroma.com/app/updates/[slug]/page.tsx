@@ -5,17 +5,29 @@ import fs from "fs";
 import path from "path";
 import MarkdocRenderer from "@/components/markdoc/markdoc-renderer";
 
+// Define the known updates pages - must match updatesPages in layout.tsx
+const updatesPages = ["migration", "troubleshooting"];
+
+// Ensure all pages are statically generated at build time
+export const dynamicParams = false;
+
+export async function generateStaticParams() {
+  return updatesPages.map((slug) => ({ slug }));
+}
+
 export async function generateMetadata({
   params,
 }: {
   params: { slug: string };
 }): Promise<Metadata> {
   // Try to read a human-friendly title from the Markdoc file
+  // Content lives in docs/overview/ - updates pages reuse this content
   const filePath = `${path.join(
     process.cwd(),
     "markdoc",
     "content",
-    "updates",
+    "docs",
+    "overview",
     params.slug,
   )}.md`;
 
@@ -51,7 +63,8 @@ export async function generateMetadata({
 
 const Page: React.FC<{ params: { slug: string } }> = ({ params }) => {
   const { slug } = params;
-  return <MarkdocRenderer slug={["updates", slug]} />;
+  // Content lives in docs/overview/ - updates pages reuse this content
+  return <MarkdocRenderer slug={["docs", "overview", slug]} />;
 };
 
 export default Page;
