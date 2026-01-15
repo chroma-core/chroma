@@ -36,6 +36,34 @@ fn validate_uuid(id: &str) -> Result<Uuid, SysDbError> {
     Uuid::parse_str(id).map_err(SysDbError::InvalidUuid)
 }
 
+/// Converts protobuf UpdateMetadata to internal Metadata type.
+fn convert_update_metadata_to_metadata(
+    update_metadata: chroma_proto::UpdateMetadata,
+) -> Result<Metadata, SysDbError> {
+    let mut metadata = Metadata::new();
+    for (key, value) in update_metadata.metadata {
+        if let Some(inner) = value.value {
+            let meta_value = match inner {
+                chroma_proto::update_metadata_value::Value::StringValue(s) => MetadataValue::Str(s),
+                chroma_proto::update_metadata_value::Value::IntValue(i) => MetadataValue::Int(i),
+                chroma_proto::update_metadata_value::Value::FloatValue(f) => {
+                    MetadataValue::Float(f)
+                }
+                chroma_proto::update_metadata_value::Value::BoolValue(b) => MetadataValue::Bool(b),
+                chroma_proto::update_metadata_value::Value::SparseVectorValue(_) => {
+                    // Sparse vectors are not supported in collection metadata
+                    return Err(SysDbError::InvalidArgument(
+                        "sparse vectors are not supported in collection metadata".to_string(),
+                    ));
+                }
+            };
+            metadata.insert(key, meta_value);
+        }
+        // If value is None, we skip it (don't include in metadata)
+    }
+    Ok(metadata)
+}
+
 /// Internal request for creating a tenant.
 #[derive(Debug, Clone)]
 pub struct CreateTenantRequest {
@@ -363,6 +391,75 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
     }
 }
 
+/// Internal request for updating a collection.
+#[derive(Debug, Clone)]
+pub struct UpdateCollectionRequest {
+    /// The collection ID to update
+    pub id: CollectionUuid,
+    /// New name (optional - None means don't change)
+    pub name: Option<String>,
+    /// New dimension (optional - None means don't change)
+    pub dimension: Option<i32>,
+    /// New metadata to set (optional - None means don't change, unless reset_metadata is true)
+    pub metadata: Option<Metadata>,
+    /// If true, delete all existing metadata (metadata field must be None)
+    pub reset_metadata: bool,
+}
+
+impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::UpdateCollectionRequest) -> Result<Self, Self::Error> {
+        let id = CollectionUuid(validate_uuid(&req.id)?);
+
+        // Handle the metadata_update oneof field
+        // Case 1: reset_metadata = true, metadata = None -> delete all metadata
+        // Case 2: reset_metadata = true, metadata = Some -> ERROR (invalid)
+        // Case 3: reset_metadata = false, metadata = Some -> replace metadata
+        // Case 4: reset_metadata = false, metadata = None -> no-op
+        let (metadata, reset_metadata) = match req.metadata_update {
+            Some(chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(true)) => {
+                (None, true)
+            }
+            Some(chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(false)) => {
+                (None, false)
+            }
+            Some(chroma_proto::update_collection_request::MetadataUpdate::Metadata(
+                update_metadata,
+            )) => {
+                // Convert UpdateMetadata to Metadata
+                let metadata = convert_update_metadata_to_metadata(update_metadata)?;
+                (Some(metadata), false)
+            }
+            None => (None, false),
+        };
+
+        Ok(Self {
+            id,
+            name: req.name,
+            dimension: req.dimension,
+            metadata,
+            reset_metadata,
+        })
+    }
+}
+
+/// Internal response for updating a collection.
+#[derive(Debug, Clone)]
+pub struct UpdateCollectionResponse {
+    /// The updated collection
+    pub collection: Collection,
+}
+
+impl TryFrom<UpdateCollectionResponse> for chroma_proto::UpdateCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
+        // The proto response is empty - it doesn't return the updated collection
+        Ok(chroma_proto::UpdateCollectionResponse {})
+    }
+}
+
 // ============================================================================
 // Assignable Trait Implementations
 // ============================================================================
@@ -445,6 +542,16 @@ impl Assignable for GetCollectionWithSegmentsRequest {
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
         // Single collection lookup - default to Spanner
+        // TODO: Determine routing based on collection metadata if needed
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+
+impl Assignable for UpdateCollectionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Single collection update - default to Spanner
         // TODO: Determine routing based on collection metadata if needed
         Backend::Spanner(factory.spanner().clone())
     }
@@ -537,6 +644,16 @@ impl Runnable for GetCollectionWithSegmentsRequest {
 
     async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_collection_with_segments(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for UpdateCollectionRequest {
+    type Response = UpdateCollectionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.update_collection(self).await
     }
 }
 

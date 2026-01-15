@@ -23,7 +23,7 @@ use crate::types::{
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
-    SpannerRowRef, SpannerRows, SysDbError,
+    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_types::{
     Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Segment, Tenant,
@@ -944,6 +944,27 @@ impl SpannerBackend {
             collection,
             segments,
         })
+    }
+
+    // ============================================================
+    // Update Operations
+    // ============================================================
+
+    /// Update a collection.
+    ///
+    /// Supports updating:
+    /// - `name`: New collection name (must be unique within database)
+    /// - `dimension`: New dimension value
+    /// - `metadata`: New metadata (replaces existing if provided)
+    /// - `reset_metadata`: If true, deletes all existing metadata
+    ///
+    /// Returns the updated collection.
+    pub async fn update_collection(
+        &self,
+        _req: UpdateCollectionRequest,
+    ) -> Result<UpdateCollectionResponse, SysDbError> {
+        // TODO: Implement update_collection
+        todo!("update_collection not yet implemented")
     }
 
     // ============================================================
