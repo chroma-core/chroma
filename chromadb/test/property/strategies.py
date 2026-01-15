@@ -129,11 +129,12 @@ sql_alphabet_minus_underscore = (
 safe_text_min_size_3 = st.text(alphabet=sql_alphabet_minus_underscore, min_size=3)
 tenant_database_name = st.text(alphabet=sql_alphabet, min_size=3)
 
+tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_") and not s.startswith("-") and not s.endswith('-') and not s.endswith('_'))
+
 # Workaround for FastAPI json encoding peculiarities
 # https://github.com/tiangolo/fastapi/blob/8ac8d70d52bb0dd9eb55ba4e22d3e383943da05c/fastapi/encoders.py#L104
 safe_text = safe_text.filter(lambda s: not s.startswith("_sa"))
 safe_text_min_size_3 = safe_text_min_size_3.filter(lambda s: not s.startswith("_sa"))
-tenant_database_name = tenant_database_name.filter(lambda s: not s.startswith("_sa"))
 
 safe_integers = st.integers(
     min_value=-(2**31), max_value=2**31 - 1

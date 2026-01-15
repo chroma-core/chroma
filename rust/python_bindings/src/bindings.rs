@@ -1,4 +1,4 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
+use crate::errors::{ChromaPyResult, InvalidDatabaseNameError, WrappedPyErr, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -18,9 +18,9 @@ use chroma_system::System;
 use chroma_types::{
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
+    DatabaseName, DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest,
+    GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError,
+    IncludeList, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
     UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
@@ -155,7 +155,10 @@ impl Bindings {
     ////////////////////////////// Admin API //////////////////////////////
 
     fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> ChromaPyResult<()> {
-        let request = CreateDatabaseRequest::try_new(tenant, name)?;
+        let database_name = DatabaseName::new(name).ok_or_else(|| {
+            InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
+        })?;
+        let request = CreateDatabaseRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
 
         self.runtime
@@ -170,7 +173,10 @@ impl Bindings {
         tenant: String,
         _py: Python<'_>,
     ) -> ChromaPyResult<Database> {
-        let request = GetDatabaseRequest::try_new(tenant, name)?;
+        let database_name = DatabaseName::new(name).ok_or_else(|| {
+            InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
+        })?;
+        let request = GetDatabaseRequest::try_new(tenant, database_name)?;
 
         let mut frontend = self.frontend.clone();
         let database = self

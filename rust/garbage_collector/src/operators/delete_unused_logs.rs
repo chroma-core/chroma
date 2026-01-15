@@ -8,7 +8,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName};
 use futures::future::try_join_all;
 use thiserror::Error;
 use tracing::Level;
@@ -32,7 +32,7 @@ pub struct DeleteUnusedLogsOperator {
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsInput {
     pub collections_to_destroy: HashSet<CollectionUuid>,
-    pub collections_to_garbage_collect: HashMap<CollectionUuid, LogPosition>,
+    pub collections_to_garbage_collect: HashMap<CollectionUuid, (DatabaseName, LogPosition)>,
 }
 
 pub type DeleteUnusedLogsOutput = ();
@@ -75,9 +75,11 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         let storage_arc = Arc::new(self.storage.clone());
         if !input.collections_to_garbage_collect.is_empty() {
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
-            for (collection_id, minimum_log_offset_to_keep) in &input.collections_to_garbage_collect
+            for (collection_id, (database_name, minimum_log_offset_to_keep)) in
+                &input.collections_to_garbage_collect
             {
                 let collection_id = *collection_id;
+                let database_name = database_name.clone();
                 let storage_clone = storage_arc.clone();
                 let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
@@ -144,7 +146,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             }
                         };
                     }
-                    if let Err(err) = logs.garbage_collect_phase2(collection_id).await {
+                    if let Err(err) = logs.garbage_collect_phase2(database_name, collection_id).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };

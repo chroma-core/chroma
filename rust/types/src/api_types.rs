@@ -24,6 +24,7 @@ use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DatabaseName;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
@@ -352,14 +353,13 @@ impl ChromaError for UpdateTenantError {
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
-    #[validate(length(min = 3))]
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CreateDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let database_id = Uuid::new_v4();
         let request = Self {
@@ -503,13 +503,13 @@ impl ChromaError for ListDatabasesError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl GetDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -1114,6 +1114,8 @@ pub enum ForkCollectionError {
     DuplicateSegment,
     #[error("Missing field: [{0}]")]
     Field(String),
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
     #[error("Collection forking is unsupported for local chroma")]
     Local,
     #[error(transparent)]
@@ -1134,6 +1136,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(e) => e.code(),
             ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(e) => e.code(),
             ForkCollectionError::SegmentConversionError(e) => e.code(),
@@ -1323,6 +1326,8 @@ pub enum AddCollectionRecordsError {
     Collection(#[from] GetCollectionError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1332,6 +1337,7 @@ impl ChromaError for AddCollectionRecordsError {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1409,6 +1415,8 @@ pub struct UpdateCollectionRecordsResponse {}
 pub enum UpdateCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1417,6 +1425,7 @@ impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1495,6 +1504,8 @@ pub struct UpsertCollectionRecordsResponse {}
 pub enum UpsertCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1503,6 +1514,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1579,6 +1591,8 @@ pub enum DeleteCollectionRecordsError {
     Get(#[from] ExecutorError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -1588,6 +1602,7 @@ impl ChromaError for DeleteCollectionRecordsError {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
             DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
@@ -2587,8 +2602,10 @@ mod test {
 
     #[test]
     fn test_create_database_min_length() {
-        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
-        assert!(request.is_err());
+        // DatabaseName requires at least 3 characters
+        assert!(DatabaseName::new("a").is_none());
+        assert!(DatabaseName::new("ab").is_none());
+        assert!(DatabaseName::new("abc").is_some());
     }
 
     #[test]

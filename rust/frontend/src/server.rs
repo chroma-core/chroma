@@ -13,12 +13,12 @@ use chroma_metering::{
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
-    decode_embeddings, maybe_decode_update_embeddings, AddCollectionRecordsPayload,
+    decode_embeddings, maybe_decode_update_embeddings, validate_name, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
     CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
     DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
     DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
     GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionRequest,
@@ -676,6 +676,26 @@ async fn update_tenant(
     Ok(Json(server.frontend.update_tenant(request).await?))
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct InvalidDatabaseError(String);
+
+impl From<validator::ValidationError> for InvalidDatabaseError {
+    fn from(err: validator::ValidationError) -> Self {
+        let message = err
+            .message
+            .map(|m| m.to_string())
+            .unwrap_or_else(|| "invalid database name".to_string());
+        Self(message)
+    }
+}
+
+impl chroma_error::ChromaError for InvalidDatabaseError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
+
 #[derive(Deserialize, Serialize, ToSchema, Debug)]
 pub struct CreateDatabasePayload {
     pub name: String,
@@ -701,6 +721,9 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
+    if let Err(err) = validate_name(&name) {
+        return Err(InvalidDatabaseError::from(err).into());
+    }
     server.metrics.create_database.add(1, &[]);
     tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
@@ -725,7 +748,10 @@ async fn create_database(
     let mut quota_payload = QuotaPayload::new(Action::CreateDatabase, tenant.clone(), api_token);
     quota_payload = quota_payload.with_collection_name(&name);
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let create_database_request = CreateDatabaseRequest::try_new(tenant, name)?;
+    let database_name = DatabaseName::new(name).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let create_database_request = CreateDatabaseRequest::try_new(tenant, database_name)?;
     let res = server
         .frontend
         .create_database(create_database_request)
@@ -816,7 +842,10 @@ async fn get_database(
         .await?;
     let _guard =
         server.scorecard_request(&["op:get_database", format!("tenant:{}", tenant).as_str()])?;
-    let request = GetDatabaseRequest::try_new(tenant, database)?;
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let request = GetDatabaseRequest::try_new(tenant, database_name)?;
     let res = server.frontend.get_database(request).await?;
     Ok(Json(res))
 }
@@ -1850,11 +1879,14 @@ async fn indexing_status(
 
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
 
     Ok(Json(
         server
             .frontend
-            .indexing_status(collection_id)
+            .indexing_status(database_name, collection_id)
             .meter(metering_context_container)
             .await?,
     ))
@@ -2258,9 +2290,12 @@ async fn attach_function(
         format!("database:{}", database).as_str(),
     ])?;
 
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let res = server
         .frontend
-        .attach_function(tenant, database, collection_id, request)
+        .attach_function(tenant, database_name, collection_id, request)
         .await?;
     Ok(Json(res))
 }
@@ -2306,9 +2341,12 @@ async fn get_attached_function(
         format!("database:{}", database).as_str(),
     ])?;
 
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let attached_function = server
         .frontend
-        .get_attached_function(tenant, database, collection_id, function_name)
+        .get_attached_function(tenant, database_name, collection_id, function_name)
         .await?;
     let attached_function_api =
         chroma_types::AttachedFunctionApiResponse::from_attached_function(attached_function)?;
@@ -2359,9 +2397,12 @@ async fn detach_function(
         format!("database:{}", database_name).as_str(),
     ])?;
 
+    let database_name_typed = DatabaseName::new(database_name).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let res = server
         .frontend
-        .detach_function(tenant, database_name, collection_id, name, request)
+        .detach_function(tenant, database_name_typed, collection_id, name, request)
         .await?;
     Ok(Json(res))
 }
