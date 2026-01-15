@@ -632,12 +632,9 @@ impl SpannerBackend {
             .ids
             .as_ref()
             .map(|ids| ids.iter().map(|id| id.0.to_string()).collect());
-        if let Some(ref ids) = ids_str {
-            if ids.len() == 1 {
-                where_clauses.push("c.collection_id = @collection_id".to_string());
-            } else {
-                where_clauses.push("c.collection_id IN UNNEST(@collection_ids)".to_string());
-            }
+
+        if ids_str.is_some() {
+            where_clauses.push("c.collection_id IN UNNEST(@collection_ids)".to_string());
         }
 
         // Filter by name
@@ -673,8 +670,12 @@ impl SpannerBackend {
         let pagination = match (filter.limit, filter.offset) {
             (Some(limit), Some(offset)) => format!("LIMIT {} OFFSET {}", limit, offset),
             (Some(limit), None) => format!("LIMIT {}", limit),
-            (None, Some(offset)) => format!("OFFSET {}", offset),
             (None, None) => String::new(),
+            (None, Some(_)) => {
+                return Err(SysDbError::InvalidArgument(
+                    "offset requires limit to be specified".to_string(),
+                ));
+            }
         };
 
         let query = format!(
@@ -724,11 +725,7 @@ impl SpannerBackend {
 
         // Bind parameters based on which filters are set
         if let Some(ref ids) = ids_str {
-            if ids.len() == 1 {
-                stmt.add_param("collection_id", &ids[0]);
-            } else {
-                stmt.add_param("collection_ids", ids);
-            }
+            stmt.add_param("collection_ids", ids);
         }
         if let Some(ref name) = filter.name {
             stmt.add_param("name", name);

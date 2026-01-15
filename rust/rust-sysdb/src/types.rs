@@ -320,10 +320,21 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
 
         // Handle limit and offset
         if let Some(limit) = req.limit {
-            filter = filter.limit(limit as u32);
+            let limit = u32::try_from(limit).map_err(|_| {
+                SysDbError::InvalidArgument(format!("limit must be non-negative, got {}", limit))
+            })?;
+            filter = filter.limit(limit);
         }
         if let Some(offset) = req.offset {
-            filter = filter.offset(offset as u32);
+            if req.limit.is_none() {
+                return Err(SysDbError::InvalidArgument(
+                    "offset requires limit to be specified".to_string(),
+                ));
+            }
+            let offset = u32::try_from(offset).map_err(|_| {
+                SysDbError::InvalidArgument(format!("offset must be non-negative, got {}", offset))
+            })?;
+            filter = filter.offset(offset);
         }
 
         // Handle include_soft_deleted
