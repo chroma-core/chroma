@@ -1,4 +1,4 @@
-use chroma_storage::config::{RegionalStorage, StorageConfig, TopologicalStorage};
+use chroma_storage::config::{RegionalStorage, TopologicalStorage};
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use chroma_types::{MultiCloudMultiRegionConfiguration, RegionName};
 use figment::providers::{Env, Format, Yaml};
@@ -30,10 +30,8 @@ pub struct SysDbServiceConfig {
     pub otel_filters: Vec<OtelFilter>,
     #[serde(default = "SysDbServiceConfig::default_port")]
     pub port: u16,
-    #[serde(default)]
-    pub storage: StorageConfig,
-    #[serde(default)]
-    pub spanner: SpannerConfig,
+    pub regions_and_topologies:
+        MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
 }
 
 impl SysDbServiceConfig {
@@ -60,8 +58,6 @@ impl SysDbServiceConfig {
 #[derive(Serialize, Deserialize)]
 pub struct RootConfig {
     pub sysdb_service: SysDbServiceConfig,
-    pub regions_and_topologies:
-        MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
 }
 
 impl RootConfig {

@@ -128,13 +128,14 @@ impl Configurable<RootConfig> for SysdbService {
         config: &RootConfig,
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        config
+        let sysdb_config = &config.sysdb_service;
+        sysdb_config
             .regions_and_topologies
             .validate()
             .map_err(|e| e.boxed())?;
         let backends =
-            BackendFactory::try_from_config(&config.regions_and_topologies, registry).await?;
-        let local_region_config = config
+            BackendFactory::try_from_config(&sysdb_config.regions_and_topologies, registry).await?;
+        let local_region_config = sysdb_config
             .regions_and_topologies
             .preferred_region_config()
             .ok_or_else(|| -> Box<dyn ChromaError> {
@@ -143,11 +144,7 @@ impl Configurable<RootConfig> for SysdbService {
                 ))
             })?;
         let storage = Storage::try_from_config(&local_region_config.storage, registry).await?;
-        Ok(SysdbService::new(
-            config.sysdb_service.port,
-            storage,
-            backends,
-        ))
+        Ok(SysdbService::new(sysdb_config.port, storage, backends))
     }
 }
 
