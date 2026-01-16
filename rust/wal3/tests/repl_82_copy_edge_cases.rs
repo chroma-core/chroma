@@ -32,22 +32,15 @@ async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = wal3::LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = wal3::LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     log.append_many(vec![Vec::from("single-record")])
         .await
@@ -119,22 +112,15 @@ async fn test_k8s_mcmr_integration_repl_copy_preserves_fragment_boundaries() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = wal3::LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = wal3::LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..10 {
         let mut batch = Vec::new();
@@ -182,22 +168,15 @@ async fn test_k8s_mcmr_integration_repl_copy_multiple_times_creates_independent_
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = wal3::LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = wal3::LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..10 {
         log.append_many(vec![Vec::from(format!("multi:i={}", i))])
@@ -231,6 +210,7 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
         log_id,
@@ -238,8 +218,6 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
 
     let log = wal3::LogWriter::open_or_initialize(
         options,
-        Arc::new(storage.clone()),
-        &prefix,
         "writer",
         fragment_factory,
         manifest_factory,
@@ -258,7 +236,10 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
             + 1u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log
+        .cursors(CursorStoreOptions::default())
+        .await
+        .expect("cursors should succeed");
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),

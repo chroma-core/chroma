@@ -41,6 +41,7 @@ async fn test_k8s_mcmr_integration_repl_70_load_and_scrub() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
@@ -48,8 +49,6 @@ async fn test_k8s_mcmr_integration_repl_70_load_and_scrub() {
 
     let log = LogWriter::open(
         options,
-        Arc::new(storage.clone()),
-        &prefix,
         "load and scrub writer",
         fragment_factory,
         manifest_factory,
@@ -75,6 +74,7 @@ async fn test_k8s_mcmr_integration_repl_70_load_and_scrub() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,

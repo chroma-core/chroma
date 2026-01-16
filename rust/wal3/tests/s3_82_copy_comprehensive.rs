@@ -42,17 +42,9 @@ async fn test_k8s_integration_copy_with_deep_snapshots() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..200 {
         let mut batch = Vec::with_capacity(10);
         for j in 0..10 {
@@ -155,17 +147,9 @@ async fn test_k8s_integration_copy_at_specific_offset() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     let mut offset_at_50 = LogPosition::default();
     for i in 0..100 {
         let mut batch = Vec::with_capacity(10);
@@ -256,17 +240,9 @@ async fn test_k8s_integration_copy_verifies_manifest_consistency() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..50 {
         let batch = vec![Vec::from(format!("consistency:i={}", i))];
         log.append_many(batch).await.unwrap();
@@ -362,23 +338,16 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log =
+        LogWriter::open_or_initialize(options, writer, fragment_factory, manifest_factory, None)
+            .await
+            .unwrap();
     let mut position = LogPosition::default();
     for i in 0..50 {
         let batch = vec![Vec::from(format!("advanced:i={}", i))];
         position = log.append_many(batch).await.unwrap() + 1u64;
     }
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),
@@ -484,17 +453,9 @@ async fn test_k8s_integration_copy_with_large_fragments() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for _i in 0..100 {
         let mut batch = Vec::with_capacity(100);
         for _j in 0..100 {

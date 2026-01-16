@@ -4,7 +4,7 @@ use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
     create_s3_factories, FragmentManagerFactory, LogPosition, LogReader, LogReaderOptions,
-    LogWriter, LogWriterOptions, ManifestManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
+    LogWriter, LogWriterOptions, ManifestManagerFactory, SnapshotOptions,
 };
 
 #[tokio::test]
@@ -14,15 +14,15 @@ async fn test_k8s_integration_80_copy() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_80_copy_source";
     let writer = "load and scrub writer";
-    let init_manifest_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: prefix.to_string(),
-        writer: "init".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
+    let (_init_fragment_factory, init_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "init".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
     init_manifest_factory
         .init_manifest(&wal3::Manifest::new_empty("init"))
         .await
@@ -43,17 +43,9 @@ async fn test_k8s_integration_80_copy() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..100 {
         let mut batch = Vec::with_capacity(100);
         for j in 0..10 {

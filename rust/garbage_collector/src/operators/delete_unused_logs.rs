@@ -100,10 +100,8 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         S3ManifestManagerFactory,
                     >::open(
                         options,
-                        storage_clone,
                         fragment_manager_factory,
                         manifest_manager_factory,
-                        &prefix,
                     )
                     .await
                     {

@@ -40,7 +40,7 @@ pub fn create_s3_factories(
     let fragment_manager_factory = S3FragmentManagerFactory {
         write: write.clone(),
         read: read.clone(),
-        storage: Arc::clone(&storage),
+        storage: Storage::clone(&*storage),
         prefix: prefix.clone(),
         mark_dirty: Arc::clone(&mark_dirty),
     };
@@ -59,7 +59,7 @@ pub fn create_s3_factories(
 pub struct S3FragmentManagerFactory {
     pub write: LogWriterOptions,
     pub read: LogReaderOptions,
-    pub storage: Arc<Storage>,
+    pub storage: Storage,
     pub prefix: String,
     pub mark_dirty: Arc<dyn MarkDirty>,
 }
@@ -70,10 +70,14 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     type Publisher = BatchManager<Self::FragmentPointer, S3FragmentUploader>;
     type Consumer = S3FragmentPuller;
 
+    async fn preferred_storage(&self) -> Storage {
+        self.storage.clone()
+    }
+
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
         let fragment_uploader = S3FragmentUploader::new(
             self.write.clone(),
-            Arc::clone(&self.storage),
+            self.storage.clone(),
             self.prefix.clone(),
             Arc::clone(&self.mark_dirty),
         );
@@ -84,7 +88,7 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
         Ok(S3FragmentPuller::new(
             self.read.clone(),
-            Arc::clone(&self.storage),
+            Arc::new(self.storage.clone()),
             self.prefix.clone(),
         ))
     }

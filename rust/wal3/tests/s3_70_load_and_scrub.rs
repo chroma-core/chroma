@@ -43,17 +43,9 @@ async fn test_k8s_integration_70_load_and_scrub() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..100 {
         let mut batch = Vec::with_capacity(100);
         for j in 0..10 {

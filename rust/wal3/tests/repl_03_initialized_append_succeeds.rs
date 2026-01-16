@@ -34,6 +34,7 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
@@ -41,8 +42,6 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
 
     let log = LogWriter::open(
         options,
-        Arc::new(storage),
-        &prefix,
         "test writer",
         fragment_factory,
         manifest_factory,

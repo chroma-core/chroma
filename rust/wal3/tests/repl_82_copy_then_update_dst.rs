@@ -41,22 +41,15 @@ async fn test_k8s_mcmr_integration_repl_82_copy_then_update_dst() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..100 {
         let mut batch = Vec::with_capacity(100);
@@ -74,6 +67,7 @@ async fn test_k8s_mcmr_integration_repl_82_copy_then_update_dst() {
     let (reader_fragment_factory, reader_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         reader_storages,
         Arc::clone(&client),
         log_id,
@@ -111,6 +105,7 @@ async fn test_k8s_mcmr_integration_repl_82_copy_then_update_dst() {
     let (copy_target_fragment_factory, copy_target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         copy_target_storages,
         Arc::clone(&client),
         target_log_id,
@@ -140,6 +135,7 @@ async fn test_k8s_mcmr_integration_repl_82_copy_then_update_dst() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         Arc::clone(&target_storages),
         Arc::clone(&client),
         target_log_id,
@@ -180,22 +176,15 @@ async fn test_k8s_mcmr_integration_repl_82_copy_then_update_dst() {
     let (fragment_factory2, manifest_factory2) = create_repl_factories(
         options2.clone(),
         default_repl_options(),
+        0,
         target_storages,
         Arc::clone(&client),
         target_log_id,
     );
 
-    let log2 = LogWriter::open(
-        options2,
-        Arc::new(storage.clone()),
-        &target_prefix,
-        writer,
-        fragment_factory2,
-        manifest_factory2,
-        None,
-    )
-    .await
-    .expect("LogWriter::open for target should succeed");
+    let log2 = LogWriter::open(options2, writer, fragment_factory2, manifest_factory2, None)
+        .await
+        .expect("LogWriter::open for target should succeed");
 
     log2.append_many(vec![Vec::from("fresh-write".to_string())])
         .await

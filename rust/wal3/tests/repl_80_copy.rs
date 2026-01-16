@@ -43,6 +43,7 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
@@ -50,8 +51,6 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
 
     let log = LogWriter::open(
         options,
-        Arc::new(storage.clone()),
-        &prefix,
         "copy source writer",
         fragment_factory,
         manifest_factory,
@@ -77,6 +76,7 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
@@ -115,6 +115,7 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         Arc::clone(&target_storages),
         Arc::clone(&client),
         target_log_id,
@@ -138,6 +139,7 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         target_storages,
         Arc::clone(&client),
         target_log_id,

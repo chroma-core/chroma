@@ -85,6 +85,7 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
     let (fragment_factory1, manifest_factory1) = create_repl_factories(
         options1.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
         log_id,
@@ -92,8 +93,6 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
     let writer1 = Arc::new(
         LogWriter::open(
             options1,
-            Arc::new(storage.clone()),
-            &prefix,
             "writer1",
             fragment_factory1,
             manifest_factory1,
@@ -107,6 +106,7 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
     let (fragment_factory2, manifest_factory2) = create_repl_factories(
         options2.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
         log_id,
@@ -114,8 +114,6 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
     let writer2 = Arc::new(
         LogWriter::open(
             options2,
-            Arc::new(storage),
-            &prefix,
             "writer2",
             fragment_factory2,
             manifest_factory2,

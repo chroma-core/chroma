@@ -40,22 +40,15 @@ async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..200 {
         let mut batch = Vec::with_capacity(10);
@@ -107,22 +100,15 @@ async fn test_k8s_mcmr_integration_repl_copy_at_specific_offset() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     let mut offset_at_50 = LogPosition::default();
     for i in 0..100 {
@@ -175,22 +161,15 @@ async fn test_k8s_mcmr_integration_repl_copy_verifies_manifest_consistency() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..50 {
         let batch = vec![Vec::from(format!("consistency:i={}", i))];
@@ -235,22 +214,16 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
         log_id,
     );
 
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open_or_initialize should succeed");
+    let log =
+        LogWriter::open_or_initialize(options, "writer", fragment_factory, manifest_factory, None)
+            .await
+            .expect("LogWriter::open_or_initialize should succeed");
 
     let mut position = LogPosition::default();
     for i in 0..50 {
@@ -262,7 +235,7 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
             + 1u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),
@@ -316,22 +289,15 @@ async fn test_k8s_mcmr_integration_repl_copy_with_large_fragments() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for _i in 0..100 {
         let mut batch = Vec::with_capacity(100);

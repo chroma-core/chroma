@@ -33,8 +33,6 @@ async fn create_test_log_writer(storage: &Storage, prefix: &str, writer_name: &s
     );
     S3LogWriter::open_or_initialize(
         options,
-        Arc::new(storage.clone()),
-        prefix,
         writer_name,
         fragment_publisher_factory,
         manifest_publisher_factory,

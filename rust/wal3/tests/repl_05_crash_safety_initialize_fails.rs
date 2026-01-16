@@ -41,6 +41,7 @@ async fn test_k8s_mcmr_integration_repl_05_crash_safety_initialize_fails() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
         log_id,
@@ -48,8 +49,6 @@ async fn test_k8s_mcmr_integration_repl_05_crash_safety_initialize_fails() {
 
     let log = LogWriter::open(
         options.clone(),
-        Arc::new(storage.clone()),
-        &prefix,
         "writer1",
         fragment_factory,
         manifest_factory,
@@ -86,6 +85,7 @@ async fn test_k8s_mcmr_integration_repl_05_crash_safety_initialize_fails() {
     let (fragment_factory2, manifest_factory2) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages2,
         Arc::clone(&client),
         log_id,
@@ -93,8 +93,6 @@ async fn test_k8s_mcmr_integration_repl_05_crash_safety_initialize_fails() {
 
     let log2 = LogWriter::open(
         options,
-        Arc::new(storage2),
-        &prefix,
         "writer2",
         fragment_factory2,
         manifest_factory2,

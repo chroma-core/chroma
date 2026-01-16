@@ -3,9 +3,9 @@ use std::sync::Arc;
 use chroma_storage::s3_client_for_test_with_new_bucket;
 
 use wal3::{
-    create_s3_factories, now_micros, upload_parquet, FragmentIdentifier, FragmentSeqNo,
-    LogPosition, LogReaderOptions, LogWriter, LogWriterOptions, Manifest, ManifestManagerFactory,
-    S3ManifestManagerFactory,
+    create_s3_factories, now_micros, upload_parquet, FragmentIdentifier, FragmentManagerFactory,
+    FragmentSeqNo, LogPosition, LogReaderOptions, LogWriter, LogWriterOptions, Manifest,
+    ManifestManagerFactory,
 };
 
 mod common;
@@ -19,16 +19,17 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
     let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
     let prefix = "test_k8s_integration_05_crash_safety_initialize_fails";
     let writer = "test writer";
-    let init_factory = S3ManifestManagerFactory {
-        write: LogWriterOptions::default(),
-        read: LogReaderOptions::default(),
-        storage: Arc::clone(&storage),
-        prefix: prefix.to_string(),
-        writer: "init".to_string(),
-        mark_dirty: Arc::new(()),
-        snapshot_cache: Arc::new(()),
-    };
-    init_factory
+    let (init_fragment_factory, init_manifest_factory) = create_s3_factories(
+        LogWriterOptions::default(),
+        LogReaderOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "init".to_string(),
+        Arc::new(()),
+        Arc::new(()),
+    );
+    let fragment_publisher = init_fragment_factory.make_publisher().await.unwrap();
+    init_manifest_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
         .unwrap();
@@ -73,7 +74,7 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
             data: vec![(position, vec![42, 43, 44, 45])],
         }),
     ];
-    assert_conditions(&storage, prefix, &conditions).await;
+    assert_conditions(&fragment_publisher, &conditions).await;
     let options = LogWriterOptions::default();
     let (fragment_factory, manifest_factory) = create_s3_factories(
         options.clone(),
@@ -84,17 +85,9 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     // The log contention will be transparently sorted out.
     let position = log.append(vec![81, 82, 83, 84]).await.unwrap();
     let fragment2 = FragmentCondition {
@@ -115,5 +108,5 @@ async fn test_k8s_integration_05_crash_safety_initialize_fails() {
         Condition::Fragment(fragment1.clone()),
         Condition::Fragment(fragment2.clone()),
     ];
-    assert_conditions(&storage, prefix, &postconditions).await;
+    assert_conditions(&fragment_publisher, &postconditions).await;
 }

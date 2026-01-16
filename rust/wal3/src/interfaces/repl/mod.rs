@@ -3,6 +3,8 @@ use std::sync::Arc;
 use google_cloud_spanner::client::Client;
 use uuid::Uuid;
 
+use chroma_storage::Storage;
+
 mod fragment_manager;
 mod manifest_manager;
 
@@ -19,6 +21,7 @@ pub use fragment_manager::{ReplicatedFragmentOptions, StorageWrapper};
 pub fn create_repl_factories(
     write_options: LogWriterOptions,
     repl_options: ReplicatedFragmentOptions,
+    preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     spanner: Arc<Client>,
     log_id: Uuid,
@@ -26,9 +29,11 @@ pub fn create_repl_factories(
     ReplicatedFragmentManagerFactory,
     ReplicatedManifestManagerFactory,
 ) {
+    assert!(preferred < storages.len());
     let fragment_manager_factory = ReplicatedFragmentManagerFactory {
         write: write_options.clone(),
         repl: repl_options.clone(),
+        preferred,
         storages,
     };
     let manifest_manager_factory = ReplicatedManifestManagerFactory { spanner, log_id };
@@ -39,6 +44,7 @@ pub fn create_repl_factories(
 pub struct ReplicatedFragmentManagerFactory {
     write: LogWriterOptions,
     repl: ReplicatedFragmentOptions,
+    preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
 }
 
@@ -46,11 +52,14 @@ impl ReplicatedFragmentManagerFactory {
     pub fn new(
         write: LogWriterOptions,
         repl: ReplicatedFragmentOptions,
+        preferred: usize,
         storages: Arc<Vec<StorageWrapper>>,
     ) -> Self {
+        assert!(preferred < storages.len());
         Self {
             write,
             repl,
+            preferred,
             storages,
         }
     }
@@ -62,10 +71,15 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
     type Publisher = BatchManager<FragmentUuid, fragment_manager::ReplicatedFragmentUploader>;
     type Consumer = fragment_manager::FragmentReader;
 
+    async fn preferred_storage(&self) -> Storage {
+        self.storages[self.preferred].storage.clone()
+    }
+
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
         let fragment_uploader = ReplicatedFragmentUploader::new(
             self.repl.clone(),
             self.write.clone(),
+            self.preferred,
             Arc::clone(&self.storages),
         );
         BatchManager::new(self.write.clone(), fragment_uploader)
@@ -74,7 +88,7 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
         let storages = Arc::clone(&self.storages);
-        Ok(FragmentReader::new(storages))
+        Ok(FragmentReader::new(self.preferred, storages))
     }
 }
 
@@ -175,7 +189,6 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_mcmr_integration_replicated_fragment_manager_factory_make_publisher() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
-        use std::time::Duration;
 
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = StorageWrapper::new("test-region".to_string(), storage, "prefix".to_string());
@@ -183,12 +196,13 @@ mod tests {
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         };
         let factory = ReplicatedFragmentManagerFactory {
             write: LogWriterOptions::default(),
             repl: options,
+            preferred: 0,
             storages,
         };
 
@@ -206,7 +220,6 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_mcmr_integration_replicated_fragment_manager_factory_make_consumer() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
-        use std::time::Duration;
 
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = StorageWrapper::new("test-region".to_string(), storage, "prefix".to_string());
@@ -214,12 +227,13 @@ mod tests {
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         };
         let factory = ReplicatedFragmentManagerFactory {
             write: LogWriterOptions::default(),
             repl: options,
+            preferred: 0,
             storages,
         };
 
@@ -233,33 +247,23 @@ mod tests {
         println!("replicated_fragment_manager_factory_make_consumer: passed");
     }
 
-    // Test make_publisher with empty storages still succeeds (failure happens at upload time).
+    // Test make_publisher with empty storages panics,
     #[tokio::test]
+    #[should_panic]
     async fn replicated_fragment_manager_factory_make_publisher_empty_storages() {
-        use std::time::Duration;
-
         let storages: Arc<Vec<StorageWrapper>> = Arc::new(vec![]);
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         };
-        let factory = ReplicatedFragmentManagerFactory {
+        let _factory = ReplicatedFragmentManagerFactory {
             write: LogWriterOptions::default(),
             repl: options,
+            preferred: 0,
             storages,
         };
-
-        let result = factory.make_publisher().await;
-        // BatchManager::new always succeeds; failure happens at upload time with no replicas.
-        assert!(
-            result.is_ok(),
-            "make_publisher should succeed even with empty storages: {:?}",
-            result.err()
-        );
-
-        println!("replicated_fragment_manager_factory_make_publisher_empty_storages: passed");
     }
 
     // ==================== ReplicatedManifestManagerFactory tests ====================
