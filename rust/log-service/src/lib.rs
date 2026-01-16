@@ -33,7 +33,7 @@ use chroma_types::chroma_proto::{
 use chroma_types::chroma_proto::{ForkLogsRequest, ForkLogsResponse};
 use chroma_types::dirty_log_path_from_hostname;
 use chroma_types::Cmek;
-use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker};
+use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker, Topology};
 use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
@@ -578,6 +578,16 @@ impl RollupPerCollection {
             reinsert_count: 0,
             initial_insertion_epoch_us,
         }
+    }
+
+    fn merge_from(&mut self, other: &Self) {
+        self.start_log_position = std::cmp::min(self.start_log_position, other.start_log_position);
+        self.limit_log_position = std::cmp::max(self.limit_log_position, other.limit_log_position);
+        self.reinsert_count = std::cmp::max(self.reinsert_count, other.reinsert_count);
+        self.initial_insertion_epoch_us = std::cmp::min(
+            self.initial_insertion_epoch_us,
+            other.initial_insertion_epoch_us,
+        );
     }
 
     fn observe_dirty_marker(
@@ -1148,6 +1158,61 @@ impl LogServer {
     async fn roll_dirty_log(&self) -> Result<(), Error> {
         // Ensure at most one request at a time.
         let _guard = self.rolling_up.lock().await;
+        let mut futures = vec![];
+        for topology in self.storages.topologies.iter() {
+            futures.push(self.roll_dirty_log_repl(topology));
+        }
+        // NOTE(rescrv):  Join all so that errors don't short circuit.
+        let results = futures::future::join_all(futures);
+        let dirty = self.roll_dirty_log_s3();
+        let (results, dirty) = tokio::join!(results, dirty);
+        let mut backpressure = vec![];
+        let mut rollups: HashMap<CollectionUuid, RollupPerCollection> = HashMap::default();
+        let mut process_dirty =
+            |bp: Vec<CollectionUuid>, ru: HashMap<CollectionUuid, RollupPerCollection>| {
+                backpressure.extend(bp);
+                for (k, v) in ru.into_iter() {
+                    match rollups.entry(k) {
+                        Entry::Occupied(mut entry) => {
+                            entry.get_mut().merge_from(&v);
+                        }
+                        Entry::Vacant(entry) => {
+                            entry.insert(v);
+                        }
+                    }
+                }
+            };
+        for dirty in results {
+            match dirty {
+                Ok((bp, ru)) => process_dirty(bp, ru),
+                Err(err) => {
+                    tracing::event!(Level::ERROR, name = "could not roll dirty log for topology", error =? err);
+                }
+            }
+        }
+        match dirty {
+            Ok((bp, ru)) => process_dirty(bp, ru),
+            Err(err) => {
+                tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
+            }
+        }
+        self.set_backpressure(&backpressure);
+        {
+            let mut need_to_compact = self.need_to_compact.lock();
+            std::mem::swap(&mut *need_to_compact, &mut rollups);
+        }
+        Ok(())
+    }
+
+    async fn roll_dirty_log_s3(
+        &self,
+    ) -> Result<
+        (
+            Vec<CollectionUuid>,
+            HashMap<CollectionUuid, RollupPerCollection>,
+        ),
+        Error,
+    > {
         let Some(dirty_log) = self.dirty_log.as_ref() else {
             tracing::error!("roll dirty log called with no dirty log configured");
             return Err(Error::CouldNotGetDirtyLogReader);
@@ -1155,12 +1220,10 @@ impl LogServer {
         let mut rollup = self.read_and_coalesce_dirty_log(&**dirty_log).await?;
         if rollup.rollups.is_empty() {
             tracing::info!("rollups is empty");
-            let backpressure = vec![];
-            self.set_backpressure(&backpressure);
             let mut need_to_compact = self.need_to_compact.lock();
             let mut rollups = HashMap::new();
             std::mem::swap(&mut *need_to_compact, &mut rollups);
-            return Ok(());
+            return Ok((Default::default(), Default::default()));
         };
         let collections = rollup.rollups.len();
         tracing::event!(
@@ -1174,11 +1237,31 @@ impl LogServer {
         self.save_dirty_log(rollup, &**dirty_log).await
     }
 
+    async fn roll_dirty_log_repl(
+        &self,
+        _topology: &Topology<TopologicalStorage>,
+    ) -> Result<
+        (
+            Vec<CollectionUuid>,
+            HashMap<CollectionUuid, RollupPerCollection>,
+        ),
+        Error,
+    > {
+        // TODO(rescrv,mcmr):  GACTC on spanner.
+        Ok((Default::default(), Default::default()))
+    }
+
     async fn save_dirty_log(
         &self,
-        mut rollup: Rollup,
+        rollup: Rollup,
         dirty_log: &dyn LogWriterTrait,
-    ) -> Result<(), Error> {
+    ) -> Result<
+        (
+            Vec<CollectionUuid>,
+            HashMap<CollectionUuid, RollupPerCollection>,
+        ),
+        Error,
+    > {
         let mut markers = vec![];
         let mut backpressure = vec![];
         let mut total_uncompacted = 0;
@@ -1222,12 +1305,7 @@ impl LogServer {
         self.metrics
             .log_total_uncompacted_records_count
             .record(total_uncompacted as f64, &[]);
-        self.set_backpressure(&backpressure);
         let after = rollup.rollups.clone();
-        {
-            let mut need_to_compact = self.need_to_compact.lock();
-            std::mem::swap(&mut *need_to_compact, &mut rollup.rollups);
-        }
         // NOTE(rescrv):  This is protection against a collection hopping from one log to another
         // permanently.  Every reinsert_threshold reinserts it will remove the cached compaction
         // cursor, which will, on the next dirty log rollup, update the lower bound on the cursor,
@@ -1237,8 +1315,8 @@ impl LogServer {
             let before = rollup.rollups;
             // Guard against division by zero if reinsert_threshold is misconfigured to 0.
             if self.config.reinsert_threshold > 0 {
-                for (collection_id, after_state) in after.into_iter() {
-                    let Some(before_state) = before.get(&collection_id) else {
+                for (collection_id, after_state) in after.iter() {
+                    let Some(before_state) = before.get(collection_id) else {
                         continue;
                     };
                     if before_state.reinsert_count / self.config.reinsert_threshold
@@ -1249,11 +1327,11 @@ impl LogServer {
                 }
             }
             for collection_id in cache_collections_to_purge {
-                let cache_key = cache_key_for_cursor(collection_id, &COMPACTION);
+                let cache_key = cache_key_for_cursor(*collection_id, &COMPACTION);
                 cache.remove(&cache_key).await;
             }
         }
-        Ok(())
+        Ok((backpressure, after))
     }
 
     /// Read the entirety of a prefix of the dirty log.
