@@ -651,53 +651,76 @@ impl<'me> MetadataSegmentWriter<'me> {
         let mut schema = schema;
         let mut schema_modified = false;
 
-        let mut full_text_writer_batch = vec![];
-        for record in materialized {
-            let record = record
-                .hydrate(record_segment_reader.as_ref())
-                .await
-                .map_err(ApplyMaterializedLogError::Materialization)?;
-            let offset_id = record.get_offset_id();
-            let old_document = record.document_ref_from_segment();
-            let new_document = record.document_ref_from_log();
+        // Build full text index batch
+        let full_text_writer_batch = {
+            let _span = tracing::info_span!(
+                "MetadataSegment apply build_full_text_batch",
+                otel.name = "MetadataSegment apply build_full_text_batch"
+            )
+            .entered();
 
-            if matches!(
-                record.get_operation(),
-                MaterializedLogOperation::UpdateExisting
-            ) && new_document.is_none()
-            {
-                continue;
-            }
+            let mut batch = vec![];
+            for record in materialized {
+                let record = record
+                    .hydrate(record_segment_reader.as_ref())
+                    .await
+                    .map_err(ApplyMaterializedLogError::Materialization)?;
+                let offset_id = record.get_offset_id();
+                let old_document = record.document_ref_from_segment();
+                let new_document = record.document_ref_from_log();
 
-            match (old_document, new_document) {
-                (None, None) => continue,
-                (Some(old_document), Some(new_document)) => {
-                    full_text_writer_batch.push(DocumentMutation::Update {
+                if matches!(
+                    record.get_operation(),
+                    MaterializedLogOperation::UpdateExisting
+                ) && new_document.is_none()
+                {
+                    continue;
+                }
+
+                match (old_document, new_document) {
+                    (None, None) => continue,
+                    (Some(old_document), Some(new_document)) => {
+                        batch.push(DocumentMutation::Update {
+                            offset_id,
+                            old_document,
+                            new_document,
+                        })
+                    }
+                    (None, Some(new_document)) => batch.push(DocumentMutation::Create {
+                        offset_id,
+                        new_document,
+                    }),
+                    (Some(old_document), None) => batch.push(DocumentMutation::Delete {
                         offset_id,
                         old_document,
-                        new_document,
-                    })
-                }
-                (None, Some(new_document)) => {
-                    full_text_writer_batch.push(DocumentMutation::Create {
-                        offset_id,
-                        new_document,
-                    })
-                }
-                (Some(old_document), None) => {
-                    full_text_writer_batch.push(DocumentMutation::Delete {
-                        offset_id,
-                        old_document,
-                    })
+                    }),
                 }
             }
+            batch
+        };
+
+        // Apply full text index batch
+        {
+            let _span = tracing::info_span!(
+                "MetadataSegment apply full_text_index handle_batch",
+                otel.name = "MetadataSegment apply full_text_index handle_batch",
+                batch_size = full_text_writer_batch.len()
+            )
+            .entered();
+
+            self.full_text_index_writer
+                .as_ref()
+                .unwrap()
+                .handle_batch(full_text_writer_batch)
+                .map_err(ApplyMaterializedLogError::FullTextIndex)?;
         }
 
-        self.full_text_index_writer
-            .as_ref()
-            .unwrap()
-            .handle_batch(full_text_writer_batch)
-            .map_err(ApplyMaterializedLogError::FullTextIndex)?;
+        // Apply metadata index updates
+        let _metadata_span = tracing::info_span!(
+            "MetadataSegment apply metadata_indexes",
+            otel.name = "MetadataSegment apply metadata_indexes"
+        )
+        .entered();
 
         for record in materialized {
             count += 1;
