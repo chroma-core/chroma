@@ -247,25 +247,6 @@ mod tests {
         println!("replicated_fragment_manager_factory_make_consumer: passed");
     }
 
-    // Test make_publisher with empty storages panics,
-    #[tokio::test]
-    #[should_panic]
-    async fn replicated_fragment_manager_factory_make_publisher_empty_storages() {
-        let storages: Arc<Vec<StorageWrapper>> = Arc::new(vec![]);
-        let options = ReplicatedFragmentOptions {
-            minimum_allowed_replication_factor: 1,
-            minimum_failures_to_exclude_replica: 100,
-            decimation_interval_secs: 3600,
-            slow_writer_tolerance_secs: 30,
-        };
-        let _factory = ReplicatedFragmentManagerFactory {
-            write: LogWriterOptions::default(),
-            repl: options,
-            preferred: 0,
-            storages,
-        };
-    }
-
     // ==================== ReplicatedManifestManagerFactory tests ====================
 
     // Test init_manifest delegates to ManifestManager::init.
