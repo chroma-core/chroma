@@ -2157,4 +2157,157 @@ mod tests {
             result.unwrap_err()
         );
     }
+
+    #[tokio::test]
+    async fn provider_region_try_cast_async_success() {
+        let region = ProviderRegion::new(
+            region_name("aws-us-east-1"),
+            "aws",
+            "us-east-1",
+            "42".to_string(),
+        );
+        let result: Result<ProviderRegion<i32>, std::num::ParseIntError> =
+            region.try_cast_async(|s| async move { s.parse() }).await;
+        let casted = result.expect("parsing should succeed");
+        assert_eq!(casted.name(), &region_name("aws-us-east-1"));
+        assert_eq!(casted.provider(), "aws");
+        assert_eq!(casted.region(), "us-east-1");
+        assert_eq!(casted.config(), &42);
+    }
+
+    #[tokio::test]
+    async fn provider_region_try_cast_async_failure() {
+        let region = ProviderRegion::new(
+            region_name("aws-us-east-1"),
+            "aws",
+            "us-east-1",
+            "not-a-number".to_string(),
+        );
+        let result: Result<ProviderRegion<i32>, std::num::ParseIntError> =
+            region.try_cast_async(|s| async move { s.parse() }).await;
+        assert!(result.is_err());
+        println!(
+            "provider_region_try_cast_async_failure error: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn topology_try_cast_async_success() {
+        let t = Topology::new(
+            topology_name("global"),
+            vec![region_name("aws-us-east-1")],
+            "123".to_string(),
+        );
+        let result: Result<Topology<i32>, std::num::ParseIntError> =
+            t.try_cast_async(|s| async move { s.parse() }).await;
+        let casted = result.expect("parsing should succeed");
+        assert_eq!(casted.name(), &topology_name("global"));
+        assert_eq!(casted.regions(), &[region_name("aws-us-east-1")]);
+        assert_eq!(casted.config(), &123);
+    }
+
+    #[tokio::test]
+    async fn topology_try_cast_async_failure() {
+        let t = Topology::new(
+            topology_name("global"),
+            vec![region_name("aws-us-east-1")],
+            "invalid".to_string(),
+        );
+        let result: Result<Topology<i32>, std::num::ParseIntError> =
+            t.try_cast_async(|s| async move { s.parse() }).await;
+        assert!(result.is_err());
+        println!(
+            "topology_try_cast_async_failure error: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_try_cast_async_success() {
+        let config = MultiCloudMultiRegionConfiguration::<String, String>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "42".to_string(),
+            )],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![region_name("aws-us-east-1")],
+                "100".to_string(),
+            )],
+        )
+        .expect("valid configuration");
+
+        let result: Result<MultiCloudMultiRegionConfiguration<i32, i32>, std::num::ParseIntError> =
+            config
+                .try_cast_async(|r| async move { r.parse() }, |t| async move { t.parse() })
+                .await;
+
+        let casted = result.expect("parsing should succeed");
+        assert_eq!(casted.preferred_region_config(), Some(&42));
+        assert_eq!(casted.topologies()[0].config(), &100);
+    }
+
+    #[tokio::test]
+    async fn configuration_try_cast_async_region_failure() {
+        let config = MultiCloudMultiRegionConfiguration::<String, String>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "not-a-number".to_string(),
+            )],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![region_name("aws-us-east-1")],
+                "100".to_string(),
+            )],
+        )
+        .expect("valid configuration");
+
+        let result: Result<MultiCloudMultiRegionConfiguration<i32, i32>, std::num::ParseIntError> =
+            config
+                .try_cast_async(|r| async move { r.parse() }, |t| async move { t.parse() })
+                .await;
+
+        assert!(result.is_err());
+        println!(
+            "configuration_try_cast_async_region_failure error: {:?}",
+            result.unwrap_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn configuration_try_cast_async_topology_failure() {
+        let config = MultiCloudMultiRegionConfiguration::<String, String>::new(
+            region_name("aws-us-east-1"),
+            vec![ProviderRegion::new(
+                region_name("aws-us-east-1"),
+                "aws",
+                "us-east-1",
+                "42".to_string(),
+            )],
+            vec![Topology::new(
+                topology_name("global"),
+                vec![region_name("aws-us-east-1")],
+                "not-a-number".to_string(),
+            )],
+        )
+        .expect("valid configuration");
+
+        let result: Result<MultiCloudMultiRegionConfiguration<i32, i32>, std::num::ParseIntError> =
+            config
+                .try_cast_async(|r| async move { r.parse() }, |t| async move { t.parse() })
+                .await;
+
+        assert!(result.is_err());
+        println!(
+            "configuration_try_cast_async_topology_failure error: {:?}",
+            result.unwrap_err()
+        );
+    }
 }
