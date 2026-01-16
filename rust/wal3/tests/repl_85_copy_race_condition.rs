@@ -65,7 +65,12 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let storages = Arc::new(vec![wrapper]);
 
     // Initialize the manifest.
-    let init_manifest_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_manifest_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
     init_manifest_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -77,8 +82,10 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let (reader_fragment_factory, reader_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         reader_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory
@@ -108,8 +115,6 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let barrier_start = Arc::new(Barrier::new(2));
     let barrier_start_clone = Arc::clone(&barrier_start);
 
-    let storage_clone = storage.clone();
-    let prefix_clone = prefix.clone();
     let storages_clone = Arc::clone(&storages);
     let client_clone = Arc::clone(&client);
 
@@ -126,21 +131,15 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         let (fragment_factory, manifest_factory) = create_repl_factories(
             options.clone(),
             default_repl_options(),
+            0,
             storages_clone,
             client_clone,
+            vec!["dummy".to_string()],
             log_id,
         );
-        let log = LogWriter::open(
-            options,
-            Arc::new(storage_clone),
-            &prefix_clone,
-            writer,
-            fragment_factory,
-            manifest_factory,
-            None,
-        )
-        .await
-        .expect("LogWriter::open should succeed");
+        let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+            .await
+            .expect("LogWriter::open should succeed");
 
         barrier_start_clone.wait().await;
 
@@ -167,8 +166,10 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let (copy_target_fragment_factory, copy_target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         copy_target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_publisher = copy_target_fragment_factory
@@ -197,8 +198,10 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_consumer = target_fragment_factory

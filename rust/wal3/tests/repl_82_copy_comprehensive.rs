@@ -24,7 +24,12 @@ async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -40,22 +45,16 @@ async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..200 {
         let mut batch = Vec::with_capacity(10);
@@ -91,7 +90,12 @@ async fn test_k8s_mcmr_integration_repl_copy_at_specific_offset() {
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -107,22 +111,16 @@ async fn test_k8s_mcmr_integration_repl_copy_at_specific_offset() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     let mut offset_at_50 = LogPosition::default();
     for i in 0..100 {
@@ -165,7 +163,12 @@ async fn test_k8s_mcmr_integration_repl_copy_verifies_manifest_consistency() {
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -175,22 +178,16 @@ async fn test_k8s_mcmr_integration_repl_copy_verifies_manifest_consistency() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..50 {
         let batch = vec![Vec::from(format!("consistency:i={}", i))];
@@ -235,22 +232,17 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open_or_initialize should succeed");
+    let log =
+        LogWriter::open_or_initialize(options, "writer", fragment_factory, manifest_factory, None)
+            .await
+            .expect("LogWriter::open_or_initialize should succeed");
 
     let mut position = LogPosition::default();
     for i in 0..50 {
@@ -262,7 +254,7 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
             + 1u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),
@@ -278,7 +270,12 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
     // Note: Garbage collection is not fully implemented for repl manifests.
     // We skip the garbage_collect call here.
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
     let consumer = init_factory.make_consumer().await.unwrap();
     let (manifest, _) = consumer.manifest_load().await.unwrap().unwrap();
 
@@ -300,7 +297,12 @@ async fn test_k8s_mcmr_integration_repl_copy_with_large_fragments() {
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -316,22 +318,16 @@ async fn test_k8s_mcmr_integration_repl_copy_with_large_fragments() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for _i in 0..100 {
         let mut batch = Vec::with_capacity(100);

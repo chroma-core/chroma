@@ -923,6 +923,10 @@ impl S3Storage {
         }
         Ok(paths)
     }
+
+    pub fn bucket(&self) -> Option<&str> {
+        Some(&self.bucket)
+    }
 }
 
 #[async_trait]

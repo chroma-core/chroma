@@ -134,17 +134,18 @@ fn post_process_fragments(
 /// LogReader is a reader for the log.
 pub struct LogReader<
     P: FragmentPointer = (FragmentSeqNo, LogPosition),
-    FC: FragmentConsumer<FragmentPointer = P> = s3::S3FragmentPuller,
+    FC: FragmentConsumer = s3::S3FragmentPuller,
     MC: ManifestConsumer<P> = s3::ManifestReader,
 > {
     _options: LogReaderOptions,
     fragment_consumer: FC,
     manifest_consumer: MC,
     cache: Option<Arc<dyn SnapshotCache>>,
+    _phantom_p: std::marker::PhantomData<P>,
 }
 
-impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
-    std::fmt::Debug for LogReader<P, FC, MC>
+impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> std::fmt::Debug
+    for LogReader<P, FC, MC>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LogReader")
@@ -153,9 +154,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
     }
 }
 
-impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
-    LogReader<P, FC, MC>
-{
+impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReader<P, FC, MC> {
     pub fn new(options: LogReaderOptions, fragment_consumer: FC, manifest_consumer: MC) -> Self {
         let cache = None;
         Self {
@@ -163,6 +162,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
             fragment_consumer,
             manifest_consumer,
             cache,
+            _phantom_p: std::marker::PhantomData,
         }
     }
 
@@ -177,6 +177,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: Manifest
             fragment_consumer,
             manifest_consumer,
             cache,
+            _phantom_p: std::marker::PhantomData,
         })
     }
 
@@ -3589,7 +3590,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_k8s_integration_manifest_and_witness_returns_none_when_no_manifest() {
-        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let storage = chroma_storage::s3::s3_client_for_test_with_new_bucket().await;
         let prefix = "nonexistent-prefix".to_string();
         let options = LogReaderOptions::default();
         let writer_options = crate::LogWriterOptions::default();
@@ -3598,14 +3599,14 @@ mod tests {
         let fragment_factory = crate::S3FragmentManagerFactory {
             write: writer_options.clone(),
             read: LogReaderOptions::default(),
-            storage: Arc::clone(&storage),
+            storage: storage.clone(),
             prefix: prefix.clone(),
             mark_dirty: Arc::new(()),
         };
         let manifest_factory = crate::S3ManifestManagerFactory {
             write: writer_options.clone(),
             read: LogReaderOptions::default(),
-            storage: Arc::clone(&storage),
+            storage: Arc::new(storage),
             prefix: prefix.clone(),
             writer: "test-writer".to_string(),
             mark_dirty: Arc::new(()),

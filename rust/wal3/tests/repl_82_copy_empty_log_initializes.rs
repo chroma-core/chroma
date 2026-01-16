@@ -27,22 +27,17 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open_or_initialize should succeed");
+    let log =
+        LogWriter::open_or_initialize(options, "writer", fragment_factory, manifest_factory, None)
+            .await
+            .expect("LogWriter::open_or_initialize should succeed");
 
     let mut position: LogPosition = LogPosition::default();
     for i in 0..100 {
@@ -57,7 +52,7 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
             + 10u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("writer").unwrap(),
@@ -82,8 +77,10 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (reader_fragment_factory, reader_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         reader_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory
@@ -122,8 +119,10 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (copy_target_fragment_factory, copy_target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         copy_target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let copy_target_fragment_publisher = copy_target_fragment_factory
@@ -151,8 +150,10 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_consumer = target_fragment_factory

@@ -416,7 +416,7 @@ pub struct Topology<T: Clone + Debug> {
     /// The names of provider regions included in this topology.
     regions: Vec<RegionName>,
     /// The configuration of this topology.
-    config: T,
+    pub config: T,
 }
 
 impl<T: Clone + Debug> Topology<T> {
@@ -548,6 +548,32 @@ pub struct MultiCloudMultiRegionConfiguration<R: Clone + Debug, T: Clone + Debug
     pub regions: Vec<ProviderRegion<R>>,
     /// The set of topologies defined over the provider regions.
     pub topologies: Vec<Topology<T>>,
+}
+
+impl<R: Clone + Debug, T: Clone + Debug> MultiCloudMultiRegionConfiguration<R, T> {
+    /// Returns the preferred region, if found.
+    pub fn preferred_region(&self) -> Option<&ProviderRegion<R>> {
+        self.regions.iter().find(|pr| pr.name() == &self.preferred)
+    }
+
+    /// Returns the named region or None if nothing.
+    pub fn lookup_region(&self, name: &RegionName) -> Option<ProviderRegion<R>> {
+        self.regions.iter().find(|pr| pr.name() == name).cloned()
+    }
+
+    /// Returns the regions for a configured topology or None if it doesn't exist or references a
+    /// non-existent region.
+    pub fn lookup_topology(
+        &self,
+        name: &TopologyName,
+    ) -> Option<(Vec<ProviderRegion<R>>, Topology<T>)> {
+        let t = self.topologies.iter().find(|t| &t.name == name).cloned()?;
+        let mut regions = vec![];
+        for r in t.regions.iter() {
+            regions.push(self.lookup_region(r)?)
+        }
+        Some((regions, t))
+    }
 }
 
 /// Raw representation for serde deserialization before validation.

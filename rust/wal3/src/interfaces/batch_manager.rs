@@ -5,13 +5,16 @@ use setsum::Setsum;
 use tracing::Span;
 
 use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, PutMode, PutOptions, Storage, StorageError,
+    admissioncontrolleds3::StorageRequestPriority, ETag, PutMode, PutOptions, Storage, StorageError,
 };
 use chroma_types::Cmek;
 
 use crate::backoff::ExponentialBackoff;
 use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher};
-use crate::{Error, FragmentIdentifier, LogPosition, LogWriterOptions, ThrottleOptions};
+use crate::{
+    CursorStore, CursorStoreOptions, Error, FragmentIdentifier, LogPosition, LogWriterOptions,
+    ThrottleOptions,
+};
 
 use super::FragmentUploader;
 
@@ -275,6 +278,22 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             .await
     }
 
+    async fn read_json_file(&self, path: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), Error> {
+        Ok(
+            crate::interfaces::read_raw_bytes(path, self.fragment_uploader.storages().await)
+                .await
+                .map_err(Arc::new)?,
+        )
+    }
+
+    async fn preferred_storage(&self) -> Storage {
+        self.fragment_uploader.preferred_storage().await
+    }
+
+    async fn storages(&self) -> Vec<crate::StorageWrapper> {
+        self.fragment_uploader.storages().await.to_vec()
+    }
+
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
     fn shutdown_prepare(&self) {
         let enqueued = {
@@ -290,6 +309,71 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
     /// Finish shutting down.
     fn shutdown_finish(&self) {
         self.write_finished.notify_one();
+    }
+
+    async fn write_garbage(
+        &self,
+        options: &crate::ThrottleOptions,
+        existing: Option<&ETag>,
+        garbage: &crate::Garbage,
+    ) -> Result<Option<ETag>, Error> {
+        let exp_backoff = crate::backoff::ExponentialBackoff::new(
+            options.throughput as f64,
+            options.headroom as f64,
+        );
+        let mut retry_count = 0;
+        let storages = self.fragment_uploader.storages().await;
+        let preferred = &storages[0];
+        loop {
+            let path = format!("{}/gc/GARBAGE", preferred.prefix);
+            let payload = serde_json::to_string(garbage)
+                .map_err(|e| {
+                    Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
+                })?
+                .into_bytes();
+            let put_options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+            let put_options = if let Some(e_tag) = existing {
+                put_options.with_mode(PutMode::IfMatch(e_tag.clone()))
+            } else {
+                put_options.with_mode(PutMode::IfNotExist)
+            };
+            match preferred
+                .storage
+                .put_bytes(&path, payload, put_options)
+                .await
+            {
+                Ok(e_tag) => return Ok(e_tag),
+                Err(StorageError::Precondition { path: _, source: _ }) => {
+                    return Err(Error::LogContentionFailure);
+                }
+                Err(e) => {
+                    tracing::error!("error uploading garbage: {e:?}");
+                    let backoff = exp_backoff.next();
+                    if backoff > std::time::Duration::from_secs(60) || retry_count >= 3 {
+                        return Err(Arc::new(e).into());
+                    }
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+            retry_count += 1;
+        }
+    }
+
+    async fn reset_garbage(
+        &self,
+        options: &crate::ThrottleOptions,
+        e_tag: &ETag,
+    ) -> Result<(), Error> {
+        let empty = crate::Garbage::empty();
+        self.write_garbage(options, Some(e_tag), &empty).await?;
+        Ok(())
+    }
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
+        let storages = self.fragment_uploader.storages().await;
+        let storage = Arc::new(storages[0].storage.clone());
+        let prefix = storages[0].prefix.clone();
+        CursorStore::new(options, storage, prefix, "batch_manager".to_string())
     }
 }
 
@@ -384,7 +468,7 @@ mod tests {
         };
         let fragment_uploader = S3FragmentUploader::new(
             options.clone(),
-            Arc::clone(&storage),
+            Storage::clone(&*storage),
             prefix.clone(),
             Arc::new(()),
         );

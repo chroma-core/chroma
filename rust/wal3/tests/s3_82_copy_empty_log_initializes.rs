@@ -25,17 +25,10 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log =
+        LogWriter::open_or_initialize(options, writer, fragment_factory, manifest_factory, None)
+            .await
+            .unwrap();
     let mut position: LogPosition = LogPosition::default();
     for i in 0..100 {
         let mut batch = Vec::with_capacity(100);
@@ -44,7 +37,7 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
         }
         position = log.append_many(batch).await.unwrap() + 10u64;
     }
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("writer").unwrap(),

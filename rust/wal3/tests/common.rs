@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use chroma_config::spanner::SpannerEmulatorConfig;
@@ -11,8 +10,8 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 extern crate wal3;
 
 use wal3::{
-    FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, ManifestReader,
-    ReplicatedFragmentOptions, Snapshot, SnapshotPointer, ThrottleOptions,
+    FragmentIdentifier, FragmentPointer, FragmentPublisher, FragmentSeqNo, Garbage, LogPosition,
+    ManifestReader, ReplicatedFragmentOptions, Snapshot, SnapshotPointer, ThrottleOptions,
 };
 
 //////////////////////////////////////////// Repl Utilities /////////////////////////////////////////
@@ -59,8 +58,8 @@ pub fn default_repl_options() -> ReplicatedFragmentOptions {
     ReplicatedFragmentOptions {
         minimum_allowed_replication_factor: 1,
         minimum_failures_to_exclude_replica: 100,
-        decimation_interval: Duration::from_secs(3600),
-        slow_writer_tolerance: Duration::from_secs(30),
+        decimation_interval_secs: 3600,
+        slow_writer_tolerance_secs: 30,
     }
 }
 
@@ -245,9 +244,12 @@ pub struct GarbageCondition {
 
 impl GarbageCondition {
     #[allow(dead_code)]
-    pub async fn assert(&self, storage: &Storage, prefix: &str) {
+    pub async fn assert<FP: FragmentPointer>(
+        &self,
+        fragment_publisher: &dyn FragmentPublisher<FragmentPointer = FP>,
+    ) {
         println!("asserting garbage condition {self:#?}");
-        let garbage = Garbage::load(&ThrottleOptions::default(), storage, prefix)
+        let garbage = Garbage::load(&ThrottleOptions::default(), fragment_publisher)
             .await
             .unwrap();
         let (garbage, _) = garbage.expect("should have a garbage file");
@@ -307,7 +309,13 @@ impl GarbageCondition {
 ///////////////////////////////////////// assert_conditions ////////////////////////////////////////
 
 #[allow(dead_code)]
-pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: &[Condition]) {
+pub async fn assert_conditions<FP: FragmentPointer>(
+    fragment_publisher: &dyn FragmentPublisher<FragmentPointer = FP>,
+    postconditions: &[Condition],
+) {
+    let storages = fragment_publisher.storages().await;
+    let storage = &storages[0].storage;
+    let prefix = &storages[0].prefix;
     for postcondition in postconditions {
         match postcondition {
             Condition::PathNotExist(path) => {
@@ -333,7 +341,7 @@ pub async fn assert_conditions(storage: &Storage, prefix: &str, postconditions: 
                 postcondition.assert(storage, prefix).await;
             }
             Condition::Garbage(postcondition) => {
-                postcondition.assert(storage, prefix).await;
+                postcondition.assert(fragment_publisher).await;
             }
         }
     }

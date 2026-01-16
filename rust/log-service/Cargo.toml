@@ -27,6 +27,8 @@ tokio = { workspace = true }
 serde_json = { workspace = true }
 serde_yml = { workspace = true }
 futures = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-gax = { workspace = true }
 
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
@@ -39,5 +41,11 @@ wal3 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-proptest = { workspace = true }
+proptest = { workspace = true, features = ["timeout"] }
+rand = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-googleapis = { workspace = true }
+google-cloud-gax = { workspace = true }
+
 chroma-types = { workspace = true, features = ["testing"] }
+spanner-migrations = { workspace = true }

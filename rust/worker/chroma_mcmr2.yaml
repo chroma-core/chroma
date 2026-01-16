@@ -238,15 +238,22 @@ log_service:
                 max_concurrent_requests: 30
                 bandwidth_allocation: [0.7, 0.3]
     topologies:
-    - name: tilt-topo-2
-      regions:
-      - tilt-config-2
-      config: {}
     - name: tilt-spanning
       regions:
       - tilt-config-1
       - tilt-config-2
-      config: {}
+      config:
+        repl:
+          minimum_allowed_replication_factor: 1
+          minimum_failures_to_exclude_replica: 100
+        spanner:
+          emulator:
+            host: "spanner.chroma.svc.cluster.local"
+            grpc_port: 9010
+            rest_port: 9020
+            project: "local-project"
+            instance: "test-instance"
+            database: "local-logdb-database"
 garbage_collector:
   service_name: "garbage-collector"
   otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"

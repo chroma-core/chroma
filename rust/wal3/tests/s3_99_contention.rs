@@ -97,8 +97,6 @@ async fn test_k8s_integration_99_ping_pong_contention() {
     let writer1 = Arc::new(
         LogWriter::open(
             options1,
-            Arc::clone(&storage),
-            prefix,
             "writer1",
             fragment_factory1,
             manifest_factory1,
@@ -121,8 +119,6 @@ async fn test_k8s_integration_99_ping_pong_contention() {
     let writer2 = Arc::new(
         LogWriter::open(
             options2,
-            Arc::clone(&storage),
-            prefix,
             "writer2",
             fragment_factory2,
             manifest_factory2,

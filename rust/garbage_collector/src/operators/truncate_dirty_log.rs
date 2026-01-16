@@ -73,13 +73,7 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
                 (FragmentSeqNo, LogPosition),
                 S3FragmentManagerFactory,
                 S3ManifestManagerFactory,
-            >::open(
-                options,
-                storage_arc.clone(),
-                fragment_manager_factory,
-                manifest_manager_factory,
-                &dirty_log_prefix,
-            )
+            >::open(options, fragment_manager_factory, manifest_manager_factory)
             .await
             {
                 Ok(log_writer) => dirty_log_writers.push((log_writer, replica_id)),

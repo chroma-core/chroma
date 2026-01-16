@@ -550,7 +550,6 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
             match self
                 .publish_fragment(
                     &(fragment_seq_no, log_position),
-                    &[],
                     &fragment.path,
                     fragment
                         .limit
@@ -608,7 +607,6 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
     async fn publish_fragment(
         &self,
         (seq_no, log_position): &(FragmentSeqNo, LogPosition),
-        _: &[&str],
         path: &str,
         num_records: u64,
         num_bytes: u64,
@@ -797,6 +795,10 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
                 },
             }
         }
+    }
+
+    async fn destroy(&self) -> Result<(), Error> {
+        crate::destroy::destroy_s3_manifest(&self.storage, &self.prefix).await
     }
 }
 

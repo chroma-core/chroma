@@ -82,17 +82,9 @@ async fn test_k8s_integration_84_bootstrap_empty() {
         Arc::new(()),
         Arc::new(()),
     );
-    let writer = LogWriter::open(
-        options2,
-        Arc::clone(&storage),
-        PREFIX,
-        WRITER,
-        fragment_factory2,
-        manifest_factory2,
-        None,
-    )
-    .await
-    .unwrap();
+    let writer = LogWriter::open(options2, WRITER, fragment_factory2, manifest_factory2, None)
+        .await
+        .unwrap();
     writer
         .manifest_and_witness()
         .await

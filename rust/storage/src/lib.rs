@@ -453,6 +453,15 @@ impl Storage {
             Storage::AdmissionControlledS3(acs3) => acs3.list_prefix(prefix, options).await,
         }
     }
+
+    pub fn bucket(&self) -> Option<&str> {
+        match self {
+            Storage::Local(_) => None,
+            Storage::S3(s3) => s3.bucket(),
+            Storage::Object(obj) => obj.bucket(),
+            Storage::AdmissionControlledS3(acs3) => acs3.storage.bucket(),
+        }
+    }
 }
 
 #[async_trait]

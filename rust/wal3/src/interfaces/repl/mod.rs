@@ -3,6 +3,8 @@ use std::sync::Arc;
 use google_cloud_spanner::client::Client;
 use uuid::Uuid;
 
+use chroma_storage::Storage;
+
 mod fragment_manager;
 mod manifest_manager;
 
@@ -10,28 +12,39 @@ use crate::{Error, FragmentUuid, LogWriterOptions, Manifest};
 
 use super::batch_manager::BatchManager;
 use super::{FragmentManagerFactory, ManifestManagerFactory};
-use manifest_manager::ManifestManager;
 
 pub use fragment_manager::{FragmentReader, ReplicatedFragmentUploader};
 pub use fragment_manager::{ReplicatedFragmentOptions, StorageWrapper};
+pub use manifest_manager::ManifestManager;
 
 /// Creates replicated fragment and manifest manager factories.
 pub fn create_repl_factories(
     write_options: LogWriterOptions,
     repl_options: ReplicatedFragmentOptions,
+    preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     spanner: Arc<Client>,
+    regions: Vec<String>,
     log_id: Uuid,
 ) -> (
     ReplicatedFragmentManagerFactory,
     ReplicatedManifestManagerFactory,
 ) {
+    assert!(preferred < storages.len());
+    assert_eq!(regions.len(), storages.len());
     let fragment_manager_factory = ReplicatedFragmentManagerFactory {
         write: write_options.clone(),
         repl: repl_options.clone(),
+        preferred,
         storages,
     };
-    let manifest_manager_factory = ReplicatedManifestManagerFactory { spanner, log_id };
+    let local_region = regions[preferred].clone();
+    let manifest_manager_factory = ReplicatedManifestManagerFactory {
+        spanner,
+        regions,
+        local_region,
+        log_id,
+    };
     (fragment_manager_factory, manifest_manager_factory)
 }
 
@@ -39,6 +52,7 @@ pub fn create_repl_factories(
 pub struct ReplicatedFragmentManagerFactory {
     write: LogWriterOptions,
     repl: ReplicatedFragmentOptions,
+    preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
 }
 
@@ -46,11 +60,14 @@ impl ReplicatedFragmentManagerFactory {
     pub fn new(
         write: LogWriterOptions,
         repl: ReplicatedFragmentOptions,
+        preferred: usize,
         storages: Arc<Vec<StorageWrapper>>,
     ) -> Self {
+        assert!(preferred < storages.len());
         Self {
             write,
             repl,
+            preferred,
             storages,
         }
     }
@@ -62,10 +79,15 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
     type Publisher = BatchManager<FragmentUuid, fragment_manager::ReplicatedFragmentUploader>;
     type Consumer = fragment_manager::FragmentReader;
 
+    async fn preferred_storage(&self) -> Storage {
+        self.storages[self.preferred].storage.clone()
+    }
+
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
         let fragment_uploader = ReplicatedFragmentUploader::new(
             self.repl.clone(),
             self.write.clone(),
+            self.preferred,
             Arc::clone(&self.storages),
         );
         BatchManager::new(self.write.clone(), fragment_uploader)
@@ -74,20 +96,32 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
         let storages = Arc::clone(&self.storages);
-        Ok(FragmentReader::new(storages))
+        Ok(FragmentReader::new(self.preferred, storages))
     }
 }
 
 #[derive(Clone)]
 pub struct ReplicatedManifestManagerFactory {
     spanner: Arc<Client>,
+    regions: Vec<String>,
+    local_region: String,
     log_id: Uuid,
 }
 
 impl ReplicatedManifestManagerFactory {
     /// Creates a new ReplicatedManifestManagerFactory.
-    pub fn new(spanner: Arc<Client>, log_id: Uuid) -> Self {
-        Self { spanner, log_id }
+    pub fn new(
+        spanner: Arc<Client>,
+        regions: Vec<String>,
+        local_region: String,
+        log_id: Uuid,
+    ) -> Self {
+        Self {
+            spanner,
+            regions,
+            local_region,
+            log_id,
+        }
     }
 }
 
@@ -98,15 +132,25 @@ impl ManifestManagerFactory for ReplicatedManifestManagerFactory {
     type Consumer = ManifestManager;
 
     async fn init_manifest(&self, manifest: &Manifest) -> Result<(), Error> {
-        ManifestManager::init(&self.spanner, self.log_id, manifest).await
+        ManifestManager::init(self.regions.clone(), &self.spanner, self.log_id, manifest).await
     }
 
     async fn open_publisher(&self) -> Result<Self::Publisher, Error> {
-        Ok(ManifestManager::new(Arc::clone(&self.spanner), self.log_id))
+        Ok(ManifestManager::new(
+            Arc::clone(&self.spanner),
+            self.regions.clone(),
+            self.local_region.clone(),
+            self.log_id,
+        ))
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        Ok(ManifestManager::new(Arc::clone(&self.spanner), self.log_id))
+        Ok(ManifestManager::new(
+            Arc::clone(&self.spanner),
+            self.regions.clone(),
+            self.local_region.clone(),
+            self.log_id,
+        ))
     }
 }
 
@@ -175,7 +219,6 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_mcmr_integration_replicated_fragment_manager_factory_make_publisher() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
-        use std::time::Duration;
 
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = StorageWrapper::new("test-region".to_string(), storage, "prefix".to_string());
@@ -183,12 +226,13 @@ mod tests {
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         };
         let factory = ReplicatedFragmentManagerFactory {
             write: LogWriterOptions::default(),
             repl: options,
+            preferred: 0,
             storages,
         };
 
@@ -206,7 +250,6 @@ mod tests {
     #[tokio::test]
     async fn test_k8s_mcmr_integration_replicated_fragment_manager_factory_make_consumer() {
         use chroma_storage::s3_client_for_test_with_new_bucket;
-        use std::time::Duration;
 
         let storage = s3_client_for_test_with_new_bucket().await;
         let wrapper = StorageWrapper::new("test-region".to_string(), storage, "prefix".to_string());
@@ -214,12 +257,13 @@ mod tests {
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         };
         let factory = ReplicatedFragmentManagerFactory {
             write: LogWriterOptions::default(),
             repl: options,
+            preferred: 0,
             storages,
         };
 
@@ -233,35 +277,6 @@ mod tests {
         println!("replicated_fragment_manager_factory_make_consumer: passed");
     }
 
-    // Test make_publisher with empty storages still succeeds (failure happens at upload time).
-    #[tokio::test]
-    async fn replicated_fragment_manager_factory_make_publisher_empty_storages() {
-        use std::time::Duration;
-
-        let storages: Arc<Vec<StorageWrapper>> = Arc::new(vec![]);
-        let options = ReplicatedFragmentOptions {
-            minimum_allowed_replication_factor: 1,
-            minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
-        };
-        let factory = ReplicatedFragmentManagerFactory {
-            write: LogWriterOptions::default(),
-            repl: options,
-            storages,
-        };
-
-        let result = factory.make_publisher().await;
-        // BatchManager::new always succeeds; failure happens at upload time with no replicas.
-        assert!(
-            result.is_ok(),
-            "make_publisher should succeed even with empty storages: {:?}",
-            result.err()
-        );
-
-        println!("replicated_fragment_manager_factory_make_publisher_empty_storages: passed");
-    }
-
     // ==================== ReplicatedManifestManagerFactory tests ====================
 
     // Test init_manifest delegates to ManifestManager::init.
@@ -272,7 +287,12 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            "dummy".to_string(),
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         let result = factory.init_manifest(&manifest).await;
@@ -294,7 +314,12 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            "dummy".to_string(),
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         let result1 = factory.init_manifest(&manifest).await;
@@ -320,7 +345,12 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            "dummy".to_string(),
+            log_id,
+        );
 
         let result = factory.open_publisher().await;
         assert!(
@@ -340,7 +370,12 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            "dummy".to_string(),
+            log_id,
+        );
 
         let result = factory.make_consumer().await;
         assert!(
@@ -364,7 +399,12 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            "dummy".to_string(),
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         factory.init_manifest(&manifest).await.expect("init failed");
@@ -375,14 +415,7 @@ mod tests {
             .expect("open_publisher failed");
         let pointer = FragmentUuid::generate();
         let result = publisher
-            .publish_fragment(
-                &pointer,
-                &["dummy"],
-                "test/path.parquet",
-                10,
-                100,
-                Setsum::default(),
-            )
+            .publish_fragment(&pointer, "test/path.parquet", 10, 100, Setsum::default())
             .await;
 
         assert!(
@@ -407,7 +440,12 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            "dummy".to_string(),
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         factory.init_manifest(&manifest).await.expect("init failed");

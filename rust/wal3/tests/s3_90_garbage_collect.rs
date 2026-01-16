@@ -29,17 +29,10 @@ async fn test_k8s_integration_90_garbage_collect() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::clone(&storage),
-        PREFIX,
-        WRITER,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log =
+        LogWriter::open_or_initialize(options, WRITER, fragment_factory, manifest_factory, None)
+            .await
+            .unwrap();
     let mut position1 = LogPosition::default();
     let mut position2 = LogPosition::default();
 

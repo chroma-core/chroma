@@ -314,6 +314,13 @@ impl ACStorageProvider {
             ACStorageProvider::Object(object_storage) => object_storage.delete_many(keys).await,
         }
     }
+
+    pub fn bucket(&self) -> Option<&str> {
+        match self {
+            ACStorageProvider::S3(s3_storage) => s3_storage.bucket(),
+            ACStorageProvider::Object(object_storage) => object_storage.bucket(),
+        }
+    }
 }
 
 /// Wrapper over s3 storage that provides proxy features such as

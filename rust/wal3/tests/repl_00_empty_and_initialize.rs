@@ -11,7 +11,12 @@ async fn test_k8s_mcmr_integration_repl_00_empty_and_initialize() {
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
-    let manifest_factory = ReplicatedManifestManagerFactory::new(client, log_id);
+    let manifest_factory = ReplicatedManifestManagerFactory::new(
+        client,
+        vec!["dummy".to_string()],
+        "dummy".to_string(),
+        log_id,
+    );
 
     // Initialize the manifest.
     manifest_factory
