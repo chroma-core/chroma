@@ -50,18 +50,25 @@ impl TryFrom<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
     }
 }
 
-/// Internal request for getting a tenant.
+/// Internal request for getting tenants.
 #[derive(Debug, Clone)]
-pub struct GetTenantRequest {
-    pub id: String,
+pub struct GetTenantsRequest {
+    pub ids: Vec<String>,
 }
-
-impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantRequest {
+impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantsRequest {
     type Error = SysDbError;
-
     fn try_from(req: chroma_proto::GetTenantRequest) -> Result<Self, Self::Error> {
-        Ok(Self { id: req.name })
+        Ok(Self {
+            ids: vec![req.name],
+        })
     }
+}
+/// Internal request for updating a tenant.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub last_compaction_time: Option<Timestamp>,
+    pub resource_name: Option<String>,
 }
 
 /// Internal request for setting tenant resource name.
@@ -379,11 +386,16 @@ impl Assignable for CreateTenantRequest {
     }
 }
 
-impl Assignable for GetTenantRequest {
+impl Assignable for GetTenantsRequest {
     type Output = Backend;
-
     fn assign(&self, factory: &BackendFactory) -> Backend {
         // Single backend operation
+        Backend::Spanner(factory.spanner().clone())
+    }
+}
+impl Assignable for UpdateTenantRequest {
+    type Output = Backend;
+    fn assign(&self, factory: &BackendFactory) -> Backend {
         Backend::Spanner(factory.spanner().clone())
     }
 }
@@ -468,12 +480,22 @@ impl Runnable for CreateTenantRequest {
 }
 
 #[async_trait::async_trait]
-impl Runnable for GetTenantRequest {
-    type Response = GetTenantResponse;
+impl Runnable for GetTenantsRequest {
+    type Response = GetTenantsResponse;
     type Input = Backend;
 
     async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
-        backend.get_tenant(self).await
+        backend.get_tenants(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for UpdateTenantRequest {
+    type Response = UpdateTenantResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.update_tenant(self).await
     }
 }
 
@@ -556,16 +578,27 @@ impl From<CreateTenantResponse> for chroma_proto::CreateTenantResponse {
     }
 }
 
-/// Internal response for getting a tenant.
+/// Internal response for getting tenants.
 #[derive(Debug, Clone)]
-pub struct GetTenantResponse {
-    pub tenant: Tenant,
+pub struct GetTenantsResponse {
+    pub tenants: Vec<Tenant>,
 }
 
-impl From<GetTenantResponse> for chroma_proto::GetTenantResponse {
-    fn from(r: GetTenantResponse) -> Self {
+/// Internal response for updating a tenant.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantResponse {
+    pub updated_tenant: Tenant,
+}
+impl From<GetTenantsResponse> for chroma_proto::GetTenantResponse {
+    fn from(r: GetTenantsResponse) -> Self {
+        // TODO(tanujnay112): Not sure what to do here
+        let tenant = r
+            .tenants
+            .into_iter()
+            .next()
+            .expect("Expected at least one tenant");
         chroma_proto::GetTenantResponse {
-            tenant: Some(r.tenant.into()),
+            tenant: Some(tenant.into()),
         }
     }
 }

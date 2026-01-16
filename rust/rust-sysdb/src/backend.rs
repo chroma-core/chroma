@@ -66,8 +66,9 @@ use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
-    GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    UpdateTenantRequest, UpdateTenantResponse,
 };
 use chroma_types::chroma_proto::Database;
 
@@ -164,12 +165,27 @@ impl Backend {
         }
     }
 
-    /// Get a tenant by name.
+    /// Get tenants by names.
     ///
-    /// Returns `SysDbError::NotFound` if the tenant does not exist.
-    pub async fn get_tenant(&self, req: GetTenantRequest) -> Result<GetTenantResponse, SysDbError> {
+    /// Returns `SysDbError::NotFound` if any tenant does not exist.
+    pub async fn get_tenants(
+        &self,
+        req: GetTenantsRequest,
+    ) -> Result<GetTenantsResponse, SysDbError> {
         match self {
-            Backend::Spanner(s) => s.get_tenant(req).await,
+            Backend::Spanner(s) => s.get_tenants(req).await,
+        }
+    }
+
+    /// Update a tenant with the specified update.
+    ///
+    /// Returns the updated tenant record.
+    pub async fn update_tenant(
+        &self,
+        req: UpdateTenantRequest,
+    ) -> Result<UpdateTenantResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.update_tenant(req).await,
         }
     }
 
