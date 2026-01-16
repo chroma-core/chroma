@@ -13,7 +13,7 @@ if ($isAdmin) {
 $expectedInstallPath = Join-Path $expectedInstallDir "chroma.exe"
 
 $repo    = "chroma-core/chroma"
-$release = "cli-1.3.1"
+$release = "cli-1.3.2"
 $asset   = "chroma-windows.exe"
 
 $downloadUrl = "https://github.com/$repo/releases/download/$release/$asset"
