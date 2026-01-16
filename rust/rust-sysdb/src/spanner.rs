@@ -21,10 +21,11 @@ use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
-    GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
-    SpannerRowRef, SpannerRows, SysDbError,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
+    SpannerRowRef, SpannerRows, SysDbError, UpdateTenantRequest, UpdateTenantResponse,
 };
+
 use chroma_types::{
     Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Segment, Tenant,
 };
@@ -116,30 +117,112 @@ impl SpannerBackend {
         Ok(CreateTenantResponse {})
     }
 
-    /// Get a tenant by name.
+    /// Get tenants by names.
     ///
-    /// Returns `SysDbError::NotFound` if the tenant does not exist or is marked as deleted.
-    pub async fn get_tenant(&self, req: GetTenantRequest) -> Result<GetTenantResponse, SysDbError> {
+    /// Returns `SysDbError::NotFound` if any tenant does not exist or is marked as deleted.
+    pub async fn get_tenants(
+        &self,
+        req: GetTenantsRequest,
+    ) -> Result<GetTenantsResponse, SysDbError> {
         let mut stmt = Statement::new(
-            "SELECT id, resource_name, UNIX_SECONDS(last_compaction_time) as last_compaction_time FROM tenants WHERE id = @id AND is_deleted = FALSE",
+            "SELECT id, resource_name, UNIX_SECONDS(last_compaction_time) as last_compaction_time FROM tenants WHERE id IN UNNEST(@ids) AND is_deleted = FALSE",
         );
-        stmt.add_param("id", &req.id);
+        stmt.add_param("ids", &req.ids);
 
         let mut tx = self.client.single().await?;
 
         let mut iter = tx.query(stmt).await?;
+        let mut tenants = Vec::new();
 
-        // Get the first row if it exists
-        if let Some(row) = iter.next().await? {
-            Ok(GetTenantResponse {
-                tenant: Tenant::try_from(SpannerRow { row })?,
-            })
-        } else {
-            Err(SysDbError::NotFound(format!(
-                "tenant '{}' not found",
-                req.id
-            )))
+        // Get all rows
+        while let Some(row) = iter.next().await? {
+            tenants.push(Tenant::try_from(SpannerRow { row })?);
         }
+
+        if tenants.len() != req.ids.len() {
+            Err(SysDbError::NotFound(format!(
+                "tenants '{}' not found",
+                req.ids.join(", ")
+            )))
+        } else {
+            Ok(GetTenantsResponse { tenants })
+        }
+    }
+
+    /// Update a tenant with the specified update.
+    pub async fn update_tenant(
+        &self,
+        req: UpdateTenantRequest,
+    ) -> Result<UpdateTenantResponse, SysDbError> {
+        // Build SET clauses based on what fields are being updated
+        let mut set_clauses: Vec<String> = Vec::new();
+
+        if req.last_compaction_time.is_some() {
+            set_clauses.push(
+                "last_compaction_time = TIMESTAMP_SECONDS(@last_compaction_time)".to_string(),
+            );
+        }
+        if req.resource_name.is_some() {
+            set_clauses.push("resource_name = @resource_name".to_string());
+        }
+
+        if set_clauses.is_empty() {
+            return Err(SysDbError::InvalidArgument(
+                "No fields to update".to_string(),
+            ));
+        }
+
+        set_clauses.push("updated_at = PENDING_COMMIT_TIMESTAMP()".to_string());
+
+        let update_query = format!(
+            "UPDATE tenants SET {} WHERE id = @id AND is_deleted = FALSE",
+            set_clauses.join(", ")
+        );
+
+        // Create the statement and add parameters before the transaction
+        let mut update_stmt = Statement::new(&update_query);
+        update_stmt.add_param("id", &req.tenant_id);
+
+        if let Some(ref timestamp) = req.last_compaction_time {
+            update_stmt.add_param("last_compaction_time", &timestamp.seconds);
+        }
+        if let Some(ref resource_name) = req.resource_name {
+            update_stmt.add_param("resource_name", resource_name);
+        }
+
+        // Clone the statement for the transaction
+        let stmt = update_stmt.clone();
+        let tenant_id = req.tenant_id.clone();
+
+        // Use a transaction for the update
+        let (_commit_result, rows_affected) = self
+            .client
+            .read_write_transaction::<i64, SysDbError, _>(|tx| {
+                let stmt_clone = stmt.clone();
+                Box::pin(async move { tx.update(stmt_clone).await.map_err(SysDbError::from) })
+            })
+            .await?;
+
+        if rows_affected == 0 {
+            return Err(SysDbError::NotFound(format!(
+                "tenant '{}' not found",
+                tenant_id
+            )));
+        }
+
+        // Fetch the updated tenant to return in response
+        let get_tenants_req = GetTenantsRequest {
+            ids: vec![tenant_id],
+        };
+        let tenants_response = self.get_tenants(get_tenants_req).await?;
+
+        if tenants_response.tenants.is_empty() {
+            return Err(SysDbError::NotFound("Updated tenant not found".to_string()));
+        }
+
+        Ok(UpdateTenantResponse {
+            updated_tenant: tenants_response.tenants.into_iter().next().unwrap(),
+        })
     }
 
     /// Set the resource name for a tenant.
@@ -695,7 +778,7 @@ impl SpannerBackend {
                 ORDER BY c.created_at ASC
                 {pagination}
             )
-            SELECT 
+            SELECT
                 c.collection_id,
                 c.name,
                 c.dimension,
@@ -720,7 +803,7 @@ impl SpannerBackend {
             FROM filtered_collections fc
             JOIN collections c ON c.collection_id = fc.collection_id
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors ccc 
+            LEFT JOIN collection_compaction_cursors ccc
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
             ORDER BY c.created_at ASC
             "#,
@@ -791,7 +874,7 @@ impl SpannerBackend {
         // 3-way LEFT JOIN to get collection, metadata, and compaction cursor fields
         let mut fetch_stmt = Statement::new(
             r#"
-            SELECT 
+            SELECT
                 c.collection_id,
                 c.name,
                 c.dimension,
@@ -814,7 +897,7 @@ impl SpannerBackend {
                 cursors.compaction_failure_count
             FROM collections c
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors cursors 
+            LEFT JOIN collection_compaction_cursors cursors
                 ON cursors.collection_id = c.collection_id AND cursors.region = @region
             WHERE c.collection_id = @collection_id
             "#,
@@ -857,7 +940,7 @@ impl SpannerBackend {
         // 4-way JOIN query: collection + metadata + compaction cursor + segments
         // Note: Segment columns are aliased with "segment_" prefix to match TryFrom<Row> for Segment
         let query = r#"
-            SELECT 
+            SELECT
                 c.collection_id,
                 c.name,
                 c.dimension,
@@ -885,9 +968,9 @@ impl SpannerBackend {
                 cs.file_paths as segment_file_paths
             FROM collections c
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors ccc 
+            LEFT JOIN collection_compaction_cursors ccc
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
-            LEFT JOIN collection_segments cs 
+            LEFT JOIN collection_segments cs
                 ON cs.collection_id = c.collection_id AND cs.region = @region
             WHERE c.collection_id = @collection_id AND c.is_deleted = FALSE
         "#;
@@ -1011,7 +1094,7 @@ mod tests {
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
         GetCollectionWithSegmentsRequest, GetCollectionsRequest, GetDatabaseRequest,
-        GetTenantRequest,
+        GetTenantsRequest,
     };
     use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
     use uuid::Uuid;
@@ -1070,16 +1153,187 @@ mod tests {
         );
 
         // Test get_tenant
-        let get_req = GetTenantRequest {
-            id: tenant_id.clone(),
+        let get_req = GetTenantsRequest {
+            ids: vec![tenant_id.clone()],
         };
-        let result = backend.get_tenant(get_req.clone()).await;
+        let result = backend.get_tenants(get_req).await;
         assert!(result.is_ok(), "Failed to get tenant: {:?}", result.err());
+    }
 
-        let tenant = result.unwrap();
-        assert_eq!(tenant.tenant.id, tenant_id);
-        assert_eq!(tenant.tenant.last_compaction_time, 0);
-        assert!(tenant.tenant.resource_name.is_none());
+    #[tokio::test]
+    async fn test_get_last_compaction_time_single_tenant() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let tenant_id = Uuid::new_v4().to_string();
+        let test_timestamp = 1640995200i64; // 2022-01-01 00:00:00 UTC
+
+        // Create tenant and set compaction time
+        backend
+            .create_tenant(CreateTenantRequest {
+                id: tenant_id.clone(),
+            })
+            .await
+            .unwrap();
+        backend
+            .update_tenant(UpdateTenantRequest {
+                tenant_id: tenant_id.clone(),
+                last_compaction_time: Some(prost_types::Timestamp {
+                    seconds: test_timestamp,
+                    nanos: 0,
+                }),
+                resource_name: None,
+            })
+            .await
+            .unwrap();
+
+        // Test getting tenant with last compaction time using get_tenants
+        let get_req = GetTenantsRequest {
+            ids: vec![tenant_id.clone()],
+        };
+        let get_result = backend.get_tenants(get_req).await;
+        assert!(
+            get_result.is_ok(),
+            "Failed to get tenant: {:?}",
+            get_result.err()
+        );
+
+        let response = get_result.unwrap();
+        assert_eq!(response.tenants.len(), 1);
+        let tenant = &response.tenants[0];
+        assert_eq!(tenant.id, tenant_id);
+        assert_eq!(tenant.last_compaction_time, test_timestamp);
+    }
+
+    #[tokio::test]
+    async fn test_get_last_compaction_time_multiple_tenants() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let tenant_id = Uuid::new_v4().to_string();
+        let tenant_id2 = Uuid::new_v4().to_string();
+        let test_timestamp = 1640995200i64; // 2022-01-01 00:00:00 UTC
+        let test_timestamp2 = 1641081600i64; // 2022-01-02 00:00:00 UTC
+
+        // Create tenants and set compaction times
+        backend
+            .create_tenant(CreateTenantRequest {
+                id: tenant_id.clone(),
+            })
+            .await
+            .unwrap();
+        backend
+            .create_tenant(CreateTenantRequest {
+                id: tenant_id2.clone(),
+            })
+            .await
+            .unwrap();
+
+        backend
+            .update_tenant(UpdateTenantRequest {
+                tenant_id: tenant_id.clone(),
+                last_compaction_time: Some(prost_types::Timestamp {
+                    seconds: test_timestamp,
+                    nanos: 0,
+                }),
+                resource_name: None,
+            })
+            .await
+            .unwrap();
+
+        backend
+            .update_tenant(UpdateTenantRequest {
+                tenant_id: tenant_id2.clone(),
+                last_compaction_time: Some(prost_types::Timestamp {
+                    seconds: test_timestamp2,
+                    nanos: 0,
+                }),
+                resource_name: None,
+            })
+            .await
+            .unwrap();
+
+        // Get tenants with compaction times using get_tenants
+        let get_multi_req = GetTenantsRequest {
+            ids: vec![tenant_id.clone(), tenant_id2.clone()],
+        };
+        let get_multi_result = backend.get_tenants(get_multi_req).await;
+        assert!(
+            get_multi_result.is_ok(),
+            "Failed to get multiple tenants: {:?}",
+            get_multi_result.err()
+        );
+
+        let multi_response = get_multi_result.unwrap();
+        assert_eq!(multi_response.tenants.len(), 2);
+
+        // Verify both tenants are present with correct timestamps
+        let tenant_times: std::collections::HashMap<String, i64> = multi_response
+            .tenants
+            .into_iter()
+            .map(|t| (t.id, t.last_compaction_time))
+            .collect();
+
+        assert_eq!(tenant_times.get(&tenant_id), Some(&test_timestamp));
+        assert_eq!(tenant_times.get(&tenant_id2), Some(&test_timestamp2));
+    }
+
+    #[tokio::test]
+    async fn test_last_compaction_time_nonexistent_tenant() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Test getting non-existent tenant using get_tenants
+        let get_nonexistent_req = GetTenantsRequest {
+            ids: vec![Uuid::new_v4().to_string()],
+        };
+        let get_nonexistent_result = backend.get_tenants(get_nonexistent_req).await;
+        assert!(get_nonexistent_result.is_err());
+        match get_nonexistent_result {
+            Err(SysDbError::NotFound(msg)) => {
+                assert!(msg.contains("not found"));
+            }
+            _ => panic!("Expected NotFound error, got: {:?}", get_nonexistent_result),
+        }
+
+        // Test setting compaction time for non-existent tenant
+        let set_nonexistent_req = UpdateTenantRequest {
+            tenant_id: Uuid::new_v4().to_string(),
+            last_compaction_time: Some(prost_types::Timestamp {
+                seconds: 1641168000i64,
+                nanos: 0,
+            }),
+            resource_name: None,
+        };
+        let set_nonexistent_result = backend.update_tenant(set_nonexistent_req).await;
+        assert!(set_nonexistent_result.is_err());
+        match set_nonexistent_result {
+            Err(SysDbError::NotFound(msg)) => {
+                assert!(msg.contains("not found"));
+            }
+            _ => panic!("Expected NotFound error, got: {:?}", set_nonexistent_result),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_last_compaction_time_edge_cases() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Test empty tenant IDs list using get_tenants
+        let get_empty_req = GetTenantsRequest { ids: vec![] };
+        let get_empty_result = backend.get_tenants(get_empty_req).await;
+        assert!(
+            get_empty_result.is_ok(),
+            "Failed to handle empty tenant list: {:?}",
+            get_empty_result.err()
+        );
+        let empty_response = get_empty_result.unwrap();
+        assert_eq!(empty_response.tenants.len(), 0);
     }
 
     #[tokio::test]
@@ -1110,15 +1364,17 @@ mod tests {
         );
 
         // Verify tenant exists
-        let get_req = GetTenantRequest {
-            id: tenant_id.clone(),
+        let get_req = GetTenantsRequest {
+            ids: vec![tenant_id.clone()],
         };
-        let result = backend.get_tenant(get_req.clone()).await;
+        let result = backend.get_tenants(get_req.clone()).await;
         assert!(result.is_ok(), "Failed to get tenant: {:?}", result.err());
-        let tenant = result.unwrap(); // Tenant should exist
-        assert_eq!(tenant.tenant.id, tenant_id);
-        assert_eq!(tenant.tenant.last_compaction_time, 0);
-        assert!(tenant.tenant.resource_name.is_none());
+        let tenant_response = result.unwrap(); // Tenant should exist
+        assert_eq!(tenant_response.tenants.len(), 1);
+        let tenant = &tenant_response.tenants[0];
+        assert_eq!(tenant.id, tenant_id);
+        assert_eq!(tenant.last_compaction_time, 0);
+        assert!(tenant.resource_name.is_none());
     }
 
     #[tokio::test]
@@ -1128,8 +1384,10 @@ mod tests {
         };
 
         let tenant_id = Uuid::new_v4().to_string();
-        let get_req = GetTenantRequest { id: tenant_id };
-        let result = backend.get_tenant(get_req.clone()).await;
+        let get_req = GetTenantsRequest {
+            ids: vec![tenant_id],
+        };
+        let result = backend.get_tenants(get_req.clone()).await;
         assert!(
             result.is_err(),
             "Getting nonexistent tenant should return error"
