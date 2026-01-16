@@ -8,16 +8,7 @@ query_service:
   otel_filters:
     - crate_name: "worker"
       filter_level: "trace"
-  my_member_id: "query-service-0"
   my_port: 50051
-  assignment_policy:
-    rendezvous_hashing:
-      hasher: Murmur3
-  memberlist_provider:
-    custom_resource:
-      kube_namespace: "chroma2"
-      memberlist_name: "query-service-memberlist"
-      queue_size: 100
   sysdb:
     grpc:
       host: "sysdb.chroma2"
