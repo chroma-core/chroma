@@ -118,12 +118,6 @@ pub struct QueryServiceConfig {
     pub otel_filters: Vec<OtelFilter>,
     #[serde(default = "QueryServiceConfig::default_my_port")]
     pub my_port: u16,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub assignment_policy: assignment::config::AssignmentPolicyConfig,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     #[serde(default)]
     pub sysdb: SysDbConfig,
     #[serde(default)]
