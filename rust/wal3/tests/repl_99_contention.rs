@@ -74,7 +74,11 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
     let writer_name = "init";
 
     // Initialize the log.
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty(writer_name))
         .await
@@ -88,6 +92,7 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let writer1 = Arc::new(
@@ -109,6 +114,7 @@ async fn test_k8s_mcmr_integration_repl_99_ping_pong_contention() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let writer2 = Arc::new(

@@ -23,7 +23,11 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
     let storages = Arc::new(vec![wrapper]);
 
     // Initialize the manifest.
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -37,6 +41,7 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
         0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
@@ -57,7 +62,11 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
         .expect("append should succeed");
 
     // Verify the manifest was updated with the fragment.
-    let consumer_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let consumer_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        log_id,
+    );
     let consumer = consumer_factory
         .make_consumer()
         .await

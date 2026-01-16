@@ -516,7 +516,6 @@ pub(crate) struct OnceLogWriter<
 impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
     OnceLogWriter<P, FP, MP>
 {
-    #[allow(clippy::too_many_arguments)]
     async fn open(
         options: LogWriterOptions,
         batch_manager: FP,
@@ -707,7 +706,6 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             .manifest_manager
             .publish_fragment(
                 &pointer,
-                &["dummy"],
                 &path,
                 messages_len as u64,
                 num_bytes as u64,

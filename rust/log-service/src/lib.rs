@@ -350,7 +350,9 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             return Err(Error::MissingTopology(topology_name.to_string()));
         };
         let mut storage_wrappers = vec![];
+        let mut region_names = vec![];
         for region in regions.into_iter() {
+            region_names.push(region.name().to_string());
             storage_wrappers.push(StorageWrapper::new(
                 region.name().to_string(),
                 region.config.storage.clone(),
@@ -373,6 +375,7 @@ async fn get_log_from_handle_with_mutex_held<'a>(
             preferred_index,
             storage_wrappers,
             spanner,
+            region_names,
             collection_id.0,
         );
         let opened = LogWriter::open_or_initialize(
@@ -805,7 +808,9 @@ impl LogServer {
                 return Err(Error::MissingTopology(topology_name.to_string()));
             };
             let mut storage_wrappers = vec![];
+            let mut region_names = vec![];
             for region in regions.into_iter() {
+                region_names.push(region.name().to_string());
                 storage_wrappers.push(StorageWrapper::new(
                     region.name().to_string(),
                     region.config.storage.clone(),
@@ -828,6 +833,7 @@ impl LogServer {
                 preferred_index,
                 storage_wrappers,
                 spanner,
+                region_names,
                 collection_id.0,
             );
             let fragment_consumer = fragment_factory.make_consumer().await?;

@@ -17,7 +17,7 @@ use crate::{
     Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
-const GARBAGE_PATH: &str = "/gc/GARBAGE";
+const GARBAGE_PATH: &str = "gc/GARBAGE";
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 
@@ -62,7 +62,7 @@ impl Garbage {
     }
 
     pub fn path(prefix: &str) -> String {
-        format!("{}{}", prefix, GARBAGE_PATH)
+        format!("{}/{}", prefix, GARBAGE_PATH)
     }
 
     #[allow(clippy::result_large_err)]

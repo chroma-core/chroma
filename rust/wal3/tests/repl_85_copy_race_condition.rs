@@ -65,7 +65,11 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
     let storages = Arc::new(vec![wrapper]);
 
     // Initialize the manifest.
-    let init_manifest_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_manifest_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        log_id,
+    );
     init_manifest_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -80,6 +84,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         0,
         reader_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory
@@ -128,6 +133,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
             0,
             storages_clone,
             client_clone,
+            vec!["dummy".to_string()],
             log_id,
         );
         let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
@@ -162,6 +168,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         0,
         copy_target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_publisher = copy_target_fragment_factory
@@ -193,6 +200,7 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
         0,
         target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_consumer = target_fragment_factory

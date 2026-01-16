@@ -24,7 +24,11 @@ async fn test_k8s_mcmr_integration_repl_81_copy_then_update_src() {
     let storages = Arc::new(vec![wrapper]);
 
     // Initialize the source manifest.
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["dummy".to_string()],
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -44,6 +48,7 @@ async fn test_k8s_mcmr_integration_repl_81_copy_then_update_src() {
         0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
@@ -77,6 +82,7 @@ async fn test_k8s_mcmr_integration_repl_81_copy_then_update_src() {
         0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let fragment_consumer = fragment_factory
@@ -115,6 +121,7 @@ async fn test_k8s_mcmr_integration_repl_81_copy_then_update_src() {
         0,
         Arc::clone(&target_storages),
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_publisher = target_fragment_factory
@@ -144,6 +151,7 @@ async fn test_k8s_mcmr_integration_repl_81_copy_then_update_src() {
         0,
         target_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         target_log_id,
     );
     let target_fragment_consumer = target_fragment_factory

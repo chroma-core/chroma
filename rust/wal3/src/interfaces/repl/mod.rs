@@ -24,6 +24,7 @@ pub fn create_repl_factories(
     preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     spanner: Arc<Client>,
+    regions: Vec<String>,
     log_id: Uuid,
 ) -> (
     ReplicatedFragmentManagerFactory,
@@ -36,7 +37,11 @@ pub fn create_repl_factories(
         preferred,
         storages,
     };
-    let manifest_manager_factory = ReplicatedManifestManagerFactory { spanner, log_id };
+    let manifest_manager_factory = ReplicatedManifestManagerFactory {
+        spanner,
+        regions,
+        log_id,
+    };
     (fragment_manager_factory, manifest_manager_factory)
 }
 
@@ -95,13 +100,18 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
 #[derive(Clone)]
 pub struct ReplicatedManifestManagerFactory {
     spanner: Arc<Client>,
+    regions: Vec<String>,
     log_id: Uuid,
 }
 
 impl ReplicatedManifestManagerFactory {
     /// Creates a new ReplicatedManifestManagerFactory.
-    pub fn new(spanner: Arc<Client>, log_id: Uuid) -> Self {
-        Self { spanner, log_id }
+    pub fn new(spanner: Arc<Client>, regions: Vec<String>, log_id: Uuid) -> Self {
+        Self {
+            spanner,
+            regions,
+            log_id,
+        }
     }
 }
 
@@ -112,15 +122,23 @@ impl ManifestManagerFactory for ReplicatedManifestManagerFactory {
     type Consumer = ManifestManager;
 
     async fn init_manifest(&self, manifest: &Manifest) -> Result<(), Error> {
-        ManifestManager::init(&self.spanner, self.log_id, manifest).await
+        ManifestManager::init(self.regions.clone(), &self.spanner, self.log_id, manifest).await
     }
 
     async fn open_publisher(&self) -> Result<Self::Publisher, Error> {
-        Ok(ManifestManager::new(Arc::clone(&self.spanner), self.log_id))
+        Ok(ManifestManager::new(
+            Arc::clone(&self.spanner),
+            self.regions.clone(),
+            self.log_id,
+        ))
     }
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
-        Ok(ManifestManager::new(Arc::clone(&self.spanner), self.log_id))
+        Ok(ManifestManager::new(
+            Arc::clone(&self.spanner),
+            self.regions.clone(),
+            self.log_id,
+        ))
     }
 }
 
@@ -257,7 +275,11 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         let result = factory.init_manifest(&manifest).await;
@@ -279,7 +301,11 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         let result1 = factory.init_manifest(&manifest).await;
@@ -305,7 +331,11 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            log_id,
+        );
 
         let result = factory.open_publisher().await;
         assert!(
@@ -325,7 +355,11 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            log_id,
+        );
 
         let result = factory.make_consumer().await;
         assert!(
@@ -349,7 +383,11 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         factory.init_manifest(&manifest).await.expect("init failed");
@@ -360,14 +398,7 @@ mod tests {
             .expect("open_publisher failed");
         let pointer = FragmentUuid::generate();
         let result = publisher
-            .publish_fragment(
-                &pointer,
-                &["dummy"],
-                "test/path.parquet",
-                10,
-                100,
-                Setsum::default(),
-            )
+            .publish_fragment(&pointer, "test/path.parquet", 10, 100, Setsum::default())
             .await;
 
         assert!(
@@ -392,7 +423,11 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let factory = ReplicatedManifestManagerFactory::new(Arc::new(client), log_id);
+        let factory = ReplicatedManifestManagerFactory::new(
+            Arc::new(client),
+            vec!["dummy".to_string()],
+            log_id,
+        );
         let manifest = make_empty_manifest();
 
         factory.init_manifest(&manifest).await.expect("init failed");

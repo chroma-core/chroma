@@ -26,6 +26,7 @@ async fn test_k8s_mcmr_integration_repl_01_empty_and_open() {
         0,
         storages,
         client,
+        vec!["dummy".to_string()],
         log_id,
     );
 
