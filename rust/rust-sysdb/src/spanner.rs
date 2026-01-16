@@ -10,7 +10,8 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::client::{Client, ClientConfig};
-use google_cloud_spanner::mutation::insert;
+use google_cloud_spanner::key::Key;
+use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::row::Row;
 use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
@@ -23,7 +24,7 @@ use crate::types::{
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
-    SpannerRowRef, SpannerRows, SysDbError,
+    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_types::{
     Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Segment, Tenant,
@@ -947,6 +948,249 @@ impl SpannerBackend {
     }
 
     // ============================================================
+    // Update Operations
+    // ============================================================
+
+    /// Update a collection.
+    ///
+    /// Supports updating:
+    /// - `name`: New collection name (must be unique within database)
+    /// - `dimension`: New dimension value
+    /// - `metadata`: New metadata (replaces existing if provided)
+    /// - `reset_metadata`: If true, deletes all existing metadata
+    /// - `new_configuration`: New configuration (selective update of hnsw, spann, or embedding function)
+    ///
+    /// Returns the updated collection.
+    pub async fn update_collection(
+        &self,
+        req: UpdateCollectionRequest,
+    ) -> Result<UpdateCollectionResponse, SysDbError> {
+        let UpdateCollectionRequest {
+            id,
+            name,
+            dimension,
+            metadata,
+            reset_metadata,
+            new_configuration,
+        } = req;
+
+        let collection_id = id.0.to_string();
+
+        let result = self
+            .client
+            .read_write_transaction::<(), SysDbError, _>(|tx| {
+                let collection_id = collection_id.clone();
+                let name = name.clone();
+                let metadata = metadata.clone();
+                let new_configuration = new_configuration.clone();
+
+                Box::pin(async move {
+                    // First, verify the collection exists and get tenant/database info for name uniqueness check
+                    let mut check_stmt = Statement::new(
+                        "SELECT tenant_id, database_name FROM collections WHERE collection_id = @collection_id AND is_deleted = FALSE",
+                    );
+                    check_stmt.add_param("collection_id", &collection_id);
+
+                    let mut check_iter = tx.query(check_stmt).await?;
+                    let (tenant_id, database_name): (String, String) = match check_iter.next().await? {
+                        Some(row) => {
+                            let tenant: String = row.column_by_name("tenant_id").map_err(SysDbError::FailedToReadColumn)?;
+                            let db: String = row.column_by_name("database_name").map_err(SysDbError::FailedToReadColumn)?;
+                            (tenant, db)
+                        }
+                        None => {
+                            return Err(SysDbError::NotFound(format!(
+                                "collection with id '{}' not found",
+                                collection_id
+                            )));
+                        }
+                    };
+
+                    // If name is being changed, check for uniqueness within the database
+                    if let Some(ref new_name) = name {
+                        let mut name_check_stmt = Statement::new(
+                            "SELECT collection_id FROM collections WHERE tenant_id = @tenant_id AND database_name = @database_name AND name = @name AND collection_id != @collection_id AND is_deleted = FALSE",
+                        );
+                        name_check_stmt.add_param("tenant_id", &tenant_id);
+                        name_check_stmt.add_param("database_name", &database_name);
+                        name_check_stmt.add_param("name", new_name);
+                        name_check_stmt.add_param("collection_id", &collection_id);
+
+                        let mut name_iter = tx.query(name_check_stmt).await?;
+                        if name_iter.next().await?.is_some() {
+                            return Err(SysDbError::AlreadyExists(format!(
+                                "collection with name '{}' already exists in database '{}'",
+                                new_name, database_name
+                            )));
+                        }
+                    }
+
+                    // Use Spanner's commit timestamp sentinel string
+                    let commit_ts = "spanner.commit_timestamp()";
+                    let mut mutations = Vec::new();
+
+                    // Determine what needs to be updated
+                    let has_collection_changes = name.is_some() || dimension.is_some();
+                    let has_metadata_changes = metadata.is_some() || reset_metadata;
+                    let has_config_changes = new_configuration.as_ref().is_some_and(|c| {
+                        c.hnsw.is_some() || c.spann.is_some() || c.embedding_function.is_some()
+                    });
+
+                    // Build collection update mutation if name or dimension changed
+                    if has_collection_changes {
+                        // We need the current name/dimension if not changing them
+                        let mut current_stmt = Statement::new(
+                            "SELECT name, dimension FROM collections WHERE collection_id = @collection_id",
+                        );
+                        current_stmt.add_param("collection_id", &collection_id);
+                        let mut current_iter = tx.query(current_stmt).await?;
+                        let (current_name, current_dimension): (String, Option<i64>) = match current_iter.next().await? {
+                            Some(row) => {
+                                let n: String = row.column_by_name("name").map_err(SysDbError::FailedToReadColumn)?;
+                                let d: Option<i64> = row.column_by_name("dimension").ok();
+                                (n, d)
+                            }
+                            None => return Err(SysDbError::Internal("collection disappeared".to_string())),
+                        };
+
+                        let final_name = name.as_ref().unwrap_or(&current_name);
+                        let final_dimension = dimension.map(|d| d as i64).or(current_dimension);
+
+                        mutations.push(update(
+                            "collections",
+                            &["collection_id", "name", "dimension", "updated_at"],
+                            &[&collection_id, final_name, &final_dimension, &commit_ts],
+                        ));
+                    }
+
+                    // Handle metadata changes
+                    if has_metadata_changes {
+                        // Query existing metadata keys to delete them
+                        let mut keys_stmt = Statement::new(
+                            "SELECT key FROM collection_metadata WHERE collection_id = @collection_id",
+                        );
+                        keys_stmt.add_param("collection_id", &collection_id);
+                        let mut keys_iter = tx.query(keys_stmt).await?;
+                        while let Some(row) = keys_iter.next().await? {
+                            let key: String = row.column_by_name("key").map_err(SysDbError::FailedToReadColumn)?;
+                            mutations.push(delete(
+                                "collection_metadata",
+                                Key::composite(&[&collection_id, &key]),
+                            ));
+                        }
+
+                        // Insert new metadata if provided
+                        if let Some(ref meta) = metadata {
+                            for (key, value) in meta.iter() {
+                                let (str_val, int_val, float_val, bool_val): (
+                                    Option<&str>,
+                                    Option<i64>,
+                                    Option<f64>,
+                                    Option<bool>,
+                                ) = match value {
+                                    chroma_types::MetadataValue::Str(s) => {
+                                        (Some(s.as_str()), None, None, None)
+                                    }
+                                    chroma_types::MetadataValue::Int(i) => (None, Some(*i), None, None),
+                                    chroma_types::MetadataValue::Float(f) => {
+                                        (None, None, Some(*f), None)
+                                    }
+                                    chroma_types::MetadataValue::Bool(b) => {
+                                        (None, None, None, Some(*b))
+                                    }
+                                    chroma_types::MetadataValue::SparseVector(_) => continue,
+                                };
+
+                                mutations.push(insert(
+                                    "collection_metadata",
+                                    &[
+                                        "collection_id",
+                                        "key",
+                                        "str_value",
+                                        "int_value",
+                                        "float_value",
+                                        "bool_value",
+                                        "created_at",
+                                        "updated_at",
+                                    ],
+                                    &[
+                                        &collection_id,
+                                        key,
+                                        &str_val,
+                                        &int_val,
+                                        &float_val,
+                                        &bool_val,
+                                        &commit_ts,
+                                        &commit_ts,
+                                    ],
+                                ));
+                            }
+                        }
+                    }
+
+                    // Handle configuration updates (spann and embedding_function only)
+                    // Updates schema for ALL regions
+                    if has_config_changes {
+                        // Safe to unwrap: has_config_changes implies new_configuration is Some with hnsw, spann, or embedding_function
+                        let config = new_configuration.as_ref().unwrap();
+
+                        // Read current schemas from all regions
+                        let mut schema_stmt = Statement::new(
+                            "SELECT region, index_schema FROM collection_compaction_cursors WHERE collection_id = @collection_id",
+                        );
+                        schema_stmt.add_param("collection_id", &collection_id);
+
+                        let mut schema_iter = tx.query(schema_stmt).await?;
+                        let mut region_schemas: Vec<(String, String)> = Vec::new();
+
+                        while let Some(row) = schema_iter.next().await? {
+                            let region: String = row.column_by_name("region").map_err(SysDbError::FailedToReadColumn)?;
+                            let schema_json: String = row.column_by_name("index_schema").map_err(SysDbError::FailedToReadColumn)?;
+                            region_schemas.push((region, schema_json));
+                        }
+
+                        if region_schemas.is_empty() {
+                            return Err(SysDbError::Internal("collection has no schema in any region".to_string()));
+                        }
+
+                        // Update schema for each region
+                        for (region, current_schema_json) in region_schemas {
+                            let mut schema: chroma_types::Schema = serde_json::from_str(&current_schema_json)
+                                .map_err(|e| SysDbError::Internal(format!("failed to parse schema for region {}: {}", region, e)))?;
+
+                            // Apply updates (errors if hnsw is set)
+                            schema.apply_update_configuration(config)?;
+
+                            let new_schema_json = serde_json::to_string(&schema)
+                                .map_err(|e| SysDbError::Internal(format!("failed to serialize schema for region {}: {}", region, e)))?;
+
+                            mutations.push(update(
+                                "collection_compaction_cursors",
+                                &["collection_id", "region", "index_schema", "updated_at"],
+                                &[&collection_id, &region, &new_schema_json, &commit_ts],
+                            ));
+                        }
+                    }
+
+                    // Buffer all mutations - they will be applied atomically at commit
+                    if !mutations.is_empty() {
+                        tx.buffer_write(mutations);
+                    }
+
+                    tracing::info!("Updated collection: {}", collection_id);
+
+                    Ok(())
+                })
+            })
+            .await;
+
+        match result {
+            Ok((_, ())) => Ok(UpdateCollectionResponse {}),
+            Err(e) => Err(e),
+        }
+    }
+
+    // ============================================================
     // Lifecycle
     // ============================================================
 
@@ -1011,7 +1255,7 @@ mod tests {
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
         GetCollectionWithSegmentsRequest, GetCollectionsRequest, GetDatabaseRequest,
-        GetTenantRequest,
+        GetTenantRequest, UpdateCollectionRequest,
     };
     use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
     use uuid::Uuid;
@@ -5941,5 +6185,879 @@ mod tests {
                 _ => panic!("Unexpected segment scope: {:?}", segment.scope),
             }
         }
+    }
+
+    // ============================================================
+    // Update Collection Tests
+    // ============================================================
+
+    /// Helper to create a collection for update tests
+    async fn create_collection_for_update(
+        backend: &SpannerBackend,
+        tenant_id: &str,
+        db_name: &str,
+        name: &str,
+        dimension: Option<u32>,
+        metadata: Option<chroma_types::Metadata>,
+    ) -> CollectionUuid {
+        create_collection_for_update_with_schema(
+            backend,
+            tenant_id,
+            db_name,
+            name,
+            dimension,
+            metadata,
+            Schema::default(),
+        )
+        .await
+    }
+
+    /// Helper to create a collection for update tests with custom schema
+    async fn create_collection_for_update_with_schema(
+        backend: &SpannerBackend,
+        tenant_id: &str,
+        db_name: &str,
+        name: &str,
+        dimension: Option<u32>,
+        metadata: Option<chroma_types::Metadata>,
+        schema: Schema,
+    ) -> CollectionUuid {
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: name.to_string(),
+            dimension,
+            index_schema: schema,
+            segments: create_test_segments(collection_id),
+            metadata,
+            get_or_create: false,
+            tenant_id: tenant_id.to_string(),
+            database_name: db_name.to_string(),
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to create collection for update test: {:?}",
+            result.err()
+        );
+
+        collection_id
+    }
+
+    /// Helper to fetch a single collection by ID
+    async fn fetch_collection(
+        backend: &SpannerBackend,
+        collection_id: CollectionUuid,
+        tenant_id: &str,
+        db_name: &str,
+    ) -> chroma_types::Collection {
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .tenant_id(tenant_id.to_string())
+                .database_name(db_name.to_string()),
+        };
+
+        let result = backend.get_collections(get_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to get collection: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(
+            response.collections.len(),
+            1,
+            "Expected exactly one collection"
+        );
+
+        response.collections[0].clone()
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_name_only() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let original_name = format!("test_coll_orig_{}", Uuid::new_v4());
+        let new_name = format!("test_coll_new_{}", Uuid::new_v4());
+
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &original_name,
+            Some(128),
+            None,
+        )
+        .await;
+
+        // Update name only
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: Some(new_name.clone()),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection name: {:?}",
+            result.err()
+        );
+
+        // Verify via get_collections + verify_new_collection
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &new_name, // name should be updated
+            Some(128), // dimension should be unchanged
+            &tenant_id,
+            &db_name,
+            None, // metadata should still be None
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_dimension_only() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_dim_{}", Uuid::new_v4());
+
+        let collection_id =
+            create_collection_for_update(&backend, &tenant_id, &db_name, &name, Some(128), None)
+                .await;
+
+        // Update dimension only
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: Some(256),
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection dimension: {:?}",
+            result.err()
+        );
+
+        // Verify via get_collections + verify_new_collection
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,     // name should be unchanged
+            Some(256), // dimension should be updated
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_name_and_dimension() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let original_name = format!("test_coll_nd_orig_{}", Uuid::new_v4());
+        let new_name = format!("test_coll_nd_new_{}", Uuid::new_v4());
+
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &original_name,
+            Some(128),
+            None,
+        )
+        .await;
+
+        // Update both name and dimension
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: Some(new_name.clone()),
+            dimension: Some(512),
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection name and dimension: {:?}",
+            result.err()
+        );
+
+        // Verify via get_collections + verify_new_collection
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &new_name,
+            Some(512),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_metadata_replace() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_meta_{}", Uuid::new_v4());
+
+        let original_metadata: chroma_types::Metadata = [
+            (
+                "key1".to_string(),
+                chroma_types::MetadataValue::Str("value1".to_string()),
+            ),
+            ("key2".to_string(), chroma_types::MetadataValue::Int(42)),
+        ]
+        .into_iter()
+        .collect();
+
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            Some(original_metadata),
+        )
+        .await;
+
+        // Update metadata (replace with new keys)
+        let new_metadata: chroma_types::Metadata = [
+            ("key3".to_string(), chroma_types::MetadataValue::Float(1.5)),
+            ("key4".to_string(), chroma_types::MetadataValue::Bool(true)),
+        ]
+        .into_iter()
+        .collect();
+
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: Some(new_metadata.clone()),
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection metadata: {:?}",
+            result.err()
+        );
+
+        // Verify via get_collections - old metadata should be gone, new metadata present
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            Some(&new_metadata),
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_metadata_reset() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_reset_{}", Uuid::new_v4());
+
+        let original_metadata: chroma_types::Metadata = [
+            (
+                "key1".to_string(),
+                chroma_types::MetadataValue::Str("value1".to_string()),
+            ),
+            ("key2".to_string(), chroma_types::MetadataValue::Int(42)),
+        ]
+        .into_iter()
+        .collect();
+
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            Some(original_metadata),
+        )
+        .await;
+
+        // Reset metadata (delete all)
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: true,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to reset collection metadata: {:?}",
+            result.err()
+        );
+
+        // Verify via get_collections - metadata should be empty/None
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None, // metadata should be gone
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_name_conflict() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name1 = format!("test_coll_conflict1_{}", Uuid::new_v4());
+        let name2 = format!("test_coll_conflict2_{}", Uuid::new_v4());
+
+        // Create two collections
+        let collection_id1 =
+            create_collection_for_update(&backend, &tenant_id, &db_name, &name1, Some(128), None)
+                .await;
+
+        let _collection_id2 =
+            create_collection_for_update(&backend, &tenant_id, &db_name, &name2, Some(256), None)
+                .await;
+
+        // Try to rename collection1 to collection2's name (should fail)
+        let update_req = UpdateCollectionRequest {
+            id: collection_id1,
+            name: Some(name2.clone()),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(result.is_err(), "Should fail to update to conflicting name");
+
+        match result.unwrap_err() {
+            SysDbError::AlreadyExists(msg) => {
+                assert!(
+                    msg.contains(&name2),
+                    "Error message should mention conflicting name"
+                );
+            }
+            e => panic!("Expected AlreadyExists error, got: {:?}", e),
+        }
+
+        // Verify original collection is unchanged
+        let collection = fetch_collection(&backend, collection_id1, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id1,
+            &name1, // should still have original name
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_not_found() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup tenant/database but don't create collection
+        let (_tenant_id, _db_name) = setup_tenant_and_database(&backend).await;
+
+        let nonexistent_id = CollectionUuid(Uuid::new_v4());
+
+        let update_req = UpdateCollectionRequest {
+            id: nonexistent_id,
+            name: Some("new_name".to_string()),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(result.is_err(), "Should fail for nonexistent collection");
+
+        match result.unwrap_err() {
+            SysDbError::NotFound(msg) => {
+                assert!(
+                    msg.contains(&nonexistent_id.0.to_string()),
+                    "Error message should mention collection ID"
+                );
+            }
+            e => panic!("Expected NotFound error, got: {:?}", e),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_no_changes() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_noop_{}", Uuid::new_v4());
+
+        let metadata: chroma_types::Metadata = [(
+            "key1".to_string(),
+            chroma_types::MetadataValue::Str("value1".to_string()),
+        )]
+        .into_iter()
+        .collect();
+
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            Some(metadata.clone()),
+        )
+        .await;
+
+        // Update with no changes (all None/false)
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "No-op update should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify collection is unchanged
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            Some(&metadata),
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_all_fields() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let original_name = format!("test_coll_all_orig_{}", Uuid::new_v4());
+        let new_name = format!("test_coll_all_new_{}", Uuid::new_v4());
+
+        let original_metadata: chroma_types::Metadata = [(
+            "old_key".to_string(),
+            chroma_types::MetadataValue::Str("old_value".to_string()),
+        )]
+        .into_iter()
+        .collect();
+
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &original_name,
+            Some(128),
+            Some(original_metadata),
+        )
+        .await;
+
+        // Update name, dimension, and metadata all at once
+        let new_metadata: chroma_types::Metadata =
+            [("new_key".to_string(), chroma_types::MetadataValue::Int(999))]
+                .into_iter()
+                .collect();
+
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: Some(new_name.clone()),
+            dimension: Some(1024),
+            metadata: Some(new_metadata.clone()),
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update all collection fields: {:?}",
+            result.err()
+        );
+
+        // Verify all fields updated
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &new_name,
+            Some(1024),
+            &tenant_id,
+            &db_name,
+            Some(&new_metadata),
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_set_dimension_from_none() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_null_dim_{}", Uuid::new_v4());
+
+        // Create collection with no dimension
+        let collection_id = create_collection_for_update(
+            &backend, &tenant_id, &db_name, &name, None, // No dimension initially
+            None,
+        )
+        .await;
+
+        // Set dimension
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: Some(384),
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to set dimension from None: {:?}",
+            result.err()
+        );
+
+        // Verify dimension is now set
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(384),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_hnsw_config_rejected() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_hnsw_{}", Uuid::new_v4());
+
+        let collection_id =
+            create_collection_for_update(&backend, &tenant_id, &db_name, &name, Some(128), None)
+                .await;
+
+        // Try to update HNSW config (should be rejected)
+        let hnsw_config = chroma_types::UpdateHnswConfiguration {
+            ef_search: Some(100),
+            max_neighbors: None,
+            num_threads: None,
+            resize_factor: None,
+            sync_threshold: None,
+            batch_size: None,
+        };
+
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: Some(chroma_types::UpdateCollectionConfiguration {
+                hnsw: Some(hnsw_config),
+                spann: None,
+                embedding_function: None,
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(result.is_err(), "HNSW config update should be rejected");
+
+        match result.unwrap_err() {
+            SysDbError::Schema(_) => {
+                // Expected - Schema error from apply_update_configuration
+            }
+            e => panic!("Expected Schema error for HNSW update, got: {:?}", e),
+        }
+
+        // Verify collection is unchanged
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_rename_to_same_name() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_same_{}", Uuid::new_v4());
+
+        let collection_id =
+            create_collection_for_update(&backend, &tenant_id, &db_name, &name, Some(128), None)
+                .await;
+
+        // Update name to same name (should succeed - it's a no-op effectively)
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: Some(name.clone()),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Renaming to same name should succeed: {:?}",
+            result.err()
+        );
+
+        // Verify collection unchanged
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&Schema::default()),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_embedding_function() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_ef_{}", Uuid::new_v4());
+
+        let collection_id =
+            create_collection_for_update(&backend, &tenant_id, &db_name, &name, Some(128), None)
+                .await;
+
+        // Update embedding function
+        let new_ef = chroma_types::EmbeddingFunctionConfiguration::Known(
+            chroma_types::EmbeddingFunctionNewConfiguration {
+                name: "test_embedding_function".to_string(),
+                config: serde_json::json!({"model": "test-model"}),
+            },
+        );
+
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: Some(chroma_types::UpdateCollectionConfiguration {
+                hnsw: None,
+                spann: None,
+                embedding_function: Some(new_ef.clone()),
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update embedding function: {:?}",
+            result.err()
+        );
+
+        // Build expected schema: default schema with updated embedding function
+        let mut expected_schema = Schema::default();
+        expected_schema
+            .apply_update_configuration(&chroma_types::UpdateCollectionConfiguration {
+                hnsw: None,
+                spann: None,
+                embedding_function: Some(new_ef),
+            })
+            .expect("apply_update_configuration should succeed");
+
+        // Verify all fields exhaustively
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&expected_schema),
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_spann_config() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_spann_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Update spann config
+        let spann_update = chroma_types::UpdateSpannConfiguration {
+            search_nprobe: Some(20),
+            ef_search: Some(200),
+        };
+
+        let update_req = UpdateCollectionRequest {
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: Some(chroma_types::UpdateCollectionConfiguration {
+                hnsw: None,
+                spann: Some(spann_update.clone()),
+                embedding_function: None,
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update spann config: {:?}",
+            result.err()
+        );
+
+        // Build expected schema: spann schema with updated config
+        let mut expected_schema = spann_schema;
+        expected_schema
+            .apply_update_configuration(&chroma_types::UpdateCollectionConfiguration {
+                hnsw: None,
+                spann: Some(spann_update),
+                embedding_function: None,
+            })
+            .expect("apply_update_configuration should succeed");
+
+        // Verify all fields exhaustively
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        verify_new_collection(
+            &collection,
+            collection_id,
+            &name,
+            Some(128),
+            &tenant_id,
+            &db_name,
+            None,
+            Some(&expected_schema),
+        );
     }
 }

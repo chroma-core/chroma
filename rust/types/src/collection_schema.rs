@@ -23,7 +23,8 @@ use crate::{
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
-    InternalUpdateCollectionConfiguration, KnnIndex, Segment, CHROMA_KEY,
+    InternalUpdateCollectionConfiguration, KnnIndex, Segment, UpdateCollectionConfiguration,
+    CHROMA_KEY,
 };
 
 impl ChromaError for SchemaError {
@@ -37,6 +38,7 @@ impl ChromaError for SchemaError {
             // which happens internally during compaction, not from user input
             SchemaError::DefaultsMismatch => ErrorCodes::Internal,
             SchemaError::ConfigurationConflict { .. } => ErrorCodes::Internal,
+            SchemaError::InvalidConfigurationUpdate { .. } => ErrorCodes::Internal,
 
             // User/External errors (400)
             // These indicate user-provided invalid input
@@ -67,6 +69,8 @@ pub enum SchemaError {
     InvalidSpannConfig(validator::ValidationErrors),
     #[error("Invalid schema input: {reason}")]
     InvalidUserInput { reason: String },
+    #[error("Invalid configuration update: {message}")]
+    InvalidConfigurationUpdate { message: String },
     #[error(transparent)]
     Builder(#[from] SchemaBuilderError),
 }
@@ -256,6 +260,87 @@ impl Schema {
                 embedding_vector_index.config.embedding_function = Some(embedding_function.clone());
             }
         }
+    }
+
+    /// Apply updates from UpdateCollectionConfiguration.
+    ///
+    /// Only supports updating:
+    /// - `spann`: SPANN configuration parameters (search_nprobe, ef_search)
+    /// - `embedding_function`: Embedding function configuration
+    ///
+    /// Returns an error if:
+    /// - `hnsw` is provided (HNSW updates are not supported)
+    /// - Schema is missing expected structure (defaults/embedding vector index or spann config)
+    pub fn apply_update_configuration(
+        &mut self,
+        config: &UpdateCollectionConfiguration,
+    ) -> Result<(), SchemaError> {
+        // HNSW updates are not allowed
+        if config.hnsw.is_some() {
+            return Err(SchemaError::InvalidConfigurationUpdate {
+                message: "HNSW configuration updates are not supported".to_string(),
+            });
+        }
+
+        // Apply spann updates
+        if let Some(ref spann_update) = config.spann {
+            let defaults_spann = self
+                .defaults_vector_index_mut()
+                .ok_or_else(|| SchemaError::InvalidConfigurationUpdate {
+                    message: "schema missing defaults.float_list.vector_index".to_string(),
+                })?
+                .config
+                .spann
+                .as_mut()
+                .ok_or_else(|| SchemaError::InvalidConfigurationUpdate {
+                    message: "schema missing defaults spann config".to_string(),
+                })?;
+
+            if let Some(search_nprobe) = spann_update.search_nprobe {
+                defaults_spann.search_nprobe = Some(search_nprobe);
+            }
+            if let Some(ef_search) = spann_update.ef_search {
+                defaults_spann.ef_search = Some(ef_search);
+            }
+
+            let embedding_spann = self
+                .embedding_vector_index_mut()
+                .ok_or_else(|| SchemaError::InvalidConfigurationUpdate {
+                    message: "schema missing keys[#embedding].float_list.vector_index".to_string(),
+                })?
+                .config
+                .spann
+                .as_mut()
+                .ok_or_else(|| SchemaError::InvalidConfigurationUpdate {
+                    message: "schema missing #embedding spann config".to_string(),
+                })?;
+
+            if let Some(search_nprobe) = spann_update.search_nprobe {
+                embedding_spann.search_nprobe = Some(search_nprobe);
+            }
+            if let Some(ef_search) = spann_update.ef_search {
+                embedding_spann.ef_search = Some(ef_search);
+            }
+        }
+
+        // Apply embedding function updates
+        if let Some(ref ef) = config.embedding_function {
+            self.defaults_vector_index_mut()
+                .ok_or_else(|| SchemaError::InvalidConfigurationUpdate {
+                    message: "schema missing defaults.float_list.vector_index".to_string(),
+                })?
+                .config
+                .embedding_function = Some(ef.clone());
+
+            self.embedding_vector_index_mut()
+                .ok_or_else(|| SchemaError::InvalidConfigurationUpdate {
+                    message: "schema missing keys[#embedding].float_list.vector_index".to_string(),
+                })?
+                .config
+                .embedding_function = Some(ef.clone());
+        }
+
+        Ok(())
     }
 
     fn defaults_vector_index_mut(&mut self) -> Option<&mut VectorIndexType> {

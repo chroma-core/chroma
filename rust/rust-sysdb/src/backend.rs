@@ -68,6 +68,7 @@ use crate::types::{
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_types::chroma_proto::Database;
 
@@ -263,6 +264,20 @@ impl Backend {
     ) -> Result<GetCollectionWithSegmentsResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_collection_with_segments(req).await,
+        }
+    }
+
+    /// Update a collection.
+    ///
+    /// Supports updating name, dimension, metadata, and configuration.
+    /// Returns `SysDbError::NotFound` if the collection does not exist.
+    /// Returns `SysDbError::AlreadyExists` if the new name conflicts with an existing collection.
+    pub async fn update_collection(
+        &self,
+        req: UpdateCollectionRequest,
+    ) -> Result<UpdateCollectionResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.update_collection(req).await,
         }
     }
 

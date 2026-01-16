@@ -351,9 +351,21 @@ impl SysDb for SysdbService {
 
     async fn update_collection(
         &self,
-        _request: Request<UpdateCollectionRequest>,
+        request: Request<UpdateCollectionRequest>,
     ) -> Result<Response<UpdateCollectionResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        let internal_req: internal::UpdateCollectionRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let proto_resp: UpdateCollectionResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn fork_collection(
