@@ -21,9 +21,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Find the PR associated with this merge commit
-          PR_NUMBER=$(gh pr list --repo ${{ github.repository }} --state merged --search "${{ github.sha }}" --json number -q '.[0].number')
+          PR_NUMBER=$(gh api "/repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].number')
 
-          if [ -z "$PR_NUMBER" ]; then
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
             echo "No PR found for this commit"
             echo "release-python=false" >> $GITHUB_OUTPUT
             echo "release-js=false" >> $GITHUB_OUTPUT
@@ -247,6 +247,38 @@ jobs:
     with:
       publish_to_crates_io: ${{ needs.detect-release.outputs.release-rust == 'true' || needs.detect-release.outputs.release-all == 'true' }}
 
+  release-docs:
+    name: Deploy docs to Vercel
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - detect-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for docs changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.docs == 'true'
+        with:
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install vercel
+        if: steps.changes.outputs.docs == 'true'
+        run: npm install -g vercel
+      - name: Deploy
+        if: steps.changes.outputs.docs == 'true'
+        run: vercel deploy --token ${{ secrets.VERCEL_TOKEN }} ${{ (needs.detect-release.outputs.release-python == 'true' || needs.detect-release.outputs.release-js == 'true' || needs.detect-release.outputs.release-rust == 'true' || needs.detect-release.outputs.release-all == 'true') && '--prod' || '' }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+
   notify-slack-on-failure:
     name: Notify Slack on Release Failure
     if: failure()
@@ -259,6 +291,7 @@ jobs:
       - release-js-bindings
       - release-js
       - release-rust
+      - release-docs
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack
