@@ -1,4 +1,4 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
@@ -58,7 +58,6 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     shutdown_grace_period: Duration,
-    bm25_tenant: HashSet<String>,
 }
 
 #[async_trait]
@@ -104,7 +103,6 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
-            bm25_tenant: config.bm25_tenant.clone(),
         })
     }
 }
@@ -571,13 +569,11 @@ impl WorkerServer {
                     }
                     QueryVector::Sparse(query) => {
                         // Use Sparse KNN orchestrator
-                        let tenant = collection_and_segments_clone.collection.tenant.clone();
                         let sparse_orchestrator = SparseKnnOrchestrator::new(
                             blockfile_provider,
                             dispatcher,
                             1000,
                             collection_and_segments_clone,
-                            self.bm25_tenant.contains(&tenant),
                             knn_filter_output_clone,
                             query,
                             knn_query.key.to_string(),
@@ -747,7 +743,6 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             shutdown_grace_period: Duration::from_secs(1),
-            bm25_tenant: HashSet::new(),
         };
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
