@@ -1,4 +1,11 @@
+---
+id: query-and-get
+name: Query and Get
+---
+
 # Query and Get Data from Chroma Collections
+
+**New Search API Available**: Chroma Cloud users can now use the powerful [Search API](/cloud/search-api/overview) for advanced hybrid search capabilities with better filtering, ranking, and batch operations.
 
 ### python
 
@@ -40,9 +47,10 @@ collection.query(
 ```
 
 You can also retrieve records from a collection by using the `.get` method. It supports the following arguments:
-* `ids` - get records with IDs from this list. If not provided, the first 100 records will be retrieved, in the order of their addition to the collection.
-* `limit` - the number of records to retrieve. The default value is 100.
-* `offset` - The offset to start returning results from. Useful for paging results with limit. The default value is 0.
+
+- `ids` - get records with IDs from this list. If not provided, the first 100 records will be retrieved, in the order of their addition to the collection.
+- `limit` - the number of records to retrieve. The default value is 100.
+- `offset` - The offset to start returning results from. Useful for paging results with limit. The default value is 0.
 
 ```python
 collection.get(ids=["id1", "ids2", ...])
@@ -107,8 +115,8 @@ You can query a Chroma collection to run a similarity search using the `.query` 
 
 ```typescript
 await collection.query({
-    queryTexts: ["thus spake zarathustra", "the oracle speaks"]
-})
+  queryTexts: ["thus spake zarathustra", "the oracle speaks"],
+});
 ```
 
 Chroma will use the collection's [embedding function](../embeddings/embedding-functions) to embed your text queries, and use the output to run a vector similarity search against your collection.
@@ -141,9 +149,10 @@ await collection.query({
 ```
 
 You can also retrieve records from a collection by using the `.get` method. It supports the following arguments:
-* `ids` - get records with IDs from this list. If not provided, the first 100 records will be retrieved, in the order of their addition to the collection.
-* `limit` - the number of records to retrieve. The default value is 100.
-* `offset` - The offset to start returning results from. Useful for paging results with limit. The default value is 0.
+
+- `ids` - get records with IDs from this list. If not provided, the first 100 records will be retrieved, in the order of their addition to the collection.
+- `limit` - the number of records to retrieve. The default value is 100.
+- `offset` - The offset to start returning results from. Useful for paging results with limit. The default value is 0.
 
 ```typescript
 await collection.get({ids: ["id1", "ids2", ...]})
@@ -166,27 +175,35 @@ Chroma returns `.query` and `.get` results in columnar form. You will get a resu
 
 ```typescript
 class QueryResult {
-    public readonly distances: (number | null)[][];
-    public readonly documents: (string | null)[][];
-    public readonly embeddings: (number[] | null)[][];
-    public readonly ids: string[][];
-    public readonly include: Include[];
-    public readonly metadatas: (Record<string, string | number | boolean> | null)[][];
+  public readonly distances: (number | null)[][];
+  public readonly documents: (string | null)[][];
+  public readonly embeddings: (number[] | null)[][];
+  public readonly ids: string[][];
+  public readonly include: Include[];
+  public readonly metadatas: (Record<
+    string,
+    string | number | boolean
+  > | null)[][];
 }
 
 class GetResult {
-    public readonly documents: (string | null)[];
-    public readonly embeddings: number[][];
-    public readonly ids: string[];
-    public readonly include: Include[];
-    public readonly metadatas: (Record<string, string | number | boolean> | null)[];
+  public readonly documents: (string | null)[];
+  public readonly embeddings: number[][];
+  public readonly ids: string[];
+  public readonly include: Include[];
+  public readonly metadatas: (Record<
+    string,
+    string | number | boolean
+  > | null)[];
 }
 ```
 
 `.query` results also contain a list of `distances`. These are the distances of each of the results from your input queries. `.query` results are also indexed by each of your input queries. For example, `results.ids[0]` contains the list of records IDs for the results of the first input query.
 
 ```typescript
-const results = await collection.query({ queryTexts: ["first query", "second query"] })
+const results = await collection.query({
+  queryTexts: ["first query", "second query"],
+});
 ```
 
 On `.query` and `.get` results, you can use the `.rows()` method, to get them in row-based format. That is, you will get an array of records, each with its `id`, `document`, `metdata` (etc.) fields.
@@ -222,7 +239,7 @@ await collection.query({ queryTexts: ["my query"] }); // 'ids', 'documents', and
 await collection.get({ include: ["documents"] }); // Only 'ids' and 'documents' are returned
 
 await collection.query({
-    queryTexts: ["my query"],
-    include: ["documents", "metadatas", "embeddings"]
+  queryTexts: ["my query"],
+  include: ["documents", "metadatas", "embeddings"],
 }); // 'ids', 'documents', 'metadatas', and 'embeddings' are returned
 ```

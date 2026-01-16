@@ -1,3 +1,8 @@
+---
+id: migration
+name: Migration
+---
+
 # Migration
 
 Schema and data format changes are a necessary evil of evolving software. We take changes seriously and make them infrequently and only when necessary.
@@ -18,7 +23,7 @@ We will aim to provide:
 
 ## Migration Log
 
-### v1.0.0
+### v1.0.0 - March 1, 2025
 
 In this release, we've rewritten much of Chroma in Rust. Performance has significantly improved across the board.
 
@@ -79,7 +84,7 @@ you should now start it with:
 docker run -p 8000:8000 -v ./chroma:/data chroma-core/chroma
 ```
 
-### v0.6.0
+### v0.6.0 - December 30, 2024
 
 Previously, `list_collections` returned a list of `Collection` objects. This could lead to some errors if any of your collections were created with a custom embedding function (i.e. not the default). So moving forward, `list_collections` will only return collections names.
 
@@ -98,7 +103,7 @@ In the future, we plan on supporting embedding function persistence, so `list_co
 
 Additionally, we have dropped support for Python 3.8
 
-### v0.5.17
+### v0.5.17 - October 30, 2024
 
 We no longer support sending empty lists or dictionaries for metadata filtering, ID filtering, etc. For example,
 
@@ -115,22 +120,25 @@ is not supported. Instead, use:
 collection.get(ids=["id1", "id2", "id3", ...])
 ```
 
-### v0.5.12
+### v0.5.12 - October 8, 2024
 
 The operators `$ne` (not equal) and `$nin` (not in) in `where` clauses have been updated:
-* Previously: They only matched records that had the specified key.
-* Now: They also match records that don't have the specified key at all.
+
+- Previously: They only matched records that had the specified key.
+- Now: They also match records that don't have the specified key at all.
 
 In other words, `$ne` and `$nin` now match the complement set of records (the exact opposite) that `$eq` (equals) and `$in` (in) would match, respectively.
 
 The `$not_contains` operator in the `where_document` clause has also been updated:
-* Previously: It only matched records that had a document field.
-* Now: It also matches records that don't have a document field at all.
+
+- Previously: It only matched records that had a document field.
+- Now: It also matches records that don't have a document field at all.
 
 In other words, `$not_contains` now matches the exact opposite set of records that `$contains` would match.
 
 `RateLimitingProvider` is now deprecated and replaced by `RateLimitEnforcer`. This new interface allows you to wrap server calls with rate limiting logic. The default `SimpleRateLimitEnforcer` implementation allows all requests, but you can create custom implementations for more advanced rate limiting strategies.
-### v0.5.11
+
+### v0.5.11 - September 26, 2024
 
 The results returned by `collection.get()` is now ordered by internal ids. Whereas previously, the results were ordered by user provided ids, although this behavior was not explicitly documented. We would like to make the change because using user provided ids may not be ideal for performance in hosted Chroma, and we hope to propagate the change to local Chroma for consistency of behavior. In general, newer documents in Chroma has larger internal ids.
 
@@ -140,7 +148,7 @@ We have also modified the behavior of `client.get_or_create`. Previously, if a c
 
 Finally, the embeddings returned from `collection.get()`, `collection.query()`, and `collection.peek()` are now represented as 2-dimensional NumPy arrays instead of Python lists. When adding embeddings, you can still use either a Python list or a NumPy array. If your request returns multiple embeddings, the result will be a Python list containing 2-dimensional NumPy arrays. This change is part of our effort to enhance performance in Local Chroma by using NumPy arrays for internal representation of embeddings.
 
-### v0.5.6
+### v0.5.6 - September 16, 2024
 
 Chroma internally uses a write-ahead log. In all versions prior to v0.5.6, this log was never pruned. This resulted in the data directory being much larger than it needed to be, as well as the directory size not decreasing by the expected amount after deleting a collection.
 
@@ -148,7 +156,7 @@ In v0.5.6 the write-ahead log is pruned automatically. However, this is not enab
 
 This does not need to be run regularly and does not need to be run on new databases created with v0.5.6 or later.
 
-### v0.5.1
+### v0.5.1 - June 7, 2024
 
 On the Python client, the `max_batch_size` property was removed. It wasn't previously documented, but if you were reading it, you should now use `get_max_batch_size()`.
 
@@ -268,22 +276,22 @@ CHROMA_AUTH_TOKEN_TRANSPORT_HEADER="AUTHORIZATION"
 #### Reference of changed configuration values
 
 - Overall config
-    - `chroma_client_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
-    - `chroma_server_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
+  - `chroma_client_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
+  - `chroma_server_auth_token_transport_header`: renamed to `chroma_auth_token_transport_header`.
 - Client config
-    - `chroma_client_auth_credentials_provider`: deleted. Functionality is now in `chroma_client_auth_provider`.
-    - `chroma_client_auth_protocol_adapter`: deleted. Functionality is now in `chroma_client_auth_provider`.
-    - `chroma_client_auth_credentials_file`: deleted. Functionality is now in `chroma_client_auth_credentials`.
-    - These changes also apply to the Typescript client.
+  - `chroma_client_auth_credentials_provider`: deleted. Functionality is now in `chroma_client_auth_provider`.
+  - `chroma_client_auth_protocol_adapter`: deleted. Functionality is now in `chroma_client_auth_provider`.
+  - `chroma_client_auth_credentials_file`: deleted. Functionality is now in `chroma_client_auth_credentials`.
+  - These changes also apply to the Typescript client.
 - Server authn
-    - `chroma_server_auth_provider`: Renamed to `chroma_server_authn_provider`.
-    - `chroma_server_auth_configuration_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
-    - `chroma_server_auth_credentials_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
-    - `chroma_server_auth_credentials_file`: renamed to `chroma_server_authn_credentials_file`.
-    - `chroma_server_auth_credentials`: renamed to `chroma_server_authn_credentials`.
-    - `chroma_server_auth_configuration_file`: renamed to `chroma_server_authn_configuration_file`.
+  - `chroma_server_auth_provider`: Renamed to `chroma_server_authn_provider`.
+  - `chroma_server_auth_configuration_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
+  - `chroma_server_auth_credentials_provider`: deleted. Functionality is now in `chroma_server_authn_provider`.
+  - `chroma_server_auth_credentials_file`: renamed to `chroma_server_authn_credentials_file`.
+  - `chroma_server_auth_credentials`: renamed to `chroma_server_authn_credentials`.
+  - `chroma_server_auth_configuration_file`: renamed to `chroma_server_authn_configuration_file`.
 - Server authz
-    - `chroma_server_authz_ignore_paths`: deleted. Functionality is now in `chroma_server_auth_ignore_paths`.
+  - `chroma_server_authz_ignore_paths`: deleted. Functionality is now in `chroma_server_auth_ignore_paths`.
 
 To see the full changes, you can read the [PR](https://github.com/chroma-core/chroma/pull/1970/files) or reach out to the Chroma team on [Discord](https://discord.gg/MMeYNTmh3x).
 

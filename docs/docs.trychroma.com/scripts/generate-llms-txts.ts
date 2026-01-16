@@ -62,7 +62,7 @@ const generateLLMsTxt = (pages: PageInfo[]) => {
   Object.entries(pagesBySection).forEach(([section, pages]) => {
     const pagesList = pages.map(
       (page) =>
-        `- [${page.title}](https://docs.trychroma.com${page.path}): ${page.description}`,
+        `- [${page.title}](https://docs.trychroma.com${page.path.replace(".md", "")}): ${page.description}`,
     );
     const sectionContent = `# ${toTitle(section)}\n\n${pagesList.join("\n")}\n\n`;
     fs.appendFileSync(LLMS_FILE, sectionContent, "utf-8");
@@ -128,7 +128,7 @@ const main = async () => {
   const docsContent = { fullContent: "", pages: [] };
   await walk(CONTENT_DIRECTORY, docsContent);
 
-  const llmsFullPath = path.join(PUBLIC_DIRECTORY, "llms-full.text");
+  const llmsFullPath = path.join(PUBLIC_DIRECTORY, "llms-full.txt");
   fs.writeFileSync(llmsFullPath, docsContent.fullContent, "utf-8");
 
   generateLLMsTxt(docsContent.pages);

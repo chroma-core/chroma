@@ -1,8 +1,17 @@
+---
+id: getting-started
+name: Getting Started
+---
+
 # Getting Started
 
 Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
 
-For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+### python
+
+### typescript
+
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
 
 ### 1. Install
 
@@ -125,11 +134,11 @@ collection.add(
 
 ```typescript
 await collection.add({
-    ids: ["id1", "id2"],
-    documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges",
-    ]
+  ids: ["id1", "id2"],
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ],
 });
 ```
 
@@ -151,8 +160,8 @@ print(results)
 
 ```typescript
 const results = await collection.query({
-    queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
-    nResults: 2, // how many results to return
+  queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
+  nResults: 2, // how many results to return
 });
 
 console.log(results);
@@ -240,30 +249,41 @@ const client = new ChromaClient();
 
 // switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
 const collection = await client.getOrCreateCollection({
-    name: "my_collection",
+  name: "my_collection",
 });
 
 // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
 await collection.upsert({
-    documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges",
-    ],
-    ids: ["id1", "id2"],
+  documents: [
+    "This is a document about pineapple",
+    "This is a document about oranges",
+  ],
+  ids: ["id1", "id2"],
 });
 
 const results = await collection.query({
-    queryTexts: "This is a query document about florida", // Chroma will embed this for you
-    nResults: 2, // how many results to return
+  queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
+  nResults: 2, // how many results to return
 });
 
 console.log(results);
 ```
 
+### python
+
 ## Next steps
 
 In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](../run-chroma/persistent-client) or run Chroma in [client-server mode](../run-chroma/client-server) if you need data persistence.
 
+- Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+### typescript
+
+## Next steps
+
+- We offer [first class support](/docs/embeddings/embedding-functions) for various embedding providers via our embedding function interface. Each embedding function ships in its own npm package.
 - Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
 - Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates

@@ -1,3 +1,8 @@
+---
+id: cli-profile
+name: Profile Management
+---
+
 # Profile Management
 
 A **profile** in the Chroma CLI persists the credentials (API key and tenant ID) for authenticating with Chroma Cloud.

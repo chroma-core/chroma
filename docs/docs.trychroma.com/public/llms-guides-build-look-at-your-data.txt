@@ -1,0 +1,291 @@
+# Look at Your Data
+
+Before building our RAG pipelines and inserting data into Chroma collections, it is worth asking ourselves the following questions:
+
+* What types of searches do we want to support? (semantic, regex, keyword, etc.)
+* What embedding models should we use for semantic and keyword searches?
+* Should chunks live in one Chroma collection, or should we use different collections for different chunk types?
+* What are the meaningful units of data we want to store as records in our Chroma collections?
+* What metadata fields can we leverage when querying?
+
+The structure of our collections, the granularity of our chunks, and the metadata we capture - all directly impact retrieval quality—and by extension, the quality of the LLM's responses in our AI application.
+
+## Search Modalities
+
+Chroma supports various search techniques that are useful for different use cases.
+
+**Dense search** (semantic) uses embeddings to find records that are semantically similar to a query. It excels at matching meaning and intent — a query like "how do I return a product" can surface relevant chunks even if they never use the word "return." The weakness? Dense search can struggle with exact terms: product SKUs, part numbers, legal case citations, or domain-specific jargon that didn't appear often in the embedding model's training data.
+
+All Chroma collections enable semantic search by default. You can specify the embedding function your collection will use to embed your data when creating a collection:
+
+### python
+
+```python
+import chromadb
+from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+
+client = chromadb.CloudClient()
+
+collection = client.create_collection(
+    name="my-collection",
+    embedding_function=OpenAIEmbeddingFunction(
+        api_key="YOUR_OPENAI_API_KEY",
+        model="text-embedding-3-small"
+    )
+)
+```
+
+### typescript
+
+```typescript
+import { CloudClient } from "chromadb";
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+const client = new CloudClient();
+
+const collection = await client.createCollection({
+    name: "my-collection",
+    embeddingFunction: new OpenAIEmbeddingFunction({
+        apiKey: "YOUR_OPENAI_API_KEY",
+        model: "text-embedding-3-small"
+    })
+});
+```
+
+**Lexical search** (keyword) matches on exact tokens. It shines when you need precision: finding a specific product ID like `SKU-4892-X`, a drug name like `omeprazole`, a legal citation like `Smith v. Jones (2019)`, or a model number in a technical manual. Dense search might miss these entirely or return semantically related but wrong results. The tradeoff is that lexical search can't bridge synonyms or paraphrases — searching "cancel" won't find chunks that only mention "terminate."
+
+To enable lexical search on your collection, you can enable a sparse vector index on your collection's schema with a sparse embedding function:
+
+### python
+
+```python
+import chromadb
+from chromadb import Schema, SparseVectorIndexConfig, K
+from chromadb.utils.embedding_functions import ChromaCloudSpladeEmbeddingFunction
+
+client = chromadb.CloudClient()
+
+schema = Schema()
+
+schema.create_index(
+    config=SparseVectorIndexConfig(
+        source_key=K.DOCUMENT,
+        embedding_function=ChromaCloudSpladeEmbeddingFunction()
+    ),
+    key="sparse_embedding"
+)
+
+collection = client.create_collection(
+    name="my-collection",
+    schema=schema
+)
+```
+
+### typescript
+
+```typescript
+import { CloudClient, Schema, SparseVectorIndexConfig, K } from 'chromadb';
+import { ChromaCloudSpladeEmbeddingFunction } from '@chroma-core/chroma-cloud-splade';
+
+const client = new CloudClient();
+
+const schema = new Schema();
+
+schema.createIndex(
+    new SparseVectorIndexConfig({
+        sourceKey: K.DOCUMENT,
+        embeddingFunction: new ChromaCloudSpladeEmbeddingFunction()
+    }),
+    "sparse_embedding"
+);
+
+const collection = await client.createCollection({
+    name: "my-collection",
+    schema
+});
+```
+
+**Hybrid search** combines both: run dense and lexical searches in parallel, then merge the results. This gives you semantic understanding and precise term matching. For many retrieval tasks — especially over technical or specialized content — hybrid outperforms either approach alone.
+
+Chroma's [Search API](../../cloud/search-api/overview) allows you to define how you want to combine dense and sparse (lexical) results. For example, using [RRF](../../cloud/search-api/hybrid-search#understanding-rrf):
+
+### python
+
+```python
+from chromadb import Search, K, Knn, Rrf
+
+# Dense semantic embeddings
+dense_rank = Knn(
+    query="machine learning research",  # Text query for dense embeddings
+    key="#embedding",          # Default embedding field
+    return_rank=True,
+    limit=200                  # Consider top 200 candidates
+)
+
+# Sparse keyword embeddings
+sparse_rank = Knn(
+    query="machine learning research",  # Text query for sparse embeddings
+    key="sparse_embedding",    # Metadata field for sparse vectors
+    return_rank=True,
+    limit=200
+)
+
+# Combine with RRF
+hybrid_rank = Rrf(
+    ranks=[dense_rank, sparse_rank],
+    weights=[0.7, 0.3],       # 70% semantic, 30% keyword
+    k=60
+)
+
+# Use in search
+search = (Search()
+    .where(K("status") == "published")  # Optional filtering
+    .rank(hybrid_rank)
+    .limit(20)
+    .select(K.DOCUMENT, K.SCORE, "title")
+)
+
+results = collection.search(search)
+```
+
+### typescript
+
+```typescript
+import { Search, K, Knn, Rrf } from 'chromadb';
+
+// Dense semantic embeddings
+const denseRank = Knn({
+  query: "machine learning research",  // Text query for dense embeddings
+  key: "#embedding",         // Default embedding field
+  returnRank: true,
+  limit: 200                 // Consider top 200 candidates
+});
+
+// Sparse keyword embeddings
+const sparseRank = Knn({
+  query: "machine learning research",  // Text query for sparse embeddings
+  key: "sparse_embedding",   // Metadata field for sparse vectors
+  returnRank: true,
+  limit: 200
+});
+
+// Combine with RRF
+const hybridRank = Rrf({
+  ranks: [denseRank, sparseRank],
+  weights: [0.7, 0.3],       // 70% semantic, 30% keyword
+  k: 60
+});
+
+// Use in search
+const search = new Search()
+  .where(K("status").eq("published"))  // Optional filtering
+  .rank(hybridRank)
+  .limit(20)
+  .select(K.DOCUMENT, K.SCORE, "title");
+
+const results = await collection.search(search);
+```
+
+Chroma also supports **text filtering** on top of your searches via the `where_document` parameter. You can filter results to only include chunks that contain an exact string or match a regex pattern. This is useful for enforcing structural constraints—like ensuring results contain a specific identifier—or for pattern matching on things like email addresses, dates, or phone numbers.
+
+## Embedding Models
+
+**Dense embedding models** map text to vectors where semantic similarity is captured by vector distance.
+
+Chroma has first-class support for many embedding models. The tradeoffs include cost (API-based vs. local), latency, embedding dimensions (which affect storage and search speed), and quality on your specific domain. General-purpose models work well for most text, but specialized models trained on code, legal documents, or medical text can outperform them on domain-specific tasks. Larger models typically produce better embeddings but cost more and run slower—so the right choice depends on your quality requirements and constraints.
+* If you're building a customer support bot over general documentation, a model like `text-embedding-3-small` offers a good balance of quality and cost. 
+* For a codebase search tool, code-specific models will better capture the semantics of function names, syntax, and programming patterns. Chroma works with code-specific models from [OpenAI](../../integrations/embedding-models/openai), [Cohere](../../integrations/embedding-models/cohere), [Mistral](../../integrations/embedding-models/mistral), [Morph](../../integrations/embedding-models/morph), and more. 
+* If you need to run entirely locally for privacy or cost reasons, smaller open-source models like `all-MiniLM-L6-v2` are a practical choice, though with some quality tradeoff.
+
+**Sparse embedding models** power lexical search. For example, BM25 counts the frequency of tokens in a document and produces a vector representing the counts for each token. When we issue a lexical search query, we will get back the documents whose sparse vectors have a higher count for the tokens in our query.
+
+SPLADE is a learned alternative that expands terms—so a document about "dogs" might also get weight on "puppy" and "canine," helping bridge the synonym gap that pure lexical search misses.
+* If your data contains lots of exact identifiers that must match precisely — SKUs, legal citations, chemical formulas — BM25 is straightforward and effective. 
+* If you want lexical search that's more forgiving of vocabulary mismatches, SPLADE can help.
+
+## Collections in your Chroma Database
+
+A Chroma collection indexes records using a specific embedding model and configuration. Whether your records live in one Chroma collection or many depends on your application's access patterns and data types.
+
+**Use a single collection when**:
+* You are using the same embedding model for all of your data.
+* You want to search across everything at once.
+* You can distinguish between records using metadata filtering.
+
+**Use multiple collections when**:
+* You have different types of data, requiring different embedding models. For example, you have text data and images, which are embedded using different models.
+* You have multi-tenant requirements. In this case, establishing a collection per user or organization helps you avoid filtering overhead at query time.
+
+## Chunking Data
+
+Chunking is the process of breaking source data into smaller, meaningful units (“chunks”) that are embedded and stored as individual records in a Chroma collection. Because embedding models operate on limited context windows and produce a single vector per input, storing entire documents as one record often blurs multiple ideas together and reduces retrieval quality. Chunking allows Chroma to index information at the level users actually search for—paragraphs, sections, functions, or messages—improving both recall and precision. Well-chosen chunks ensure that retrieved results are specific, semantically coherent, and useful on their own, while still allowing larger context to be reconstructed through metadata when needed.
+
+To learn more about chunking best practices, see our [Chunking Guide](./chunking)
+
+Chroma is flexible enough to support nearly any chunking strategy so long as each chunk fits in 16kB.  This is also the best way to work with large documents, regardless of performance concerns.
+
+When adding chunks to your collection, we recommend using batch operations. Batching increases the number of items sent per operation, acting as a throughput multiplier.  Going
+from one vector to two will generally double the number of vectors per second with diminishing
+returns as the batch size increases.  Chroma Cloud allows ingesting up to 300 vectors per batch.
+
+### python
+
+```python
+# Instead of
+for chunk in chunks:
+    collection.add(
+        ids=[chunk.id],
+        documents=[chunk.document],
+        metadatas=[chunk.metadata]
+    )
+
+# Use batching
+BATCH_SIZE = 300
+for i in range(0, len(chunks), BATCH_SIZE):
+    batch = chunks[i:i + BATCH_SIZE]
+    collection.add(
+        ids=[chunk.id for chunk in batch],
+        documents=[chunk.document for chunk in batch],
+        metadatas=[chunk.metadata for chunk in batch]
+    )
+```
+
+### typescript
+
+```typescript
+// Instead of
+for (const chunk of chunks) {
+    await collection.add({
+        ids: [chunk.id],
+        documents: [chunk.document],
+        metadatas: [chunk.metadata]
+    })
+}
+
+// Use batching
+const BATCH_SIZE = 300;
+for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
+    const batch = chunks.slice(i, i + BATCH_SIZE);
+    await collection.add({
+        ids: batch.map((chunk) => chunk.id),
+        documents: batch.map((chunk) => chunk.document),
+        metadatas: batch.map((chunk) => chunk.metadata)
+    });
+}
+```
+
+Finally, issuing concurrent requests to the same collection will allow for even more throughput.
+Internally, requests are batched to give better performance than would be seen issuing requests individually.
+This batching happens automatically and to greater numbers than the 300 vectors per batch permitted
+by default.  Every Chroma Cloud user can issue up to 10 concurrent requests.
+
+## Metadata
+
+Metadata lets you attach structured information to each chunk, which serves two purposes: filtering at query time and providing context to the LLM.
+
+For filtering, metadata lets you narrow searches without relying on semantic similarity. You might filter by source type (only search FAQs, not legal disclaimers), by date (only recent documents), by author or department, or by access permissions (only return chunks the user is allowed to see). This is often more reliable than hoping the embedding captures these distinctions.
+
+Metadata is also returned with search results, which means you can pass it to the LLM alongside the chunk text.
+Knowing that a chunk came from "Q3 2024 Financial Report, page 12" or "authored by the legal team" helps the LLM interpret the content and cite sources accurately.
+
+When designing your schema, think about what filters you'll need at query time and what context would help the LLM make sense of each chunk.
