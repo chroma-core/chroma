@@ -1506,6 +1506,7 @@ async fn collection_update(
     if let Some(uris) = &payload.uris {
         quota_payload = quota_payload.with_uris(uris);
     }
+    quota_payload = quota_payload.with_collection_uuid(collection_id);
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
