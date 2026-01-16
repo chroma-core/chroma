@@ -939,19 +939,28 @@ impl GrpcSysDb {
         let req = chroma_proto::GetTenantRequest {
             name: tenant_name.clone(),
         };
-        match self.client.get_tenant(req).await {
-            Ok(resp) => {
-                let tenant = resp
-                    .into_inner()
-                    .tenant
-                    .ok_or(GetTenantError::NotFound(tenant_name))?;
-                Ok(GetTenantResponse {
-                    name: tenant.name,
-                    resource_name: tenant.resource_name,
-                })
-            }
-            Err(err) => Err(GetTenantError::Internal(err.into())),
+        let mut clients = vec![self.client.clone()];
+        if let Some(mcmr_client) = self._mcmr_client.clone() {
+            clients.push(mcmr_client);
         }
+
+        let mut tenant_response: Option<GetTenantResponse> = None;
+        for mut client in clients {
+            match client.get_tenant(req.clone()).await {
+                Ok(resp) => {
+                    let tenant = resp
+                        .into_inner()
+                        .tenant
+                        .ok_or(GetTenantError::NotFound(tenant_name.clone()))?;
+                    tenant_response = Some(GetTenantResponse {
+                        name: tenant.name,
+                        resource_name: tenant.resource_name,
+                    })
+                }
+                Err(err) => return Err(GetTenantError::Internal(err.into())),
+            }
+        }
+        tenant_response.ok_or(GetTenantError::NotFound(tenant_name.clone()))
     }
 
     pub(crate) async fn create_database(
@@ -1698,25 +1707,48 @@ impl GrpcSysDb {
         &mut self,
         tenant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
-        let res = self
-            .client
-            .get_last_compaction_time_for_tenant(
-                chroma_proto::GetLastCompactionTimeForTenantRequest {
-                    tenant_id: tenant_ids,
-                },
-            )
-            .await;
-        match res {
-            Ok(res) => {
-                let last_compaction_times = res.into_inner().tenant_last_compaction_time;
-                let last_compaction_times = last_compaction_times
-                    .into_iter()
-                    .map(|proto_tenant| proto_tenant.try_into())
-                    .collect::<Result<Vec<Tenant>, ()>>();
-                Ok(last_compaction_times.unwrap())
-            }
-            Err(e) => Err(GetLastCompactionTimeError::FailedToGetLastCompactionTime(e)),
+        let mut results: HashMap<String, Tenant> = HashMap::new();
+
+        // Try both mcmr_client and normal client
+        let mut clients = vec![&mut self.client];
+        if let Some(ref mut mcmr_client) = self._mcmr_client {
+            clients.push(mcmr_client);
         }
+
+        for client in clients {
+            let res = client
+                .get_last_compaction_time_for_tenant(
+                    chroma_proto::GetLastCompactionTimeForTenantRequest {
+                        tenant_id: tenant_ids.clone(),
+                    },
+                )
+                .await?;
+
+            let tenant_results = res
+                .into_inner()
+                .tenant_last_compaction_time
+                .into_iter()
+                .filter_map(|proto_tenant| proto_tenant.try_into().ok())
+                .collect::<Vec<Tenant>>();
+
+            for new_tenant in tenant_results {
+                let tenant_id = new_tenant.id.clone();
+                let entry = results.entry(tenant_id);
+
+                // Use and_modify + or_insert to handle both new and existing cases
+                entry
+                    .and_modify(|existing_tenant| {
+                        // If tenant already exists, keep the one with the latest compaction time
+                        if new_tenant.last_compaction_time > existing_tenant.last_compaction_time {
+                            *existing_tenant = new_tenant.clone();
+                        }
+                    })
+                    .or_insert(new_tenant);
+            }
+        }
+
+        // Convert HashMap to Vec
+        Ok(results.into_values().collect())
     }
 
     #[allow(clippy::too_many_arguments)]
