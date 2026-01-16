@@ -951,7 +951,10 @@ async fn list_collections(
     };
 
     // TODO: Limit shouldn't be optional here
-    let request = ListCollectionsRequest::try_new(tenant, database, validated_limit, offset)?;
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let request = ListCollectionsRequest::try_new(tenant, database_name, validated_limit, offset)?;
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
@@ -992,7 +995,10 @@ async fn count_collections(
         format!("tenant:{}", tenant).as_str(),
     ])?;
 
-    let request = CountCollectionsRequest::try_new(tenant, database)?;
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let request = CountCollectionsRequest::try_new(tenant, database_name)?;
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
@@ -1060,9 +1066,12 @@ async fn create_collection(
         )?),
     };
 
+    let database_name = DatabaseName::new(database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let request = CreateCollectionRequest::try_new(
         tenant,
-        database,
+        database_name,
         payload.name,
         payload.metadata,
         configuration,
@@ -1110,7 +1119,10 @@ async fn get_collection(
         .await?;
     let _guard =
         server.scorecard_request(&["op:get_collection", format!("tenant:{}", tenant).as_str()])?;
-    let request = GetCollectionRequest::try_new(tenant, database, collection_name)?;
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    let request = GetCollectionRequest::try_new(tenant, database_name, collection_name)?;
     let collection = server.frontend.get_collection(request).await?;
     Ok(Json(collection))
 }

@@ -1226,11 +1226,14 @@ mod tests {
         // Create input collection
         let collection_name = format!("test_statistics_{}", uuid::Uuid::new_v4());
         let collection_id = CollectionUuid::new();
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
 
         sysdb
             .create_collection(
                 test_segments.collection.tenant,
-                test_segments.collection.database,
+                database_name,
                 collection_id,
                 collection_name,
                 vec![

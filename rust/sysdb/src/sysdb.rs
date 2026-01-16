@@ -11,7 +11,7 @@ use chroma_types::{
     chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments, CollectionFlushInfo,
     CollectionFlushInfoConversionError, CollectionMetadataUpdate, CountCollectionsError,
     CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DeleteCollectionError, DeleteDatabaseError,
+    CreateTenantResponse, Database, DatabaseName, DeleteCollectionError, DeleteDatabaseError,
     DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
     GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
@@ -27,7 +27,7 @@ use chroma_types::{
     FinishCreateAttachedFunctionError, FinishDatabaseDeletionError,
     FlushCompactionAndAttachedFunctionResponse, FlushCompactionResponse,
     FlushCompactionResponseConversionError, ForkCollectionError, Schema, SchemaError, Segment,
-    SegmentConversionError, SegmentScope, Tenant,
+    SegmentConversionError, SegmentScope, Tenant, TopologyName,
 };
 use prost_types;
 use std::collections::HashMap;
@@ -144,7 +144,7 @@ impl SysDb {
     pub async fn create_database(
         &mut self,
         database_id: Uuid,
-        database_name: String,
+        database_name: DatabaseName,
         tenant: String,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         match self {
@@ -154,7 +154,7 @@ impl SysDb {
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .create_database(database_id, &database_name, &tenant)
+                    .create_database(database_id, database_name.as_ref(), &tenant)
                     .await
             }
             SysDb::Test(_) => {
@@ -178,12 +178,12 @@ impl SysDb {
 
     pub async fn get_database(
         &mut self,
-        database_name: String,
+        database_name: DatabaseName,
         tenant: String,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         match self {
             SysDb::Grpc(grpc) => grpc.get_database(database_name, tenant).await,
-            SysDb::Sqlite(sqlite) => sqlite.get_database(&database_name, &tenant).await,
+            SysDb::Sqlite(sqlite) => sqlite.get_database(database_name.as_ref(), &tenant).await,
             SysDb::Test(_) => todo!(),
         }
     }
@@ -244,7 +244,7 @@ impl SysDb {
     pub async fn count_collections(
         &mut self,
         tenant: String,
-        database: Option<String>,
+        database: Option<DatabaseName>,
     ) -> Result<usize, CountCollectionsError> {
         // TODO(Sanket): optimize sqlite and test implementation.
         match self {
@@ -285,7 +285,7 @@ impl SysDb {
     pub async fn create_collection(
         &mut self,
         tenant: String,
-        database: String,
+        database: DatabaseName,
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
@@ -315,7 +315,7 @@ impl SysDb {
                 sqlite
                     .create_collection(
                         tenant,
-                        database,
+                        database.as_ref().to_string(),
                         collection_id,
                         name,
                         segments,
@@ -337,7 +337,7 @@ impl SysDb {
                     metadata,
                     dimension,
                     tenant: tenant.clone(),
-                    database: database.clone(),
+                    database: database.as_ref().to_string(),
                     log_position: 0,
                     version: 0,
                     total_records_post_compaction: 0,
@@ -871,28 +871,24 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
 impl GrpcSysDb {
     fn client(
         &self,
-        database_name: &str,
+        database_name: &DatabaseName,
     ) -> Result<
         SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
         ClientResolutionError,
     > {
-        // Extract prefix from database name. For now if it begins with topo then mcmr
-        // client otherwise use single region client. # is the delimiter.
-        // TODO(Sanket): Config for regions and handle prefix accordingly here.
-        // Only extract the beginning of the string up to the first #.
-        let prefix = database_name
-            .split('#')
-            .next()
-            .ok_or(ClientResolutionError::DatabaseNotFound)?;
-        if prefix.starts_with("topo") {
-            if let Some(mcmr_client) = &self._mcmr_client {
-                Ok(mcmr_client.clone())
-            } else {
-                Err(ClientResolutionError::McmrNotSupported)
+        // Route to MCMR client if database has a valid topology prefix (before '+').
+        // TopologyName::new() validates the topology is non-empty and well-formed.
+        // Otherwise use single region client.
+        if let Some(topo_str) = database_name.topology() {
+            if TopologyName::new(topo_str).is_ok() {
+                if let Some(mcmr_client) = &self._mcmr_client {
+                    return Ok(mcmr_client.clone());
+                } else {
+                    return Err(ClientResolutionError::McmrNotSupported);
+                }
             }
-        } else {
-            Ok(self.client.clone())
         }
+        Ok(self.client.clone())
     }
 
     pub async fn create_tenant(
@@ -947,24 +943,23 @@ impl GrpcSysDb {
     pub(crate) async fn create_database(
         &mut self,
         database_id: Uuid,
-        database_name: String,
+        database_name: DatabaseName,
         tenant: String,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         let req = chroma_proto::CreateDatabaseRequest {
             id: database_id.to_string(),
-            name: database_name.clone(),
+            name: database_name.as_ref().to_string(),
             tenant,
         };
-        let res = self
-            .client(database_name.as_str())?
-            .create_database(req)
-            .await;
+        let res = self.client(&database_name)?.create_database(req).await;
         match res {
             Ok(_) => Ok(CreateDatabaseResponse {}),
             Err(e) => {
                 tracing::error!("Failed to create database {:?}", e);
                 let res = match e.code() {
-                    Code::AlreadyExists => CreateDatabaseError::AlreadyExists(database_name),
+                    Code::AlreadyExists => {
+                        CreateDatabaseError::AlreadyExists(database_name.into_string())
+                    }
                     _ => CreateDatabaseError::Internal(e.into()),
                 };
                 Err(res)
@@ -1004,19 +999,19 @@ impl GrpcSysDb {
 
     pub async fn get_database(
         &mut self,
-        database_name: String,
+        database_name: DatabaseName,
         tenant: String,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         let req = chroma_proto::GetDatabaseRequest {
-            name: database_name.clone(),
+            name: database_name.as_ref().to_string(),
             tenant,
         };
-        let res = self.client(database_name.as_str())?.get_database(req).await;
+        let res = self.client(&database_name)?.get_database(req).await;
         match res {
             Ok(res) => {
                 let res = match res.into_inner().database {
                     Some(res) => res,
-                    None => return Err(GetDatabaseError::NotFound(database_name)),
+                    None => return Err(GetDatabaseError::NotFound(database_name.into_string())),
                 };
                 let db_id = match Uuid::parse_str(res.id.as_str()) {
                     Ok(uuid) => uuid,
@@ -1031,7 +1026,7 @@ impl GrpcSysDb {
             Err(e) => {
                 tracing::error!("Failed to get database {:?}", e);
                 let res = match e.code() {
-                    Code::NotFound => GetDatabaseError::NotFound(database_name),
+                    Code::NotFound => GetDatabaseError::NotFound(database_name.into_string()),
                     _ => GetDatabaseError::Internal(e.into()),
                 };
                 Err(res)
@@ -1103,7 +1098,7 @@ impl GrpcSysDb {
                 limit: limit.map(|l| l as i32),
                 offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),
-                database: database.unwrap_or("".to_string()),
+                database: database.map(|d| d.into_string()).unwrap_or("".to_string()),
             })
             .await;
 
@@ -1163,9 +1158,12 @@ impl GrpcSysDb {
     async fn count_collections(
         &mut self,
         tenant: String,
-        database: Option<String>,
+        database: Option<DatabaseName>,
     ) -> Result<usize, CountCollectionsError> {
-        let request = chroma_proto::CountCollectionsRequest { tenant, database };
+        let request = chroma_proto::CountCollectionsRequest {
+            tenant,
+            database: database.map(|d| d.into_string()),
+        };
         let res = self.client.count_collections(request).await;
         match res {
             Ok(res) => Ok(res.into_inner().count as usize),
@@ -1194,7 +1192,7 @@ impl GrpcSysDb {
     async fn create_collection(
         &mut self,
         tenant: String,
-        database: String,
+        database: DatabaseName,
         collection_id: CollectionUuid,
         name: String,
         segments: Vec<Segment>,
@@ -1209,12 +1207,14 @@ impl GrpcSysDb {
                 .map_err(CreateCollectionError::Configuration)?,
             None => "{}".to_string(),
         };
-        let res = self
-            .client
+        let mut client = self
+            .client(&database)
+            .map_err(|e| CreateCollectionError::Internal(e.boxed()))?;
+        let res = client
             .create_collection(chroma_proto::CreateCollectionRequest {
                 id: collection_id.0.to_string(),
                 tenant,
-                database,
+                database: database.into_string(),
                 name: name.clone(),
                 segments: segments
                     .into_iter()

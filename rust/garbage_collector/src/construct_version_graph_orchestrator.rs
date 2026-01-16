@@ -650,6 +650,8 @@ mod tests {
         let collection_id_c = CollectionUuid::new();
         let collection_id_d = CollectionUuid::new();
 
+        let database_name = chroma_types::DatabaseName::new("test_database")
+            .expect("database name should be valid");
         for collection_id in [
             collection_id_a,
             collection_id_b,
@@ -659,7 +661,7 @@ mod tests {
             sysdb
                 .create_collection(
                     "test_tenant".to_string(),
-                    "test_database".to_string(),
+                    database_name.clone(),
                     collection_id,
                     format!("test_collection_{}", collection_id),
                     vec![],

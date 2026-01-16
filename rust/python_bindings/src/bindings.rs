@@ -232,7 +232,9 @@ impl Bindings {
 
     ////////////////////////////// Base API //////////////////////////////
     fn count_collections(&self, tenant: String, database: String) -> ChromaPyResult<u32> {
-        let request = CountCollectionsRequest::try_new(tenant, database)?;
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
+        let request = CountCollectionsRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
         let count = self
             .runtime
@@ -248,8 +250,10 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<Vec<Collection>> {
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request =
-            ListCollectionsRequest::try_new(tenant, database, limit, offset.unwrap_or(0))?;
+            ListCollectionsRequest::try_new(tenant, database_name, limit, offset.unwrap_or(0))?;
         let mut frontend = self.frontend.clone();
         let collections = self
             .runtime
@@ -305,9 +309,11 @@ impl Bindings {
             None => None,
         };
 
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = CreateCollectionRequest::try_new(
             tenant,
-            database,
+            database_name,
             name,
             metadata,
             configuration,
@@ -329,7 +335,9 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<Collection> {
-        let request = GetCollectionRequest::try_new(tenant, database, name)?;
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
+        let request = GetCollectionRequest::try_new(tenant, database_name, name)?;
         let mut frontend = self.frontend.clone();
         let collection = self
             .runtime
