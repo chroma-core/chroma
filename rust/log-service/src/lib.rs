@@ -4867,6 +4867,7 @@ mod tests {
         );
     }
 
+    #[test]
     fn test_k8s_mcmr_integration_rust_log_service_rollup_snapshot_after_gc() {
         let runtime = Runtime::new().unwrap();
         // NOTE: Somehow it overflow the stack under default stack limit
