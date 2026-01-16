@@ -9,7 +9,7 @@ If you want to release changes that affect only a client, choose the release pat
 In the root directory of the Chroma repo, run 
 
 ```shell
-uv run release.py
+uv run bin/release.py
 ```
 
 This script will ask you what release path you want to take (either client, or the CLI), and input new versions for the files necessary for a new release.
