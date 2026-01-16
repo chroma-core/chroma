@@ -102,66 +102,66 @@ impl Default for RootConfig {
 /// The primary config for the query service.
 #[derive(Debug)]
 pub struct QueryServiceConfig {
-    // The service name to be used for OpenTelemetry.
+    /// The service name to be used for OpenTelemetry.
     #[serde(default = "QueryServiceConfig::default_service_name")]
     pub service_name: String,
 
-    // The OpenTelemetry endpoint to send traces to.
+    /// The OpenTelemetry endpoint to send traces to.
     #[serde(default = "QueryServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
 
-    // Additional RUST_LOG style filters to apply for tracing.
+    /// Additional RUST_LOG style filters to apply for tracing.
     #[serde(default = "QueryServiceConfig::default_otel_filters")]
     pub otel_filters: Vec<OtelFilter>,
 
-    // The port to listen on for gRPC requests.
+    /// The port to listen on for gRPC requests.
     #[serde(default = "QueryServiceConfig::default_my_port")]
     pub my_port: u16,
 
-    // The configuration for connecting to the chroma metadata (sysdb) service.
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
     #[serde(default)]
     pub sysdb: SysDbConfig,
 
-    // The configuration for connecting to the chroma multi-cloud / multi-region metadata (sysdb) service.
+    /// The configuration for connecting to the chroma multi-cloud / multi-region metadata (sysdb) service.
     #[serde(default)]
     pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
 
-    // The configuration for connecting to the chroma data storage (S3, etc.) service.
+    /// The configuration for connecting to the chroma data storage (S3, etc.) service.
     #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
 
-    // The configuration for connecting to the chroma WAL (log) service.
+    /// The configuration for connecting to the chroma WAL (log) service.
     #[serde(default)]
     pub log: chroma_log::config::LogConfig,
 
-    // The configuration for the dispatcher (task distribution engine).
+    /// The configuration for the dispatcher (task distribution engine).
     #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
 
-    // The configuration for managing blockfiles within the query service.
-    // Blocks are the underlying data structure for storing collection data in chroma.
+    /// The configuration for managing blockfiles within the query service.
+    /// Blocks are the underlying data structure for storing collection data in chroma.
     #[serde(default)]
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
 
-    // The configuration for managing HNSW indices within the query service.
-    // HNSW is a graph-based index that is used for approximate nearest neighbor search.
+    /// The configuration for managing HNSW indices within the query service.
+    /// HNSW is a graph-based index that is used for approximate nearest neighbor search.
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
 
-    // The number of log entries to fetch in a single request batch.
+    /// The number of log entries to fetch in a single request batch.
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
 
-    // The configuration for managing SPANN indices within the query service.
-    // SPANN is a tree-based index that is used for approximate nearest neighbor search.
+    /// The configuration for managing SPANN indices within the query service.
+    /// SPANN is a tree-based index that is used for approximate nearest neighbor search.
     #[serde(default)]
     pub spann_provider: SpannProviderConfig,
 
-    // If set, a pprof server will be started on this port.
+    /// If set, a pprof server will be started on this port.
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
 
-    // The grace period for shutting down the gRPC server.
+    /// The grace period for shutting down the gRPC server.
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
         deserialize_with = "deserialize_duration_from_seconds",
