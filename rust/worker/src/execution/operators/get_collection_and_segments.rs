@@ -76,7 +76,7 @@ impl Operator<GetCollectionAndSegmentsInput, GetCollectionAndSegmentsOutput>
         Ok(self
             .sysdb
             .clone()
-            .get_collection_with_segments(self.collection_id)
+            .get_collection_with_segments(None, self.collection_id)
             .await?)
     }
 }

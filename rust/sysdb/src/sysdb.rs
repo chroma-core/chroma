@@ -524,12 +524,13 @@ impl SysDb {
 
     pub async fn get_collection_with_segments(
         &mut self,
+        database: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
         match self {
             SysDb::Grpc(grpc_sys_db) => {
                 grpc_sys_db
-                    .get_collection_with_segments(collection_id)
+                    .get_collection_with_segments(database, collection_id)
                     .await
             }
             SysDb::Sqlite(sqlite) => sqlite.get_collection_with_segments(collection_id).await,
@@ -1553,12 +1554,19 @@ impl GrpcSysDb {
 
     async fn get_collection_with_segments(
         &mut self,
+        database: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
-        let res = self
-            .client
+        let mut client = match &database {
+            Some(db) => self
+                .client(db)
+                .map_err(|e| GetCollectionWithSegmentsError::Internal(Box::new(e)))?,
+            None => self.client.clone(),
+        };
+        let res = client
             .get_collection_with_segments(chroma_proto::GetCollectionWithSegmentsRequest {
                 id: collection_id.to_string(),
+                database: database.map(|db| db.into_string()),
             })
             .await?
             .into_inner();
