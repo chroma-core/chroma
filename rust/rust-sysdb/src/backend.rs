@@ -60,6 +60,9 @@
 //!                          └──────────────────────────────────┘
 //! ```
 
+use std::collections::HashMap;
+
+use crate::config::SpannerBackendConfig;
 use crate::spanner::SpannerBackend;
 use crate::types::SysDbError;
 use crate::types::{
@@ -70,7 +73,11 @@ use crate::types::{
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
     UpdateCollectionRequest, UpdateCollectionResponse,
 };
+use chroma_config::{registry::Registry, Configurable};
+use chroma_error::ChromaError;
+use chroma_storage::config::{RegionalStorage, TopologicalStorage};
 use chroma_types::chroma_proto::Database;
+use chroma_types::{MultiCloudMultiRegionConfiguration, TopologyName};
 
 /// Factory that holds all configured backend instances.
 ///
@@ -78,21 +85,55 @@ use chroma_types::chroma_proto::Database;
 /// without requiring knowledge of specific backend types in the assign logic.
 #[derive(Clone)]
 pub struct BackendFactory {
-    spanner: SpannerBackend,
+    topology_to_backend: HashMap<TopologyName, SpannerBackend>,
     // TODO: aurora: AuroraBackend,
+}
+
+/// Type alias for the MCMR configuration used by the sysdb service.
+pub type SysdbMcmrConfig = MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>;
+
+#[async_trait::async_trait]
+impl Configurable<SysdbMcmrConfig> for BackendFactory {
+    async fn try_from_config(
+        config: &SysdbMcmrConfig,
+        registry: &Registry,
+    ) -> Result<Self, Box<dyn ChromaError>> {
+        let local_region_name = config.preferred().clone();
+        let mut topology_to_backend = HashMap::new();
+
+        for topology in config.topologies() {
+            let backend_config = SpannerBackendConfig {
+                spanner: &topology.config().spanner,
+                regions: topology.regions().to_vec(),
+                local_region: local_region_name.clone(),
+            };
+            let backend = SpannerBackend::try_from_config(&backend_config, registry).await?;
+            topology_to_backend.insert(topology.name().clone(), backend);
+        }
+
+        Ok(Self::new(topology_to_backend))
+    }
 }
 
 impl BackendFactory {
     /// Create a new BackendFactory with the given backends.
-    ///
-    /// TODO: Update to `new(spanner: SpannerBackend, aurora: AuroraBackend)` when Aurora is added.
-    pub fn new(spanner: SpannerBackend) -> Self {
-        Self { spanner }
+    pub fn new(topology_to_backend: HashMap<TopologyName, SpannerBackend>) -> Self {
+        Self {
+            topology_to_backend,
+        }
     }
 
-    /// Get a reference to the Spanner backend.
-    pub fn spanner(&self) -> &SpannerBackend {
-        &self.spanner
+    /// Get a reference to the Spanner backend belonging to the given topology.
+    pub fn spanner(&self, topology: &TopologyName) -> &SpannerBackend {
+        &self.topology_to_backend[topology]
+    }
+
+    /// Get a reference to one of the Spanner backends.
+    pub fn one_spanner(&self) -> &SpannerBackend {
+        if self.topology_to_backend.is_empty() {
+            panic!("No spanner backends found");
+        }
+        self.topology_to_backend.iter().next().unwrap().1
     }
 
     // TODO: pub fn aurora(&self) -> &AuroraBackend {
@@ -101,8 +142,33 @@ impl BackendFactory {
 
     /// Close all backends.
     pub async fn close(self) {
-        self.spanner.close().await;
+        for backend in self.topology_to_backend.into_values() {
+            backend.close().await;
+        }
         // TODO: self.aurora.close().await;
+    }
+
+    pub fn get_all_backends(&self) -> Vec<Backend> {
+        self.topology_to_backend
+            .values()
+            .map(|b| Backend::Spanner(b.clone()))
+            .collect()
+        // TODO: return vec![Backend::Aurora(b.clone())];
+    }
+
+    /// Get a backend routed by the topology prefix in the database name.
+    /// If the database name has a topology prefix (before '+'), use it to route to the correct backend.
+    /// Otherwise, fall back to one_spanner().
+    pub fn backend_from_database_name(&self, db_name: &chroma_types::DatabaseName) -> Backend {
+        if let Some(topo_str) = db_name.topology() {
+            if let Ok(topology) = TopologyName::new(topo_str) {
+                return Backend::Spanner(self.spanner(&topology).clone());
+            }
+        }
+        // Fall back to default backend if no topology or invalid topology
+        // TODO(Sanket): Should fall back to Aurora here.
+        tracing::warn!("No topology found in database name, falling back to default backend");
+        Backend::Spanner(self.one_spanner().clone())
     }
 }
 

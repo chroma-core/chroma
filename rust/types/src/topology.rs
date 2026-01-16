@@ -80,6 +80,8 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::hash::Hash;
 
+use chroma_error::ChromaError;
+use chroma_error::ErrorCodes;
 use serde::Deserialize;
 use serde::Serialize;
 use thiserror::Error;
@@ -576,6 +578,12 @@ pub struct ValidationError {
     unknown_preferred_region: Option<RegionName>,
 }
 
+impl ChromaError for ValidationError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
 impl ValidationError {
     #[cfg(test)]
     fn new(
@@ -745,7 +753,7 @@ impl<
     ///
     /// Returns `Ok(())` if validation passes, or a [`ValidationError`] describing any violations.
     /// Each unique error is reported only once, even if it occurs multiple times.
-    fn validate(&self) -> Result<(), ValidationError> {
+    pub fn validate(&self) -> Result<(), ValidationError> {
         let mut error = ValidationError::default();
         let all_region_names: HashSet<_> = self.regions.iter().map(|r| &r.name).collect();
 

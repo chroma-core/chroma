@@ -17,7 +17,7 @@ use google_cloud_spanner::statement::Statement;
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::config::SpannerConfig;
+use crate::config::{SpannerBackendConfig, SpannerConfig};
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
@@ -27,7 +27,8 @@ use crate::types::{
     SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_types::{
-    Collection, Database, DatabaseUuid, InternalCollectionConfiguration, Segment, Tenant,
+    Collection, Database, DatabaseUuid, InternalCollectionConfiguration, RegionName, Segment,
+    Tenant,
 };
 
 #[derive(Error, Debug)]
@@ -54,17 +55,35 @@ impl ChromaError for SpannerError {
 #[derive(Clone)]
 pub struct SpannerBackend {
     client: Client,
+    /// All regions in this backend's topology (for multi-region writes)
+    regions: Vec<RegionName>,
+    /// The local region for this instance (for reads)
+    local_region: RegionName,
 }
 
 impl SpannerBackend {
-    /// Create a new SpannerBackend with the given client.
-    pub fn new(client: Client) -> Self {
-        Self { client }
+    /// Create a new SpannerBackend with the given client and region configuration.
+    pub fn new(client: Client, regions: Vec<RegionName>, local_region: RegionName) -> Self {
+        Self {
+            client,
+            regions,
+            local_region,
+        }
     }
 
     /// Get a reference to the underlying Spanner client.
     pub fn client(&self) -> &Client {
         &self.client
+    }
+
+    /// Get the regions this backend writes to.
+    pub fn regions(&self) -> &[RegionName] {
+        &self.regions
+    }
+
+    /// Get the local region for reads.
+    pub fn local_region(&self) -> &RegionName {
+        &self.local_region
     }
 
     // ============================================================
@@ -166,20 +185,13 @@ impl SpannerBackend {
         &self,
         req: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, SysDbError> {
-        // Validate database name is not empty
-        if req.name.is_empty() {
-            return Err(SysDbError::InvalidArgument(
-                "database name cannot be empty".to_string(),
-            ));
-        }
-
         // Use a read-write transaction to atomically check tenant, check database, and insert
         let result = self
             .client
             .read_write_transaction::<(), SysDbError, _>(|tx| {
                 let tenant_id = req.tenant_id.clone();
                 let db_id = req.id.to_string();
-                let db_name = req.name.to_string();
+                let db_name = req.name.clone().into_string();
                 Box::pin(async move {
                     // Check if tenant exists within the same transaction
                     let mut tenant_check_stmt = Statement::new(
@@ -254,10 +266,11 @@ impl SpannerBackend {
         &self,
         req: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, SysDbError> {
+        let db_name_str = req.name.as_ref();
         let mut stmt = Statement::new(
             "SELECT id, name, tenant_id FROM databases WHERE name = @name AND tenant_id = @tenant_id AND is_deleted = FALSE",
         );
-        stmt.add_param("name", &req.name);
+        stmt.add_param("name", &db_name_str);
         stmt.add_param("tenant_id", &req.tenant_id);
 
         let mut tx = self.client.single().await?;
@@ -272,7 +285,7 @@ impl SpannerBackend {
         } else {
             Err(SysDbError::NotFound(format!(
                 "database '{}' not found for tenant '{}'",
-                req.name, req.tenant_id
+                db_name_str, req.tenant_id
             )))
         }
     }
@@ -317,11 +330,11 @@ impl SpannerBackend {
             tenant_id,
             database_name,
         } = req;
+        let database_name = database_name.into_string();
 
-        // Regions for compaction cursors
-        // TODO(Sanket): Extract the topo name from db name and use the config
-        // to get the regions.
-        const REGIONS: &[&str] = &["us", "asia", "europe"];
+        // Get regions from backend configuration
+        let regions = self.regions.clone();
+        let local_region = self.local_region.clone();
 
         // TRADEOFF: We use mutations with buffer_write instead of DML for inserts.
         //
@@ -356,6 +369,8 @@ impl SpannerBackend {
                 let segments = segments.clone();
                 let metadata = metadata.clone();
                 let index_schema = index_schema.clone();
+                let regions = regions.clone();
+                let local_region = local_region.clone();
                 Box::pin(async move {
                     let index_schema_json = serde_json::to_string(&index_schema)?;
                     // Check if database exists and get database_id
@@ -392,9 +407,8 @@ impl SpannerBackend {
                     if id_iter.next().await?.is_some() {
                         if get_or_create {
                             // Return the existing collection
-                            // TODO(Sanket): Use the local region here.
                             let fetched_collection =
-                                Self::fetch_collection_in_tx(&mut *tx, &collection_id, REGIONS[0]).await?;
+                                Self::fetch_collection_in_tx(&mut *tx, &collection_id, local_region.as_str()).await?;
                             return Ok((fetched_collection, false)); // false = not created
                         } else {
                             return Err(SysDbError::AlreadyExists(format!(
@@ -420,9 +434,8 @@ impl SpannerBackend {
                             let existing_collection_id: String = existing_row
                                 .column_by_name("collection_id")
                                 .map_err(SysDbError::FailedToReadColumn)?;
-                            // TODO(Sanket): Use the local region here.
                             let fetched_collection =
-                                Self::fetch_collection_in_tx(&mut *tx, &existing_collection_id, REGIONS[0]).await?;
+                                Self::fetch_collection_in_tx(&mut *tx, &existing_collection_id, local_region.as_str()).await?;
                             return Ok((fetched_collection, false)); // false = not created
                         } else {
                             return Err(SysDbError::AlreadyExists(format!(
@@ -465,7 +478,8 @@ impl SpannerBackend {
                     ));
 
                     // Insert compaction cursors for each region
-                    for region in REGIONS {
+                    for region in &regions {
+                        let region_str = region.to_string();
                         mutations.push(insert(
                             "collection_compaction_cursors",
                             &[
@@ -477,7 +491,7 @@ impl SpannerBackend {
                             ],
                             &[
                                 &collection_id,
-                                region,
+                                &region_str,
                                 &index_schema_json,
                                 &commit_ts,
                                 &commit_ts,
@@ -499,7 +513,8 @@ impl SpannerBackend {
                             )
                         };
 
-                        for region in REGIONS {
+                        for region in &regions {
+                            let region_str = region.to_string();
                             mutations.push(insert(
                                 "collection_segments",
                                 &[
@@ -515,7 +530,7 @@ impl SpannerBackend {
                                 ],
                                 &[
                                     &collection_id,
-                                    region,
+                                    &region_str,
                                     &segment_id_str,
                                     &segment_type_str,
                                     &segment_scope_str,
@@ -630,8 +645,8 @@ impl SpannerBackend {
     ) -> Result<GetCollectionsResponse, SysDbError> {
         let filter = req.filter;
 
-        // TODO(Sanket): Get region from config based on db name topology
-        let region = "us";
+        // Use local region for reads
+        let region = self.local_region.as_str();
 
         // Build dynamic query based on which filters are provided
         let mut where_clauses: Vec<String> = Vec::new();
@@ -743,7 +758,7 @@ impl SpannerBackend {
             stmt.add_param("tenant_id", tenant_id);
         }
         if let Some(ref database_name) = filter.database_name {
-            stmt.add_param("database_name", database_name);
+            stmt.add_param("database_name", &database_name.as_ref());
         }
 
         let mut tx = self.client.single().await?;
@@ -851,8 +866,8 @@ impl SpannerBackend {
         &self,
         req: GetCollectionWithSegmentsRequest,
     ) -> Result<GetCollectionWithSegmentsResponse, SysDbError> {
-        // TODO(Sanket): Get region from config based on db name topology
-        let region = "us";
+        // Use local region for reads
+        let region = self.local_region.as_str();
         let collection_id = req.id.0.to_string();
 
         // 4-way JOIN query: collection + metadata + compaction cursor + segments
@@ -1200,12 +1215,12 @@ impl SpannerBackend {
 }
 
 #[async_trait::async_trait]
-impl Configurable<SpannerConfig> for SpannerBackend {
+impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
     async fn try_from_config(
-        config: &SpannerConfig,
+        config: &SpannerBackendConfig<'a>,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let client = match config {
+        let client = match config.spanner {
             SpannerConfig::Emulator(emulator) => {
                 let client_config = ClientConfig {
                     environment: Environment::Emulator(emulator.grpc_endpoint()),
@@ -1245,7 +1260,11 @@ impl Configurable<SpannerConfig> for SpannerBackend {
             }
         };
 
-        Ok(SpannerBackend { client })
+        Ok(SpannerBackend {
+            client,
+            regions: config.regions.clone(),
+            local_region: config.local_region.clone(),
+        })
     }
 }
 
@@ -1265,6 +1284,7 @@ mod tests {
     // To run: cargo test --package rust-sysdb --lib spanner::tests
 
     async fn setup_test_backend() -> Option<SpannerBackend> {
+        use crate::config::SpannerBackendConfig;
         use chroma_config::registry::Registry;
         use chroma_config::spanner::SpannerEmulatorConfig;
         use chroma_config::Configurable;
@@ -1279,8 +1299,22 @@ mod tests {
             database: "local-sysdb-database".to_string(),
         };
 
-        let config = SpannerConfig::Emulator(emulator);
+        let spanner_config = SpannerConfig::Emulator(emulator);
         let registry = Registry::new();
+
+        // Test regions matching Tilt emulator setup
+        let regions = vec![
+            RegionName::new("us").unwrap(),
+            RegionName::new("asia").unwrap(),
+            RegionName::new("europe").unwrap(),
+        ];
+        let local_region = RegionName::new("us").unwrap();
+
+        let config = SpannerBackendConfig {
+            spanner: &spanner_config,
+            regions,
+            local_region,
+        };
 
         match SpannerBackend::try_from_config(&config, &registry).await {
             Ok(backend) => Some(backend),
@@ -1404,13 +1438,14 @@ mod tests {
 
         // Now create a database
         let db_id = Uuid::new_v4();
-        let db_name = format!(
+        let db_name = chroma_types::DatabaseName::new(format!(
             "test_database_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-        );
+        ))
+        .expect("test db name should be valid");
 
         let create_db_req = CreateDatabaseRequest {
             id: db_id,
@@ -1458,13 +1493,14 @@ mod tests {
 
         // Create database first time
         let db_id = Uuid::new_v4();
-        let db_name = format!(
+        let db_name = chroma_types::DatabaseName::new(format!(
             "test_database_conflict_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-        );
+        ))
+        .expect("test db name should be valid");
 
         let create_db_req = CreateDatabaseRequest {
             id: db_id,
@@ -1522,13 +1558,14 @@ mod tests {
             result.err()
         );
 
-        let db_name = format!(
+        let db_name = chroma_types::DatabaseName::new(format!(
             "nonexistent_database_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-        );
+        ))
+        .expect("test db name should be valid");
 
         let get_db_req = GetDatabaseRequest {
             name: db_name,
@@ -1552,13 +1589,14 @@ mod tests {
         };
 
         let db_id = Uuid::new_v4();
-        let db_name = format!(
+        let db_name = chroma_types::DatabaseName::new(format!(
             "test_database_invalid_tenant_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-        );
+        ))
+        .expect("test db name should be valid");
         let tenant_id = Uuid::new_v4().to_string();
 
         let create_db_req = CreateDatabaseRequest {
@@ -1597,24 +1635,15 @@ mod tests {
             result.err()
         );
 
-        // Try to create database with empty name
-        let db_id = Uuid::new_v4();
-        let create_db_req = CreateDatabaseRequest {
-            id: db_id,
-            name: "".to_string(), // Empty name
-            tenant_id: tenant_id.clone(),
-        };
-        let result = backend.create_database(create_db_req.clone()).await;
+        // Try to create database with empty name - should fail at type level
         assert!(
-            result.is_err(),
-            "Creating database with empty name should fail"
+            chroma_types::DatabaseName::new("").is_none(),
+            "DatabaseName::new should reject empty string"
         );
-        match result.unwrap_err() {
-            SysDbError::InvalidArgument(_) => {
-                // Expected error
-            }
-            e => panic!("Expected InvalidArgument error, got: {:?}", e),
-        }
+        assert!(
+            chroma_types::DatabaseName::new("ab").is_none(),
+            "DatabaseName::new should reject strings shorter than 3 characters"
+        );
     }
 
     #[tokio::test]
@@ -1637,13 +1666,14 @@ mod tests {
 
         // Create database first time
         let db_id1 = Uuid::new_v4();
-        let db_name = format!(
+        let db_name = chroma_types::DatabaseName::new(format!(
             "test_database_dup_name_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs()
-        );
+        ))
+        .expect("test db name should be valid");
 
         let create_db_req1 = CreateDatabaseRequest {
             id: db_id1,
@@ -1673,7 +1703,7 @@ mod tests {
         match result2.unwrap_err() {
             SysDbError::AlreadyExists(msg) => {
                 assert!(
-                    msg.contains(&db_name) && msg.contains(&tenant_id),
+                    msg.contains(db_name.as_ref()) && msg.contains(&tenant_id),
                     "Error message should mention database name and tenant: {}",
                     msg
                 );
@@ -1695,7 +1725,9 @@ mod tests {
     }
 
     // Helper to create a tenant and database for collection tests
-    async fn setup_tenant_and_database(backend: &SpannerBackend) -> (String, String) {
+    async fn setup_tenant_and_database(
+        backend: &SpannerBackend,
+    ) -> (String, chroma_types::DatabaseName) {
         let tenant_id = Uuid::new_v4().to_string();
         let create_tenant_req = CreateTenantRequest {
             id: tenant_id.clone(),
@@ -1706,13 +1738,14 @@ mod tests {
             .expect("Failed to create tenant");
 
         let db_id = Uuid::new_v4();
-        let db_name = format!(
+        let db_name = chroma_types::DatabaseName::new(format!(
             "test_db_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        );
+        ))
+        .expect("test db name should be valid");
 
         let create_db_req = CreateDatabaseRequest {
             id: db_id,
@@ -1765,7 +1798,7 @@ mod tests {
         expected_name: &str,
         expected_dimension: Option<i32>,
         expected_tenant: &str,
-        expected_database: &str,
+        expected_database: &chroma_types::DatabaseName,
         expected_metadata: Option<&chroma_types::Metadata>,
         expected_schema: Option<&Schema>,
     ) {
@@ -1780,7 +1813,11 @@ mod tests {
             "dimension mismatch"
         );
         assert_eq!(collection.tenant, expected_tenant, "tenant mismatch");
-        assert_eq!(collection.database, expected_database, "database mismatch");
+        assert_eq!(
+            collection.database,
+            expected_database.as_ref(),
+            "database mismatch"
+        );
 
         // Schema verification
         assert_eq!(
@@ -2192,7 +2229,8 @@ mod tests {
             metadata: None,
             get_or_create: false,
             tenant_id: tenant_id.clone(),
-            database_name: "nonexistent_database".to_string(),
+            database_name: chroma_types::DatabaseName::new("nonexistent_database")
+                .expect("test db name should be valid"),
         };
 
         let result = backend.create_collection(create_req).await;
@@ -2466,20 +2504,22 @@ mod tests {
             .expect("Failed to create tenant");
 
         // Create two databases
-        let db_name1 = format!(
+        let db_name1 = chroma_types::DatabaseName::new(format!(
             "test_db1_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        );
-        let db_name2 = format!(
+        ))
+        .expect("test db name should be valid");
+        let db_name2 = chroma_types::DatabaseName::new(format!(
             "test_db2_{}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
-        );
+        ))
+        .expect("test db name should be valid");
 
         backend
             .create_database(CreateDatabaseRequest {
@@ -6195,7 +6235,7 @@ mod tests {
     async fn create_collection_for_update(
         backend: &SpannerBackend,
         tenant_id: &str,
-        db_name: &str,
+        db_name: &chroma_types::DatabaseName,
         name: &str,
         dimension: Option<u32>,
         metadata: Option<chroma_types::Metadata>,
@@ -6216,7 +6256,7 @@ mod tests {
     async fn create_collection_for_update_with_schema(
         backend: &SpannerBackend,
         tenant_id: &str,
-        db_name: &str,
+        db_name: &chroma_types::DatabaseName,
         name: &str,
         dimension: Option<u32>,
         metadata: Option<chroma_types::Metadata>,
@@ -6233,7 +6273,7 @@ mod tests {
             metadata,
             get_or_create: false,
             tenant_id: tenant_id.to_string(),
-            database_name: db_name.to_string(),
+            database_name: db_name.clone(),
         };
 
         let result = backend.create_collection(create_req).await;
@@ -6251,13 +6291,13 @@ mod tests {
         backend: &SpannerBackend,
         collection_id: CollectionUuid,
         tenant_id: &str,
-        db_name: &str,
+        db_name: &chroma_types::DatabaseName,
     ) -> chroma_types::Collection {
         let get_req = GetCollectionsRequest {
             filter: CollectionFilter::default()
                 .ids(vec![collection_id])
                 .tenant_id(tenant_id.to_string())
-                .database_name(db_name.to_string()),
+                .database_name(db_name.clone()),
         };
 
         let result = backend.get_collections(get_req).await;

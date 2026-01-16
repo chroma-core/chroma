@@ -29,6 +29,10 @@ impl DatabaseName {
     pub fn into_string(self) -> String {
         self.0
     }
+
+    pub fn topology(&self) -> Option<String> {
+        self.0.split_once('+').map(|x| x.0.to_string())
+    }
 }
 
 impl AsRef<str> for DatabaseName {
