@@ -36,8 +36,10 @@ async fn test_k8s_mcmr_integration_repl_84_bootstrap_empty() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
@@ -60,8 +62,10 @@ async fn test_k8s_mcmr_integration_repl_84_bootstrap_empty() {
     let (reader_fragment_factory, reader_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         reader_storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory
@@ -106,22 +110,16 @@ async fn test_k8s_mcmr_integration_repl_84_bootstrap_empty() {
     let (fragment_factory2, manifest_factory2) = create_repl_factories(
         options2.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["dummy".to_string()],
         log_id,
     );
 
-    let log_writer = LogWriter::open(
-        options2,
-        Arc::new(storage),
-        &prefix,
-        writer,
-        fragment_factory2,
-        manifest_factory2,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log_writer = LogWriter::open(options2, writer, fragment_factory2, manifest_factory2, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     log_writer
         .manifest_and_witness()

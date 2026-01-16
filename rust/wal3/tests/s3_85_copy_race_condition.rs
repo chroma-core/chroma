@@ -104,17 +104,9 @@ async fn run_single_attempt(attempt: usize, delay_ms: u64) -> bool {
             Arc::new(()),
             Arc::new(()),
         );
-        let log = LogWriter::open(
-            options,
-            storage_clone,
-            &prefix_clone,
-            writer,
-            fragment_factory,
-            manifest_factory,
-            None,
-        )
-        .await
-        .unwrap();
+        let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+            .await
+            .unwrap();
 
         barrier_start_clone.wait().await;
 

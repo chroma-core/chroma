@@ -67,8 +67,6 @@ async fn garbage_collect_in_a_loop(options: LogWriterOptions, storage: Arc<Stora
         );
         let log = match LogWriter::open(
             options.clone(),
-            Arc::clone(&storage),
-            prefix,
             writer,
             fragment_factory,
             manifest_factory,
@@ -111,8 +109,6 @@ async fn main() {
     let log = Arc::new(
         LogWriter::open_or_initialize(
             options.log.clone(),
-            Arc::clone(&storage),
-            prefix,
             writer,
             fragment_factory,
             manifest_factory,

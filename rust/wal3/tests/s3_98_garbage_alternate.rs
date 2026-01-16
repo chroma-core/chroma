@@ -26,7 +26,7 @@ async fn writer_thread(
     notify: Arc<tokio::sync::Notify>,
     iterations: usize,
 ) -> (usize, usize) {
-    let cursors = writer.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = writer.cursors(CursorStoreOptions::default()).await.unwrap();
     let mut witness = cursors
         .load(&CursorName::new("my_cursor").unwrap())
         .await
@@ -164,8 +164,6 @@ async fn test_k8s_integration_98_garbage_alternate() {
     let writer1 = Arc::new(
         LogWriter::open(
             options1,
-            Arc::clone(&storage),
-            prefix,
             "writer1",
             fragment_factory1,
             manifest_factory1,
@@ -174,7 +172,10 @@ async fn test_k8s_integration_98_garbage_alternate() {
         .await
         .unwrap(),
     );
-    let cursors = writer1.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = writer1
+        .cursors(CursorStoreOptions::default())
+        .await
+        .unwrap();
     cursors
         .init(&CursorName::new("my_cursor").unwrap(), Cursor::default())
         .await
@@ -193,8 +194,6 @@ async fn test_k8s_integration_98_garbage_alternate() {
     let writer2 = Arc::new(
         LogWriter::open(
             options2,
-            Arc::clone(&storage),
-            prefix,
             "writer2",
             fragment_factory2,
             manifest_factory2,

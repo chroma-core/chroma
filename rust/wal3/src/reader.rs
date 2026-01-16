@@ -3589,7 +3589,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_k8s_integration_manifest_and_witness_returns_none_when_no_manifest() {
-        let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
+        let storage = chroma_storage::s3::s3_client_for_test_with_new_bucket().await;
         let prefix = "nonexistent-prefix".to_string();
         let options = LogReaderOptions::default();
         let writer_options = crate::LogWriterOptions::default();
@@ -3598,14 +3598,14 @@ mod tests {
         let fragment_factory = crate::S3FragmentManagerFactory {
             write: writer_options.clone(),
             read: LogReaderOptions::default(),
-            storage: Arc::clone(&storage),
+            storage: storage.clone(),
             prefix: prefix.clone(),
             mark_dirty: Arc::new(()),
         };
         let manifest_factory = crate::S3ManifestManagerFactory {
             write: writer_options.clone(),
             read: LogReaderOptions::default(),
-            storage: Arc::clone(&storage),
+            storage: Arc::new(storage),
             prefix: prefix.clone(),
             writer: "test-writer".to_string(),
             mark_dirty: Arc::new(()),

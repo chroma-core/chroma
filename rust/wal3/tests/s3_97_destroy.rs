@@ -31,8 +31,6 @@ async fn test_k8s_integration_97_destroy() {
     );
     let log = LogWriter::open_or_initialize(
         options.clone(),
-        Arc::clone(&storage),
-        PREFIX,
         WRITER,
         fragment_factory,
         manifest_factory,

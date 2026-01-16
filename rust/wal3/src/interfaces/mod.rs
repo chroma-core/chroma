@@ -6,12 +6,15 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use setsum::Setsum;
 use tracing::Span;
 
-use chroma_storage::ETag;
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, Storage, StorageError,
+};
 use chroma_types::Cmek;
 
 use crate::{
-    Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
+    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
+    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness,
+    Snapshot, SnapshotPointer, StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -76,6 +79,7 @@ pub trait FragmentManagerFactory {
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error>;
     async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
+    async fn preferred_storage(&self) -> Storage;
 }
 
 ///////////////////////////////////////// FragmentUploader /////////////////////////////////////////
@@ -90,6 +94,12 @@ pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
         cmek: Option<Cmek>,
         epoch_micros: u64,
     ) -> Result<(String, Setsum, usize), Error>;
+
+    /// The preferred region for this cluster.
+    async fn preferred_storage(&self) -> Storage;
+
+    /// The full list of storage wrappers for this cluster
+    async fn storages(&self) -> &[StorageWrapper];
 }
 
 ///////////////////////////////////////// FragmentPublisher ////////////////////////////////////////
@@ -137,10 +147,31 @@ pub trait FragmentPublisher: Send + Sync + 'static {
         epoch_micros: u64,
     ) -> Result<(String, Setsum, usize), Error>;
 
+    async fn read_raw_bytes(&self, path: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), Error>;
+
+    /// Returns the preferred storage for this fragment publisher.
+    async fn preferred_storage(&self) -> Storage;
+
+    /// Returns all storages for this fragment publisher.
+    async fn storages(&self) -> Vec<repl::StorageWrapper>;
+
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
     fn shutdown_prepare(&self);
     /// Finish shutting down.
     fn shutdown_finish(&self);
+
+    /// Write garbage to storage on the preferred region, returning the new ETag if successful.
+    async fn write_garbage(
+        &self,
+        options: &ThrottleOptions,
+        existing: Option<&ETag>,
+        garbage: &Garbage,
+    ) -> Result<Option<ETag>, Error>;
+
+    /// Reset the garbage on the preferred region.
+    async fn reset_garbage(&self, options: &ThrottleOptions, e_tag: &ETag) -> Result<(), Error>;
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ///////////////////////////////////////// FragmentConsumer /////////////////////////////////////////
@@ -149,11 +180,7 @@ pub trait FragmentPublisher: Send + Sync + 'static {
 pub trait FragmentConsumer: Send + Sync + 'static {
     type FragmentPointer: FragmentPointer;
 
-    async fn read_raw_bytes(
-        &self,
-        path: &str,
-        fragment_first_log_position: LogPosition,
-    ) -> Result<Arc<Vec<u8>>, Error>;
+    async fn read_raw_bytes(&self, path: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), Error>;
 
     async fn read_parquet(
         &self,
@@ -166,6 +193,8 @@ pub trait FragmentConsumer: Send + Sync + 'static {
         path: &str,
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error>;
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ////////////////////////////////////// ManifestManagerFactory //////////////////////////////////////
@@ -250,7 +279,6 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     async fn publish_fragment(
         &self,
         pointer: &FP,
-        regions: &[&str],
         path: &str,
         messages_len: u64,
         num_bytes: u64,
@@ -266,7 +294,6 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
         options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
     ) -> Result<Option<Garbage>, Error>;
-
     /// Snapshot storers and accessors
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
     async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error>;
@@ -397,6 +424,36 @@ pub fn checksum_parquet(
         Ok((setsum, records, uses_relative_offsets, epoch_micros))
     } else {
         Ok((setsum, records, uses_relative_offsets, 0))
+    }
+}
+
+async fn read_raw_bytes(
+    path: &str,
+    storages: &[repl::StorageWrapper],
+) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+    let mut err: Option<StorageError> = None;
+    for storage in storages.iter() {
+        let path = crate::fragment_path(&storage.prefix, path);
+        match storage
+            .storage
+            .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+            .await
+        {
+            Ok((parquet, e_tag)) => return Ok((parquet, e_tag)),
+            Err(e @ StorageError::NotFound { .. }) => err = Some(e),
+            Err(e) => {
+                tracing::error!("reading from region {} failed", storage.region);
+                err = Some(e);
+            }
+        }
+    }
+    if let Some(err) = err {
+        Err(err)
+    } else {
+        Err(StorageError::NotFound {
+            path: path.into(),
+            source: Arc::new(std::io::Error::other("replicas exhausted")),
+        })
     }
 }
 

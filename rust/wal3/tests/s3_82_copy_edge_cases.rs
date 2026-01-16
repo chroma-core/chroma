@@ -36,17 +36,9 @@ async fn test_k8s_integration_copy_single_fragment() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     log.append_many(vec![Vec::from("single-record")])
         .await
         .unwrap();
@@ -183,23 +175,16 @@ async fn test_k8s_integration_copy_after_garbage_collection_leaves_empty() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log =
+        LogWriter::open_or_initialize(options, writer, fragment_factory, manifest_factory, None)
+            .await
+            .unwrap();
     let mut position = LogPosition::default();
     for i in 0..20 {
         let batch = vec![Vec::from(format!("gc-test:i={}", i))];
         position = log.append_many(batch).await.unwrap() + 1u64;
     }
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),
@@ -303,17 +288,9 @@ async fn test_k8s_integration_copy_preserves_fragment_boundaries() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..10 {
         let mut batch = Vec::new();
         for j in 0..10 {
@@ -411,17 +388,9 @@ async fn test_k8s_integration_copy_with_partial_offset_splits_correctly() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..30 {
         let batch = vec![Vec::from(format!("partial:i={}", i))];
         log.append_many(batch).await.unwrap();
@@ -506,17 +475,9 @@ async fn test_k8s_integration_copy_multiple_times_creates_independent_copies() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..10 {
         log.append_many(vec![Vec::from(format!("multi:i={}", i))])
             .await

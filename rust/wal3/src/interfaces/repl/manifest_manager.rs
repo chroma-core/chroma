@@ -20,15 +20,25 @@ use crate::{
 
 pub struct ManifestManager {
     spanner: Arc<Client>,
+    regions: Vec<String>,
     log_id: Uuid,
 }
 
 impl ManifestManager {
-    pub fn new(spanner: Arc<Client>, log_id: Uuid) -> Self {
-        Self { spanner, log_id }
+    pub fn new(spanner: Arc<Client>, regions: Vec<String>, log_id: Uuid) -> Self {
+        Self {
+            spanner,
+            regions,
+            log_id,
+        }
     }
 
-    pub async fn init(spanner: &Client, log_id: Uuid, manifest: &Manifest) -> Result<(), Error> {
+    pub async fn init(
+        regions: Vec<String>,
+        spanner: &Client,
+        log_id: Uuid,
+        manifest: &Manifest,
+    ) -> Result<(), Error> {
         let enum_offset = manifest.fragments.iter().map(|f| f.limit).max().unwrap_or(
             manifest
                 .initial_offset
@@ -82,12 +92,13 @@ impl ManifestManager {
                 ],
             ));
             // Insert into fragment_regions so that GC can see this fragment.
-            // TODO(rescrv, mcmr): region-aware
-            mutations.push(insert(
-                "fragment_regions",
-                &["log_id", "ident", "region"],
-                &[&log_id_str, &uuid_str, &"dummy"],
-            ));
+            for region in regions.iter() {
+                mutations.push(insert(
+                    "fragment_regions",
+                    &["log_id", "ident", "region"],
+                    &[&log_id_str, &uuid_str, region],
+                ));
+            }
         }
         spanner
             .read_write_transaction(|tx| {
@@ -295,7 +306,6 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     async fn publish_fragment(
         &self,
         pointer: &FragmentUuid,
-        regions: &[&str],
         path: &str,
         messages_len: u64,
         num_bytes: u64,
@@ -311,7 +321,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         let _log_position: Option<LogPosition> = None;
         let pointer = pointer.to_string();
         let path = path.to_string();
-        let regions: Vec<String> = regions.iter().map(|s| s.to_string()).collect();
+        let regions: Vec<String> = self.regions.to_vec();
         // The SDK's read_write_transaction has internal retries for Aborted errors, so this outer
         // loop handles cases where those are exhausted.
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
@@ -826,7 +836,8 @@ mod tests {
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
 
-        let result = ManifestManager::init(&client, log_id, &manifest).await;
+        let result =
+            ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest).await;
         assert!(result.is_ok(), "init failed: {:?}", result.err());
 
         let loaded = ManifestManager::load(&client, log_id).await;
@@ -884,11 +895,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let witness = ManifestWitness::Position(PositionWitness::new(
             LogPosition::from_offset(0),
             Setsum::default(),
@@ -913,11 +924,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         // Witness with wrong enumeration_offset should not match.
         let witness = ManifestWitness::Position(PositionWitness::new(
             LogPosition::from_offset(999),
@@ -943,11 +954,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let result = manager.manifest_and_witness().await;
         assert!(
             result.is_ok(),
@@ -971,7 +982,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let result = manager.manifest_and_witness().await;
 
         match result {
@@ -992,7 +1003,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
 
         let ts1 = manager.assign_timestamp(0);
         let ts2 = manager.assign_timestamp(0);
@@ -1013,11 +1024,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let pointer = FragmentUuid::generate();
         let path = "test/path/fragment.parquet";
         let messages_len = 10u64;
@@ -1025,7 +1036,7 @@ mod tests {
         let setsum = make_setsum(1);
 
         let result = manager
-            .publish_fragment(&pointer, &["dummy"], path, messages_len, num_bytes, setsum)
+            .publish_fragment(&pointer, path, messages_len, num_bytes, setsum)
             .await;
 
         assert!(
@@ -1068,16 +1079,16 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
 
         // Publish first fragment.
         let pointer1 = FragmentUuid::generate();
         let pos1 = manager
-            .publish_fragment(&pointer1, &["dummy"], "path1", 10, 100, make_setsum(1))
+            .publish_fragment(&pointer1, "path1", 10, 100, make_setsum(1))
             .await
             .expect("first publish failed");
         assert_eq!(pos1.offset(), 0);
@@ -1085,7 +1096,7 @@ mod tests {
         // Publish second fragment.
         let pointer2 = FragmentUuid::generate();
         let pos2 = manager
-            .publish_fragment(&pointer2, &["dummy"], "path2", 20, 200, make_setsum(2))
+            .publish_fragment(&pointer2, "path2", 20, 200, make_setsum(2))
             .await
             .expect("second publish failed");
         assert_eq!(pos2.offset(), 10);
@@ -1093,7 +1104,7 @@ mod tests {
         // Publish third fragment.
         let pointer3 = FragmentUuid::generate();
         let pos3 = manager
-            .publish_fragment(&pointer3, &["dummy"], "path3", 30, 300, make_setsum(3))
+            .publish_fragment(&pointer3, "path3", 30, 300, make_setsum(3))
             .await
             .expect("third publish failed");
         assert_eq!(pos3.offset(), 30);
@@ -1124,23 +1135,16 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let pointer = FragmentUuid::generate();
 
         let messages_len = (i64::MAX as u64) + 1;
         let result = manager
-            .publish_fragment(
-                &pointer,
-                &["dummy"],
-                "path",
-                messages_len,
-                100,
-                Setsum::default(),
-            )
+            .publish_fragment(&pointer, "path", messages_len, 100, Setsum::default())
             .await;
 
         match result {
@@ -1162,31 +1166,25 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager =
+            ManifestManager::new(Arc::new(client.clone()), vec!["dummy".to_string()], log_id);
 
         // Publish two fragments.
         let pointer1 = FragmentUuid::generate();
         let setsum1 = make_setsum(1);
         manager
-            .publish_fragment(&pointer1, &["dummy"], "path/frag1.parquet", 5, 500, setsum1)
+            .publish_fragment(&pointer1, "path/frag1.parquet", 5, 500, setsum1)
             .await
             .expect("publish failed");
 
         let pointer2 = FragmentUuid::generate();
         let setsum2 = make_setsum(2);
         manager
-            .publish_fragment(
-                &pointer2,
-                &["dummy"],
-                "path/frag2.parquet",
-                10,
-                1000,
-                setsum2,
-            )
+            .publish_fragment(&pointer2, "path/frag2.parquet", 10, 1000, setsum2)
             .await
             .expect("publish failed");
 
@@ -1227,11 +1225,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let mut manager = ManifestManager::new(Arc::new(client), log_id);
+        let mut manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let result = manager.recover().await;
         assert!(result.is_ok(), "recover should succeed");
 
@@ -1246,7 +1244,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         manager.shutdown();
 
         println!("test_k8s_mcmr_integration_shutdown: passed");
@@ -1273,7 +1271,7 @@ mod tests {
             writer: "custom-writer".to_string(),
         };
 
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
@@ -1300,7 +1298,7 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
@@ -1310,18 +1308,11 @@ mod tests {
         for i in 0..5 {
             let client = Arc::clone(&client);
             let handle = tokio::spawn(async move {
-                let manager = ManifestManager::new(client, log_id);
+                let manager = ManifestManager::new(client, vec!["dummy".to_string()], log_id);
                 let pointer = FragmentUuid::generate();
                 let path = format!("path/fragment_{}.parquet", i);
                 manager
-                    .publish_fragment(
-                        &pointer,
-                        &["dummy"],
-                        &path,
-                        10,
-                        100,
-                        make_setsum((i + 1) as u8),
-                    )
+                    .publish_fragment(&pointer, &path, 10, 100, make_setsum((i + 1) as u8))
                     .await
             });
             handles.push(handle);
@@ -1364,10 +1355,12 @@ mod tests {
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
 
-        let result1 = ManifestManager::init(&client, log_id, &manifest).await;
+        let result1 =
+            ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest).await;
         assert!(result1.is_ok(), "first init should succeed");
 
-        let result2 = ManifestManager::init(&client, log_id, &manifest).await;
+        let result2 =
+            ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest).await;
         assert!(
             result2.is_err(),
             "second init should fail for duplicate log_id"
@@ -1399,16 +1392,16 @@ mod tests {
             writer: "test-writer".to_string(),
         };
 
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let pointer = FragmentUuid::generate();
 
         // Try to publish a fragment that would overflow enumeration_offset.
         let result = manager
-            .publish_fragment(&pointer, &["dummy"], "path", 100, 100, Setsum::default())
+            .publish_fragment(&pointer, "path", 100, 100, Setsum::default())
             .await;
 
         match result {
@@ -1431,7 +1424,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let pointer = crate::SnapshotPointer {
             setsum: Setsum::default(),
             path_to_snapshot: "test/path".to_string(),
@@ -1463,7 +1456,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let snapshot = crate::Snapshot {
             path: "test/snapshot".to_string(),
             depth: 0,
@@ -1493,7 +1486,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let pointer = crate::SnapshotPointer {
             setsum: Setsum::default(),
             path_to_snapshot: "test/path".to_string(),
@@ -1526,7 +1519,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let garbage = crate::Garbage::empty();
 
         let result = manager.garbage_applies_cleanly(&garbage).await;
@@ -1551,10 +1544,15 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        ManifestManager::init(&client, log_id, &Manifest::new_empty("test writer"))
-            .await
-            .unwrap();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        ManifestManager::init(
+            vec!["dummy".to_string()],
+            &client,
+            log_id,
+            &Manifest::new_empty("test writer"),
+        )
+        .await
+        .unwrap();
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let garbage = crate::Garbage::empty();
 
         let result = manager.apply_garbage(garbage).await;
@@ -1576,24 +1574,25 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager =
+            ManifestManager::new(Arc::new(client.clone()), vec!["dummy".to_string()], log_id);
 
         // Publish fragments with a region so they can be garbage collected.
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, &["dummy"], "path1", 10, 100, setsum1)
+            .publish_fragment(&pointer1, "path1", 10, 100, setsum1)
             .await
             .expect("first publish failed");
 
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, &["dummy"], "path2", 10, 100, setsum2)
+            .publish_fragment(&pointer2, "path2", 10, 100, setsum2)
             .await
             .expect("second publish failed");
 
@@ -1709,11 +1708,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
 
         // Create a witness with correct enumeration_offset but wrong collected.
         let wrong_collected = make_setsum(1);
@@ -1740,7 +1739,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let options = crate::GarbageCollectionOptions::default();
         let first_to_keep = LogPosition::from_offset(0);
 
@@ -1765,17 +1764,18 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager =
+            ManifestManager::new(Arc::new(client.clone()), vec!["dummy".to_string()], log_id);
 
         // Publish first fragment with known setsum.
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, &["dummy"], "path1", 5, 100, setsum1)
+            .publish_fragment(&pointer1, "path1", 5, 100, setsum1)
             .await
             .expect("first publish failed");
 
@@ -1793,7 +1793,7 @@ mod tests {
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, &["dummy"], "path2", 5, 100, setsum2)
+            .publish_fragment(&pointer2, "path2", 5, 100, setsum2)
             .await
             .expect("second publish failed");
 
@@ -1823,11 +1823,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), vec!["dummy".to_string()], log_id);
         let witness = ManifestWitness::ETag(crate::interfaces::ETag("test-etag".to_string()));
 
         let result = manager.manifest_head(&witness).await;
@@ -1882,7 +1882,7 @@ mod tests {
         };
 
         // Initialize with the pre-existing fragment.
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
@@ -1899,7 +1899,8 @@ mod tests {
         assert_eq!(loaded.fragments[0].setsum, fragment_setsum);
 
         // Fragments inserted via init should be visible to garbage collection.
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager =
+            ManifestManager::new(Arc::new(client.clone()), vec!["dummy".to_string()], log_id);
         let gc_options = crate::GarbageCollectionOptions::default();
         let first_to_keep = LogPosition::from_offset(100); // Keep nothing, GC everything.
 

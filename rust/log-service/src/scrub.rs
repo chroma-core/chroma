@@ -29,10 +29,9 @@ impl LogServer {
             }
         };
 
-        let reader =
-            Self::make_log_reader_with_defaults(std::sync::Arc::clone(&self.storage), path)
-                .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let reader = Self::make_log_reader_with_defaults(&self.storages, path)
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
 
         let limits = Limits {
             max_files: Some(scrub_log.max_files_to_read.into()),

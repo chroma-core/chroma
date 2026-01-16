@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::{Storage, StorageError};
+use chroma_storage::StorageError;
 use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
@@ -73,8 +73,6 @@ pub struct LogWriter<
     MP: ManifestManagerFactory<FragmentPointer = P>,
 > {
     options: LogWriterOptions,
-    storage: Arc<Storage>,
-    prefix: String,
     writer: String,
     new_fragment_publisher: FP,
     new_manifest_publisher: MP,
@@ -100,21 +98,16 @@ impl<
     #[allow(clippy::too_many_arguments)]
     pub async fn open(
         options: LogWriterOptions,
-        storage: Arc<Storage>,
-        prefix: &str,
         writer: &str,
         new_fragment_publisher: FP,
         new_manifest_publisher: MP,
         cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
         let inner = EpochWriter::default();
-        let prefix = prefix.to_string();
         let writer = writer.to_string();
         let reopen_protection = tokio::sync::Mutex::new(());
         let this = Self {
             options,
-            storage,
-            prefix,
             writer,
             new_fragment_publisher,
             new_manifest_publisher,
@@ -131,21 +124,16 @@ impl<
     #[allow(clippy::too_many_arguments)]
     pub async fn open_or_initialize(
         options: LogWriterOptions,
-        storage: Arc<Storage>,
-        prefix: &str,
         writer: &str,
         new_fragment_publisher: FP,
         new_manifest_publisher: MP,
         cmek: Option<Cmek>,
     ) -> Result<Self, Error> {
         let inner = EpochWriter::default();
-        let prefix = prefix.to_string();
         let writer = writer.to_string();
         let reopen_protection = tokio::sync::Mutex::new(());
         let this = Self {
             options,
-            storage,
-            prefix,
             writer,
             new_fragment_publisher,
             new_manifest_publisher,
@@ -285,14 +273,9 @@ impl<
         ))
     }
 
-    // TODO(rescrv):  No option
-    pub fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore> {
-        Some(CursorStore::new(
-            options,
-            Arc::clone(&self.storage),
-            self.prefix.clone(),
-            self.writer.clone(),
-        ))
+    pub async fn cursors(&self, options: CursorStoreOptions) -> Result<CursorStore, Error> {
+        let publisher = self.new_fragment_publisher.make_publisher().await?;
+        Ok(publisher.cursors(options).await)
     }
 
     pub async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
@@ -452,10 +435,8 @@ impl<
             let manifest_manager = self.new_manifest_publisher.open_publisher().await?;
             let writer = match OnceLogWriter::open(
                 self.options.clone(),
-                self.storage.clone(),
                 batch_manager,
                 manifest_manager,
-                self.prefix.clone(),
                 self.cmek.clone(),
             )
             .await
@@ -522,10 +503,6 @@ pub(crate) struct OnceLogWriter<
     /// LogWriter is intentionally cheap to construct and destroy.
     /// Reopen the log to change the options.
     options: LogWriterOptions,
-    /// A chroma object store.
-    storage: Arc<Storage>,
-    /// The prefix to store the log under in object storage.
-    prefix: String,
     /// True iff the log is done.
     done: AtomicBool,
     /// ManifestManager coordinates updates to the manifest.
@@ -539,21 +516,16 @@ pub(crate) struct OnceLogWriter<
 impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: ManifestPublisher<P>>
     OnceLogWriter<P, FP, MP>
 {
-    #[allow(clippy::too_many_arguments)]
     async fn open(
         options: LogWriterOptions,
-        storage: Arc<Storage>,
         batch_manager: FP,
         mut manifest_manager: MP,
-        prefix: String,
         cmek: Option<Cmek>,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         manifest_manager.recover().await?;
         let this = Arc::new(Self {
             options,
-            storage,
-            prefix,
             done,
             manifest_manager,
             batch_manager,
@@ -593,16 +565,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
 
     pub(crate) async fn open_for_read_only_and_stale_ops(
         options: LogWriterOptions,
-        storage: Arc<Storage>,
         batch_manager: FP,
         manifest_manager: MP,
-        prefix: String,
     ) -> Result<Arc<Self>, Error> {
         let done = AtomicBool::new(false);
         Ok(Arc::new(Self {
             options,
-            storage,
-            prefix,
             done,
             manifest_manager,
             batch_manager,
@@ -738,7 +706,6 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             .manifest_manager
             .publish_fragment(
                 &pointer,
-                &["dummy"],
                 &path,
                 messages_len as u64,
                 num_bytes as u64,
@@ -783,8 +750,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             }
             let garbage_and_e_tag = match Garbage::load(
                 &self.options.throttle_manifest,
-                &self.storage,
-                &self.prefix,
+                &self.batch_manager,
             )
             .await
             {
@@ -798,13 +764,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                         Some((garbage, e_tag))
                     } else if let Some(e_tag) = e_tag {
                         tracing::info!("resetting garbage because a concurrent snapshot write invalidated prior garbage");
-                        garbage
-                            .reset(
-                                &self.options.throttle_manifest,
-                                &self.storage,
-                                &self.prefix,
-                                &e_tag,
-                            )
+                        self.batch_manager
+                            .reset_garbage(&self.options.throttle_manifest, &e_tag)
                             .await?;
                         continue;
                     } else {
@@ -836,9 +797,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             match garbage
                 .install(
                     &self.manifest_manager,
+                    &self.batch_manager,
                     &self.options.throttle_manifest,
-                    &self.storage,
-                    &self.prefix,
                     e_tag.as_ref(),
                 )
                 .await
@@ -868,8 +828,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         _options: &GarbageCollectionOptions,
     ) -> Result<(), Error> {
         let (garbage, _) =
-            match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
-            {
+            match Garbage::load(&self.options.throttle_manifest, &self.batch_manager).await {
                 Ok(Some((garbage, e_tag))) => (garbage, e_tag),
                 Ok(None) => return Ok(()),
                 Err(err) => {
@@ -903,8 +862,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         let exp_backoff: ExponentialBackoff = options.throttle.into();
         let start = Instant::now();
         let (garbage, e_tag) =
-            match Garbage::load(&self.options.throttle_manifest, &self.storage, &self.prefix).await
-            {
+            match Garbage::load(&self.options.throttle_manifest, &self.batch_manager).await {
                 Ok(Some((garbage, e_tag))) => (garbage, e_tag),
                 Ok(None) => return Ok(()),
                 Err(err) => {
@@ -917,8 +875,9 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             ));
         };
         let mut batch = vec![];
+        let storage = self.batch_manager.preferred_storage().await;
         let delete_batch = |batch: Vec<String>, exp_backoff: ExponentialBackoff| {
-            let storage = Arc::clone(&self.storage);
+            let storage = storage.clone();
             async move {
                 let paths = batch.iter().map(String::as_str).collect::<Vec<_>>();
                 loop {
@@ -928,7 +887,7 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                                 tracing::error!(error = ?err, "could not clean up");
                             }
                             if let Some(err) = deleted_objects.errors.pop() {
-                                return Err(Arc::new(err).into());
+                                return Err::<(), Error>(Arc::new(err).into());
                             } else {
                                 return Ok(());
                             }
@@ -953,7 +912,9 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 Ok(())
             }
         };
-        for path in garbage.prefixed_paths_to_delete(&self.prefix) {
+        let storages = self.batch_manager.storages().await;
+        let prefix = &storages[0].prefix;
+        for path in garbage.prefixed_paths_to_delete(prefix) {
             batch.push(path);
             if batch.len() >= 100 {
                 let batch = std::mem::take(&mut batch);
@@ -963,13 +924,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         if !batch.is_empty() {
             delete_batch(batch, exp_backoff.clone()).await?;
         }
-        garbage
-            .reset(
-                &self.options.throttle_manifest,
-                &self.storage,
-                &self.prefix,
-                e_tag,
-            )
+        self.batch_manager
+            .reset_garbage(&self.options.throttle_manifest, e_tag)
             .await?;
         Ok(())
     }
@@ -990,12 +946,10 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     // NOTE(rescrv): Garbage collection cutoff is responsible for determining the crucial amount of
     // how much to garbage collect.  If there are no cursors, it must bail with an error.
     async fn garbage_collection_cutoff(&self) -> Result<LogPosition, Error> {
-        let cursors = CursorStore::new(
-            CursorStoreOptions::default(),
-            Arc::clone(&self.storage),
-            self.prefix.clone(),
-            "garbage collection writer".to_string(),
-        );
+        let cursors = self
+            .batch_manager
+            .cursors(CursorStoreOptions::default())
+            .await;
         // This will be None if there are no cursors, upholding the function invariant.
         let mut collect_up_to = None;
         for cursor_name in cursors.list().await? {
@@ -1008,10 +962,9 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             }
         }
         let Some(collect_up_to) = collect_up_to else {
-            return Err(Error::NoSuchCursor(format!(
-                "there is no cursor for prefix {}",
-                self.prefix
-            )));
+            return Err(Error::NoSuchCursor(
+                "there is no cursor for this log".to_string(),
+            ));
         };
         Ok(collect_up_to)
     }
