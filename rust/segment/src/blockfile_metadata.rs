@@ -914,7 +914,13 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = full_text_index_writer.write_to_blockfiles().await;
+        let res = full_text_index_writer
+            .write_to_blockfiles()
+            .instrument(tracing::info_span!(
+                "MetadataSegment finish full_text_index",
+                otel.name = "MetadataSegment finish full_text_index"
+            ))
+            .await;
         self.full_text_index_writer = Some(full_text_index_writer);
         match res {
             Ok(_) => {}
@@ -925,7 +931,13 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = string_metadata_index_writer.write_to_blockfile().await;
+        let res = string_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "MetadataSegment finish string_metadata_index",
+                otel.name = "MetadataSegment finish string_metadata_index"
+            ))
+            .await;
         self.string_metadata_index_writer = Some(string_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -936,7 +948,13 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = bool_metadata_index_writer.write_to_blockfile().await;
+        let res = bool_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "MetadataSegment finish bool_metadata_index",
+                otel.name = "MetadataSegment finish bool_metadata_index"
+            ))
+            .await;
         self.bool_metadata_index_writer = Some(bool_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -947,7 +965,13 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = f32_metadata_index_writer.write_to_blockfile().await;
+        let res = f32_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "MetadataSegment finish f32_metadata_index",
+                otel.name = "MetadataSegment finish f32_metadata_index"
+            ))
+            .await;
         self.f32_metadata_index_writer = Some(f32_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -958,7 +982,13 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = u32_metadata_index_writer.write_to_blockfile().await;
+        let res = u32_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "MetadataSegment finish u32_metadata_index",
+                otel.name = "MetadataSegment finish u32_metadata_index"
+            ))
+            .await;
         self.u32_metadata_index_writer = Some(u32_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -970,50 +1000,103 @@ impl<'me> MetadataSegmentWriter<'me> {
 
     pub async fn commit(self) -> Result<MetadataSegmentFlusher, Box<dyn ChromaError>> {
         let full_text_flusher = match self.full_text_index_writer {
-            Some(flusher) => match flusher.commit().await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(flusher) => {
+                match flusher
+                    .commit()
+                    .instrument(tracing::info_span!(
+                        "MetadataSegment commit full_text_index",
+                        otel.name = "MetadataSegment commit full_text_index"
+                    ))
+                    .await
+                {
+                    Ok(flusher) => flusher,
+                    Err(e) => return Err(Box::new(e)),
+                }
+            }
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let string_metadata_flusher = match self.string_metadata_index_writer {
-            Some(flusher) => match flusher.commit().await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(flusher) => {
+                match flusher
+                    .commit()
+                    .instrument(tracing::info_span!(
+                        "MetadataSegment commit string_metadata_index",
+                        otel.name = "MetadataSegment commit string_metadata_index"
+                    ))
+                    .await
+                {
+                    Ok(flusher) => flusher,
+                    Err(e) => return Err(Box::new(e)),
+                }
+            }
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let bool_metadata_flusher = match self.bool_metadata_index_writer {
-            Some(flusher) => match flusher.commit().await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(flusher) => {
+                match flusher
+                    .commit()
+                    .instrument(tracing::info_span!(
+                        "MetadataSegment commit bool_metadata_index",
+                        otel.name = "MetadataSegment commit bool_metadata_index"
+                    ))
+                    .await
+                {
+                    Ok(flusher) => flusher,
+                    Err(e) => return Err(Box::new(e)),
+                }
+            }
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let f32_metadata_flusher = match self.f32_metadata_index_writer {
-            Some(flusher) => match flusher.commit().await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(flusher) => {
+                match flusher
+                    .commit()
+                    .instrument(tracing::info_span!(
+                        "MetadataSegment commit f32_metadata_index",
+                        otel.name = "MetadataSegment commit f32_metadata_index"
+                    ))
+                    .await
+                {
+                    Ok(flusher) => flusher,
+                    Err(e) => return Err(Box::new(e)),
+                }
+            }
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let u32_metadata_flusher = match self.u32_metadata_index_writer {
-            Some(flusher) => match flusher.commit().await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(flusher) => {
+                match flusher
+                    .commit()
+                    .instrument(tracing::info_span!(
+                        "MetadataSegment commit u32_metadata_index",
+                        otel.name = "MetadataSegment commit u32_metadata_index"
+                    ))
+                    .await
+                {
+                    Ok(flusher) => flusher,
+                    Err(e) => return Err(Box::new(e)),
+                }
+            }
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
         let sparse_index_flusher = match self.sparse_index_writer {
-            Some(sparse_index_writer) => match Box::pin(sparse_index_writer.commit()).await {
-                Ok(flusher) => flusher,
-                Err(e) => return Err(Box::new(e)),
-            },
+            Some(sparse_index_writer) => {
+                match Box::pin(sparse_index_writer.commit())
+                    .instrument(tracing::info_span!(
+                        "MetadataSegment commit sparse_index",
+                        otel.name = "MetadataSegment commit sparse_index"
+                    ))
+                    .await
+                {
+                    Ok(flusher) => flusher,
+                    Err(e) => return Err(Box::new(e)),
+                }
+            }
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
 
@@ -1058,7 +1141,15 @@ impl MetadataSegmentFlusher {
 
         let mut flushed = HashMap::new();
 
-        match self.full_text_index_flusher.flush().await {
+        match self
+            .full_text_index_flusher
+            .flush()
+            .instrument(tracing::info_span!(
+                "MetadataSegment flush full_text_index",
+                otel.name = "MetadataSegment flush full_text_index"
+            ))
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -1070,7 +1161,15 @@ impl MetadataSegmentFlusher {
             )],
         );
 
-        match self.bool_metadata_index_flusher.flush().await {
+        match self
+            .bool_metadata_index_flusher
+            .flush()
+            .instrument(tracing::info_span!(
+                "MetadataSegment flush bool_metadata_index",
+                otel.name = "MetadataSegment flush bool_metadata_index"
+            ))
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -1082,7 +1181,15 @@ impl MetadataSegmentFlusher {
             )],
         );
 
-        match self.f32_metadata_index_flusher.flush().await {
+        match self
+            .f32_metadata_index_flusher
+            .flush()
+            .instrument(tracing::info_span!(
+                "MetadataSegment flush f32_metadata_index",
+                otel.name = "MetadataSegment flush f32_metadata_index"
+            ))
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -1094,7 +1201,15 @@ impl MetadataSegmentFlusher {
             )],
         );
 
-        match self.u32_metadata_index_flusher.flush().await {
+        match self
+            .u32_metadata_index_flusher
+            .flush()
+            .instrument(tracing::info_span!(
+                "MetadataSegment flush u32_metadata_index",
+                otel.name = "MetadataSegment flush u32_metadata_index"
+            ))
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -1106,7 +1221,15 @@ impl MetadataSegmentFlusher {
             )],
         );
 
-        match self.string_metadata_index_flusher.flush().await {
+        match self
+            .string_metadata_index_flusher
+            .flush()
+            .instrument(tracing::info_span!(
+                "MetadataSegment flush string_metadata_index",
+                otel.name = "MetadataSegment flush string_metadata_index"
+            ))
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
@@ -1120,7 +1243,13 @@ impl MetadataSegmentFlusher {
 
         let max_id = self.sparse_index_flusher.max_id();
         let offset_value_id = self.sparse_index_flusher.offset_value_id();
-        match Box::pin(self.sparse_index_flusher.flush()).await {
+        match Box::pin(self.sparse_index_flusher.flush())
+            .instrument(tracing::info_span!(
+                "MetadataSegment flush sparse_index",
+                otel.name = "MetadataSegment flush sparse_index"
+            ))
+            .await
+        {
             Ok(_) => {}
             Err(e) => return Err(Box::new(e)),
         }
