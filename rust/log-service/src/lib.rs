@@ -896,6 +896,7 @@ impl LogServer {
                 rollup.start_log_position,
                 LogPosition::from_offset(adjusted_log_offset as u64),
             );
+            rollup.reinsert_count = 0;
             if rollup.is_empty() {
                 entry.remove();
             }
@@ -2707,6 +2708,11 @@ mod tests {
         ThrottleOptions,
     };
 
+    use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
+    use std::collections::HashMap;
+    use tonic::Request;
+    use wal3::LogWriterOptions;
+
     #[test]
     fn unsafe_constants() {
         assert!(STABLE_PREFIX.is_valid());
@@ -4407,12 +4413,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_k8s_integration_update_collection_log_offset_never_moves_backwards() {
-        use chroma_storage::s3_client_for_test_with_new_bucket;
-        use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
-        use std::collections::HashMap;
-        use tonic::Request;
-        use wal3::LogWriterOptions;
-
         // Set up test storage using S3 (minio)
         let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
 
@@ -4553,6 +4553,124 @@ mod tests {
             response.is_ok(),
             "Forward movement after backward attempt should succeed"
         );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_update_collection_log_offset_resets_reinsert_count() {
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+
+        let options = LogWriterOptions::default();
+        let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+            options.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            "dirty-test".to_string(),
+            "dirty log writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let dirty_log = LogWriter::open_or_initialize(
+            options,
+            Arc::clone(&storage),
+            "dirty-test",
+            "dirty log writer",
+            fragment_publisher_factory,
+            manifest_publisher_factory,
+            None,
+        )
+        .await
+        .expect("Failed to create dirty log");
+        let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
+
+        let config = LogServerConfig::default();
+        let log_server = LogServer {
+            config,
+            open_logs: Arc::new(StateHashTable::default()),
+            storage,
+            dirty_log,
+            rolling_up: tokio::sync::Mutex::new(()),
+            backpressure: Mutex::new(Arc::new(HashSet::default())),
+            need_to_compact: Mutex::new(HashMap::default()),
+            cache: None,
+            metrics: Metrics::new(opentelemetry::global::meter("test")),
+        };
+
+        let collection_id = CollectionUuid::new();
+        let collection_id_str = collection_id.to_string();
+
+        // Initialize a log for this collection
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let options2 = LogWriterOptions::default();
+        let (fragment_publisher_factory2, manifest_publisher_factory2) = create_s3_factories(
+            options2.clone(),
+            LogReaderOptions::default(),
+            Arc::clone(&log_server.storage),
+            storage_prefix.clone(),
+            "test log writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let _log_writer = LogWriter::open_or_initialize(
+            options2,
+            Arc::clone(&log_server.storage),
+            &storage_prefix,
+            "test log writer",
+            fragment_publisher_factory2,
+            manifest_publisher_factory2,
+            None,
+        )
+        .await
+        .expect("Failed to initialize collection log");
+
+        // Manually insert an entry into need_to_compact with a non-zero reinsert_count
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_micros() as u64;
+        {
+            let mut need_to_compact = log_server.need_to_compact.lock();
+            let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, now);
+            rollup.reinsert_count = 42;
+            need_to_compact.insert(collection_id, rollup);
+        }
+
+        // Verify reinsert_count is non-zero before the call
+        {
+            let need_to_compact = log_server.need_to_compact.lock();
+            let rollup = need_to_compact.get(&collection_id).unwrap();
+            assert_eq!(
+                42, rollup.reinsert_count,
+                "reinsert_count should be 42 before update"
+            );
+            println!("Before update: reinsert_count = {}", rollup.reinsert_count);
+        }
+
+        // Call update_collection_log_offset to advance start_log_position
+        let request = UpdateCollectionLogOffsetRequest {
+            collection_id: collection_id_str,
+            log_offset: 50,
+            database_name: "test_db".to_string(),
+        };
+
+        let response = log_server
+            .update_collection_log_offset(Request::new(request))
+            .await;
+        assert!(
+            response.is_ok(),
+            "update_collection_log_offset should succeed: {:?}",
+            response.err()
+        );
+
+        // Verify reinsert_count was reset to 0
+        {
+            let need_to_compact = log_server.need_to_compact.lock();
+            let rollup = need_to_compact.get(&collection_id).unwrap();
+            assert_eq!(
+                0, rollup.reinsert_count,
+                "reinsert_count should be reset to 0 after update"
+            );
+            println!("After update: reinsert_count = {}", rollup.reinsert_count);
+        }
     }
 
     #[test]
