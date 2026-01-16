@@ -987,6 +987,7 @@ impl SpannerBackend {
             metadata,
             reset_metadata,
             new_configuration,
+            ..
         } = req;
 
         let collection_id = id.0.to_string();
@@ -6340,6 +6341,7 @@ mod tests {
 
         // Update name only
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: Some(new_name.clone()),
             dimension: None,
@@ -6385,6 +6387,7 @@ mod tests {
 
         // Update dimension only
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: Some(256),
@@ -6437,6 +6440,7 @@ mod tests {
 
         // Update both name and dimension
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: Some(new_name.clone()),
             dimension: Some(512),
@@ -6505,6 +6509,7 @@ mod tests {
         .collect();
 
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: None,
@@ -6566,6 +6571,7 @@ mod tests {
 
         // Reset metadata (delete all)
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: None,
@@ -6617,6 +6623,7 @@ mod tests {
 
         // Try to rename collection1 to collection2's name (should fail)
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id1,
             name: Some(name2.clone()),
             dimension: None,
@@ -6659,11 +6666,12 @@ mod tests {
         };
 
         // Setup tenant/database but don't create collection
-        let (_tenant_id, _db_name) = setup_tenant_and_database(&backend).await;
+        let (_tenant_id, db_name) = setup_tenant_and_database(&backend).await;
 
         let nonexistent_id = CollectionUuid(Uuid::new_v4());
 
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: nonexistent_id,
             name: Some("new_name".to_string()),
             dimension: None,
@@ -6715,6 +6723,7 @@ mod tests {
 
         // Update with no changes (all None/false)
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: None,
@@ -6779,6 +6788,7 @@ mod tests {
                 .collect();
 
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: Some(new_name.clone()),
             dimension: Some(1024),
@@ -6827,6 +6837,7 @@ mod tests {
 
         // Set dimension
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: Some(384),
@@ -6881,6 +6892,7 @@ mod tests {
         };
 
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: None,
@@ -6933,6 +6945,7 @@ mod tests {
 
         // Update name to same name (should succeed - it's a no-op effectively)
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: Some(name.clone()),
             dimension: None,
@@ -6985,6 +6998,7 @@ mod tests {
         );
 
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: None,
@@ -7058,6 +7072,7 @@ mod tests {
         };
 
         let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
             id: collection_id,
             name: None,
             dimension: None,

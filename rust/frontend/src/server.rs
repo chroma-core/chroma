@@ -1217,6 +1217,9 @@ async fn update_collection(
         quota_payload = quota_payload.with_update_collection_metadata(new_metadata);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -1226,6 +1229,7 @@ async fn update_collection(
     };
 
     let request = chroma_types::UpdateCollectionRequest::try_new(
+        Some(database_name),
         collection_id,
         payload.new_name,
         payload
