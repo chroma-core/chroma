@@ -362,6 +362,7 @@ impl SysDb {
 
     pub async fn update_collection(
         &mut self,
+        database: Option<DatabaseName>,
         collection_id: CollectionUuid,
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
@@ -370,8 +371,15 @@ impl SysDb {
     ) -> Result<(), UpdateCollectionError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.update_collection(collection_id, name, metadata, dimension, configuration)
-                    .await
+                grpc.update_collection(
+                    database,
+                    collection_id,
+                    name,
+                    metadata,
+                    dimension,
+                    configuration,
+                )
+                .await
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
@@ -1253,18 +1261,26 @@ impl GrpcSysDb {
 
     async fn update_collection(
         &mut self,
+        database: Option<DatabaseName>,
         collection_id: CollectionUuid,
         name: Option<String>,
         metadata: Option<CollectionMetadataUpdate>,
         dimension: Option<u32>,
         configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<(), UpdateCollectionError> {
+        let mut client = match &database {
+            Some(db) => self
+                .client(db)
+                .map_err(|e| UpdateCollectionError::Internal(Box::new(e)))?,
+            None => self.client.clone(),
+        };
         let mut configuration_json_str = None;
         if let Some(configuration) = configuration {
             configuration_json_str = Some(serde_json::to_string(&configuration).unwrap());
         }
         let req = chroma_proto::UpdateCollectionRequest {
             id: collection_id.0.to_string(),
+            database: database.map(|db| db.into_string()),
             name: name.clone(),
             metadata_update: metadata.map(|metadata| match metadata {
                 CollectionMetadataUpdate::UpdateMetadata(metadata) => {
@@ -1280,7 +1296,7 @@ impl GrpcSysDb {
             configuration_json_str,
         };
 
-        self.client.update_collection(req).await.map_err(|e| {
+        client.update_collection(req).await.map_err(|e| {
             if e.code() == Code::NotFound {
                 UpdateCollectionError::NotFound(collection_id.to_string())
             } else {

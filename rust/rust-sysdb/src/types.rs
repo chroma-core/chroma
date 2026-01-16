@@ -420,6 +420,8 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
 /// Internal request for updating a collection.
 #[derive(Debug, Clone)]
 pub struct UpdateCollectionRequest {
+    /// The database containing the collection (required for routing)
+    pub database_name: DatabaseName,
     /// The collection ID to update
     pub id: CollectionUuid,
     /// New name (optional - None means don't change)
@@ -439,6 +441,17 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
 
     fn try_from(req: chroma_proto::UpdateCollectionRequest) -> Result<Self, Self::Error> {
         let id = CollectionUuid(validate_uuid(&req.id)?);
+
+        // Parse database name from proto (required)
+        let database_str = req
+            .database
+            .ok_or_else(|| SysDbError::Internal("database is required".to_string()))?;
+        let database_name = DatabaseName::new(&database_str).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                database_str
+            ))
+        })?;
 
         // Handle the metadata_update oneof field
         // Case 1: reset_metadata = true, metadata = None -> delete all metadata
@@ -474,6 +487,7 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
         };
 
         Ok(Self {
+            database_name,
             id,
             name: req.name,
             dimension: req.dimension.map(|dim| dim as u32),
@@ -583,9 +597,8 @@ impl Assignable for UpdateCollectionRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Single collection update - no database context available, use default
-        // TODO(Sanket): Make database name mandatory in the request.
-        Backend::Spanner(factory.one_spanner().clone())
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
     }
 }
 

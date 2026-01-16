@@ -377,6 +377,7 @@ impl Bindings {
         };
 
         let request = UpdateCollectionRequest::try_new(
+            None,
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),

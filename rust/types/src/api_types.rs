@@ -919,6 +919,7 @@ pub enum CollectionMetadataUpdate {
 #[derive(Clone, Validate, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRequest {
+    pub database_name: Option<DatabaseName>,
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
     pub new_name: Option<String>,
@@ -929,12 +930,14 @@ pub struct UpdateCollectionRequest {
 
 impl UpdateCollectionRequest {
     pub fn try_new(
+        database_name: Option<DatabaseName>,
         collection_id: CollectionUuid,
         new_name: Option<String>,
         new_metadata: Option<CollectionMetadataUpdate>,
         new_configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
+            database_name,
             collection_id,
             new_name,
             new_metadata,

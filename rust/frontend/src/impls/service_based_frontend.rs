@@ -185,11 +185,19 @@ impl ServiceBasedFrontend {
 
     async fn set_collection_dimension(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         dimension: u32,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(collection_id, None, None, Some(dimension), None)
+            .update_collection(
+                Some(database_name),
+                collection_id,
+                None,
+                None,
+                Some(dimension),
+                None,
+            )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
@@ -235,7 +243,13 @@ impl ServiceBasedFrontend {
                 }
                 None => {
                     if update_if_not_present {
-                        self.set_collection_dimension(collection_id, emb_dim)
+                        let database_name =
+                            DatabaseName::new(&collection.database).ok_or_else(|| {
+                                ValidationError::InvalidArgument(
+                                    "database name must be at least 3 characters".to_string(),
+                                )
+                            })?;
+                        self.set_collection_dimension(database_name, collection_id, emb_dim)
                             .await?;
                     }
                 }
@@ -623,6 +637,7 @@ impl ServiceBasedFrontend {
     pub async fn update_collection(
         &mut self,
         UpdateCollectionRequest {
+            database_name,
             collection_id,
             new_name,
             new_metadata,
@@ -632,6 +647,7 @@ impl ServiceBasedFrontend {
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
             .update_collection(
+                database_name,
                 collection_id,
                 new_name,
                 new_metadata,
