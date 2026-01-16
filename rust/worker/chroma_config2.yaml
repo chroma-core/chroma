@@ -240,7 +240,7 @@ log_service:
       config:
         repl:
           minimum_allowed_replication_factor: 1
-          minimum_failures_to_exclude_replica: 100,
+          minimum_failures_to_exclude_replica: 100
         spanner:
           emulator:
             host: "spanner.chroma.svc.cluster.local"

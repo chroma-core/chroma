@@ -2984,7 +2984,9 @@ mod tests {
     use super::*;
     use crate::state_hash_table::Value;
 
+    use chroma_config::spanner::SpannerEmulatorConfig;
     use chroma_storage::s3_client_for_test_with_new_bucket;
+    use chroma_types::Topology;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
     use opentelemetry::global::meter;
     use proptest::prelude::*;
@@ -2999,6 +3001,8 @@ mod tests {
     use std::collections::HashMap;
     use tonic::Request;
     use wal3::LogWriterOptions;
+
+    const TEST_TOPOLOGY_NAME: &str = "test-mcmr-topology";
 
     #[test]
     fn unsafe_constants() {
@@ -4114,7 +4118,119 @@ mod tests {
     }
 
     fn mcmr_setup_log_server() -> Pin<Box<dyn Future<Output = LogServer> + Send>> {
-        todo!();
+        Box::pin(async {
+            let storage1 = s3_client_for_test_with_new_bucket().await;
+            let storage2 = s3_client_for_test_with_new_bucket().await;
+            let writer_options = LogWriterOptions {
+                snapshot_manifest: SnapshotOptions {
+                    // We set a snapshot rollover threshold that's high enough that the test won't go
+                    // on forever due to a race, but also so that we stress the conditions.
+                    snapshot_rollover_threshold: 10,
+                    fragment_rollover_threshold: 3,
+                },
+                throttle_fragment: ThrottleOptions {
+                    batch_size_bytes: 4,
+                    batch_interval_us: 4096,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+
+            // Set up Spanner emulator config (requires Tilt with Spanner emulator running).
+            let emulator = SpannerEmulatorConfig {
+                host: "localhost".to_string(),
+                grpc_port: 9010,
+                rest_port: 9020,
+                project: "local-project".to_string(),
+                instance: "test-instance".to_string(),
+                database: "local-logdb-database".to_string(),
+            };
+            let database_path = emulator.database_path();
+            let spanner_config = emulator.spanner_config();
+
+            // Connect to Spanner emulator. Panics if emulator not available.
+            let spanner = SpannerClient::new(database_path, spanner_config)
+                .await
+                .expect("Failed to connect to Spanner emulator. Is Tilt running?");
+
+            let repl_options = ReplicatedFragmentOptions::default();
+
+            // Set up two regions for MCMR testing.
+            let region1 = RegionName::new("region1").expect("'region1' is a valid region name");
+            let region2 = RegionName::new("region2").expect("'region2' is a valid region name");
+
+            // Create dirty log using S3 factories (dirty log doesn't use replication).
+            let dirty_log_prefix = MarkDirty::path_for_hostname("test-mcmr-dirty-log");
+            let storage1_arc = Arc::new(storage1.clone());
+            let (dirty_fragment_factory, dirty_manifest_factory) = create_s3_factories(
+                writer_options.clone(),
+                LogReaderOptions::default(),
+                Arc::clone(&storage1_arc),
+                dirty_log_prefix,
+                "test-mcmr-dirty-log-writer".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
+                LogWriter::open_or_initialize(
+                    writer_options.clone(),
+                    "test-mcmr-dirty-log-writer",
+                    dirty_fragment_factory,
+                    dirty_manifest_factory,
+                    None, // Dirty log doesn't use CMEK
+                )
+                .await
+                .expect("Dirty log should be initializable"),
+            ));
+
+            // Create the topology with both regions.
+            let topology_name = TopologyName::new(TEST_TOPOLOGY_NAME).expect("valid topology name");
+            let topology = Topology::new(
+                topology_name,
+                vec![region1.clone(), region2.clone()],
+                TopologicalStorage {
+                    spanner,
+                    repl: repl_options.clone(),
+                },
+            );
+
+            let config = LogServerConfig {
+                writer: writer_options,
+                repl: repl_options,
+                ..Default::default()
+            };
+
+            let storages = MultiCloudMultiRegionConfiguration {
+                preferred: region1.clone(),
+                regions: vec![
+                    ProviderRegion::new(
+                        region1,
+                        "aws",
+                        "us-east-1",
+                        RegionalStorage { storage: storage1 },
+                    ),
+                    ProviderRegion::new(
+                        region2,
+                        "aws",
+                        "us-west-2",
+                        RegionalStorage { storage: storage2 },
+                    ),
+                ],
+                topologies: vec![topology],
+            };
+
+            LogServer {
+                storages,
+                dirty_log,
+                metrics: Metrics::new(meter("test-rust-log-service")),
+                config,
+                open_logs: Default::default(),
+                rolling_up: Default::default(),
+                backpressure: Default::default(),
+                need_to_compact: Default::default(),
+                cache: Default::default(),
+            }
+        })
     }
 
     fn s3_setup_log_server() -> Pin<Box<dyn Future<Output = LogServer> + Send>> {
@@ -4983,8 +5099,6 @@ mod tests {
         );
         let dirty_log = LogWriter::open_or_initialize(
             options,
-            Arc::clone(&storage),
-            "dirty-test",
             "dirty log writer",
             fragment_publisher_factory,
             manifest_publisher_factory,
@@ -4995,10 +5109,23 @@ mod tests {
         let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
 
         let config = LogServerConfig::default();
+        let local = RegionName::new("local").expect("'local' is a valid region name");
+        let storages = MultiCloudMultiRegionConfiguration {
+            preferred: local.clone(),
+            regions: vec![ProviderRegion {
+                name: local,
+                provider: "aws".to_string(),
+                region: "us-east-1".to_string(),
+                config: RegionalStorage {
+                    storage: (*storage).clone(),
+                },
+            }],
+            topologies: vec![],
+        };
         let log_server = LogServer {
             config,
             open_logs: Arc::new(StateHashTable::default()),
-            storage,
+            storages,
             dirty_log,
             rolling_up: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
@@ -5016,7 +5143,7 @@ mod tests {
         let (fragment_publisher_factory2, manifest_publisher_factory2) = create_s3_factories(
             options2.clone(),
             LogReaderOptions::default(),
-            Arc::clone(&log_server.storage),
+            Arc::clone(&storage),
             storage_prefix.clone(),
             "test log writer".to_string(),
             Arc::new(()),
@@ -5024,8 +5151,6 @@ mod tests {
         );
         let _log_writer = LogWriter::open_or_initialize(
             options2,
-            Arc::clone(&log_server.storage),
-            &storage_prefix,
             "test log writer",
             fragment_publisher_factory2,
             manifest_publisher_factory2,
@@ -5207,7 +5332,7 @@ mod tests {
             .stack_size(1 << 22)
             .spawn(move || {
                 runtime.block_on(test_rollup_snapshot_after_gc(
-                    "topo+dbname",
+                    &format!("{TEST_TOPOLOGY_NAME}+dbname"),
                     mcmr_setup_log_server,
                 ))
             })
@@ -5224,7 +5349,7 @@ mod tests {
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36)
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs("topo+dbname", read_offset, batch_size, operations, mcmr_setup_log_server))
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_push_pull_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), read_offset, batch_size, operations, mcmr_setup_log_server))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
@@ -5235,7 +5360,7 @@ mod tests {
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=5).prop_map(|ops| ops.into_iter().enumerate().collect()).prop_shuffle()
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs("topo+dbname", operations, mcmr_setup_log_server))
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_dirty_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), operations, mcmr_setup_log_server))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
@@ -5248,7 +5373,7 @@ mod tests {
             fork_operations in proptest::collection::vec(any::<OperationRecord>(), 0..=10),
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs("topo+dbname", initial_operations, source_operations, fork_operations, mcmr_setup_log_server))
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_fork_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), initial_operations, source_operations, fork_operations, mcmr_setup_log_server))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
@@ -5259,7 +5384,7 @@ mod tests {
             operations in proptest::collection::vec(any::<OperationRecord>(), 1..=36),
         ) {
             // NOTE: Somehow it overflow the stack under default stack limit
-            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_garbage_collect_unused_logs("topo+dbname", operations, mcmr_setup_log_server))
+            std::thread::Builder::new().stack_size(1 << 22).spawn(move || test_garbage_collect_unused_logs(&format!("{TEST_TOPOLOGY_NAME}+dbname"), operations, mcmr_setup_log_server))
             .expect("Thread should be spawnable")
             .join()
             .expect("Spawned thread should not fail to join");
