@@ -134,17 +134,18 @@ pub struct QueryServiceConfig {
     #[serde(default)]
     pub log: chroma_log::config::LogConfig,
 
-    /// The configuration for the dispatcher (task distribution engine).
+    /// The configuration for the dispatcher (task execution engine).
     #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
 
     /// The configuration for managing blockfiles within the query service.
-    /// Blocks are the underlying data structure for storing collection data in chroma.
+    /// Blockfiles are the underlying data structure for storing collection data in chroma.
     #[serde(default)]
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
 
     /// The configuration for managing HNSW indices within the query service.
     /// HNSW is a graph-based index that is used for approximate nearest neighbor search.
+    /// TODO: This should move underneath spann_provider once we remove support for HNSW.
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
 
@@ -153,7 +154,7 @@ pub struct QueryServiceConfig {
     pub fetch_log_batch_size: u32,
 
     /// The configuration for managing SPANN indices within the query service.
-    /// SPANN is a tree-based index that is used for approximate nearest neighbor search.
+    /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
     #[serde(default)]
     pub spann_provider: SpannProviderConfig,
 
