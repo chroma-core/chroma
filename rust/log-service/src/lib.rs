@@ -48,12 +48,13 @@ use tonic::{transport::Server, Request, Response, Status};
 use tracing::{Instrument, Level};
 use uuid::Uuid;
 use wal3::{
-    create_repl_factories, create_s3_factories, scan_from_manifest, Cursor, CursorName,
-    CursorStore, CursorStoreOptions, CursorWitness, Fragment, FragmentConsumer,
-    FragmentManagerFactory, GarbageCollectionOptions, Limits, LogPosition, LogReaderOptions,
-    LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest, ManifestAndWitness,
-    MarkDirty as MarkDirtyTrait, ReplicatedFragmentOptions, S3FragmentPuller, Snapshot,
-    SnapshotCache, SnapshotPointer, StorageWrapper,
+    create_repl_factories, create_s3_factories, interfaces::ManifestManagerFactory,
+    scan_from_manifest, Cursor, CursorName, CursorStore, CursorStoreOptions, CursorWitness,
+    Fragment, FragmentConsumer, FragmentManagerFactory, GarbageCollectionOptions, Limits,
+    LogPosition, LogReader, LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions,
+    LogWriterTrait, Manifest, ManifestAndWitness, MarkDirty as MarkDirtyTrait,
+    ReplicatedFragmentOptions, S3FragmentPuller, Snapshot, SnapshotCache, SnapshotPointer,
+    StorageWrapper,
 };
 
 mod scrub;
@@ -793,42 +794,90 @@ impl LogServer {
     /// Creates a LogReader for the given prefix with default (no-op) mark_dirty and snapshot_cache.
     async fn make_log_reader(
         &self,
-        prefix: String,
-    ) -> Result<Arc<dyn LogReaderTrait>, wal3::Error> {
-        /*
-        let (fragment_factory, manifest_factory) = create_s3_factories(
-            self.config.writer.clone(),
-            self.config.reader.clone(),
-            Arc::clone(&self.storage),
-            prefix.clone(),
-            String::new(),
-            Arc::new(()),
-            Arc::new(()),
-        );
-        let fragment_consumer = fragment_factory.make_consumer().await?;
-        let manifest_consumer = manifest_factory.make_consumer().await?;
-        Ok(Arc::new(LogReader::new(
-            self.config.reader.clone(),
-            fragment_consumer,
-            manifest_consumer,
-        )))
-        */
-        todo!();
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        if let Some(topology) = database_name.topology() {
+            let topology_name = TopologyName::new(topology.clone())
+                .map_err(|_| Error::InvalidTopology(topology))?;
+            let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+                return Err(Error::MissingTopology(topology_name.to_string()));
+            };
+            let mut storage_wrappers = vec![];
+            for region in regions.into_iter() {
+                storage_wrappers.push(StorageWrapper::new(
+                    region.name().to_string(),
+                    region.config.storage.clone(),
+                    storage_prefix.to_string(),
+                ));
+            }
+            let Some(preferred_index) = storage_wrappers
+                .iter()
+                .position(|r| r.region.as_str() == self.storages.preferred.as_str())
+            else {
+                return Err(Error::PreferredRegionNotInTopology(
+                    self.storages.preferred.to_string(),
+                ));
+            };
+            let storage_wrappers = Arc::new(storage_wrappers);
+            let spanner = Arc::new(topology.config.spanner.clone());
+            let (fragment_factory, manifest_factory) = create_repl_factories(
+                self.config.writer.clone(),
+                topology.config.repl.clone(),
+                preferred_index,
+                storage_wrappers,
+                spanner,
+                collection_id.0,
+            );
+            let fragment_consumer = fragment_factory.make_consumer().await?;
+            let manifest_consumer = manifest_factory.make_consumer().await?;
+            Ok(Arc::new(LogReader::new(
+                self.config.reader.clone(),
+                fragment_consumer,
+                manifest_consumer,
+            )))
+        } else if let Some(region_config) = self.storages.preferred_region_config() {
+            let storage = Arc::new(region_config.storage.clone());
+            let (fragment_factory, manifest_factory) = create_s3_factories(
+                self.config.writer.clone(),
+                self.config.reader.clone(),
+                storage,
+                storage_prefix.clone(),
+                "make-reader".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let fragment_consumer = fragment_factory.make_consumer().await?;
+            let manifest_consumer = manifest_factory.make_consumer().await?;
+            Ok(Arc::new(LogReader::new(
+                self.config.reader.clone(),
+                fragment_consumer,
+                manifest_consumer,
+            )))
+        } else {
+            Err(Error::Wal3(wal3::Error::internal(file!(), line!())))
+        }
     }
 
     /// Creates a LogReader with default options for the given storage and prefix.
+    ///
+    /// This function uses the preferred region's storage without topology awareness.
     async fn make_log_reader_with_defaults(
         storages: &MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
         prefix: String,
     ) -> Result<Arc<dyn LogReaderTrait>, wal3::Error> {
-        /*
+        let storage = storages
+            .preferred_region_config()
+            .ok_or_else(|| wal3::Error::internal(file!(), line!()))?;
+        let storage = Arc::new(storage.storage.clone());
         let writer_options = LogWriterOptions::default();
         let reader_options = LogReaderOptions::default();
         let (fragment_factory, manifest_factory) = create_s3_factories(
             writer_options,
             reader_options.clone(),
-            Arc::clone(&storage),
-            prefix.clone(),
+            storage,
+            prefix,
             String::new(),
             Arc::new(()),
             Arc::new(()),
@@ -840,8 +889,6 @@ impl LogServer {
             fragment_consumer,
             manifest_consumer,
         )))
-        */
-        todo!();
     }
 
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
@@ -933,7 +980,7 @@ impl LogServer {
         let log_reader = match log.reader(self.config.reader.clone()).await {
             Some(reader) => reader,
             None => self
-                .make_log_reader(storage_prefix.clone())
+                .make_log_reader(database_name.clone(), collection_id)
                 .await
                 .map_err(|err| Status::unknown(err.to_string()))?,
         };
@@ -1335,7 +1382,7 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_witness = |storage: Arc<Storage>, collection_id: CollectionUuid| async move {
+        let load_witness = |_this, storage: Arc<Storage>, collection_id: CollectionUuid| async move {
             let cursor = &COMPACTION;
             let cursor_store = CursorStore::new(
                 CursorStoreOptions::default(),
@@ -1388,14 +1435,14 @@ impl LogServer {
         for (collection_id, mut rollup) in std::mem::take(rollups) {
             let storage_for_task = Arc::clone(&preferred_storage);
             futures.push(async move {
-                let (witness, manifest) = match load_witness(storage_for_task, collection_id).await
-                {
-                    Ok(witness) => witness,
-                    Err(err) => {
-                        tracing::warn!("could not load cursor: {err}");
-                        return Some((collection_id, rollup));
-                    }
-                };
+                let (witness, manifest) =
+                    match load_witness(self, storage_for_task, collection_id).await {
+                        Ok(witness) => witness,
+                        Err(err) => {
+                            tracing::warn!("could not load cursor: {err}");
+                            return Some((collection_id, rollup));
+                        }
+                    };
                 // NOTE(rescrv):  There are two spreads that we have.
                 // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
                 // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
@@ -1546,9 +1593,10 @@ impl LogServer {
         let collection_id = Uuid::parse_str(&scout_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-        let prefix = collection_id.storage_prefix_for_log();
+        let database_name = DatabaseName::new(&scout_logs.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
         let log_reader = self
-            .make_log_reader(prefix)
+            .make_log_reader(database_name, collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let cache_key = cache_key_for_manifest_and_etag(collection_id);
@@ -1622,16 +1670,17 @@ impl LogServer {
 
     async fn read_fragments(
         &self,
+        database_name: &DatabaseName,
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
-    ) -> Result<Vec<Fragment>, wal3::Error> {
+    ) -> Result<Vec<Fragment>, Error> {
         if let Some(fragments) = self
             .read_fragments_via_cache(collection_id, pull_logs)
             .await
         {
             Ok(fragments)
         } else {
-            self.read_fragments_via_log_reader(collection_id, pull_logs)
+            self.read_fragments_via_log_reader(database_name, collection_id, pull_logs)
                 .await
         }
     }
@@ -1663,22 +1712,24 @@ impl LogServer {
 
     async fn read_fragments_via_log_reader(
         &self,
+        database_name: &DatabaseName,
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
-    ) -> Result<Vec<Fragment>, wal3::Error> {
-        let prefix = collection_id.storage_prefix_for_log();
-        let log_reader = self.make_log_reader(prefix).await?;
+    ) -> Result<Vec<Fragment>, Error> {
+        let log_reader = self
+            .make_log_reader(database_name.clone(), collection_id)
+            .await?;
         let limits = Limits {
             max_files: Some(pull_logs.batch_size as u64 + 1),
             max_bytes: None,
             max_records: Some(pull_logs.batch_size as u64),
         };
-        log_reader
+        Ok(log_reader
             .scan(
                 LogPosition::from_offset(pull_logs.start_from_offset as u64),
                 limits,
             )
-            .await
+            .await?)
     }
 
     async fn pull_logs(
@@ -1689,6 +1740,8 @@ impl LogServer {
         let collection_id = Uuid::parse_str(&pull_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&pull_logs.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
 
         tracing::info!(
             collection_id = collection_id.to_string(),
@@ -1697,9 +1750,12 @@ impl LogServer {
             "Pulling logs",
         );
 
-        let fragments = match self.read_fragments(collection_id, &pull_logs).await {
+        let fragments = match self
+            .read_fragments(&database_name, collection_id, &pull_logs)
+            .await
+        {
             Ok(fragments) => fragments,
-            Err(wal3::Error::UninitializedLog) => vec![],
+            Err(Error::Wal3(wal3::Error::UninitializedLog)) => vec![],
             Err(err) => {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
@@ -1780,6 +1836,8 @@ impl LogServer {
         let target_collection_id = Uuid::parse_str(&request.target_collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&request.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
         let source_prefix = source_collection_id.storage_prefix_for_log();
         let target_prefix = target_collection_id.storage_prefix_for_log();
         let storage = Arc::new(
@@ -1794,7 +1852,7 @@ impl LogServer {
             target_collection_id = target_collection_id.to_string(),
         );
         let log_reader = self
-            .make_log_reader(source_prefix.clone())
+            .make_log_reader(database_name.clone(), source_collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let cursors = CursorStore::new(
@@ -1839,7 +1897,7 @@ impl LogServer {
         .await
         .map_err(|err| Status::new(err.code().into(), format!("Failed to copy log: {}", err)))?;
         let log_reader = self
-            .make_log_reader(target_prefix)
+            .make_log_reader(database_name, target_collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let new_manifest = log_reader
@@ -2064,10 +2122,12 @@ impl LogServer {
         let collection_id = Uuid::parse_str(&request.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&request.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
         tracing::info!("inspect_log_state for {collection_id}");
         let storage_prefix = collection_id.storage_prefix_for_log();
         let log_reader = self
-            .make_log_reader(storage_prefix.clone())
+            .make_log_reader(database_name, collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let mani = log_reader.manifest().await;
@@ -2587,11 +2647,13 @@ pub struct RegionalStorage {
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct TopologicalStorageConfig {
     pub spanner: SpannerConfig,
+    pub repl: ReplicatedFragmentOptions,
 }
 
 #[derive(Clone)]
 pub struct TopologicalStorage {
     pub spanner: SpannerClient,
+    pub repl: ReplicatedFragmentOptions,
 }
 
 impl std::fmt::Debug for TopologicalStorage {
@@ -2804,11 +2866,13 @@ impl Configurable<LogServerConfig> for LogServer {
                 |t| {
                     let database_path = t.spanner.database_path().clone();
                     let config = t.spanner.spanner_config();
+                    let repl = t.repl.clone();
                     async {
                         Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
                             spanner: SpannerClient::new(database_path, config).await.map_err(
                                 |e| -> Box<dyn ChromaError> { Box::new(Error::from(e)) as _ },
                             )?,
+                            repl,
                         })
                     }
                 },
@@ -2914,11 +2978,16 @@ mod tests {
     use super::*;
     use crate::state_hash_table::Value;
 
+    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};
+    use opentelemetry::global::meter;
     use proptest::prelude::*;
     use tokio::{runtime::Runtime, sync::mpsc::unbounded_channel, time::sleep};
     use tonic::{Code, IntoRequest};
-    use wal3::{FragmentSeqNo, S3FragmentManagerFactory, S3ManifestManagerFactory};
+    use wal3::{
+        FragmentSeqNo, S3FragmentManagerFactory, S3ManifestManagerFactory, SnapshotOptions,
+        ThrottleOptions,
+    };
 
     use chroma_types::chroma_proto::UpdateCollectionLogOffsetRequest;
     use std::collections::HashMap;
@@ -4043,61 +4112,71 @@ mod tests {
     }
 
     fn s3_setup_log_server() -> Pin<Box<dyn Future<Output = LogServer> + Send>> {
-        todo!();
-        /*
-                let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
-                let writer_options = LogWriterOptions {
-                    snapshot_manifest: SnapshotOptions {
-                        // We set a snapshot rollover threshold that's high enough that the test won't go
-                        // on forever due to a race, but also so that we stress the conditions.
-                        snapshot_rollover_threshold: 10,
-                        fragment_rollover_threshold: 3,
-                    },
-                    throttle_fragment: ThrottleOptions {
-                        batch_size_bytes: 4,
-                        batch_interval_us: 4096,
-                        ..Default::default()
-                    },
+        Box::pin(async {
+            let storage = s3_client_for_test_with_new_bucket().await;
+            let writer_options = LogWriterOptions {
+                snapshot_manifest: SnapshotOptions {
+                    // We set a snapshot rollover threshold that's high enough that the test won't go
+                    // on forever due to a race, but also so that we stress the conditions.
+                    snapshot_rollover_threshold: 10,
+                    fragment_rollover_threshold: 3,
+                },
+                throttle_fragment: ThrottleOptions {
+                    batch_size_bytes: 4,
+                    batch_interval_us: 4096,
                     ..Default::default()
-                };
-                let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+                },
+                ..Default::default()
+            };
+            let storage_arc = Arc::new(storage.clone());
+            let (fragment_publisher_factory, manifest_publisher_factory) = create_s3_factories(
+                writer_options.clone(),
+                LogReaderOptions::default(),
+                Arc::clone(&storage_arc),
+                "test-rust-log-service".to_string(),
+                "test-dirty-log-writer".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
+                LogWriter::open_or_initialize(
                     writer_options.clone(),
-                    LogReaderOptions::default(),
-                    Arc::clone(&storage),
-                    "test-rust-log-service".to_string(),
-                    "test-dirty-log-writer".to_string(),
-                    Arc::new(()),
-                    Arc::new(()),
-                );
-                let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(
-                    LogWriter::open_or_initialize(
-                        writer_options.clone(),
-                        storage.clone(),
-                        "test-rust-log-service",
-                        "test-dirty-log-writer",
-                        fragment_publisher_factory,
-                        manifest_publisher_factory,
-                        None, // Test doesn't use CMEK
-                    )
-                    .await
-                    .expect("Dirty log should be initializable"),
-                ));
-                let config = LogServerConfig {
-                    writer: writer_options,
-                    ..Default::default()
-                };
-                LogServer {
-                    storage,
-                    dirty_log,
-                    metrics: Metrics::new(meter("test-rust-log-service")),
-                    config,
-                    open_logs: Default::default(),
-                    rolling_up: Default::default(),
-                    backpressure: Default::default(),
-                    need_to_compact: Default::default(),
-                    cache: Default::default(),
-                }
-        */
+                    "test-dirty-log-writer",
+                    fragment_publisher_factory,
+                    manifest_publisher_factory,
+                    None, // Test doesn't use CMEK
+                )
+                .await
+                .expect("Dirty log should be initializable"),
+            ));
+            let config = LogServerConfig {
+                writer: writer_options,
+                ..Default::default()
+            };
+            let local =
+                RegionName::new("local").expect("'local' is unit tested to be a good region name");
+            let storages = MultiCloudMultiRegionConfiguration {
+                preferred: local.clone(),
+                regions: vec![ProviderRegion {
+                    name: local,
+                    provider: "aws".to_string(),
+                    region: "us-east-1".to_string(),
+                    config: RegionalStorage { storage },
+                }],
+                topologies: vec![],
+            };
+            LogServer {
+                storages,
+                dirty_log,
+                metrics: Metrics::new(meter("test-rust-log-service")),
+                config,
+                open_logs: Default::default(),
+                rolling_up: Default::default(),
+                backpressure: Default::default(),
+                need_to_compact: Default::default(),
+                cache: Default::default(),
+            }
+        })
     }
 
     async fn push_log_to_server(
@@ -4574,9 +4653,9 @@ mod tests {
                 .await
                 .expect("The background GC task should finish");
 
-            let prefix = collection_id.storage_prefix_for_log();
+            let database_name = DatabaseName::new(&db_name).expect("Database name should be valid");
             let reader = log_server
-                .make_log_reader(prefix)
+                .make_log_reader(database_name, collection_id)
                 .await
                 .expect("Log reader should be creatable");
             reader
@@ -4628,9 +4707,9 @@ mod tests {
             .await;
         }
 
-        let prefix = collection_id.storage_prefix_for_log();
+        let database_name = DatabaseName::new(db_name).expect("Database name should be valid");
         let reader = log_server
-            .make_log_reader(prefix)
+            .make_log_reader(database_name, collection_id)
             .await
             .expect("Log reader should be creatable");
         reader
