@@ -351,7 +351,8 @@ mod tests {
     use chroma_config::Configurable;
     use chroma_system::System;
     use chroma_types::{
-        AddCollectionRecordsRequest, CreateCollectionRequest, IncludeList, QueryRequest,
+        AddCollectionRecordsRequest, CreateCollectionRequest, DatabaseName, IncludeList,
+        QueryRequest,
     };
 
     use crate::{Frontend, FrontendConfig};
@@ -367,11 +368,13 @@ mod tests {
             .unwrap();
 
         // Add data
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
         let collection = frontend
             .create_collection(
                 CreateCollectionRequest::try_new(
                     "default_tenant".to_string(),
-                    "default_database".to_string(),
+                    database_name,
                     "test".to_string(),
                     None,
                     None,

@@ -181,7 +181,7 @@ impl TestSysDb {
                 collection_id,
                 name.clone(),
                 tenant.clone(),
-                database.clone(),
+                database.clone().map(|d| d.into_string()),
             ) {
                 continue;
             }

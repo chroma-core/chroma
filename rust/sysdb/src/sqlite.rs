@@ -563,7 +563,7 @@ impl SqliteSysDb {
             collection_id,
             name,
             tenant,
-            database,
+            database.map(|d| d.into_string()),
             limit,
             offset,
         )

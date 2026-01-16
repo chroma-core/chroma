@@ -4,7 +4,9 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_frontend::{config::FrontendServerConfig, Frontend};
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_system::System;
-use chroma_types::{Collection, CountRequest, CreateCollectionRequest, GetRequest, IncludeList};
+use chroma_types::{
+    Collection, CountRequest, CreateCollectionRequest, DatabaseName, GetRequest, IncludeList,
+};
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use std::sync::Arc;
 
@@ -53,12 +55,14 @@ impl StateMachineTest for FrontendUnderTest {
         state.runtime.block_on(async {
             match transition {
                 CollectionRequest::Init { .. } => {
+                    let database_name = DatabaseName::new("default_database")
+                        .expect("database name should be valid");
                     let collection = state
                         .frontend
                         .create_collection(
                             CreateCollectionRequest::try_new(
                                 "default_tenant".to_string(),
-                                "default_database".to_string(),
+                                database_name,
                                 "test".to_string(),
                                 None,
                                 None,

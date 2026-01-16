@@ -236,7 +236,7 @@ impl InMemoryFrontend {
         let collection = Collection {
             name: request.name.clone(),
             tenant: request.tenant_id.clone(),
-            database: request.database_name.clone(),
+            database: request.database_name.as_ref().to_string(),
             metadata: request.metadata,
             config,
             schema: Some(schema),
@@ -717,7 +717,7 @@ mod tests {
 
         let request = chroma_types::CreateCollectionRequest::try_new(
             tenant_name.clone(),
-            database_name.into_string(),
+            database_name,
             collection_name.clone(),
             None,
             None,

@@ -296,7 +296,7 @@ impl ServiceBasedFrontend {
         }: CreateDatabaseRequest,
     ) -> Result<CreateDatabaseResponse, CreateDatabaseError> {
         self.sysdb_client
-            .create_database(database_id, database_name.into_string(), tenant_id)
+            .create_database(database_id, database_name, tenant_id)
             .await
     }
 
@@ -323,7 +323,7 @@ impl ServiceBasedFrontend {
         }: GetDatabaseRequest,
     ) -> Result<GetDatabaseResponse, GetDatabaseError> {
         self.sysdb_client
-            .get_database(database_name.into_string(), tenant_id)
+            .get_database(database_name, tenant_id)
             .await
     }
 
@@ -658,14 +658,15 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteCollectionRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
+        let db_name = DatabaseName::new(&database_name).ok_or_else(|| {
+            DeleteCollectionError::Internal(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         let collection = self
             .get_collection(
-                GetCollectionRequest::try_new(
-                    tenant_id.clone(),
-                    database_name.clone(),
-                    collection_name,
-                )
-                .map_err(DeleteCollectionError::Validation)?,
+                GetCollectionRequest::try_new(tenant_id.clone(), db_name, collection_name)
+                    .map_err(DeleteCollectionError::Validation)?,
             )
             .await?;
 
@@ -2283,11 +2284,13 @@ mod tests {
             .await
             .unwrap();
 
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
         let collection = frontend
             .create_collection(
                 CreateCollectionRequest::try_new(
                     "default_tenant".to_string(),
-                    "default_database".to_string(),
+                    database_name,
                     "test".to_string(),
                     None,
                     None,

@@ -610,7 +610,7 @@ impl ChromaError for FinishDatabaseDeletionError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     pub limit: Option<u32>,
     pub offset: u32,
 }
@@ -618,7 +618,7 @@ pub struct ListCollectionsRequest {
 impl ListCollectionsRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         limit: Option<u32>,
         offset: u32,
     ) -> Result<Self, ChromaValidationError> {
@@ -640,13 +640,13 @@ pub type ListCollectionsResponse = Vec<Collection>;
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CountCollectionsRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -664,14 +664,14 @@ pub type CountCollectionsResponse = u32;
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     pub collection_name: String,
 }
 
 impl GetCollectionRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         collection_name: String,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -711,7 +711,7 @@ impl ChromaError for GetCollectionError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     #[validate(custom(function = "validate_name"))]
     pub name: String,
     #[validate(custom(function = "validate_optional_metadata"))]
@@ -725,7 +725,7 @@ pub struct CreateCollectionRequest {
 impl CreateCollectionRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,

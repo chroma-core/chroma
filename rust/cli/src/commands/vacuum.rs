@@ -11,7 +11,7 @@ use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::System;
-use chroma_types::{CollectionUuid, ListCollectionsRequest, Schema};
+use chroma_types::{CollectionUuid, DatabaseName, ListCollectionsRequest, Schema};
 use clap::Parser;
 use colored::Colorize;
 use dialoguer::Confirm;
@@ -157,7 +157,8 @@ pub async fn vacuum_chroma(config: FrontendConfig) -> Result<(), Box<dyn Error>>
     trigger_vector_segments_max_seq_id_migration(&sqlite, &mut sysdb, &segment_manager).await?;
 
     let tenant = String::from("default_tenant");
-    let database = String::from("default_database");
+    let database = DatabaseName::new("default_database")
+        .ok_or("Invalid database name: must be at least 3 characters")?;
 
     let list_collections_request = ListCollectionsRequest::try_new(tenant, database, None, 0)?;
     let collections = frontend.list_collections(list_collections_request).await?;

@@ -1158,7 +1158,8 @@ mod tests {
         let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
 
         let tenant = "test_tenant".to_string();
-        let database = "test_database".to_string();
+        let database = chroma_types::DatabaseName::new("test_database")
+            .expect("database name should be valid");
 
         let root_collection_id = CollectionUuid::new();
         let segment_id = SegmentUuid::new();
