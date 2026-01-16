@@ -7184,6 +7184,7 @@ dependencies = [
  "chroma-types",
  "chrono",
  "figment",
+ "futures",
  "gcloud-gax",
  "gcloud-spanner",
  "opentelemetry",

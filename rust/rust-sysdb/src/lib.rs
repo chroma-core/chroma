@@ -15,12 +15,11 @@ pub async fn sysdb_service_entrypoint() {
         Ok(config_path) => RootConfig::load_from_path(&config_path),
         Err(_) => RootConfig::load(),
     };
-    let config = config.sysdb_service;
     let registry = chroma_config::registry::Registry::new();
     chroma_tracing::init_otel_tracing(
-        &config.service_name,
-        &config.otel_filters,
-        &config.otel_endpoint,
+        &config.sysdb_service.service_name,
+        &config.sysdb_service.otel_filters,
+        &config.sysdb_service.otel_endpoint,
     );
     let sysdb_server = match server::SysdbService::try_from_config(&config, &registry).await {
         Ok(sysdb_server) => sysdb_server,

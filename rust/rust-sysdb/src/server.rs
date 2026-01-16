@@ -1,5 +1,11 @@
+use crate::types as internal;
+use crate::types::SysDbError;
+use crate::{
+    backend::{Assignable, BackendFactory, Runnable},
+    config::RootConfig,
+};
 use chroma_config::{registry::Registry, Configurable};
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
@@ -36,30 +42,25 @@ use chroma_types::chroma_proto::{
     SetTenantResourceNameResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
+use thiserror::Error;
 use tokio::{
     select,
     signal::unix::{signal, SignalKind},
 };
 use tonic::{transport::Server, Request, Response, Status};
 
-use crate::backend::{Assignable, BackendFactory, Runnable};
-use crate::config::SysDbServiceConfig;
-use crate::spanner::SpannerBackend;
-use crate::types as internal;
-use crate::types::SysDbError;
-
 pub struct SysdbService {
     port: u16,
     #[allow(dead_code)]
-    storage: Storage,
+    local_region_object_storage: Storage,
     backends: BackendFactory,
 }
 
 impl SysdbService {
-    pub fn new(port: u16, storage: Storage, backends: BackendFactory) -> Self {
+    pub fn new(port: u16, local_region_object_storage: Storage, backends: BackendFactory) -> Self {
         Self {
             port,
-            storage,
+            local_region_object_storage,
             backends,
         }
     }
@@ -107,16 +108,46 @@ impl SysdbService {
     }
 }
 
+#[derive(Error, Debug)]
+pub enum SysdbServiceError {
+    #[error("Config validation error: {0}")]
+    ConfigValidation(String),
+}
+
+impl ChromaError for SysdbServiceError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SysdbServiceError::ConfigValidation(_) => ErrorCodes::InvalidArgument,
+        }
+    }
+}
+
 #[async_trait::async_trait]
-impl Configurable<SysDbServiceConfig> for SysdbService {
+impl Configurable<RootConfig> for SysdbService {
     async fn try_from_config(
-        config: &SysDbServiceConfig,
+        config: &RootConfig,
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let storage = Storage::try_from_config(&config.storage, registry).await?;
-        let spanner = SpannerBackend::try_from_config(&config.spanner, registry).await?;
-        let backends = BackendFactory::new(spanner);
-        Ok(SysdbService::new(config.port, storage, backends))
+        config
+            .regions_and_topologies
+            .validate()
+            .map_err(|e| e.boxed())?;
+        let backends =
+            BackendFactory::try_from_config(&config.regions_and_topologies, registry).await?;
+        let local_region_config = config
+            .regions_and_topologies
+            .preferred_region_config()
+            .ok_or_else(|| -> Box<dyn ChromaError> {
+                Box::new(SysdbServiceError::ConfigValidation(
+                    "local region config not found".to_string(),
+                ))
+            })?;
+        let storage = Storage::try_from_config(&local_region_config.storage, registry).await?;
+        Ok(SysdbService::new(
+            config.sysdb_service.port,
+            storage,
+            backends,
+        ))
     }
 }
 

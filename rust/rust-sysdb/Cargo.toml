@@ -31,3 +31,4 @@ reqwest = { workspace = true, features = ["json"] }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 prost-types = { workspace = true }
+futures = { workspace = true }

@@ -1,9 +1,22 @@
-use chroma_storage::config::StorageConfig;
+use chroma_storage::config::{RegionalStorage, StorageConfig, TopologicalStorage};
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
+use chroma_types::{MultiCloudMultiRegionConfiguration, RegionName};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 
 pub use chroma_config::spanner::{SpannerConfig, SpannerEmulatorConfig};
+
+/// Configuration for instantiating a SpannerBackend.
+///
+/// Bundles the Spanner connection config with region configuration.
+pub struct SpannerBackendConfig<'a> {
+    /// The Spanner connection configuration (emulator or GCP).
+    pub spanner: &'a SpannerConfig,
+    /// All regions in the topology this backend serves.
+    pub regions: Vec<RegionName>,
+    /// The local region for this instance (used for reads).
+    pub local_region: RegionName,
+}
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
@@ -47,6 +60,8 @@ impl SysDbServiceConfig {
 #[derive(Serialize, Deserialize)]
 pub struct RootConfig {
     pub sysdb_service: SysDbServiceConfig,
+    pub regions_and_topologies:
+        MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
 }
 
 impl RootConfig {

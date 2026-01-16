@@ -7,10 +7,10 @@
 //! - Cleaner internal APIs that aren't tied to protobuf conventions
 
 use chroma_types::{
-    chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseUuid,
-    InternalCollectionConfiguration, Metadata, MetadataValue, MetadataValueConversionError, Schema,
-    Segment, SegmentConversionError, SegmentScope, SegmentType, SegmentUuid, Tenant,
-    UpdateCollectionConfiguration,
+    chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseName,
+    DatabaseUuid, InternalCollectionConfiguration, Metadata, MetadataValue,
+    MetadataValueConversionError, Schema, Segment, SegmentConversionError, SegmentScope,
+    SegmentType, SegmentUuid, Tenant, UpdateCollectionConfiguration,
 };
 use prost_types::Timestamp;
 use uuid::Uuid;
@@ -115,7 +115,7 @@ impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNa
 #[derive(Debug, Clone)]
 pub struct CreateDatabaseRequest {
     pub id: Uuid,
-    pub name: String,
+    pub name: DatabaseName,
     pub tenant_id: String,
 }
 
@@ -123,9 +123,15 @@ impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::CreateDatabaseRequest) -> Result<Self, Self::Error> {
+        let name = DatabaseName::new(&req.name).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.name
+            ))
+        })?;
         Ok(Self {
             id: validate_uuid(&req.id)?,
-            name: req.name,
+            name,
             tenant_id: req.tenant,
         })
     }
@@ -134,7 +140,7 @@ impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
 /// Internal request for getting a database.
 #[derive(Debug, Clone)]
 pub struct GetDatabaseRequest {
-    pub name: String,
+    pub name: DatabaseName,
     pub tenant_id: String,
 }
 
@@ -142,8 +148,14 @@ impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::GetDatabaseRequest) -> Result<Self, Self::Error> {
+        let name = DatabaseName::new(&req.name).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.name
+            ))
+        })?;
         Ok(Self {
-            name: req.name,
+            name,
             tenant_id: req.tenant,
         })
     }
@@ -160,7 +172,7 @@ pub struct CreateCollectionRequest {
     pub metadata: Option<Metadata>,
     pub get_or_create: bool,
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
@@ -205,6 +217,13 @@ impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest 
             .map(|d| u32::try_from(d).map_err(SysDbError::InvalidDimension))
             .transpose()?;
 
+        let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.database
+            ))
+        })?;
+
         Ok(Self {
             id: CollectionUuid(validate_uuid(&req.id)?),
             name: req.name,
@@ -214,7 +233,7 @@ impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest 
             metadata,
             get_or_create: req.get_or_create.unwrap_or(false),
             tenant_id: req.tenant,
-            database_name: req.database,
+            database_name,
         })
     }
 }
@@ -251,7 +270,7 @@ pub struct CollectionFilter {
     /// Filter by tenant ID
     pub tenant_id: Option<String>,
     /// Filter by database name
-    pub database_name: Option<String>,
+    pub database_name: Option<DatabaseName>,
     /// Include soft-deleted collections (default: false)
     pub include_soft_deleted: bool,
     /// Maximum number of results to return
@@ -280,8 +299,8 @@ impl CollectionFilter {
     }
 
     /// Filter by database name
-    pub fn database_name(mut self, name: impl Into<String>) -> Self {
-        self.database_name = Some(name.into());
+    pub fn database_name(mut self, name: DatabaseName) -> Self {
+        self.database_name = Some(name);
         self
     }
 
@@ -345,7 +364,13 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
             filter = filter.tenant_id(req.tenant);
         }
         if !req.database.is_empty() {
-            filter = filter.database_name(req.database);
+            let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
+                SysDbError::InvalidArgument(format!(
+                    "database name must be at least 3 characters, got '{}'",
+                    req.database
+                ))
+            })?;
+            filter = filter.database_name(database_name);
         }
 
         // Handle limit and offset
@@ -481,10 +506,7 @@ impl Assignable for CreateTenantRequest {
 
     fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
         // Fan out to all backends
-        vec![
-            Backend::Spanner(factory.spanner().clone()),
-            // TODO: Backend::Aurora(factory.aurora().clone()),
-        ]
+        factory.get_all_backends()
     }
 }
 
@@ -493,7 +515,7 @@ impl Assignable for GetTenantRequest {
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
         // Single backend operation
-        Backend::Spanner(factory.spanner().clone())
+        Backend::Spanner(factory.one_spanner().clone())
     }
 }
 
@@ -502,10 +524,7 @@ impl Assignable for SetTenantResourceNameRequest {
 
     fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
         // Fan out to all backends
-        vec![
-            Backend::Spanner(factory.spanner().clone()),
-            // TODO: Backend::Aurora(factory.aurora().clone()),
-        ]
+        factory.get_all_backends()
     }
 }
 
@@ -513,9 +532,8 @@ impl Assignable for CreateDatabaseRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Route by db_name prefix (for now, default to Spanner)
-        // TODO: Check self.name prefix to route to Aurora if needed
-        Backend::Spanner(factory.spanner().clone())
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.name)
     }
 }
 
@@ -523,9 +541,8 @@ impl Assignable for GetDatabaseRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Route by db_name prefix (for now, default to Spanner)
-        // TODO: Check self.name prefix to route to Aurora if needed
-        Backend::Spanner(factory.spanner().clone())
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.name)
     }
 }
 
@@ -533,9 +550,8 @@ impl Assignable for CreateCollectionRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Route by database_name prefix (for now, default to Spanner)
-        // TODO: Check self.database_name prefix to route to Aurora if needed
-        Backend::Spanner(factory.spanner().clone())
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
     }
 }
 
@@ -543,9 +559,13 @@ impl Assignable for GetCollectionsRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Route by database_name prefix (for now, default to Spanner)
-        // TODO: Check self.filter.database_name prefix to route to Aurora if needed
-        Backend::Spanner(factory.spanner().clone())
+        // Route by topology prefix in database name if available
+        if let Some(ref db_name) = self.filter.database_name {
+            return factory.backend_from_database_name(db_name);
+        }
+        // Fall back to default if no database filter
+        // TODO(Sanket): Make database name mandatory in the filter.
+        Backend::Spanner(factory.one_spanner().clone())
     }
 }
 
@@ -553,9 +573,9 @@ impl Assignable for GetCollectionWithSegmentsRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Single collection lookup - default to Spanner
-        // TODO: Determine routing based on collection metadata if needed
-        Backend::Spanner(factory.spanner().clone())
+        // Single collection lookup - no database context available, use default
+        // TODO(Sanket): Make database name mandatory in the request.
+        Backend::Spanner(factory.one_spanner().clone())
     }
 }
 
@@ -563,9 +583,9 @@ impl Assignable for UpdateCollectionRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Single collection update - default to Spanner
-        // TODO: Determine routing based on collection metadata if needed
-        Backend::Spanner(factory.spanner().clone())
+        // Single collection update - no database context available, use default
+        // TODO(Sanket): Make database name mandatory in the request.
+        Backend::Spanner(factory.one_spanner().clone())
     }
 }
 
