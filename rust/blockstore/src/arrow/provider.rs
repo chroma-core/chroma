@@ -58,6 +58,7 @@ const PREFETCH_TTL_HOURS: u64 = 8;
 pub struct ArrowBlockfileProvider {
     block_manager: BlockManager,
     root_manager: RootManager,
+    prefetch_enabled: bool,
 }
 
 pub struct BlockfileReaderOptions {
@@ -91,6 +92,7 @@ impl ArrowBlockfileProvider {
                 num_concurrent_block_flushes,
             ),
             root_manager: RootManager::new(storage, root_cache),
+            prefetch_enabled: true,
         }
     }
 
@@ -124,6 +126,9 @@ impl ArrowBlockfileProvider {
         id: &Uuid,
         prefix_path: &str,
     ) -> Result<usize, ArrowBlockfileProviderPrefetchError> {
+        if !self.prefetch_enabled {
+            return Ok(0);
+        }
         if !self.root_manager.should_prefetch(id) {
             return Ok(0);
         }
@@ -295,7 +300,7 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
                     return Err(e);
                 }
             };
-        Ok(ArrowBlockfileProvider::new(
+        let mut provider = ArrowBlockfileProvider::new(
             storage.clone(),
             blockfile_config.block_manager_config.max_block_size_bytes,
             block_cache,
@@ -303,7 +308,9 @@ impl Configurable<(ArrowBlockfileProviderConfig, Storage)> for ArrowBlockfilePro
             blockfile_config
                 .block_manager_config
                 .num_concurrent_block_flushes,
-        ))
+        );
+        provider.prefetch_enabled = blockfile_config.prefetch_enabled;
+        Ok(provider)
     }
 }
 

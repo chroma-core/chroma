@@ -4,13 +4,31 @@ use serde::{Deserialize, Serialize};
 // A small block size for testing, so that triggering splits etc is easier
 pub const TEST_MAX_BLOCK_SIZE_BYTES: usize = 16384;
 
-#[derive(Default, Deserialize, Debug, Clone, Serialize)]
+#[derive(Deserialize, Debug, Clone, Serialize)]
 pub struct ArrowBlockfileProviderConfig {
     #[serde(default)]
     pub block_manager_config: BlockManagerConfig,
     #[serde(default)]
     #[serde(alias = "sparse_index_manager_config")]
     pub root_manager_config: RootManagerConfig,
+    #[serde(default = "ArrowBlockfileProviderConfig::default_prefetch_enabled")]
+    pub prefetch_enabled: bool,
+}
+
+impl ArrowBlockfileProviderConfig {
+    fn default_prefetch_enabled() -> bool {
+        true
+    }
+}
+
+impl Default for ArrowBlockfileProviderConfig {
+    fn default() -> Self {
+        Self {
+            block_manager_config: BlockManagerConfig::default(),
+            root_manager_config: RootManagerConfig::default(),
+            prefetch_enabled: Self::default_prefetch_enabled(),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
