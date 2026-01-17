@@ -1,0 +1,61 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+linters:
+  enable:
+    - dupword
+    - ginkgolinter
+    - gocritic
+    - mirror
+  settings:
+    gocritic:
+      disable-all: false
+    staticcheck:
+      checks:
+        - all
+        - ST1000
+        - ST1001
+        - ST1003
+      dot-import-whitelist:
+        - fmt
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - ineffassign
+        path: conversion\.go
+      - linters:
+          - staticcheck
+        text: 'ST1003: should not use underscores in Go names; func (Convert_.*_To_.*|SetDefaults_)'
+      - linters:
+          - ginkgolinter
+        text: use a function call in (Eventually|Consistently)
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-same-issues: 0
+formatters:
+  enable:
+    - gci
+  settings:
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(github.com/chroma-core/chroma/clients/go)
+        - blank
+        - dot
+      custom-order: true
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
