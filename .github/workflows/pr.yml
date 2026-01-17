@@ -1,9 +1,8 @@
 name: PR checks
 on:
   pull_request:
-    branches:
-      - main
-      - '**'
+    branches-ignore:
+      - 'release/**'
 
 # Cancel any in-progress workflows when a new commit is pushed to the PR.
 concurrency:

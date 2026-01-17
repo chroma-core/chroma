@@ -1,0 +1,112 @@
+name: Release Rust Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_crates_io:
+        description: 'Publish to crates.io'
+        required: false
+        default: false
+        type: boolean
+
+  workflow_call:
+    inputs:
+      publish_to_crates_io:
+        description: 'Publish to crates.io'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Publish Rust crates
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate versions
+        id: version
+        run: |
+          set -euo pipefail
+
+          CRATES=("rust/error" "rust/api-types" "rust/types" "rust/chroma")
+
+          for crate in "${CRATES[@]}"; do
+            VERSION=$(grep '^version' "$crate/Cargo.toml" | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+            if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Invalid version format '$VERSION' in $crate/Cargo.toml. Expected semver (e.g., 1.2.3)"
+              exit 1
+            fi
+
+            echo "$crate: $VERSION"
+          done
+
+          # Output the main chroma crate version for tagging
+          CHROMA_VERSION=$(grep '^version' rust/chroma/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$CHROMA_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish chroma-error
+        if: ${{ inputs.publish_to_crates_io }}
+        run: |
+          set -euo pipefail
+          cd rust/error
+          echo "Publishing chroma-error..."
+          cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+          echo "Successfully published chroma-error"
+
+      - name: Wait for crates.io index
+        if: ${{ inputs.publish_to_crates_io }}
+        run: sleep 30
+
+      - name: Publish chroma-api-types
+        if: ${{ inputs.publish_to_crates_io }}
+        run: |
+          set -euo pipefail
+          cd rust/api-types
+          echo "Publishing chroma-api-types..."
+          cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+          echo "Successfully published chroma-api-types"
+
+      - name: Wait for crates.io index
+        if: ${{ inputs.publish_to_crates_io }}
+        run: sleep 30
+
+      - name: Publish chroma-types
+        if: ${{ inputs.publish_to_crates_io }}
+        run: |
+          set -euo pipefail
+          cd rust/types
+          echo "Publishing chroma-types..."
+          cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+          echo "Successfully published chroma-types"
+
+      - name: Wait for crates.io index
+        if: ${{ inputs.publish_to_crates_io }}
+        run: sleep 30
+
+      - name: Publish chroma
+        if: ${{ inputs.publish_to_crates_io }}
+        run: |
+          set -euo pipefail
+          cd rust/chroma
+          echo "Publishing chroma..."
+          cargo publish --token ${{ secrets.CRATES_IO_TOKEN }}
+          echo "Successfully published chroma"
+
+      - name: Tag release
+        if: ${{ inputs.publish_to_crates_io }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "rust-${{ steps.version.outputs.version }}"
+          git push origin "rust-${{ steps.version.outputs.version }}"

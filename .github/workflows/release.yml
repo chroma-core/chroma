@@ -1,0 +1,309 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  detect-release:
+    name: Detect release labels
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      release-python: ${{ steps.check-labels.outputs.release-python }}
+      release-js: ${{ steps.check-labels.outputs.release-js }}
+      release-rust: ${{ steps.check-labels.outputs.release-rust }}
+      release-all: ${{ steps.check-labels.outputs.release-all }}
+    steps:
+      - name: Check PR labels
+        id: check-labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Find the PR associated with this merge commit
+          PR_NUMBER=$(gh api "/repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" --jq '.[0].number')
+
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR found for this commit"
+            echo "release-python=false" >> $GITHUB_OUTPUT
+            echo "release-js=false" >> $GITHUB_OUTPUT
+            echo "release-rust=false" >> $GITHUB_OUTPUT
+            echo "release-all=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "Found PR #$PR_NUMBER"
+
+          # Get labels from the PR
+          LABELS=$(gh pr view $PR_NUMBER --repo ${{ github.repository }} --json labels -q '.labels[].name')
+          echo "Labels: $LABELS"
+
+          # Check for each release label
+          if echo "$LABELS" | grep -q "^release-python$"; then
+            echo "release-python=true" >> $GITHUB_OUTPUT
+          else
+            echo "release-python=false" >> $GITHUB_OUTPUT
+          fi
+
+          if echo "$LABELS" | grep -q "^release-js$"; then
+            echo "release-js=true" >> $GITHUB_OUTPUT
+          else
+            echo "release-js=false" >> $GITHUB_OUTPUT
+          fi
+
+          if echo "$LABELS" | grep -q "^release-rust$"; then
+            echo "release-rust=true" >> $GITHUB_OUTPUT
+          else
+            echo "release-rust=false" >> $GITHUB_OUTPUT
+          fi
+
+          if echo "$LABELS" | grep -q "^release-all$"; then
+            echo "release-all=true" >> $GITHUB_OUTPUT
+          else
+            echo "release-all=false" >> $GITHUB_OUTPUT
+          fi
+
+  python-tests-linux:
+    name: Python tests (Linux)
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
+      property_testing_preset: 'normal'
+
+  python-tests-windows:
+    name: Python tests (Windows)
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      python_versions: '["3.12"]'
+      property_testing_preset: 'normal'
+      runner: '8core-32gb-windows-latest'
+
+  javascript-client-tests:
+    name: JavaScript client tests
+    uses: ./.github/workflows/_javascript-client-tests.yml
+
+  rust-tests:
+    name: Rust tests
+    uses: ./.github/workflows/_rust-tests.yml
+    secrets: inherit
+
+  go-tests:
+    name: Go tests
+    uses: ./.github/workflows/_go-tests.yml
+    secrets: inherit
+
+  get-version:
+    name: Get version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - name: Install setuptools_scm
+        run: python -m pip install setuptools_scm
+      - name: Get Release Version
+        id: version
+        run: echo "version=$(python -m setuptools_scm)" >> $GITHUB_OUTPUT
+
+  release-docker:
+    name: Publish to DockerHub and GHCR
+    needs:
+      - detect-release
+      - get-version
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+    uses: ./.github/workflows/_build_release_container.yml
+    secrets: inherit
+    with:
+      tag: ${{ needs.get-version.outputs.version }}
+      tag_as_latest: ${{ needs.detect-release.outputs.release-all == 'true' }}
+      push: true
+
+  release-github:
+    name: Make GitHub release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - get-version
+      - release-docker
+    env:
+      GHCR_IMAGE_NAME: "ghcr.io/chroma-core/chroma"
+      DOCKERHUB_IMAGE_NAME: "chromadb/chroma"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Get current date
+        id: builddate
+        run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
+      - name: Update Tag
+        uses: richardsimko/update-tag@v1.0.5
+        with:
+          tag_name: latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release Latest
+        uses: ncipollo/release-action@v1.14.0
+        with:
+          tag: "latest"
+          name: "Latest"
+          body: |
+            Version: `${{ needs.get-version.outputs.version }}`
+            Git ref: `${{ github.ref }}`
+            Build Date: `${{ steps.builddate.outputs.builddate }}`
+            Github Container Registry Image: `${{ env.GHCR_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
+            DockerHub Image: `${{ env.DOCKERHUB_IMAGE_NAME }}:${{ needs.get-version.outputs.version }}`
+          allowUpdates: true
+          removeArtifacts: true
+          prerelease: true
+
+  deploy-staging:
+    name: Deploy to staging
+    needs:
+      - release-github
+    uses: ./.github/workflows/_deploy.yml
+    secrets: inherit
+
+  release-python:
+    name: Release Python clients
+    needs:
+      - detect-release
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+    uses: ./.github/workflows/_release-python.yml
+    secrets: inherit
+    with:
+      publish_to_test_pypi: true
+      publish_to_pypi: ${{ needs.detect-release.outputs.release-python == 'true' || needs.detect-release.outputs.release-all == 'true' }}
+
+  release-cli:
+    name: Release CLI
+    needs:
+      - detect-release
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+    if: needs.detect-release.outputs.release-all == 'true'
+    uses: ./.github/workflows/_release-cli.yml
+    secrets: inherit
+
+  release-js-bindings:
+    name: Release JS Bindings
+    needs:
+      - detect-release
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+    if: needs.detect-release.outputs.release-all == 'true'
+    uses: ./.github/workflows/_release-js-bindings.yml
+    secrets: inherit
+
+  release-js:
+    name: Release JS Client
+    needs:
+      - detect-release
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+      - release-js-bindings
+    if: always() && !failure() && !cancelled()
+    uses: ./.github/workflows/_release-js.yml
+    secrets: inherit
+    with:
+      publish_to_npm: ${{ needs.detect-release.outputs.release-js == 'true' || needs.detect-release.outputs.release-all == 'true' }}
+
+  release-rust:
+    name: Release Rust Client
+    needs:
+      - detect-release
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+    uses: ./.github/workflows/_release-rust.yml
+    secrets: inherit
+    with:
+      publish_to_crates_io: ${{ needs.detect-release.outputs.release-rust == 'true' || needs.detect-release.outputs.release-all == 'true' }}
+
+  release-docs:
+    name: Deploy docs to Vercel
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - detect-release
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for docs changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - 'docs/**'
+      - uses: actions/setup-node@v4
+        if: steps.changes.outputs.docs == 'true'
+        with:
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install vercel
+        if: steps.changes.outputs.docs == 'true'
+        run: npm install -g vercel
+      - name: Deploy
+        if: steps.changes.outputs.docs == 'true'
+        run: vercel deploy --token ${{ secrets.VERCEL_TOKEN }} ${{ (needs.detect-release.outputs.release-python == 'true' || needs.detect-release.outputs.release-js == 'true' || needs.detect-release.outputs.release-rust == 'true' || needs.detect-release.outputs.release-all == 'true') && '--prod' || '' }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+
+  notify-slack-on-failure:
+    name: Notify Slack on Release Failure
+    if: failure()
+    needs:
+      - release-docker
+      - release-github
+      - deploy-staging
+      - release-python
+      - release-cli
+      - release-js-bindings
+      - release-js
+      - release-rust
+      - release-docs
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Release workflow failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/tree/${{ github.ref_name }}|${{ github.ref_name }}>
+              *Author:* ${{ github.actor }}

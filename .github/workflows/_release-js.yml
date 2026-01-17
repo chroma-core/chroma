@@ -1,0 +1,125 @@
+name: Release JS Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_npm:
+        description: 'Publish to npm'
+        required: false
+        default: false
+        type: boolean
+
+  workflow_call:
+    inputs:
+      publish_to_npm:
+        description: 'Publish to npm'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  id-token: write
+  packages: write
+
+jobs:
+  build-and-publish:
+    name: Build and publish JS client
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    defaults:
+      run:
+        working-directory: clients/new-js
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: clients/new-js/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build
+        run: pnpm build:chromadb
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(node -p "require('./packages/chromadb/package.json').version")
+
+          # Validate semver format
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version format '$VERSION'. Expected semver (e.g., 1.2.3)"
+            exit 1
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate dev version
+        id: dev-version
+        run: |
+          set -euo pipefail
+          COMMIT_SHA=$(git rev-parse --short HEAD)
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Bump patch version and add dev tag
+          BASE_VERSION=$(echo $VERSION | cut -f1,2 -d.)
+          PATCH_VERSION=$(echo $VERSION | cut -f3 -d.)
+          NEW_PATCH_VERSION=$((PATCH_VERSION + 1))
+          DEV_VERSION="${BASE_VERSION}.${NEW_PATCH_VERSION}-dev.${COMMIT_SHA}-${GITHUB_RUN_ID}"
+
+          echo "dev_version=$DEV_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Publish dev version to GitHub Packages
+        working-directory: clients/new-js/packages/chromadb
+        run: |
+          set -euo pipefail
+
+          # Update package.json with dev version and org scope
+          jq --arg version "${{ steps.dev-version.outputs.dev_version }}" \
+             --arg name "@chroma-core/chromadb" \
+             '.version = $version | .name = $name' package.json > tmp.json && mv tmp.json package.json
+
+          echo "//npm.pkg.github.com/:_authToken=${{ secrets.GITHUB_TOKEN }}" >> ~/.npmrc
+          echo "Publishing @chroma-core/chromadb@${{ steps.dev-version.outputs.dev_version }} to GitHub Packages..."
+          pnpm publish --access public --no-git-checks --tag dev --registry https://npm.pkg.github.com
+          echo "Successfully published dev version"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Restore package.json for npm publish
+        if: ${{ inputs.publish_to_npm }}
+        working-directory: clients/new-js/packages/chromadb
+        run: git checkout package.json
+
+      - name: Publish to npm
+        if: ${{ inputs.publish_to_npm }}
+        working-directory: clients/new-js/packages/chromadb
+        run: |
+          set -euo pipefail
+          echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
+          echo "Publishing chromadb@${{ steps.version.outputs.version }}..."
+          pnpm publish --access public --no-git-checks
+          echo "Successfully published chromadb@${{ steps.version.outputs.version }}"
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Tag release
+        if: ${{ inputs.publish_to_npm }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "js-${{ steps.version.outputs.version }}"
+          git push origin "js-${{ steps.version.outputs.version }}"
