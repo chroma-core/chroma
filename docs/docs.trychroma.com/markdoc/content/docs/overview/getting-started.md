@@ -36,7 +36,7 @@ For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_so
 {% Tab label="Chroma Cloud" %}
 
 ```prompt
-In this directory create a new python project with Chroma set up. 
+In this directory create a new Python project with Chroma set up. 
 Use a virtual environment.
 
 Write a small example that adds some data to a collection and queries it. 
@@ -71,7 +71,7 @@ with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
 {% Tab label="OSS" %}
 
 ```text
-In this directory create a new python project with Chroma set up.
+In this directory create a new Python project with Chroma set up.
 Use a virtual environment.
 
 Write a small example that adds some data to a collection and queries it.
