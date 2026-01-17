@@ -145,7 +145,7 @@ pub struct QueryServiceConfig {
 
     /// The configuration for managing HNSW indices within the query service.
     /// HNSW is a graph-based index that is used for approximate nearest neighbor search.
-    /// TODO: This should move underneath spann_provider once we remove support for HNSW.
+    // TODO: This should move underneath spann_provider once we remove support for HNSW.
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
 
