@@ -81,6 +81,7 @@ const legacyPathsMapping: Record<string, string> = {
     "/docs/run-chroma/clients#in-memory-client",
   "/docs/run-chroma/persistent-client":
     "/docs/run-chroma/clients#persistent-client",
+  "/docs/overview/introduction": "/docs/overview/getting-started",
 };
 
 export const middleware = (request: NextRequest) => {
