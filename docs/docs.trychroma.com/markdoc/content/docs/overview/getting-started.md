@@ -46,6 +46,8 @@ script. The output should show what data was ingested, what was the query,
 and the results. 
 Your own summary should include this output so the user can see it.
 
+First, install `chromadb`.
+
 The project should be set up with Chroma Cloud. When you install `chromadb`, 
 you get access to the Chroma CLI. You can run `chroma login` to authenticate. 
 This will open a browser for authentication and save a connection profile 
@@ -54,10 +56,10 @@ locally.
 You can also use `chroma profile show` to see if the user already has an 
 active profile saved locally. If so, you can skip the login step.
 
-Then create a DB using the CLI with `chroma db create getting-started`. 
+Then create a DB using the CLI with `chroma db create chroma-getting-started`. 
 This will create a DB with this name. 
 
-Then use the CLI command `chroma db connect getting-started --env-file`.
+Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
 This will create a .env file in the current directory with the connection 
 variables for this DB and account, so the CloudClient can be instantiated 
 with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
@@ -104,6 +106,8 @@ script. The output should show what data was ingested, what was the query,
 and the results. 
 Your own summary should include this output so the user can see it.
 
+First, install `chromadb`.
+
 The project should be set up with Chroma Cloud. When you install `chromadb`, 
 you get access to the Chroma CLI. You can run `chroma login` to authenticate. 
 This will open a browser for authentication and save a connection profile 
@@ -112,10 +116,10 @@ locally.
 You can also use `chroma profile show` to see if the user already has an 
 active profile saved locally. If so, you can skip the login step.
 
-Then create a DB using the CLI with `chroma db create getting-started`. 
+Then create a DB using the CLI with `chroma db create chroma-getting-started`. 
 This will create a DB with this name. 
 
-Then use the CLI command `chroma db connect getting-started --env-file`.
+Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
 This will create a .env file in the current directory with the connection 
 variables for this DB and account, so the CloudClient can be instantiated 
 with: new CloudClient().
