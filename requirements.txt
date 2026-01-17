@@ -1,5 +1,4 @@
 bcrypt>=4.0.1
-graphlib_backport==1.0.3; python_version < '3.9'
 grpcio>=1.58.0
 httpx>=0.27.0
 importlib-resources
@@ -15,7 +14,8 @@ orjson>=3.9.12
 overrides>=7.3.1
 posthog>=2.4.0,<6.0.0
 pybase64>=1.4.1
-pydantic>=1.9
+pydantic>=2.0,<3.0
+pydantic-settings>=2.0,<3.0
 pypika>=0.48.9
 PyYAML>=6.0.0
 rich>=10.11.0
