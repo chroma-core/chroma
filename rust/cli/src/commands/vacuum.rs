@@ -105,7 +105,9 @@ async fn trigger_vector_segments_max_seq_id_migration(
     let collection_ids = get_collection_ids_to_migrate(sqlite).await?;
 
     for collection_id in collection_ids {
-        let mut collection = sysdb.get_collection_with_segments(collection_id).await?;
+        let mut collection = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await?;
 
         if collection.collection.schema.is_none() {
             collection.collection.schema = Some(

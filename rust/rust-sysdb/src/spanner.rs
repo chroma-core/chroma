@@ -1277,7 +1277,9 @@ mod tests {
         GetCollectionWithSegmentsRequest, GetCollectionsRequest, GetDatabaseRequest,
         GetTenantRequest, UpdateCollectionRequest,
     };
-    use chroma_types::{CollectionUuid, Schema, Segment, SegmentScope, SegmentType, SegmentUuid};
+    use chroma_types::{
+        CollectionUuid, DatabaseName, Schema, Segment, SegmentScope, SegmentType, SegmentUuid,
+    };
     use uuid::Uuid;
 
     // These tests require Tilt to be running with Spanner emulator.
@@ -4931,7 +4933,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -5045,7 +5050,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -5157,9 +5165,13 @@ mod tests {
             panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
         };
 
+        // Create a database name for the test
+        let db_name = DatabaseName::new("test_database").unwrap();
+
         // Try to get a non-existent collection
         let non_existent_id = CollectionUuid(Uuid::new_v4());
         let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name,
             id: non_existent_id,
         };
 
@@ -5237,7 +5249,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -5405,7 +5420,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -5543,7 +5561,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -5708,7 +5729,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -5856,7 +5880,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -6012,7 +6039,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(
@@ -6155,7 +6185,10 @@ mod tests {
             .expect("Failed to create collection");
 
         // Get collection with segments
-        let get_req = GetCollectionWithSegmentsRequest { id: collection_id };
+        let get_req = GetCollectionWithSegmentsRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+        };
         let result = backend.get_collection_with_segments(get_req).await;
 
         assert!(

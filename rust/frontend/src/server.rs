@@ -13,7 +13,7 @@ use chroma_metering::{
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
-    decode_embeddings, maybe_decode_update_embeddings, validate_name, AddCollectionRecordsPayload,
+    decode_embeddings, maybe_decode_update_embeddings, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
@@ -428,9 +428,13 @@ impl FrontendServer {
         headers: &HeaderMap,
         action: AuthzAction,
         resource: AuthzResource,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<GetUserIdentityResponse, ServerError> {
-        let collection = self.frontend.get_cached_collection(collection_id).await?;
+        let collection = self
+            .frontend
+            .get_cached_collection(database_name, collection_id)
+            .await?;
         Ok(self
             .auth
             .authenticate_and_authorize_collection(headers, action, resource, collection)
@@ -721,9 +725,9 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    if let Err(err) = validate_name(&name) {
-        return Err(InvalidDatabaseError::from(err).into());
-    }
+    // if let Err(err) = validate_name(&name) {
+    //     return Err(InvalidDatabaseError::from(err).into());
+    // }
     server.metrics.create_database.add(1, &[]);
     tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server
@@ -1189,6 +1193,9 @@ async fn update_collection(
 ) -> Result<Json<UpdateCollectionResponse>, ServerError> {
     server.metrics.update_collection.add(1, &[]);
     tracing::info!(name: "update_collection", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     server
         .authenticate_and_authorize_collection(
             &headers,
@@ -1198,6 +1205,7 @@ async fn update_collection(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            database_name.clone(),
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1217,9 +1225,7 @@ async fn update_collection(
         quota_payload = quota_payload.with_update_collection_metadata(new_metadata);
     }
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
-    let database_name = DatabaseName::new(&database).ok_or_else(|| {
-        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
-    })?;
+
     let collection_id =
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
 
@@ -1395,6 +1401,11 @@ async fn collection_add(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1492,6 +1503,11 @@ async fn collection_update(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1597,6 +1613,11 @@ async fn collection_upsert(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1696,6 +1717,11 @@ async fn collection_delete(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1787,6 +1813,11 @@ async fn collection_count(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1875,6 +1906,11 @@ async fn indexing_status(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -1941,6 +1977,11 @@ async fn collection_get(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -2064,6 +2105,11 @@ async fn collection_query(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
@@ -2185,6 +2231,11 @@ async fn collection_search(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            DatabaseName::new(&database).ok_or_else(|| {
+                ValidationError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?,
             CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;

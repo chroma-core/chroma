@@ -1099,7 +1099,7 @@ mod tests {
         assert!(compact_result.is_ok());
 
         let old_cas = sysdb
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(None, collection_id)
             .await
             .expect("Collection and segment information should be present");
 
@@ -1176,7 +1176,7 @@ mod tests {
         assert!(rebuild_result.is_ok());
 
         let new_cas = sysdb
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(None, collection_id)
             .await
             .expect("Collection and segment information should be present");
 
@@ -1283,7 +1283,7 @@ mod tests {
         assert!(rebuild_result.is_ok());
 
         let new_cas = sysdb
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(None, collection_id)
             .await
             .expect("Collection and segment information should be present");
 
@@ -1423,7 +1423,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         let old_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
 
@@ -1457,7 +1457,7 @@ mod tests {
         first_compaction_result.expect("Should succeed");
 
         let collection = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap()
             .collection;
@@ -1465,7 +1465,7 @@ mod tests {
         assert_eq!(collection.version, 1);
 
         let new_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
         let new_records = get_all_records(
@@ -1610,7 +1610,7 @@ mod tests {
             .expect("Should be able to initialize dispatcher");
         let dispatcher_handle = system.start_component(dispatcher);
         let old_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
 
@@ -1644,7 +1644,7 @@ mod tests {
         first_compaction_result.expect_err("Should fail");
 
         let new_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
         let new_records = get_all_records(
@@ -1798,7 +1798,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         let old_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
 
@@ -1893,7 +1893,7 @@ mod tests {
         // Manually repair the log position in sysdb (simulating external repair)
         // The segments were actually flushed with data up to offset 60, so update the collection
         let mut collection = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap()
             .collection;
@@ -1907,7 +1907,7 @@ mod tests {
 
         // Now verify we can get records successfully after repair
         let new_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
         let new_records = get_all_records(
@@ -2056,7 +2056,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         let old_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
 
@@ -2096,7 +2096,7 @@ mod tests {
 
         // Verify that the collection has 0 bytes post-compaction since all operations net out to empty
         let new_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
         let collection_after_compaction = new_cas.clone().collection;
@@ -2302,7 +2302,7 @@ mod tests {
 
         // Verify first compaction created data
         let collection_after_first = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .expect("Collection should exist after first compaction");
 
@@ -2346,7 +2346,7 @@ mod tests {
         }
 
         let old_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
 
@@ -2387,7 +2387,7 @@ mod tests {
 
         // Verify that the collection still has the same data from the first compaction
         let collection_after_second = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .expect("Collection should exist after second compaction");
 
@@ -2421,7 +2421,7 @@ mod tests {
 
         check_purge_successful(tmpdir.path()).await;
         let new_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
         let new_records = get_all_records(
@@ -2591,7 +2591,7 @@ mod tests {
         let dispatcher_handle = system.start_component(dispatcher);
 
         let old_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
 
@@ -2691,7 +2691,7 @@ mod tests {
 
         assert_eq!(
             sysdb
-                .get_collection_with_segments(collection_uuid)
+                .get_collection_with_segments(None, collection_uuid)
                 .await
                 .unwrap()
                 .collection
@@ -2724,7 +2724,7 @@ mod tests {
 
         // Verify that the collection was successfully compacted (by whichever succeeded)
         let collection_after_compaction = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .expect("Collection should exist after compaction");
 
@@ -2735,7 +2735,7 @@ mod tests {
         );
 
         let new_cas = sysdb
-            .get_collection_with_segments(collection_uuid)
+            .get_collection_with_segments(None, collection_uuid)
             .await
             .unwrap();
         let new_records = get_all_records(
@@ -3049,7 +3049,7 @@ mod tests {
 
         // Get output collection info before rebuild
         let output_before_rebuild = sysdb
-            .get_collection_with_segments(output_collection_id)
+            .get_collection_with_segments(None, output_collection_id)
             .await
             .expect("Should get output collection before rebuild");
         let output_version_before = output_before_rebuild.collection.version;
@@ -3084,7 +3084,7 @@ mod tests {
 
         // Verify the input collection was rebuilt (version incremented)
         let input_after_rebuild = sysdb
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(None, collection_id)
             .await
             .expect("Should get input collection after rebuild");
         println!(
@@ -3098,7 +3098,7 @@ mod tests {
 
         // Verify the output collection was also rebuilt
         let output_after_rebuild = sysdb
-            .get_collection_with_segments(output_collection_id)
+            .get_collection_with_segments(None, output_collection_id)
             .await
             .expect("Should get output collection after rebuild");
 
