@@ -30,7 +30,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use thiserror::Error;
-use tracing::{Instrument, Span};
+use tracing::Instrument;
 use uuid::Uuid;
 
 #[derive(Error, Debug)]
@@ -494,22 +494,39 @@ impl BlockManager {
                 ),
                 Duration::from_millis(100),
             );
+
+            let fetch_deserialize_span =
+                tracing::info_span!("cold_block_fetch fetch and deserialize ", key = %key_clone);
             self.storage
-                .fetch(&key, GetOptions::new(priority), move |bytes| async move {
-                    let bytes = match bytes {
-                        Ok(bytes) => bytes,
-                        Err(e) => {
-                            tracing::error!("Error loading block from storage: {:?}", e);
-                            return Err(StorageError::Message {
-                                message: "Error loading block".to_string(),
-                            });
-                        }
-                    };
-                    num_get_requests_metric_clone.record(1, &[]);
-                    let block = Block::from_bytes(&bytes, id_clone);
+                .fetch(&key, GetOptions::new(priority), {
+                    let fetch_deserialize_span_clone = fetch_deserialize_span.clone();
+                    move |bytes| async move {
+                    let _enter_fetch_deserialize = fetch_deserialize_span_clone.enter();
+                    let base_span =
+                        tracing::info_span!("cold_block_fetch finished fetch ", key = %key_clone);
+                    let block = base_span.in_scope( || {
+                        let bytes = match bytes {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                tracing::error!("Error loading block from storage: {:?}", e);
+                                return Err(StorageError::Message {
+                                    message: "Error loading block".to_string(),
+                                });
+                            }
+                        };
+
+                        num_get_requests_metric_clone.record(1, &[]);
+                        let deser_span =
+                            tracing::info_span!("cold_block_fetch deserializing ", key = %key_clone);
+                        let _enter = deser_span.enter();
+                        Block::from_bytes(&bytes, id_clone).map_err(|e| StorageError::Message {
+                            message: e.to_string(),
+                        })
+                    });
+
                     match block {
                         Ok(block) => {
-                            block_cache_clone.insert(id_clone, block.clone()).await;
+                            block_cache_clone.insert(id_clone, block.clone()).instrument(base_span).await;
                             Ok(block)
                         }
                         Err(e) => {
@@ -526,8 +543,8 @@ impl BlockManager {
                             })
                         }
                     }
-                })
-                .instrument(Span::current())
+                }})
+                .instrument(fetch_deserialize_span)
                 .await
         };
         match res {
