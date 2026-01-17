@@ -76,7 +76,7 @@ client = chromadb.PersistentClient(path="/path/to/save/to", settings=Settings(an
 
 {% Tab label="typescript" %}
 
-Disable telemetry on your Chroma server (see next section) via environemnt variables where you run Chroma.
+Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
 
 {% /Tab %}
 

@@ -11,7 +11,7 @@ You can use the `CloudClient` to create a client connecting to Chroma Cloud.
 {% Tab label="python" %}
 
 ```python
-importh chromadb
+import chromadb
 
 client = chromadb.CloudClient(
     tenant='Tenant ID',
@@ -48,7 +48,7 @@ If you set the `CHROMA_API_KEY`, `CHROMA_TENANT`, and the `CHROMA_DATABASE` envi
 {% Tab label="python" %}
 
 ```python
-client = CloudClient()
+client = chromadb.CloudClient()
 ```
 
 {% /Tab %}
