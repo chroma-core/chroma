@@ -53,6 +53,12 @@ func supportsEFConfigPersistence(version string) bool {
 	return constraint.Check(v)
 }
 
+// NOTE: Running this test with -race flag may cause crashes during runtime cleanup
+// (e.g., "fault 0x19bd96388" after all tests pass). This is a known limitation of
+// Go's race detector with native code libraries (purego, CGO) on macOS ARM64.
+// See: https://github.com/golang/go/issues/49138, https://github.com/golang/go/issues/17190
+// The tests themselves pass correctly; the crash occurs during GC/runtime shutdown
+// when ThreadSanitizer (suspected) interacts with native library cleanup. This is not a bug in the code.
 func TestClientHTTPIntegration(t *testing.T) {
 	ctx := context.Background()
 	var chromaVersion = "1.3.3"
@@ -117,6 +123,9 @@ func TestClientHTTPIntegration(t *testing.T) {
 	}
 	c, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug())
 	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, c.Close())
+	})
 
 	// For Chroma versions < 1.0.0, disable EF config storage as they don't support it
 	supportsEFConfig := supportsEFConfigPersistence(chromaVersion)
@@ -770,20 +779,7 @@ func TestClientHTTPIntegrationWithBearerXChromaTokenHeaderAuth(t *testing.T) {
 	port, err := chromaContainer.MappedPort(ctx, "8000")
 	require.NoError(t, err)
 	endpoint := fmt.Sprintf("http://%s:%s", ip, port.Port())
-	//
-	// chromaContainer, err := tcchroma.Run(ctx,
-	//	fmt.Sprintf("%s:%s", chromaImage, chromaVersion),
-	//	testcontainers.WithEnv(map[string]string{"ALLOW_RESET": "true"}),
-	//	testcontainers.WithEnv(map[string]string{"CHROMA_SERVER_AUTHN_CREDENTIALS": token}),
-	//	testcontainers.WithEnv(map[string]string{"CHROMA_SERVER_AUTHN_PROVIDER": "chromadb.auth.token_authn.TokenAuthenticationServerProvider"}),
-	//	testcontainers.WithEnv(map[string]string{"CHROMA_AUTH_TOKEN_TRANSPORT_HEADER": "X-Chroma-Token"}),
-	//)
-	// require.NoError(t, err)
-	// t.Cleanup(func() {
-	//	require.NoError(t, chromaContainer.Terminate(ctx))
-	// })
-	//endpoint, err := chromaContainer.RESTEndpoint(context.Background())
-	//require.NoError(t, err)
+
 	chromaURL := os.Getenv("CHROMA_URL")
 	if chromaURL == "" {
 		chromaURL = endpoint
@@ -846,7 +842,8 @@ func TestClientHTTPIntegrationWithSSL(t *testing.T) {
 		}
 	}
 
-	CreateSelfSignedCert(certPath, keyPath)
+	err := CreateSelfSignedCert(certPath, keyPath)
+	require.NoError(t, err)
 	chromaContainer, err := tcchroma.Run(ctx,
 		fmt.Sprintf("%s:%s", chromaImage, chromaVersion),
 		testcontainers.WithEnv(map[string]string{"ALLOW_RESET": "true"}),

@@ -107,7 +107,8 @@ func TestCollectionAdd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				t.Logf("Body: %s", respBody)
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -224,7 +225,8 @@ func TestCollectionUpdate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				t.Logf("Body: %s", respBody)
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -341,7 +343,8 @@ func TestCollectionUpsert(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				t.Logf("Body: %s", respBody)
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -444,7 +447,8 @@ func TestCollectionDelete(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				t.Logf("Body: %s", respBody)
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -483,7 +487,8 @@ func TestCollectionCount(t *testing.T) {
 	rx1 := regexp.MustCompile(`/api/v2/tenants/[^/]+/databases/[^/]+/collections/[^/]+/count`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-		respBody := chhttp.ReadRespBody(r.Body)
+		respBody, readErr := chhttp.ReadRespBody(r.Body)
+		require.NoError(t, readErr)
 		t.Logf("Body: %s", respBody)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -592,7 +597,8 @@ func TestCollectionModifyName(t *testing.T) {
 	rx1 := regexp.MustCompile(`/api/v2/tenants/[^/]+/databases/[^/]+/collections/[^/]+`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-		respBody := chhttp.ReadRespBody(r.Body)
+		respBody, readErr := chhttp.ReadRespBody(r.Body)
+		require.NoError(t, readErr)
 		t.Logf("Body: %s", respBody)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -630,7 +636,8 @@ func TestCollectionModifyMetadata(t *testing.T) {
 	rx1 := regexp.MustCompile(`/api/v2/tenants/[^/]+/databases/[^/]+/collections/[^/]+`)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-		respBody := chhttp.ReadRespBody(r.Body)
+		respBody, readErr := chhttp.ReadRespBody(r.Body)
+		require.NoError(t, readErr)
 		t.Logf("Body: %s", respBody)
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
@@ -767,7 +774,8 @@ func TestCollectionGet(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				t.Logf("Body: %s", respBody)
 				switch {
 				case r.Method == http.MethodGet && r.URL.Path == "/api/v2/pre-flight-checks":
