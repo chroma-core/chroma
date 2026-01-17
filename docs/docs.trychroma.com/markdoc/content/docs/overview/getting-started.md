@@ -60,7 +60,7 @@ This will create a DB with this name.
 Then use the CLI command `chroma db connect getting-started --env-file`.
 This will create a .env file in the current directory with the connection 
 variables for this DB and account, so the CloudClient can be instantiated 
-with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KY"), ...).
+with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
 
 ```
 

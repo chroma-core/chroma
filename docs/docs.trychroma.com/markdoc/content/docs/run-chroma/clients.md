@@ -11,7 +11,9 @@ You can use the `CloudClient` to create a client connecting to Chroma Cloud.
 {% Tab label="python" %}
 
 ```python
-client = CloudClient(
+importh chromadb
+
+client = chromadb.CloudClient(
     tenant='Tenant ID',
     database='Database name',
     api_key='Chroma Cloud API key'
@@ -23,6 +25,9 @@ client = CloudClient(
 {% Tab label="typescript" %}
 
 ```typescript
+import { CloudClient } from "chromadb";
+
+
 const client = new CloudClient({
   tenant: "Tenant ID",
   database: "Database name",
