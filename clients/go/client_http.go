@@ -23,6 +23,8 @@ type APIClientV2 struct {
 	preflightConditionsRaw map[string]interface{}
 	preflightLimits        map[string]interface{}
 	preflightCompleted     bool
+	preflightOnce          sync.Once
+	preflightErr           error
 	collectionCache        map[string]Collection
 	collectionMu           sync.RWMutex
 }
@@ -59,38 +61,41 @@ func NewHTTPClient(opts ...ClientOption) (Client, error) {
 }
 
 func (client *APIClientV2) PreFlight(ctx context.Context) error {
-	if client.preflightCompleted {
-		return nil
-	}
-	reqURL, err := url.JoinPath(client.BaseURL(), "pre-flight-checks")
-	if err != nil {
-		return err
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := client.SendRequest(httpReq)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	var preflightLimits map[string]interface{}
-	if json.NewDecoder(resp.Body).Decode(&preflightLimits) != nil {
-		return errors.New("error decoding preflight response")
-	}
-	client.preflightConditionsRaw = preflightLimits
-	if mbs, ok := preflightLimits["max_batch_size"]; ok {
-		if maxBatchSize, ok := mbs.(float64); ok {
-			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationCreate))] = int(maxBatchSize)
-			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationGet))] = int(maxBatchSize)
-			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationQuery))] = int(maxBatchSize)
-			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationUpdate))] = int(maxBatchSize)
-			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationDelete))] = int(maxBatchSize)
+	client.preflightOnce.Do(func() {
+		reqURL, err := url.JoinPath(client.BaseURL(), "pre-flight-checks")
+		if err != nil {
+			client.preflightErr = err
+			return
 		}
-	}
-	client.preflightCompleted = true
-	return nil
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+		if err != nil {
+			client.preflightErr = err
+			return
+		}
+		resp, err := client.SendRequest(httpReq)
+		if err != nil {
+			client.preflightErr = err
+			return
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var preflightLimits map[string]interface{}
+		if json.NewDecoder(resp.Body).Decode(&preflightLimits) != nil {
+			client.preflightErr = errors.New("error decoding preflight response")
+			return
+		}
+		client.preflightConditionsRaw = preflightLimits
+		if mbs, ok := preflightLimits["max_batch_size"]; ok {
+			if maxBatchSize, ok := mbs.(float64); ok {
+				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationCreate))] = int(maxBatchSize)
+				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationGet))] = int(maxBatchSize)
+				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationQuery))] = int(maxBatchSize)
+				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationUpdate))] = int(maxBatchSize)
+				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationDelete))] = int(maxBatchSize)
+			}
+		}
+		client.preflightCompleted = true
+	})
+	return client.preflightErr
 }
 
 func (client *APIClientV2) GetVersion(ctx context.Context) (string, error) {
@@ -107,7 +112,10 @@ func (client *APIClientV2) GetVersion(ctx context.Context) (string, error) {
 		return "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return "", errors.Wrap(err, "error reading response body")
+	}
 	version := strings.ReplaceAll(respBody, `"`, "")
 	return version, nil
 }
@@ -126,7 +134,10 @@ func (client *APIClientV2) Heartbeat(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return errors.Wrap(err, "error reading response body")
+	}
 	if strings.Contains(respBody, "nanosecond heartbeat") {
 		return nil
 	} else {
@@ -152,7 +163,10 @@ func (client *APIClientV2) GetTenant(ctx context.Context, tenant Tenant) (Tenant
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "error reading response body")
+	}
 	return NewTenantFromJSON(respBody)
 }
 
@@ -199,7 +213,10 @@ func (client *APIClientV2) ListDatabases(ctx context.Context, tenant Tenant) ([]
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "error reading response body")
+	}
 	var dbs []map[string]interface{}
 	if err := json.Unmarshal([]byte(respBody), &dbs); err != nil {
 		return nil, errors.Wrap(err, "error decoding response")
@@ -233,7 +250,10 @@ func (client *APIClientV2) GetDatabase(ctx context.Context, db Database) (Databa
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "error reading response body")
+	}
 	newDB, err := NewDatabaseFromJSON(respBody)
 	if err != nil {
 		return nil, errors.Wrap(err, "error decoding response")
@@ -406,7 +426,10 @@ func (client *APIClientV2) GetCollection(ctx context.Context, name string, opts 
 		return nil, errors.Wrap(err, "error sending request")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "error reading response body")
+	}
 	var cm CollectionModel
 	err = json.Unmarshal([]byte(respBody), &cm)
 	if err != nil {
@@ -461,7 +484,10 @@ func (client *APIClientV2) CountCollections(ctx context.Context, opts ...CountCo
 		return 0, errors.Wrap(err, "error sending request")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return 0, errors.Wrap(err, "error reading response body")
+	}
 	count, err := strconv.Atoi(respBody)
 	if err != nil {
 		return 0, errors.Wrap(err, "error converting response to int")

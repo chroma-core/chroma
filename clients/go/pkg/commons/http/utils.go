@@ -2,13 +2,13 @@ package http
 
 import "io"
 
-func ReadRespBody(resp io.Reader) string {
+func ReadRespBody(resp io.Reader) (string, error) {
 	if resp == nil {
-		return ""
+		return "", nil
 	}
 	body, err := io.ReadAll(resp)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(body)
+	return string(body), nil
 }

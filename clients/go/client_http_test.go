@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"reflect"
 	"regexp"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -88,7 +90,8 @@ func TestCreateCollectionProperty(t *testing.T) {
 	properties.Property("CreateCollection handles different names and metadata", prop.ForAll(
 		func(name string, col CollectionModel) bool {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				var op CreateCollectionOp
 				err := json.Unmarshal([]byte(respBody), &op)
 				require.NoError(t, err)
@@ -154,7 +157,8 @@ func TestCreateCollectionProperty(t *testing.T) {
 func TestAPIClient(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-		respBody := chhttp.ReadRespBody(r.Body)
+		respBody, readErr := chhttp.ReadRespBody(r.Body)
+		require.NoError(t, readErr)
 		t.Logf("Body: %s", respBody)
 		switch {
 		case r.URL.Path == "/api/v2/version" && r.Method == http.MethodGet:
@@ -335,7 +339,8 @@ func TestAPIClient(t *testing.T) {
 	t.Run("CreateCollection", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-			respBody := chhttp.ReadRespBody(r.Body)
+			respBody, readErr := chhttp.ReadRespBody(r.Body)
+			require.NoError(t, readErr)
 			t.Logf("Body: %s", respBody)
 
 			switch {
@@ -372,7 +377,8 @@ func TestAPIClient(t *testing.T) {
 	t.Run("GetOrCreateCollection", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
-			respBody := chhttp.ReadRespBody(r.Body)
+			respBody, readErr := chhttp.ReadRespBody(r.Body)
+			require.NoError(t, readErr)
 			t.Logf("Body: %s", respBody)
 
 			switch {
@@ -462,7 +468,8 @@ func TestCreateCollection(t *testing.T) {
 		{
 			name: "with name only",
 			validateRequestWithResponse: func(w http.ResponseWriter, r *http.Request) {
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				respMap := make(map[string]any)
 				err := json.Unmarshal([]byte(respBody), &respMap)
 				require.NoError(t, err)
@@ -483,7 +490,8 @@ func TestCreateCollection(t *testing.T) {
 			name: "with metadata",
 			validateRequestWithResponse: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				var op CreateCollectionOp
 				err := json.Unmarshal([]byte(respBody), &op)
 				require.NoError(t, err)
@@ -539,7 +547,8 @@ func TestCreateCollection(t *testing.T) {
 			name: "with HNSW params",
 			validateRequestWithResponse: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				var op CreateCollectionOp
 				err := json.Unmarshal([]byte(respBody), &op)
 				require.NoError(t, err)
@@ -623,7 +632,8 @@ func TestCreateCollection(t *testing.T) {
 			name: "with tenant and database",
 			validateRequestWithResponse: func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(http.StatusOK)
-				respBody := chhttp.ReadRespBody(r.Body)
+				respBody, readErr := chhttp.ReadRespBody(r.Body)
+				require.NoError(t, readErr)
 				var op CreateCollectionOp
 				err := json.Unmarshal([]byte(respBody), &op)
 				require.NoError(t, err)
@@ -720,4 +730,54 @@ func TestClientSetup(t *testing.T) {
 		require.Equal(t, NewTenant("test_tenant"), client.CurrentTenant())
 		require.Equal(t, NewDatabase("test_db", NewTenant("test_tenant")), client.CurrentDatabase())
 	})
+}
+
+func TestPreFlightConcurrency(t *testing.T) {
+	var requestCount int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v2/pre-flight-checks" && r.Method == http.MethodGet:
+			atomic.AddInt32(&requestCount, 1)
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(`{"max_batch_size": 100}`))
+			require.NoError(t, err)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client, err := NewHTTPClient(WithBaseURL(server.URL))
+	require.NoError(t, err)
+	defer func() { _ = client.Close() }()
+
+	apiClient, ok := client.(*APIClientV2)
+	require.True(t, ok)
+
+	const numGoroutines = 100
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	errChan := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			err := apiClient.PreFlight(context.Background())
+			if err != nil {
+				errChan <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errChan)
+
+	for err := range errChan {
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, int32(1), atomic.LoadInt32(&requestCount), "PreFlight should only make one HTTP request")
+	require.True(t, apiClient.preflightCompleted)
+	require.NotNil(t, apiClient.preflightLimits)
 }

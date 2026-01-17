@@ -124,6 +124,9 @@ func (e *Float32Embedding) IsDefined() bool {
 }
 
 func (e *Float32Embedding) ContentAsFloat32() []float32 {
+	if e.ArrayOfFloat32 == nil {
+		return []float32{}
+	}
 	return *e.ArrayOfFloat32
 }
 
@@ -187,10 +190,16 @@ func (e *Int32Embedding) ContentAsFloat32() []float32 {
 }
 
 func (e *Int32Embedding) ContentAsInt32() []int32 {
+	if e.ArrayOfInt32 == nil {
+		return []int32{}
+	}
 	return *e.ArrayOfInt32
 }
 
 func (e *Int32Embedding) Len() int {
+	if e.ArrayOfInt32 == nil {
+		return 0
+	}
 	return len(*e.ArrayOfInt32)
 }
 
@@ -382,40 +391,6 @@ func (e *ConsistentHashEmbeddingFunction) EmbedQuery(_ context.Context, document
 
 	return NewEmbeddingFromFloat32(embedding), nil
 }
-
-//
-// func EmbedRecordsDefaultImpl(e EmbeddingFunction, ctx context.Context, records []v2.Record, force bool) error {
-//	m := make(map[string]int)
-//	keys := make([]string, 0)
-//	for i, r := range records {
-//		if r.Document().ContentString() == "" && !r.Embedding().IsDefined() {
-//			return fmt.Errorf("embedding without document")
-//		}
-//		if r.Document() != nil && (force || !r.Embedding().IsDefined()) {
-//			m[r.Document().ContentString()] = i
-//			keys = append(keys, r.Document().ContentString())
-//		}
-//		if r.Document() != nil && r.Embedding().IsDefined() && !force {
-//			continue
-//		}
-//		if r.Document().ContentString() == "" && r.Embedding().IsDefined() {
-//			continue
-//		}
-//	}
-//	// batch embed
-//	embeddings, err := e.EmbedDocuments(ctx, keys)
-//	if err != nil {
-//		return err
-//	}
-//	// update original records
-//	for i, d := range keys {
-//		err := records[m[d]].Embedding().FromFloat32(embeddings[i].ContentAsFloat32()...) // TODO: this is suboptimal as it copies the data
-//		if err != nil {
-//			return err
-//		}
-//	}
-//	return nil
-//}
 
 func (e *ConsistentHashEmbeddingFunction) EmbedDocuments(ctx context.Context, documents []string) ([]Embedding, error) {
 	var embeddings = make([]Embedding, 0)
