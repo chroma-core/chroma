@@ -13,17 +13,13 @@ const sidebarConfig: AppSection[] = [
   {
     id: "docs",
     name: "Docs",
-    default: "/overview/introduction",
+    default: "/overview/getting-started",
     icon: BookText,
     subsections: [
       {
         id: "overview",
         name: "Overview",
         pages: [
-          {
-            id: "introduction",
-            name: "Introduction",
-          },
           {
             id: "getting-started",
             name: "Getting Started",
@@ -33,20 +29,8 @@ const sidebarConfig: AppSection[] = [
             name: "Architecture",
           },
           {
-            id: "data-model",
-            name: "Data Model",
-          },
-          {
-            id: "roadmap",
-            name: "Roadmap",
-          },
-          {
-            id: "contributing",
-            name: "Contributing",
-          },
-          {
-            id: "telemetry",
-            name: "Telemetry",
+            id: "oss",
+            name: "Open Source",
           },
           {
             id: "migration",
@@ -56,20 +40,14 @@ const sidebarConfig: AppSection[] = [
             id: "troubleshooting",
             name: "Troubleshooting",
           },
-          {
-            id: "about",
-            name: "About",
-          },
         ],
       },
       {
         id: "run-chroma",
         name: "Run Chroma",
         pages: [
-          { id: "ephemeral-client", name: "Ephemeral Client" },
-          { id: "persistent-client", name: "Persistent Client" },
+          { id: "clients", name: "Chroma Clients" },
           { id: "client-server", name: "Client-Server Mode" },
-          { id: "cloud-client", name: "Cloud Client" },
         ],
       },
       {

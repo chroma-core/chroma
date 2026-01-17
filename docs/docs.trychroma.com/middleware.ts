@@ -75,6 +75,12 @@ const legacyPathsMapping: Record<string, string> = {
   "/production/administration/performance": "/guides/deploy/performance",
   "/production/administration/observability": "/guides/deploy/observability",
   "/cloud/collection-forking": "/cloud/features/collection-forking",
+  "/docs/overview/data-model": "/docs/overview/architecture#chroma-data-model",
+  "/docs/run-chroma/cloud-client": "/docs/run-chroma/clients#cloud-client",
+  "/docs/run-chroma/ephemeral-client":
+    "/docs/run-chroma/clients#in-memory-client",
+  "/docs/run-chroma/persistent-client":
+    "/docs/run-chroma/clients#persistent-client",
 };
 
 export const middleware = (request: NextRequest) => {
