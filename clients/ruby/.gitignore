@@ -1,0 +1,16 @@
+# Ignore OpenAPI generator CI artifacts removed in postprocess.
+lib/chromadb/openapi/.gitlab-ci.yml
+lib/chromadb/openapi/.travis.yml
+lib/chromadb/openapi/git_push.sh
+lib/chromadb/openapi/.openapi-generator/
+lib/chromadb/openapi/.openapi-generator-ignore
+lib/chromadb/openapi/.gitignore
+lib/chromadb/openapi/.rspec
+lib/chromadb/openapi/.rubocop.yml
+lib/chromadb/openapi/Gemfile
+lib/chromadb/openapi/Rakefile
+lib/chromadb/openapi/README.md
+lib/chromadb/openapi/chromadb.gemspec
+lib/chromadb/openapi/docs/
+lib/chromadb/openapi/spec/
+*.gem

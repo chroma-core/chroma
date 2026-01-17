@@ -1,0 +1,44 @@
+name: Ruby client tests
+
+on:
+  workflow_call:
+    secrets:
+      RUBY_INTEGRATION_TEST_CHROMA_API_KEY:
+        required: false
+
+jobs:
+  test:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Rust
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: false
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Generate OpenAPI client
+        run: clients/ruby/scripts/gen_api
+      - name: Check OpenAPI client is committed
+        run: git diff --exit-code clients/ruby/lib/chromadb/openapi
+      - name: Run RuboCop
+        run: |
+          cd clients/ruby
+          bundle install
+          bundle exec rubocop -A
+          git diff --exit-code
+      - name: Run Ruby single-node integration tests
+        run: bin/ruby-single-node-integration-test.sh
+      - name: Run Ruby cloud integration tests
+        if: ${{ secrets.RUBY_INTEGRATION_TEST_CHROMA_API_KEY != '' }}
+        env:
+          RUBY_INTEGRATION_TEST_CHROMA_API_KEY: ${{ secrets.RUBY_INTEGRATION_TEST_CHROMA_API_KEY }}
+        run: bin/ruby-cloud-integration-test.sh

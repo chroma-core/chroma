@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+OPENAPI_JSON="$ROOT_DIR/clients/ruby/openapi.json"
+OUTPUT_DIR="$ROOT_DIR/clients/ruby/lib/chromadb/openapi"
+
+cleanup() {
+  if [[ -n "${CHROMA_SERVER_PID:-}" ]]; then
+    kill "$CHROMA_SERVER_PID" || true
+  fi
+}
+trap cleanup EXIT
+
+cargo build --bin chroma
+cargo run --bin chroma -- run "$ROOT_DIR/bin/rust_single_node_integration_test_config.yaml" &
+CHROMA_SERVER_PID=$!
+
+echo "Waiting for Chroma server to be available..."
+for i in {1..30}; do
+  if curl -s http://localhost:8000/api/v2/heartbeat > /dev/null; then
+    echo "Chroma server is up!"
+    break
+  fi
+  sleep 1
+  echo "Retrying..."
+done
+
+if ! curl -s http://localhost:8000/api/v2/heartbeat > /dev/null; then
+  echo "Chroma server failed to start within 30 seconds."
+  exit 1
+fi
+
+curl -s http://localhost:8000/openapi.json -o "$OPENAPI_JSON"
+python3 "$ROOT_DIR/clients/ruby/scripts/patch_openapi.py" "$OPENAPI_JSON"
+
+rm -rf "$OUTPUT_DIR"
+
+if ! command -v openapi-generator-cli >/dev/null 2>&1; then
+  npx @openapitools/openapi-generator-cli --openapitools "$ROOT_DIR/clients/ruby/openapitools.json" generate \
+    -g ruby \
+    -i "$OPENAPI_JSON" \
+    -o "$OUTPUT_DIR" \
+    --skip-validate-spec \
+    --additional-properties=library=faraday,gemName=chromadb,gemVersion="$(ruby -e 'require_relative "clients/ruby/lib/chromadb/version"; puts Chroma::VERSION')"
+else
+  openapi-generator-cli --openapitools "$ROOT_DIR/clients/ruby/openapitools.json" generate \
+    -g ruby \
+    -i "$OPENAPI_JSON" \
+    -o "$OUTPUT_DIR" \
+    --skip-validate-spec \
+    --additional-properties=library=faraday,gemName=chromadb,gemVersion="$(ruby -e 'require_relative "clients/ruby/lib/chromadb/version"; puts Chroma::VERSION')"
+fi
+
+python3 "$ROOT_DIR/clients/ruby/scripts/postprocess_openapi.py" "$OUTPUT_DIR"
