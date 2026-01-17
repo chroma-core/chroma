@@ -1,6 +1,11 @@
+---
+id: collections-add
+name: Add Data
+---
+
 # Adding Data to Chroma Collections
 
-Add data to a Chroma collection with the `.add` method. It takes a list of unique string `ids`, and a list of `documents`. Chroma will embed these documents for you using the collection's [embedding function](../embeddings/embedding-functions). It will also store the documents themselves. You can optionally provide a metadata dictionary for each document you add. 
+Add data to a Chroma collection with the `.add` method. It takes a list of unique string `ids`, and a list of `documents`. Chroma will embed these documents for you using the collection's [embedding function](../embeddings/embedding-functions). It will also store the documents themselves. You can optionally provide a metadata dictionary for each document you add.
 
 ### python
 
@@ -34,7 +39,7 @@ collection.add(
     embeddings=[[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     documents=["doc1", "doc2", "doc3", ...],
     metadatas=[{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
-    
+
 )
 ```
 

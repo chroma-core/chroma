@@ -5,6 +5,6 @@ name: LlamaIndex
 
 # LlamaIndex
 
-- `LlamaIndex` [Vector Store page](https://docs.llamaindex.ai/en/stable/examples/vector_stores/ChromaIndexDemo.html)
-- [Demo](https://github.com/jerryjliu/llama_index/blob/main/docs/docs/examples/vector_stores/ChromaIndexDemo.ipynb)
+- `LlamaIndex` [Vector Store page](https://developers.llamaindex.ai/python/examples/vector_stores/chromaindexdemo/)
+- [Demo](https://github.com/run-llama/llama_index/blob/main/docs/examples/vector_stores/ChromaIndexDemo.ipynb)
 - [Chroma Loader on Llamahub](https://llamahub.ai/l/vector_stores/llama-index-vector-stores-chroma)

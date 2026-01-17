@@ -1,6 +1,11 @@
+---
+id: getting-started
+name: Getting Started
+---
+
 # Chroma Cloud
 
-Our fully managed hosted service, **Chroma Cloud** is here. [Sign up for free](https://trychroma.com/signup).
+Our fully managed hosted service, **Chroma Cloud** is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-getting-started).
 
 **Chroma Cloud** is a managed offering of [Distributed Chroma](../docs/overview/architecture), operated by the same database and search engineers who designed the system. Under the hood, it's the exact same Apache 2.0–licensed Chroma—no forks, no divergence, just the open-source engine running at scale. Chroma Cloud is serverless - you don’t have to provision servers or think about operations, and is billed [based on usage](./pricing)
 
@@ -19,5 +24,9 @@ Chroma Cloud is SOC 2 Type I certified (Type II in progress), and offers deploym
 ### Dashboard
 
 Our web dashboard lets your team work together to view your data, and ensure data quality in your collections with ease. It also serves as a touchpoint for you to view billing data and usage telemetry.
+
+### Advanced Search API (Beta)
+
+Chroma Cloud introduces a powerful [Search API](/cloud/search-api/overview) that enables hybrid search with advanced filtering, custom ranking expressions, and batch operations. Combine vector similarity with metadata filtering using an intuitive builder pattern or flexible dictionary syntax.
 
 Chroma Cloud is open-source at its core, built on the exact same Apache 2.0 codebase available to everyone. Whether you’re building a prototype or running a mission-critical production workload, Chroma Cloud is the fastest path to reliable, scalable, and accurate retrieval.

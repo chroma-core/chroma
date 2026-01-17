@@ -1,3 +1,8 @@
+---
+id: cli-install
+name: Installing the CLI
+---
+
 # Installing the Chroma CLI
 
 The Chroma CLI lets you run a Chroma server locally on your machine, install sample apps, browse your collections, interact with your Chroma Cloud DBs, and much more!
@@ -25,7 +30,7 @@ pipx install chromadb
 ### yarn
 
 ```terminal
-yarn global add chromadb 
+yarn global add chromadb
 ```
 
 ### npm
@@ -37,13 +42,13 @@ npm install -g chromadb
 ### pnpm
 
 ```terminal
-pnpm add -g chromadb 
+pnpm add -g chromadb
 ```
 
 ### bun
 
 ```terminal
-bun add -g chromadb 
+bun add -g chromadb
 ```
 
 ## Install Globally
@@ -51,7 +56,7 @@ bun add -g chromadb
 ### cURL
 
 ```terminal
-curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash 
+curl -sSL https://raw.githubusercontent.com/chroma-core/chroma/main/rust/cli/install/install.sh | bash
 ```
 
 ### Windows
