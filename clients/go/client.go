@@ -978,7 +978,10 @@ func (bc *BaseAPIClient) ExecuteRequest(ctx context.Context, method string, path
 		return nil, errors.Wrap(chErr, "error sending request")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	respBody := chhttp.ReadRespBody(resp.Body)
+	respBody, err := chhttp.ReadRespBody(resp.Body)
+	if err != nil {
+		return nil, errors.Wrap(err, "error reading response body")
+	}
 	return []byte(respBody), nil
 }
 

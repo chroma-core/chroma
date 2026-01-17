@@ -20,6 +20,12 @@ import (
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
 
+// NOTE: Running this test with -race flag may cause crashes during runtime cleanup
+// (e.g., "fault 0x19bd96388" after all tests pass). This is a known limitation of
+// Go's race detector with native code libraries (purego, CGO) on macOS ARM64.
+// See: https://github.com/golang/go/issues/49138, https://github.com/golang/go/issues/17190
+// The tests themselves pass correctly; the crash occurs during GC/runtime shutdown
+// when ThreadSanitizer interacts with native library cleanup. This is not a bug in the code.
 func TestCollectionAddIntegration(t *testing.T) {
 	ctx := context.Background()
 	var chromaVersion = "1.3.3"
