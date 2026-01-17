@@ -27,6 +27,8 @@ For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_so
 
 ## Install with AI
 
+Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI agent. It will quickly set you up with Chroma.
+
 {% Tabs %}
 
 {% Tab label="python" %}
