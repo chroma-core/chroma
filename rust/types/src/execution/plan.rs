@@ -437,6 +437,20 @@ impl SearchPayload {
         self.group_by = group_by;
         self
     }
+
+    /// Returns a masked copy of this payload suitable for logging.
+    /// Sensitive data (embeddings, query values, document patterns) are replaced with
+    /// placeholders that preserve structural information (dimensions, lengths) without
+    /// exposing actual content.
+    pub fn masked(&self) -> Self {
+        SearchPayload {
+            filter: self.filter.masked(),
+            rank: self.rank.masked(),
+            group_by: self.group_by.clone(),
+            limit: self.limit.clone(),
+            select: self.select.clone(),
+        }
+    }
 }
 
 #[cfg(feature = "utoipa")]
@@ -614,5 +628,82 @@ impl TryFrom<Search> for chroma_proto::SearchPlan {
                 .collect::<Result<Vec<_>, _>>()?,
             read_level: chroma_proto::ReadLevel::from(value.read_level).into(),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        operator::{Key, QueryVector, RankExpr},
+        DocumentExpression, DocumentOperator, MetadataComparison, MetadataExpression,
+        MetadataSetValue, MetadataValue, PrimitiveOperator, SetOperator, SparseVector, Where,
+    };
+
+    #[test]
+    fn test_search_payload_masked_hides_sensitive_info() {
+        let sensitive = [
+            "secret_id",
+            "john@secret.com",
+            "123456789",
+            "confidential",
+            "secret query",
+            "secret_token",
+        ];
+
+        let payload = SearchPayload {
+            filter: Filter {
+                query_ids: Some(vec!["secret_id".into()]),
+                where_clause: Some(
+                    Where::Metadata(MetadataExpression {
+                        key: "email".into(),
+                        comparison: MetadataComparison::Primitive(
+                            PrimitiveOperator::Equal,
+                            MetadataValue::Str("john@secret.com".into()),
+                        ),
+                    }) & Where::Metadata(MetadataExpression {
+                        key: "ssn".into(),
+                        comparison: MetadataComparison::Primitive(
+                            PrimitiveOperator::Equal,
+                            MetadataValue::Int(123456789),
+                        ),
+                    }) & Where::Metadata(MetadataExpression {
+                        key: "tags".into(),
+                        comparison: MetadataComparison::Set(
+                            SetOperator::In,
+                            MetadataSetValue::Str(vec!["confidential".into()]),
+                        ),
+                    }) & Where::Document(DocumentExpression {
+                        operator: DocumentOperator::Contains,
+                        pattern: "secret query".into(),
+                    }),
+                ),
+            },
+            rank: Rank {
+                expr: Some(RankExpr::Knn {
+                    query: QueryVector::Sparse(SparseVector {
+                        indices: vec![1, 2, 3],
+                        values: vec![0.1, 0.2, 0.3],
+                        tokens: Some(vec!["secret_token".into()]),
+                    }),
+                    key: Key::Embedding,
+                    limit: 10,
+                    default: None,
+                    return_rank: false,
+                }),
+            },
+            ..Default::default()
+        };
+
+        let debug_output = format!("{:?}", payload.masked());
+
+        // Sensitive data must not appear
+        for s in &sensitive {
+            assert!(!debug_output.contains(s), "Leaked: {}", s);
+        }
+
+        // Structural info should be present
+        assert!(debug_output.contains("<len:"));
+        assert!(debug_output.contains("<m>"));
     }
 }
