@@ -363,8 +363,8 @@ func TestAllRegisteredProvidersHaveFactories(t *testing.T) {
 	}
 
 	expectedSparse := []string{
-		"chroma_bm25",         // Primary name (matches Python client)
-		"bm25",                // Alias for backward compatibility
+		"chroma_bm25", // Primary name (matches Python client)
+		"bm25",        // Alias for backward compatibility
 		"chroma-cloud-splade",
 	}
 
