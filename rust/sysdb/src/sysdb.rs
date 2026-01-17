@@ -1092,10 +1092,17 @@ impl GrpcSysDb {
             offset,
         } = options;
 
+        // Route to MCMR client if database has a valid topology
+        let mut client = if let Some(ref db) = database {
+            self.client(db)
+                .map_err(|e| GetCollectionsError::Internal(Box::new(e)))?
+        } else {
+            self.client.clone()
+        };
+
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
-        let res = self
-            .client
+        let res = client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
                 ids_filter: collection_ids.map(|ids| {
@@ -1169,11 +1176,19 @@ impl GrpcSysDb {
         tenant: String,
         database: Option<DatabaseName>,
     ) -> Result<usize, CountCollectionsError> {
+        // Route to MCMR client if database has a valid topology
+        let mut client = if let Some(ref db) = database {
+            self.client(db)
+                .map_err(|_| CountCollectionsError::Internal)?
+        } else {
+            self.client.clone()
+        };
+
         let request = chroma_proto::CountCollectionsRequest {
             tenant,
             database: database.map(|d| d.into_string()),
         };
-        let res = self.client.count_collections(request).await;
+        let res = client.count_collections(request).await;
         match res {
             Ok(res) => Ok(res.into_inner().count as usize),
             Err(_) => Err(CountCollectionsError::Internal),
