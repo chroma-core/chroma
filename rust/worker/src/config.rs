@@ -104,7 +104,7 @@ impl Default for RootConfig {
 /// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
 /// - assignment_policy: The assignment policy to use. Must be provided.
 /// # Notes
-/// In order to set the enviroment variables, you must prefix them with CHROMA_WORKER__<FIELD_NAME>.
+/// In order to set the environment variables, you must prefix them with CHROMA_WORKER__<FIELD_NAME>.
 /// For example, to set my_ip, you would set CHROMA_WORKER__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
@@ -182,7 +182,7 @@ impl QueryServiceConfig {
 /// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
 /// - assignment_policy: The assignment policy to use. Must be provided.
 /// # Notes
-/// In order to set the enviroment variables, you must prefix them with CHROMA_COMPACTOR__<FIELD_NAME>.
+/// In order to set the environment variables, you must prefix them with CHROMA_COMPACTOR__<FIELD_NAME>.
 /// For example, to set my_ip, you would set CHROMA_COMPACTOR__MY_IP.
 /// Each submodule that needs to be configured from the config object should implement the Configurable trait and
 /// have its own field in this struct for its Config struct.
