@@ -546,9 +546,9 @@ func TestCollectionIndexingStatus(t *testing.T) {
 	}
 	status, err := collection.IndexingStatus(context.Background())
 	require.NoError(t, err)
-	require.Equal(t, 100, status.NumIndexedOps)
-	require.Equal(t, 10, status.NumUnindexedOps)
-	require.Equal(t, 110, status.TotalOps)
+	require.Equal(t, uint64(100), status.NumIndexedOps)
+	require.Equal(t, uint64(10), status.NumUnindexedOps)
+	require.Equal(t, uint64(110), status.TotalOps)
 	require.InDelta(t, 0.909, status.OpIndexingProgress, 0.001)
 }
 
