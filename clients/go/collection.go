@@ -50,8 +50,17 @@ type Collection interface {
 	Search(ctx context.Context, opts ...SearchCollectionOption) (SearchResult, error)
 	// Fork creates a fork of the collection
 	Fork(ctx context.Context, newName string) (Collection, error)
+	// IndexingStatus returns the indexing status of the collection (requires Chroma >= 1.4.1)
+	IndexingStatus(ctx context.Context) (*IndexingStatus, error)
 	// Close closes the collection and releases any resources
 	Close() error
+}
+
+type IndexingStatus struct {
+	NumIndexedOps      int     `json:"num_indexed_ops"`
+	NumUnindexedOps    int     `json:"num_unindexed_ops"`
+	TotalOps           int     `json:"total_ops"`
+	OpIndexingProgress float64 `json:"op_indexing_progress"`
 }
 
 type CollectionOp interface {

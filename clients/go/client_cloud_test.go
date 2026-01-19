@@ -1117,6 +1117,24 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.Equal(t, "chroma-cloud-splade", sparseEFByKey.Name())
 	})
 
+	t.Run("indexing status", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_indexing_status-" + uuid.New().String()
+		collection, err := client.CreateCollection(ctx, collectionName)
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+
+		err = collection.Add(ctx, WithIDs("1", "2", "3"), WithTexts("doc1", "doc2", "doc3"))
+		require.NoError(t, err)
+		time.Sleep(2 * time.Second) // Wait for indexing
+
+		status, err := collection.IndexingStatus(ctx)
+		require.NoError(t, err)
+		require.GreaterOrEqual(t, status.TotalOps, 3)
+		require.GreaterOrEqual(t, status.OpIndexingProgress, 0.0)
+		require.LessOrEqual(t, status.OpIndexingProgress, 1.0)
+	})
+
 	t.Cleanup(func() {
 		collections, err := client.ListCollections(context.Background())
 		require.NoError(t, err)

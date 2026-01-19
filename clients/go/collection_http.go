@@ -561,6 +561,22 @@ func (c *CollectionImpl) embedRankTextQueriesWithDepth(ctx context.Context, rank
 	return nil
 }
 
+func (c *CollectionImpl) IndexingStatus(ctx context.Context) (*IndexingStatus, error) {
+	reqURL, err := url.JoinPath("tenants", c.Tenant().Name(), "databases", c.Database().Name(), "collections", c.ID(), "indexing_status")
+	if err != nil {
+		return nil, errors.Wrap(err, "error composing request URL")
+	}
+	respBody, err := c.client.ExecuteRequest(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "error getting indexing status")
+	}
+	result := &IndexingStatus{}
+	if err := json.Unmarshal(respBody, result); err != nil {
+		return nil, errors.Wrap(err, "error unmarshalling indexing status")
+	}
+	return result, nil
+}
+
 func (c *CollectionImpl) Close() error {
 	if c.embeddingFunction != nil {
 		if closer, ok := c.embeddingFunction.(io.Closer); ok {
