@@ -521,6 +521,37 @@ func TestCollectionCount(t *testing.T) {
 	require.Equal(t, 100, r)
 }
 
+func TestCollectionIndexingStatus(t *testing.T) {
+	rx1 := regexp.MustCompile(`/api/v2/tenants/[^/]+/databases/[^/]+/collections/[^/]+/indexing_status`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Logf("Request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		switch {
+		case r.Method == http.MethodGet && rx1.MatchString(r.URL.Path):
+			w.WriteHeader(http.StatusOK)
+			_, err := w.Write([]byte(`{"num_indexed_ops":100,"num_unindexed_ops":10,"total_ops":110,"op_indexing_progress":0.909}`))
+			require.NoError(t, err)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+	client, err := NewHTTPClient(WithBaseURL(server.URL))
+	require.NoError(t, err)
+	collection := &CollectionImpl{
+		name:     "test",
+		id:       "8ecf0f7e-e806-47f8-96a1-4732ef42359e",
+		tenant:   NewDefaultTenant(),
+		database: NewDefaultDatabase(),
+		client:   client.(*APIClientV2),
+	}
+	status, err := collection.IndexingStatus(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 100, status.NumIndexedOps)
+	require.Equal(t, 10, status.NumUnindexedOps)
+	require.Equal(t, 110, status.TotalOps)
+	require.InDelta(t, 0.909, status.OpIndexingProgress, 0.001)
+}
+
 func TestCollectionQuery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pathMatch := regexp.MustCompile("/api/v2/tenants/[^/]+/databases/[^/]+/collections/[^/]+/query")
