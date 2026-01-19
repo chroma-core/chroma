@@ -73,6 +73,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
             &input.record_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
@@ -90,7 +91,10 @@ impl Operator<SelectInput, SelectOutput> for Select {
 
         // Load data for offset ids
         if let Some(reader) = &record_segment_reader {
-            reader.load_id_to_data(offset_id_set.iter().cloned()).await;
+            reader
+                .load_id_to_data(offset_id_set.iter().cloned())
+                .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
+                .await;
         }
 
         let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
@@ -195,9 +199,13 @@ impl Operator<SelectInput, SelectOutput> for Select {
             })
             .collect::<Vec<_>>();
 
-        Ok(SearchPayloadResult {
-            records: stream::iter(futures).buffered(32).try_collect().await?,
-        })
+        let records = stream::iter(futures)
+            .buffered(32)
+            .try_collect()
+            .instrument(tracing::trace_span!(parent: Span::current(), "Hydrate records", num_records = input.records.len()))
+            .await?;
+
+        Ok(SearchPayloadResult { records })
     }
 }
 
