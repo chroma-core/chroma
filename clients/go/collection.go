@@ -57,9 +57,9 @@ type Collection interface {
 }
 
 type IndexingStatus struct {
-	NumIndexedOps      int     `json:"num_indexed_ops"`
-	NumUnindexedOps    int     `json:"num_unindexed_ops"`
-	TotalOps           int     `json:"total_ops"`
+	NumIndexedOps      uint64  `json:"num_indexed_ops"`
+	NumUnindexedOps    uint64  `json:"num_unindexed_ops"`
+	TotalOps           uint64  `json:"total_ops"`
 	OpIndexingProgress float64 `json:"op_indexing_progress"`
 }
 

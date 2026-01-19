@@ -1130,7 +1130,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 
 		status, err := collection.IndexingStatus(ctx)
 		require.NoError(t, err)
-		require.GreaterOrEqual(t, status.TotalOps, 3)
+		require.GreaterOrEqual(t, status.TotalOps, uint64(3))
 		require.GreaterOrEqual(t, status.OpIndexingProgress, 0.0)
 		require.LessOrEqual(t, status.OpIndexingProgress, 1.0)
 	})
