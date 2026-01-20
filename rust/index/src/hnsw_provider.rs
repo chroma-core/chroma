@@ -223,7 +223,9 @@ impl HnswIndexProvider {
                     // a larger refactor.
                     let hnsw_data_clone = hnsw_data.clone();
                     let index_config_clone = index_config.clone();
+                    let span = Span::current();
                     let hnsw_index = tokio::task::spawn_blocking(move || {
+                        let _guard = span.enter();
                         HnswIndex::load_from_hnsw_data(
                             hnsw_data_clone.as_ref(),
                             &index_config_clone,
@@ -490,7 +492,9 @@ impl HnswIndexProvider {
                             let hnsw_data_clone = hnsw_data.clone();
                             let index_config_clone = index_config.clone();
                             let id_copy = *id;
+                            let span = Span::current();
                             let hnsw_index = tokio::task::spawn_blocking(move || {
+                                let _guard = span.enter();
                                 HnswIndex::load_from_hnsw_data(
                                     hnsw_data_clone.as_ref(),
                                     &index_config_clone,
