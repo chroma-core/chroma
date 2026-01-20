@@ -1135,6 +1135,71 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.LessOrEqual(t, status.OpIndexingProgress, 1.0)
 	})
 
+	t.Run("Search with ReadLevelIndexAndWAL", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_search_read_level_wal-" + uuid.New().String()
+		collection, err := client.CreateCollection(ctx, collectionName)
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+
+		// Add 3 documents
+		err = collection.Add(ctx,
+			WithIDs("1", "2", "3"),
+			WithTexts("cats are fluffy pets", "dogs are loyal companions", "lions are big cats"),
+		)
+		require.NoError(t, err)
+
+		// Search immediately with ReadLevelIndexAndWAL - should see all documents from WAL
+		results, err := collection.Search(ctx,
+			NewSearchRequest(
+				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
+				WithPage(WithLimit(10)),
+				WithSelect(KID, KDocument, KScore),
+			),
+			WithReadLevel(ReadLevelIndexAndWAL),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, results)
+
+		sr, ok := results.(*SearchResultImpl)
+		require.True(t, ok)
+		require.NotEmpty(t, sr.IDs)
+		require.Len(t, sr.IDs[0], 3, "ReadLevelIndexAndWAL should return all 3 documents from WAL")
+	})
+
+	t.Run("Search with ReadLevelIndexOnly", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_search_read_level_index-" + uuid.New().String()
+		collection, err := client.CreateCollection(ctx, collectionName)
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+
+		// Add 3 documents
+		err = collection.Add(ctx,
+			WithIDs("1", "2", "3"),
+			WithTexts("cats are fluffy pets", "dogs are loyal companions", "lions are big cats"),
+		)
+		require.NoError(t, err)
+
+		// Search immediately with ReadLevelIndexOnly - may not see recent writes
+		results, err := collection.Search(ctx,
+			NewSearchRequest(
+				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
+				WithPage(WithLimit(10)),
+				WithSelect(KID, KDocument, KScore),
+			),
+			WithReadLevel(ReadLevelIndexOnly),
+		)
+		require.NoError(t, err)
+		require.NotNil(t, results)
+
+		sr, ok := results.(*SearchResultImpl)
+		require.True(t, ok)
+		require.NotEmpty(t, sr.IDs)
+		// Can be flaky (TOCTOU) due to eventual consistency
+		require.Len(t, sr.IDs[0], 0, "ReadLevelIndexOnly should return 0 documents if index not yet compacted")
+	})
+
 	t.Cleanup(func() {
 		collections, err := client.ListCollections(context.Background())
 		require.NoError(t, err)

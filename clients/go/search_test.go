@@ -713,3 +713,76 @@ func TestSearchResultImpl_At(t *testing.T) {
 	_, ok = result.At(0, 2)
 	require.False(t, ok)
 }
+
+func TestWithReadLevel(t *testing.T) {
+	t.Run("set index_and_wal", func(t *testing.T) {
+		sq := &SearchQuery{}
+		err := WithReadLevel(ReadLevelIndexAndWAL)(sq)
+		require.NoError(t, err)
+		require.Equal(t, ReadLevelIndexAndWAL, sq.ReadLevel)
+	})
+
+	t.Run("set index_only", func(t *testing.T) {
+		sq := &SearchQuery{}
+		err := WithReadLevel(ReadLevelIndexOnly)(sq)
+		require.NoError(t, err)
+		require.Equal(t, ReadLevelIndexOnly, sq.ReadLevel)
+	})
+
+	t.Run("json serialization includes read_level", func(t *testing.T) {
+		sq := &SearchQuery{
+			ReadLevel: ReadLevelIndexOnly,
+		}
+		data, err := json.Marshal(sq)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+		require.Equal(t, "index_only", result["read_level"])
+	})
+
+	t.Run("json serialization omits empty read_level", func(t *testing.T) {
+		sq := &SearchQuery{}
+		data, err := json.Marshal(sq)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+		_, exists := result["read_level"]
+		require.False(t, exists)
+	})
+
+	t.Run("combined with search request", func(t *testing.T) {
+		sq := &SearchQuery{}
+		opt1 := NewSearchRequest(
+			WithKnnRank(KnnQueryText("test"), WithKnnLimit(50)),
+			WithPage(WithLimit(10)),
+		)
+		opt2 := WithReadLevel(ReadLevelIndexOnly)
+
+		err := opt1(sq)
+		require.NoError(t, err)
+		err = opt2(sq)
+		require.NoError(t, err)
+
+		require.Len(t, sq.Searches, 1)
+		require.Equal(t, ReadLevelIndexOnly, sq.ReadLevel)
+
+		data, err := json.Marshal(sq)
+		require.NoError(t, err)
+
+		var result map[string]interface{}
+		err = json.Unmarshal(data, &result)
+		require.NoError(t, err)
+		require.Equal(t, "index_only", result["read_level"])
+		require.Contains(t, result, "searches")
+	})
+	t.Run("invalid read level returns error", func(t *testing.T) {
+		sq := &SearchQuery{}
+		err := WithReadLevel(ReadLevel("invalid"))(sq)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "invalid read level")
+	})
+}
