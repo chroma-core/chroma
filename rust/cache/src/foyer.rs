@@ -443,14 +443,6 @@ where
             hostname: hostname_kv,
         })
     }
-
-    /// Insert directly to disk, bypassing memory cache.
-    /// Insert directly to disk, bypassing memory cache.
-    /// Used for testing. For production use, prefer the trait method `insert_to_disk`.
-    pub fn insert_to_disk(&self, key: K, value: V) {
-    pub fn insert_to_disk(&self, key: K, value: V) {
-        self.cache.storage_writer(key).insert(value);
-    }
 }
 
 #[async_trait::async_trait]
@@ -825,7 +817,9 @@ mod test {
         .unwrap();
         // Insert a 512KB string value generated at random by passing memory.
         let large_value = "val1".repeat(512 * 1024);
-        cache.insert_to_disk("key1".to_string(), large_value.clone());
+        let _ = cache
+            .insert_to_disk("key1".to_string(), large_value.clone())
+            .await;
         // Sleep for 2 secs.
         // This should give the cache enough time to flush the data to disk.
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
