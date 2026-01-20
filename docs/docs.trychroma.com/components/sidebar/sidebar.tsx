@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect } from "react";
+import React from "react";
 import sidebarConfig from "@/markdoc/content/sidebar-config";
 import PageIndex from "@/components/sidebar/page-index";
 import path from "path";

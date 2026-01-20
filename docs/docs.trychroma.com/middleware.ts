@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const config = {
+  matcher: [
+    // Match all paths except static files and Next.js internals
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)",
+  ],
+};
+
 const legacyPathsMapping: Record<string, string> = {
   "/getting-started": "/docs/overview/getting-started",
   "/guides": "/docs/run-chroma/ephemeral-client",
