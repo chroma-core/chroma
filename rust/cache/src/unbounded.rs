@@ -83,6 +83,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<K, V> super::PersistentCache<K, V> for UnboundedCache<K, V>
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
