@@ -216,15 +216,32 @@ impl HnswIndexProvider {
                 // If you are super unlucky you could run into a taken UUID here.
                 // But if that happened we have even bigger issues downstream.
                 let index = if self.use_direct_hnsw {
+                    // Load the HNSW index on a blocking thread to avoid blocking the tokio runtime
+                    // since this is a CPU-intensive operation.
+                    // NOTE(hammadb): This is a simple measure to avoid blocking the tokio runtime.
+                    // Ideally this would occur via our Component Runtime. We can revisit this as its
+                    // a larger refactor.
+                    let hnsw_data_clone = hnsw_data.clone();
+                    let index_config_clone = index_config.clone();
+                    let hnsw_index = tokio::task::spawn_blocking(move || {
+                        HnswIndex::load_from_hnsw_data(
+                            hnsw_data_clone.as_ref(),
+                            &index_config_clone,
+                            ef_search,
+                            new_id,
+                        )
+                    })
+                    .await
+                    .map_err(|e| {
+                        HnswIndexProviderForkError::IndexLoadTaskError(format!(
+                            "HNSW index load task failed: {}",
+                            e
+                        ))
+                    })?
+                    .map_err(|e| Box::new(HnswIndexProviderForkError::IndexLoadError(e)))?;
                     HnswIndexRef {
                         inner: Arc::new(RwLock::new(DistributedHnswInner {
-                            hnsw_index: HnswIndex::load_from_hnsw_data(
-                                hnsw_data.as_ref(),
-                                &index_config,
-                                ef_search,
-                                new_id,
-                            )
-                            .map_err(|e| Box::new(HnswIndexProviderForkError::IndexLoadError(e)))?,
+                            hnsw_index,
                             prefix_path: prefix_path.to_string(),
                         })),
                     }
@@ -470,17 +487,28 @@ impl HnswIndexProvider {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = if self.use_direct_hnsw {
+                            let hnsw_data_clone = hnsw_data.clone();
+                            let index_config_clone = index_config.clone();
+                            let id_copy = *id;
+                            let hnsw_index = tokio::task::spawn_blocking(move || {
+                                HnswIndex::load_from_hnsw_data(
+                                    hnsw_data_clone.as_ref(),
+                                    &index_config_clone,
+                                    ef_search,
+                                    id_copy,
+                                )
+                            })
+                            .await
+                            .map_err(|e| {
+                                HnswIndexProviderOpenError::IndexLoadTaskError(format!(
+                                    "HNSW index load task failed: {}",
+                                    e
+                                ))
+                            })?
+                            .map_err(|e| Box::new(HnswIndexProviderOpenError::IndexLoadError(e)))?;
                             HnswIndexRef {
                                 inner: Arc::new(RwLock::new(DistributedHnswInner {
-                                    hnsw_index: HnswIndex::load_from_hnsw_data(
-                                        hnsw_data.as_ref(),
-                                        &index_config,
-                                        ef_search,
-                                        *id,
-                                    )
-                                    .map_err(|e| {
-                                        Box::new(HnswIndexProviderOpenError::IndexLoadError(e))
-                                    })?,
+                                    hnsw_index,
                                     prefix_path: prefix_path.to_string(),
                                 })),
                             }
@@ -756,6 +784,8 @@ pub enum HnswIndexProviderOpenError {
     PathToStringError(PathBuf),
     #[error("Failed to cleanup files")]
     CleanupError(#[from] tokio::io::Error),
+    #[error("Index load task failed: {0}")]
+    IndexLoadTaskError(String),
 }
 
 impl ChromaError for HnswIndexProviderOpenError {
@@ -765,6 +795,7 @@ impl ChromaError for HnswIndexProviderOpenError {
             HnswIndexProviderOpenError::IndexLoadError(e) => e.code(),
             HnswIndexProviderOpenError::PathToStringError(_) => ErrorCodes::InvalidArgument,
             HnswIndexProviderOpenError::CleanupError(_) => ErrorCodes::Internal,
+            HnswIndexProviderOpenError::IndexLoadTaskError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -777,6 +808,8 @@ pub enum HnswIndexProviderForkError {
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
     PathToStringError(PathBuf),
+    #[error("Index load task failed: {0}")]
+    IndexLoadTaskError(String),
 }
 
 impl ChromaError for HnswIndexProviderForkError {
@@ -785,6 +818,7 @@ impl ChromaError for HnswIndexProviderForkError {
             HnswIndexProviderForkError::FileError(_) => ErrorCodes::Internal,
             HnswIndexProviderForkError::IndexLoadError(e) => e.code(),
             HnswIndexProviderForkError::PathToStringError(_) => ErrorCodes::InvalidArgument,
+            HnswIndexProviderForkError::IndexLoadTaskError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -802,6 +836,9 @@ impl From<HnswIndexProviderOpenError> for HnswIndexProviderForkError {
             HnswIndexProviderOpenError::CleanupError(e) => {
                 // CleanupError doesn't have a direct equivalent in ForkError, wrap it as IndexLoadError
                 HnswIndexProviderForkError::IndexLoadError(Box::new(e))
+            }
+            HnswIndexProviderOpenError::IndexLoadTaskError(msg) => {
+                HnswIndexProviderForkError::IndexLoadTaskError(msg)
             }
         }
     }
