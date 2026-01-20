@@ -158,6 +158,214 @@ impl ChromaError for Error {
     }
 }
 
+//////////////////////////////////////// FactoryCreationContext /////////////////////////////////////
+
+/// Context needed to create log reader/writer factories.
+///
+/// This struct encapsulates all the information needed to create either S3-based or
+/// replicated (Spanner-backed) factories, allowing us to share common factory creation logic.
+struct FactoryCreationContext<'a> {
+    storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    database_name: &'a DatabaseName,
+    collection_id: CollectionUuid,
+    prefix: String,
+}
+
+impl<'a> FactoryCreationContext<'a> {
+    fn new(
+        storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+        database_name: &'a DatabaseName,
+        collection_id: CollectionUuid,
+    ) -> Self {
+        let prefix = collection_id.storage_prefix_for_log();
+        Self {
+            storages,
+            database_name,
+            collection_id,
+            prefix,
+        }
+    }
+
+    /// Creates a LogReader using the appropriate backend (replicated or S3).
+    async fn make_log_reader(
+        &self,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        if let Some(topology) = self.database_name.topology() {
+            self.make_repl_log_reader(topology, write_options, read_options)
+                .await
+        } else {
+            self.make_s3_log_reader(write_options, read_options).await
+        }
+    }
+
+    /// Creates a replicated (Spanner-backed) LogReader.
+    async fn make_repl_log_reader(
+        &self,
+        topology: String,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        let topology_name =
+            TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
+        let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+            return Err(Error::MissingTopology(topology_name.to_string()));
+        };
+        let (storage_wrappers, region_names, preferred_index) =
+            self.build_storage_wrappers(regions)?;
+        let storage_wrappers = Arc::new(storage_wrappers);
+        let spanner = Arc::new(topology.config.spanner.clone());
+        let (fragment_factory, manifest_factory) = create_repl_factories(
+            write_options.clone(),
+            topology.config.repl.clone(),
+            preferred_index,
+            storage_wrappers,
+            spanner,
+            region_names,
+            self.collection_id.0,
+        );
+        let fragment_consumer = fragment_factory.make_consumer().await?;
+        let manifest_consumer = manifest_factory.make_consumer().await?;
+        Ok(Arc::new(LogReader::new(
+            read_options.clone(),
+            fragment_consumer,
+            manifest_consumer,
+        )))
+    }
+
+    /// Creates an S3-based LogReader.
+    async fn make_s3_log_reader(
+        &self,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<Arc<dyn LogReaderTrait>, Error> {
+        let region_config = self
+            .storages
+            .preferred_region_config()
+            .ok_or_else(|| Error::Wal3(wal3::Error::internal(file!(), line!())))?;
+        let storage = Arc::new(region_config.storage.clone());
+        let (fragment_factory, manifest_factory) = create_s3_factories(
+            write_options.clone(),
+            read_options.clone(),
+            storage,
+            self.prefix.clone(),
+            "log-reader".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let fragment_consumer = fragment_factory.make_consumer().await?;
+        let manifest_consumer = manifest_factory.make_consumer().await?;
+        Ok(Arc::new(LogReader::new(
+            read_options.clone(),
+            fragment_consumer,
+            manifest_consumer,
+        )))
+    }
+
+    /// Builds storage wrappers and region names from topology regions.
+    /// Returns (storage_wrappers, region_names, preferred_index).
+    fn build_storage_wrappers(
+        &self,
+        regions: Vec<ProviderRegion<RegionalStorage>>,
+    ) -> Result<(Vec<StorageWrapper>, Vec<String>, usize), Error> {
+        let mut storage_wrappers = vec![];
+        let mut region_names = vec![];
+        for region in regions.into_iter() {
+            region_names.push(region.name().to_string());
+            storage_wrappers.push(StorageWrapper::new(
+                region.name().to_string(),
+                region.config.storage.clone(),
+                self.prefix.clone(),
+            ));
+        }
+        let preferred_index = storage_wrappers
+            .iter()
+            .position(|r| r.region.as_str() == self.storages.preferred.as_str())
+            .ok_or_else(|| {
+                Error::PreferredRegionNotInTopology(self.storages.preferred.to_string())
+            })?;
+        Ok((storage_wrappers, region_names, preferred_index))
+    }
+
+    /// Performs a fork/copy operation from a source reader to the target collection.
+    ///
+    /// This method handles both replicated (Spanner-backed) and S3-only backends.
+    async fn fork_to_target(
+        &self,
+        reader: &dyn LogReaderTrait,
+        cursor: LogPosition,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+        repl_options: &ReplicatedFragmentOptions,
+    ) -> Result<(), Error> {
+        if let Some(topology) = self.database_name.topology() {
+            self.fork_to_repl_target(topology, reader, cursor, write_options, repl_options)
+                .await
+        } else {
+            self.fork_to_s3_target(reader, cursor, write_options, read_options)
+                .await
+        }
+    }
+
+    /// Performs a fork/copy to a replicated (Spanner-backed) target.
+    async fn fork_to_repl_target(
+        &self,
+        topology: String,
+        reader: &dyn LogReaderTrait,
+        cursor: LogPosition,
+        write_options: &LogWriterOptions,
+        repl_options: &ReplicatedFragmentOptions,
+    ) -> Result<(), Error> {
+        let topology_name =
+            TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
+        let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+            return Err(Error::MissingTopology(topology_name.to_string()));
+        };
+        let (storage_wrappers, region_names, preferred_index) =
+            self.build_storage_wrappers(regions)?;
+        let storage_wrappers = Arc::new(storage_wrappers);
+        let spanner = Arc::new(topology.config.spanner.clone());
+        let (fragment_factory, manifest_factory) = create_repl_factories(
+            write_options.clone(),
+            repl_options.clone(),
+            preferred_index,
+            storage_wrappers,
+            spanner,
+            region_names,
+            self.collection_id.0,
+        );
+        let fragment_publisher = fragment_factory.make_publisher().await?;
+        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, None).await?)
+    }
+
+    /// Performs a fork/copy to an S3-only target.
+    async fn fork_to_s3_target(
+        &self,
+        reader: &dyn LogReaderTrait,
+        cursor: LogPosition,
+        write_options: &LogWriterOptions,
+        read_options: &LogReaderOptions,
+    ) -> Result<(), Error> {
+        let region_config = self
+            .storages
+            .preferred_region_config()
+            .ok_or_else(|| Error::Wal3(wal3::Error::internal(file!(), line!())))?;
+        let storage = Arc::new(region_config.storage.clone());
+        let (fragment_factory, manifest_factory) = create_s3_factories(
+            write_options.clone(),
+            read_options.clone(),
+            storage,
+            self.prefix.clone(),
+            "copy".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let fragment_publisher = fragment_factory.make_publisher().await?;
+        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, None).await?)
+    }
+}
+
 ///////////////////////////////////////// InspectedLogState ////////////////////////////////////////
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -485,6 +693,11 @@ fn cache_key_for_fragment(collection_id: CollectionUuid, fragment_path: &str) ->
 
 ////////////////////////////////////////// CachedFragment //////////////////////////////////////////
 
+/// Cached bytes with versioning for forward compatibility.
+///
+/// The `version` field allows detecting and invalidating stale cache entries when the
+/// serialization format changes. Entries with `version: None` (legacy) or mismatched
+/// versions should be treated as potentially stale.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct CachedBytes {
     bytes: Vec<u8>,
@@ -493,6 +706,7 @@ pub struct CachedBytes {
 }
 
 impl CachedBytes {
+    /// Creates a new CachedBytes with the current version (1).
     pub fn new(bytes: Vec<u8>) -> Self {
         Self {
             bytes,
@@ -813,76 +1027,15 @@ impl LogServer {
         }
     }
 
-    /// Creates a LogReader for the given prefix with default (no-op) mark_dirty and snapshot_cache.
+    /// Creates a LogReader for the given database and collection.
     async fn make_log_reader(
         &self,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let storage_prefix = collection_id.storage_prefix_for_log();
-        if let Some(topology) = database_name.topology() {
-            let topology_name = TopologyName::new(topology.clone())
-                .map_err(|_| Error::InvalidTopology(topology))?;
-            let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
-                return Err(Error::MissingTopology(topology_name.to_string()));
-            };
-            let mut storage_wrappers = vec![];
-            let mut region_names = vec![];
-            for region in regions.into_iter() {
-                region_names.push(region.name().to_string());
-                storage_wrappers.push(StorageWrapper::new(
-                    region.name().to_string(),
-                    region.config.storage.clone(),
-                    storage_prefix.to_string(),
-                ));
-            }
-            let Some(preferred_index) = storage_wrappers
-                .iter()
-                .position(|r| r.region.as_str() == self.storages.preferred.as_str())
-            else {
-                return Err(Error::PreferredRegionNotInTopology(
-                    self.storages.preferred.to_string(),
-                ));
-            };
-            let storage_wrappers = Arc::new(storage_wrappers);
-            let spanner = Arc::new(topology.config.spanner.clone());
-            let (fragment_factory, manifest_factory) = create_repl_factories(
-                self.config.writer.clone(),
-                topology.config.repl.clone(),
-                preferred_index,
-                storage_wrappers,
-                spanner,
-                region_names,
-                collection_id.0,
-            );
-            let fragment_consumer = fragment_factory.make_consumer().await?;
-            let manifest_consumer = manifest_factory.make_consumer().await?;
-            Ok(Arc::new(LogReader::new(
-                self.config.reader.clone(),
-                fragment_consumer,
-                manifest_consumer,
-            )))
-        } else if let Some(region_config) = self.storages.preferred_region_config() {
-            let storage = Arc::new(region_config.storage.clone());
-            let (fragment_factory, manifest_factory) = create_s3_factories(
-                self.config.writer.clone(),
-                self.config.reader.clone(),
-                storage,
-                storage_prefix.clone(),
-                "make-reader".to_string(),
-                Arc::new(()),
-                Arc::new(()),
-            );
-            let fragment_consumer = fragment_factory.make_consumer().await?;
-            let manifest_consumer = manifest_factory.make_consumer().await?;
-            Ok(Arc::new(LogReader::new(
-                self.config.reader.clone(),
-                fragment_consumer,
-                manifest_consumer,
-            )))
-        } else {
-            Err(Error::Wal3(wal3::Error::internal(file!(), line!())))
-        }
+        let ctx = FactoryCreationContext::new(&self.storages, &database_name, collection_id);
+        ctx.make_log_reader(&self.config.writer, &self.config.reader)
+            .await
     }
 
     /// Creates a LogReader with default options for the given storage and prefix.
@@ -1947,7 +2100,6 @@ impl LogServer {
         let database_name = DatabaseName::new(&request.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
         let source_prefix = source_collection_id.storage_prefix_for_log();
-        let target_prefix = target_collection_id.storage_prefix_for_log();
         let storage = Arc::new(
             self.preferred_storage()
                 .map_err(|e| Status::internal(e.to_string()))?
@@ -1975,90 +2127,23 @@ impl LogServer {
         // This is the existing compaction_offset, which is the next record to compact.
         let cursor = witness.map(|x| x.cursor.position);
         tracing::event!(Level::INFO, offset = ?cursor);
-        if let Some(topology) = database_name.topology() {
-            let topology_name = TopologyName::new(topology.clone())
-                .map_err(|_| Status::internal("invalid topology name {topology:?}"))?;
-            let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
-                return Err(Status::internal("missing toplogy {topology:?}"))?;
-            };
-            let mut storage_wrappers = vec![];
-            let mut region_names = vec![];
-            for region in regions.into_iter() {
-                region_names.push(region.name().to_string());
-                storage_wrappers.push(StorageWrapper::new(
-                    region.name().to_string(),
-                    region.config.storage.clone(),
-                    target_prefix.clone(),
-                ));
-            }
-            let Some(preferred_index) = storage_wrappers
-                .iter()
-                .position(|r| r.region.as_str() == self.storages.preferred.as_str())
-            else {
-                return Err(Status::internal("preferred storage not configured"));
-            };
-            let storage_wrappers = Arc::new(storage_wrappers);
-            let spanner = Arc::new(topology.config.spanner.clone());
-            let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
-                self.config.writer.clone(),
-                self.config.repl.clone(),
-                preferred_index,
-                storage_wrappers,
-                spanner,
-                region_names,
-                target_collection_id.0,
-            );
-            let target_fragment_publisher = target_fragment_factory
-                .make_publisher()
-                .await
-                .map_err(|err| {
-                    Status::new(
-                        err.code().into(),
-                        format!("Failed to create fragment publisher: {}", err),
-                    )
-                })?;
-            wal3::copy(
+
+        // Use FactoryCreationContext to handle both replicated and S3 targets
+        let target_ctx =
+            FactoryCreationContext::new(&self.storages, &database_name, target_collection_id);
+        target_ctx
+            .fork_to_target(
                 &*log_reader,
                 cursor.unwrap_or(LogPosition::from_offset(1)),
-                &target_fragment_publisher,
-                target_manifest_factory,
-                None,
+                &self.config.writer,
+                &self.config.reader,
+                &self.config.repl,
             )
             .await
             .map_err(|err| {
                 Status::new(err.code().into(), format!("Failed to copy log: {}", err))
             })?;
-        } else {
-            let (target_fragment_factory, target_manifest_factory) = create_s3_factories(
-                self.config.writer.clone(),
-                self.config.reader.clone(),
-                Arc::clone(&storage),
-                target_prefix.clone(),
-                "copy".to_string(),
-                Arc::new(()),
-                Arc::new(()),
-            );
-            let target_fragment_publisher = target_fragment_factory
-                .make_publisher()
-                .await
-                .map_err(|err| {
-                    Status::new(
-                        err.code().into(),
-                        format!("Failed to create fragment publisher: {}", err),
-                    )
-                })?;
-            wal3::copy(
-                &*log_reader,
-                cursor.unwrap_or(LogPosition::from_offset(1)),
-                &target_fragment_publisher,
-                target_manifest_factory,
-                None,
-            )
-            .await
-            .map_err(|err| {
-                Status::new(err.code().into(), format!("Failed to copy log: {}", err))
-            })?;
-        }
+
         let log_reader = self
             .make_log_reader(database_name, target_collection_id)
             .await
