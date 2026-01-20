@@ -2067,6 +2067,7 @@ dependencies = [
  "opentelemetry_sdk",
  "serde",
  "serde_json",
+ "tokio",
  "tonic 0.14.2",
  "tower 0.5.2",
  "tower-http 0.6.6",
