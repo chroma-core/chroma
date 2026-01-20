@@ -349,7 +349,8 @@ where
             .with_name(config.name.clone())
             .with_metrics_registry(otel_0_27_metrics)
             .with_tracing_options(tracing_options.clone())
-            .with_policy(foyer::HybridCachePolicy::WriteOnInsertion)
+            .with_policy(foyer::HybridCachePolicy::WriteOnEviction)
+            .with_flush_on_close(true)
             .memory(config.mem)
             .with_shards(config.shards);
 
@@ -515,6 +516,13 @@ where
         // Write directly to disk storage, bypassing the memory cache.
         // This is useful for prefetching data that is not immediately needed.
         self.cache.storage_writer(key).insert(value);
+    }
+
+    async fn close(&self) -> Result<(), CacheError> {
+        self.cache
+            .close()
+            .await
+            .map_err(|e| CacheError::DiskError(anyhow::anyhow!("failed to close cache: {:?}", e)))
     }
 }
 
@@ -706,7 +714,7 @@ mod test {
 
     use tokio::{fs::File, sync::mpsc};
 
-    use crate::Cache;
+    use crate::{Cache, PersistentCache};
 
     use super::*;
 
@@ -760,14 +768,14 @@ mod test {
             dir: Some(dir.clone()),
             ..Default::default()
         }
-        .build_hybrid::<String, String>()
+        .build_hybrid_test::<String, String>()
         .await
         .unwrap();
 
         cache.insert("key1".to_string(), "value1".to_string()).await;
 
-        // Wait for flush to disk
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        // Close the cache to flush in-memory entries to disk
+        cache.close().await.expect("Should be able to close cache");
         drop(cache);
 
         // Test that we can recover the cache from disk.

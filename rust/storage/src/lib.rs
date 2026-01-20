@@ -12,7 +12,6 @@ pub mod local;
 pub mod metrics;
 pub mod object_storage;
 pub mod s3;
-pub mod stream;
 use chroma_types::Cmek;
 use local::LocalStorage;
 use tempfile::TempDir;

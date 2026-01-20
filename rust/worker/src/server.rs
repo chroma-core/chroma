@@ -112,6 +112,7 @@ impl WorkerServer {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
 
+        let blockfile_provider = worker.blockfile_provider.clone();
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
@@ -166,6 +167,11 @@ impl WorkerServer {
         });
 
         server.await?;
+
+        tracing::info!("Closing blockfile provider caches");
+        if let Err(e) = blockfile_provider.close().await {
+            tracing::error!("Failed to close blockfile provider: {:?}", e);
+        }
 
         // Shutdown pprof server after server is finished shutting down
         if let Some(shutdown_tx) = pprof_shutdown_tx {

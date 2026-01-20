@@ -255,6 +255,12 @@ impl ArrowBlockfileProvider {
         self.root_manager.prefetched_roots.lock().clear();
         Ok(())
     }
+
+    /// Close the provider, flushing any in-memory cache entries to disk.
+    pub async fn close(&self) -> Result<(), CacheError> {
+        self.block_manager.close().await?;
+        self.root_manager.close().await
+    }
 }
 
 #[derive(Error, Debug)]
@@ -629,6 +635,11 @@ impl BlockManager {
     pub(super) fn num_concurrent_block_flushes(&self) -> usize {
         self.num_concurrent_block_flushes
     }
+
+    /// Close the block manager, flushing any in-memory cache entries to disk in the PersistentCache.
+    pub(super) async fn close(&self) -> Result<(), CacheError> {
+        self.block_cache.close().await
+    }
 }
 
 #[derive(Error, Debug)]
@@ -861,6 +872,10 @@ impl RootManager {
                 true
             }
         }
+    }
+
+    pub async fn close(&self) -> Result<(), CacheError> {
+        self.cache.close().await
     }
 }
 

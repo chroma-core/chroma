@@ -97,6 +97,13 @@ where
         // Default: fall back to regular insert
         self.insert(key, value).await;
     }
+
+    /// Close the cache, flushing any in-memory entries to disk.
+    /// This should be called before dropping the cache to ensure all data is persisted.
+    /// The default implementation is a no-op for caches that don't need flushing.
+    async fn close(&self) -> Result<(), CacheError> {
+        Ok(())
+    }
 }
 
 /// A trait to capture the weight of objects in the system.
