@@ -5,8 +5,9 @@ use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
 use crate::hnsw::WrappedHnswError;
 
 use async_trait::async_trait;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chroma_cache::AysncPartitionedMutex;
-use chroma_cache::Cache;
+use chroma_cache::PersistentCache;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_distance::DistanceFunction;
@@ -15,12 +16,15 @@ use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, PutOptions, Storage};
 use chroma_types::{Cmek, CollectionUuid};
+use foyer::{Code, CodeError};
 use futures::TryFutureExt;
 use parking_lot::RwLock;
 use std::fmt::Debug;
+use std::io::{Read, Write};
 use std::path::Path;
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
-use std::{path::PathBuf, sync::Arc};
 use thiserror::Error;
 use tokio::io::AsyncWriteExt;
 use tracing::{instrument, Instrument, Span};
@@ -53,7 +57,7 @@ type CacheKey = CollectionUuid;
 // their ref count goes to 0.
 #[derive(Clone)]
 pub struct HnswIndexProvider {
-    cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>>,
+    cache: Arc<dyn PersistentCache<CollectionUuid, HnswIndexRef>>,
     pub temporary_storage_path: PathBuf,
     storage: Storage,
     pub write_mutex: AysncPartitionedMutex<IndexUuid>,
@@ -79,6 +83,7 @@ pub struct HnswIndexRef {
 pub struct DistributedHnswInner {
     pub hnsw_index: HnswIndex,
     pub prefix_path: String,
+    pub ef_search: usize,
 }
 
 impl Debug for HnswIndexRef {
@@ -108,7 +113,8 @@ impl Configurable<(HnswProviderConfig, Storage)> for HnswIndexProvider {
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (hnsw_config, storage) = config;
-        let cache = chroma_cache::from_config(&hnsw_config.hnsw_cache_config).await?;
+        // Use persistent cache to enable disk caching when configured
+        let cache = chroma_cache::from_config_persistent(&hnsw_config.hnsw_cache_config).await?;
         Ok(Self::new(
             storage.clone(),
             PathBuf::from(&hnsw_config.hnsw_temporary_path),
@@ -137,15 +143,221 @@ impl chroma_cache::Weighted for HnswIndexRef {
     }
 }
 
+// Constants for serialization format version
+const HNSW_CACHE_FORMAT_VERSION: u8 = 1;
+
+// Distance function encoding for serialization
+fn distance_function_to_u8(df: &DistanceFunction) -> u8 {
+    match df {
+        DistanceFunction::Cosine => 0,
+        DistanceFunction::Euclidean => 1,
+        DistanceFunction::InnerProduct => 2,
+    }
+}
+
+fn distance_function_from_u8(val: u8) -> Result<DistanceFunction, std::io::Error> {
+    match val {
+        0 => Ok(DistanceFunction::Cosine),
+        1 => Ok(DistanceFunction::Euclidean),
+        2 => Ok(DistanceFunction::InnerProduct),
+        _ => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("Invalid distance function value: {}", val),
+        )),
+    }
+}
+
+/// Implementation of foyer's Code trait for HnswIndexRef to enable disk caching.
+///
+/// Serialization format:
+/// - Version (1 byte)
+/// - Index UUID (16 bytes)
+/// - Dimensionality (4 bytes, i32 little-endian)
+/// - Distance function (1 byte)
+/// - ef_search (8 bytes, u64 little-endian)
+/// - prefix_path length (4 bytes, u32 little-endian)
+/// - prefix_path data (variable)
+/// - header_buffer length (8 bytes, u64 little-endian)
+/// - header_buffer data (variable)
+/// - data_level0_buffer length (8 bytes, u64 little-endian)
+/// - data_level0_buffer data (variable)
+/// - length_buffer length (8 bytes, u64 little-endian)
+/// - length_buffer data (variable)
+/// - link_list_buffer length (8 bytes, u64 little-endian)
+/// - link_list_buffer data (variable)
+impl Code for HnswIndexRef {
+    fn encode(&self, writer: &mut impl Write) -> Result<(), CodeError> {
+        let inner = self.inner.read();
+
+        // Serialize the HNSW data
+        let hnsw_data = inner.hnsw_index.serialize_to_hnsw_data().map_err(|e| {
+            CodeError::Io(std::io::Error::other(format!(
+                "Failed to serialize HNSW index: {}",
+                e
+            )))
+        })?;
+
+        // Write format version
+        writer.write_u8(HNSW_CACHE_FORMAT_VERSION)?;
+
+        // Write index UUID (16 bytes)
+        writer.write_all(inner.hnsw_index.id.0.as_bytes())?;
+
+        // Write dimensionality
+        writer.write_i32::<LittleEndian>(inner.hnsw_index.dimensionality())?;
+
+        // Write distance function
+        writer.write_u8(distance_function_to_u8(&inner.hnsw_index.distance_function))?;
+
+        // Write ef_search
+        writer.write_u64::<LittleEndian>(inner.ef_search as u64)?;
+
+        // Write prefix_path
+        let prefix_bytes = inner.prefix_path.as_bytes();
+        writer.write_u32::<LittleEndian>(prefix_bytes.len() as u32)?;
+        writer.write_all(prefix_bytes)?;
+
+        // Write the 4 HNSW data buffers
+        let header = hnsw_data.header_buffer();
+        writer.write_u64::<LittleEndian>(header.len() as u64)?;
+        writer.write_all(header)?;
+
+        let data_level0 = hnsw_data.data_level0_buffer();
+        writer.write_u64::<LittleEndian>(data_level0.len() as u64)?;
+        writer.write_all(data_level0)?;
+
+        let length = hnsw_data.length_buffer();
+        writer.write_u64::<LittleEndian>(length.len() as u64)?;
+        writer.write_all(length)?;
+
+        let link_lists = hnsw_data.link_list_buffer();
+        writer.write_u64::<LittleEndian>(link_lists.len() as u64)?;
+        writer.write_all(link_lists)?;
+
+        Ok(())
+    }
+
+    fn decode(reader: &mut impl Read) -> Result<Self, CodeError> {
+        // Read and verify format version
+        let version = reader.read_u8()?;
+        if version != HNSW_CACHE_FORMAT_VERSION {
+            return Err(CodeError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Unsupported HNSW cache format version: {}, expected: {}",
+                    version, HNSW_CACHE_FORMAT_VERSION
+                ),
+            )));
+        }
+
+        // Read index UUID
+        let mut uuid_bytes = [0u8; 16];
+        reader.read_exact(&mut uuid_bytes)?;
+        let id = IndexUuid(Uuid::from_bytes(uuid_bytes));
+
+        // Read dimensionality
+        let dimensionality = reader.read_i32::<LittleEndian>()?;
+
+        // Read distance function
+        let distance_function =
+            distance_function_from_u8(reader.read_u8()?).map_err(CodeError::Io)?;
+
+        // Read ef_search
+        let ef_search = reader.read_u64::<LittleEndian>()? as usize;
+
+        // Read prefix_path
+        let prefix_len = reader.read_u32::<LittleEndian>()? as usize;
+        let mut prefix_bytes = vec![0u8; prefix_len];
+        reader.read_exact(&mut prefix_bytes)?;
+        let prefix_path = String::from_utf8(prefix_bytes).map_err(|e| {
+            CodeError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Invalid UTF-8 in prefix_path: {}", e),
+            ))
+        })?;
+
+        // Read the 4 HNSW data buffers
+        let header_len = reader.read_u64::<LittleEndian>()? as usize;
+        let mut header_buffer = vec![0u8; header_len];
+        reader.read_exact(&mut header_buffer)?;
+
+        let data_level0_len = reader.read_u64::<LittleEndian>()? as usize;
+        let mut data_level0_buffer = vec![0u8; data_level0_len];
+        reader.read_exact(&mut data_level0_buffer)?;
+
+        let length_len = reader.read_u64::<LittleEndian>()? as usize;
+        let mut length_buffer = vec![0u8; length_len];
+        reader.read_exact(&mut length_buffer)?;
+
+        let link_lists_len = reader.read_u64::<LittleEndian>()? as usize;
+        let mut link_list_buffer = vec![0u8; link_lists_len];
+        reader.read_exact(&mut link_list_buffer)?;
+
+        // Build HnswData
+        let hnsw_data = hnswlib::HnswData::builder()
+            .header_buffer(Arc::new(header_buffer))
+            .data_level0_buffer(Arc::new(data_level0_buffer))
+            .length_buffer(Arc::new(length_buffer))
+            .link_list_buffer(Arc::new(link_list_buffer))
+            .build()
+            .map_err(|e| {
+                CodeError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("Failed to build HnswData: {}", e),
+                ))
+            })?;
+
+        // Create IndexConfig
+        let index_config = IndexConfig::new(dimensionality, distance_function);
+
+        // Load the HNSW index from data
+        let hnsw_index = HnswIndex::load_from_hnsw_data(&hnsw_data, &index_config, ef_search, id)
+            .map_err(|e| {
+            CodeError::Io(std::io::Error::other(format!(
+                "Failed to load HNSW index from data: {}",
+                e
+            )))
+        })?;
+
+        Ok(HnswIndexRef {
+            inner: Arc::new(RwLock::new(DistributedHnswInner {
+                hnsw_index,
+                prefix_path,
+                ef_search,
+            })),
+        })
+    }
+
+    fn estimated_size(&self) -> usize {
+        let inner = self.inner.read();
+
+        // Base overhead: version + uuid + dimensionality + distance_function + ef_search + prefix_path_len
+        let base_overhead = 1 + 16 + 4 + 1 + 8 + 4 + inner.prefix_path.len();
+
+        // Estimate the HNSW data size based on index properties
+        // Each vector takes dimensionality * 4 bytes (f32)
+        // Plus graph structure overhead (estimated at ~100 bytes per node for links)
+        let num_elements = inner.hnsw_index.len();
+        let dimensionality = inner.hnsw_index.dimensionality() as usize;
+        let vector_data_size = num_elements * dimensionality * std::mem::size_of::<f32>();
+        let graph_overhead = num_elements * 100; // Rough estimate for link data
+
+        // Buffer length headers: 4 buffers * 8 bytes each
+        let buffer_headers = 4 * 8;
+
+        base_overhead + buffer_headers + vector_data_size + graph_overhead
+    }
+}
+
 impl HnswIndexProvider {
     pub fn new(
         storage: Storage,
         storage_path: PathBuf,
-        cache: Box<dyn Cache<CollectionUuid, HnswIndexRef>>,
+        cache: Box<dyn PersistentCache<CollectionUuid, HnswIndexRef>>,
         permitted_parallelism: u32,
         use_direct_hnsw: bool,
     ) -> Self {
-        let cache: Arc<dyn Cache<CollectionUuid, HnswIndexRef>> = cache.into();
+        let cache: Arc<dyn PersistentCache<CollectionUuid, HnswIndexRef>> = cache.into();
         Self {
             cache,
             storage,
@@ -243,6 +455,7 @@ impl HnswIndexProvider {
                         inner: Arc::new(RwLock::new(DistributedHnswInner {
                             hnsw_index,
                             prefix_path: prefix_path.to_string(),
+                            ef_search,
                         })),
                     }
                 } else {
@@ -260,6 +473,7 @@ impl HnswIndexProvider {
                             .await
                             .map_err(|e| Box::new(HnswIndexProviderForkError::IndexLoadError(e)))?,
                             prefix_path: prefix_path.to_string(),
+                            ef_search,
                         })),
                     }
                 };
@@ -510,6 +724,7 @@ impl HnswIndexProvider {
                                 inner: Arc::new(RwLock::new(DistributedHnswInner {
                                     hnsw_index,
                                     prefix_path: prefix_path.to_string(),
+                                    ef_search,
                                 })),
                             }
                         } else {
@@ -533,6 +748,7 @@ impl HnswIndexProvider {
                                         Box::new(HnswIndexProviderOpenError::IndexLoadError(e))
                                     })?,
                                     prefix_path: prefix_path.to_string(),
+                                    ef_search,
                                 })),
                             }
                         };
@@ -609,6 +825,7 @@ impl HnswIndexProvider {
                     inner: Arc::new(RwLock::new(DistributedHnswInner {
                         hnsw_index: index,
                         prefix_path: prefix_path.to_string(),
+                        ef_search,
                     })),
                 };
                 self.cache.insert(*cache_key, index.clone()).await;
@@ -922,7 +1139,7 @@ pub enum HnswIndexProviderFileError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_cache::new_non_persistent_cache_for_test;
+    use chroma_cache::new_cache_for_test;
     use chroma_storage::local::LocalStorage;
     use chroma_types::InternalHnswConfiguration;
 
@@ -935,7 +1152,7 @@ mod tests {
         tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
-        let cache = new_non_persistent_cache_for_test();
+        let cache = new_cache_for_test();
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, true);
         let collection_id = CollectionUuid(Uuid::new_v4());
 
@@ -986,7 +1203,7 @@ mod tests {
         tokio::fs::create_dir_all(&storage_dir).await.unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
-        let cache = new_non_persistent_cache_for_test();
+        let cache = new_cache_for_test();
         let provider = HnswIndexProvider::new(storage, storage_dir.clone(), cache, 16, false);
         let collection_id = CollectionUuid(Uuid::new_v4());
 
@@ -1075,7 +1292,7 @@ mod tests {
         tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
 
         let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
-        let cache = new_non_persistent_cache_for_test();
+        let cache = new_cache_for_test();
         // use_direct_hnsw = true to test the flush_from_memory path
         let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, true);
         let collection_id = CollectionUuid(Uuid::new_v4());
@@ -1139,5 +1356,105 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Test that HnswIndexRef can be serialized and deserialized via the Code trait.
+    /// This verifies that the disk cache serialization works correctly.
+    #[tokio::test]
+    async fn test_hnsw_index_ref_code_serialization_roundtrip() {
+        use foyer::Code;
+
+        let storage_dir = tempfile::tempdir().unwrap().path().to_path_buf();
+        let hnsw_tmp_path = storage_dir.join("hnsw");
+
+        // Create the directories needed
+        tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
+
+        let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
+        let cache = new_cache_for_test();
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, true);
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        let dimensionality = 4;
+        let distance_function = DistanceFunction::Euclidean;
+        let default_hnsw_params = InternalHnswConfiguration::default();
+        let prefix_path = "";
+
+        // Create an index and add some vectors
+        let created_index = provider
+            .create(
+                &collection_id,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
+                dimensionality,
+                distance_function.clone(),
+                prefix_path,
+            )
+            .await
+            .unwrap();
+
+        // Add some test vectors
+        {
+            let index = created_index.inner.write();
+            index.hnsw_index.add(1, &[1.0, 2.0, 3.0, 4.0]).unwrap();
+            index.hnsw_index.add(2, &[5.0, 6.0, 7.0, 8.0]).unwrap();
+            index.hnsw_index.add(3, &[9.0, 10.0, 11.0, 12.0]).unwrap();
+        }
+
+        // Get the original index properties for comparison
+        let original_id = created_index.inner.read().hnsw_index.id;
+        let original_dimensionality = created_index.inner.read().hnsw_index.dimensionality();
+        let original_len = created_index.inner.read().hnsw_index.len();
+        let original_ef_search = created_index.inner.read().ef_search;
+        let original_prefix_path = created_index.inner.read().prefix_path.clone();
+
+        // Serialize the index
+        let mut serialized_data = Vec::new();
+        created_index
+            .encode(&mut serialized_data)
+            .expect("Failed to encode HnswIndexRef");
+
+        // Verify estimated size is reasonable
+        let estimated = created_index.estimated_size();
+        assert!(estimated > 0, "Estimated size should be positive");
+
+        // Deserialize the index
+        let restored_index = HnswIndexRef::decode(&mut serialized_data.as_slice())
+            .expect("Failed to decode HnswIndexRef");
+
+        // Verify the restored index matches the original
+        {
+            let restored = restored_index.inner.read();
+            assert_eq!(restored.hnsw_index.id, original_id);
+            assert_eq!(
+                restored.hnsw_index.dimensionality(),
+                original_dimensionality
+            );
+            assert_eq!(restored.hnsw_index.len(), original_len);
+            assert_eq!(restored.ef_search, original_ef_search);
+            assert_eq!(restored.prefix_path, original_prefix_path);
+
+            // Verify the vectors can be retrieved
+            let vec1 = restored.hnsw_index.get(1).unwrap().unwrap();
+            assert_eq!(vec1, vec![1.0, 2.0, 3.0, 4.0]);
+
+            let vec2 = restored.hnsw_index.get(2).unwrap().unwrap();
+            assert_eq!(vec2, vec![5.0, 6.0, 7.0, 8.0]);
+
+            let vec3 = restored.hnsw_index.get(3).unwrap().unwrap();
+            assert_eq!(vec3, vec![9.0, 10.0, 11.0, 12.0]);
+        }
+
+        // Verify query works on the restored index
+        let (ids, _distances) = restored_index
+            .inner
+            .read()
+            .hnsw_index
+            .query(&[1.0, 2.0, 3.0, 4.0], 2, &[], &[])
+            .unwrap();
+
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains(&1)); // The exact query vector should be found
     }
 }

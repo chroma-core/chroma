@@ -780,7 +780,7 @@ impl Handler<ListDeadJobsMessage> for CompactionManager {
 mod tests {
     use super::*;
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
-    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_cache::new_cache_for_test;
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use chroma_index::config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig};
     use chroma_index::spann::types::{GarbageCollectionContext, SpannMetrics};
@@ -989,7 +989,7 @@ mod tests {
 
         let block_cache = new_cache_for_test();
         let sparse_index_cache = new_cache_for_test();
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let gc_context = GarbageCollectionContext::try_from_config(
             &(
                 PlGarbageCollectionConfig::default(),

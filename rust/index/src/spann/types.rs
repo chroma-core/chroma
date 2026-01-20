@@ -2985,7 +2985,7 @@ mod tests {
         },
         provider::BlockfileProvider,
     };
-    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_cache::new_cache_for_test;
     use chroma_config::{registry::Registry, Configurable};
     use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
@@ -3021,7 +3021,7 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
@@ -3236,7 +3236,7 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
@@ -3502,7 +3502,7 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
@@ -3740,7 +3740,7 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
@@ -4006,7 +4006,7 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         let hnsw_provider = HnswIndexProvider::new(
             storage.clone(),
             PathBuf::from(tmp_dir.path().to_str().unwrap()),
@@ -4307,7 +4307,7 @@ mod tests {
     }
 
     fn new_hnsw_provider_for_tests(storage: Storage, temp_dir: &TempDir) -> HnswIndexProvider {
-        let hnsw_cache = new_non_persistent_cache_for_test();
+        let hnsw_cache = new_cache_for_test();
         HnswIndexProvider::new(
             storage,
             PathBuf::from(temp_dir.path().to_str().unwrap()),
