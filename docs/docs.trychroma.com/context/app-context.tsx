@@ -1,5 +1,5 @@
 import React, { createContext, useState, ReactNode, useEffect } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 export interface AppContextValue {
   language: string;
@@ -13,8 +13,11 @@ const AppContextDefaultValue: AppContextValue = {
 
 const AppContext = createContext<AppContextValue>(AppContextDefaultValue);
 
-export const AppContextProvider = ({ children, initialLang }: { children: ReactNode; initialLang: string }) => {
-  const [language, setLanguage] = useState<string>(initialLang);
+export const AppContextProvider = ({ children }: { children: ReactNode }) => {
+  const searchParams = useSearchParams();
+  const [language, setLanguage] = useState<string>(
+    searchParams?.get("lang") || "python",
+  );
   const router = useRouter();
   const pathname = usePathname();
 

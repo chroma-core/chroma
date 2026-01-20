@@ -49,10 +49,9 @@ export async function generateMetadata({
   };
 }
 
-const Page: React.FC<{ params: { slug: string }; searchParams: { lang?: string } }> = ({ params, searchParams }) => {
+const Page: React.FC<{ params: { slug: string } }> = ({ params }) => {
   const { slug } = params;
-  const lang = searchParams?.lang || "python";
-  return <MarkdocRenderer slug={["updates", slug]} lang={lang} />;
+  return <MarkdocRenderer slug={["updates", slug]} />;
 };
 
 export default Page;

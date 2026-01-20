@@ -11,7 +11,6 @@ import { capitalize, cn } from "@/lib/utils";
 import { tabLabelStyle } from "@/components/markdoc/code-block-header";
 import AppContext from "@/context/app-context";
 import CodeBlock from "@/components/markdoc/code-block";
-import { usePathname } from "next/navigation";
 
 export interface TabProps {
   label: string;
@@ -20,28 +19,20 @@ export interface TabProps {
 
 export const TabsTrigger = React.forwardRef<
   React.ElementRef<typeof UITabsTrigger>,
-  React.ComponentPropsWithoutRef<typeof UITabsTrigger> & { children?: React.ReactNode }
->(({ value, children, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof UITabsTrigger>
+>(({ value, ...props }, ref) => {
   const { setLanguage } = useContext(AppContext);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const pathname = usePathname();
-
-  // Build the href for no-JS fallback
-  const href = value === "python" ? pathname : `${pathname}?lang=${value}`;
 
   return (
     <UITabsTrigger
       ref={triggerRef}
       value={value}
       {...props}
-      onClick={(e) => {
-        e.preventDefault();
+      onClick={() => {
         setLanguage(value);
       }}
-      asChild
-    >
-      <a href={href} className="no-underline text-inherit hover:no-underline">{children}</a>
-    </UITabsTrigger>
+    />
   );
 });
 TabsTrigger.displayName = "TabsTrigger";

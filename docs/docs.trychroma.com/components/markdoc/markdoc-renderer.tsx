@@ -14,7 +14,7 @@ import PageNav from "@/components/markdoc/page-nav";
 import TableOfContents from "@/components/markdoc/table-of-contents";
 import AskAI from "@/components/markdoc/ask-ai";
 
-const MarkdocRenderer: React.FC<{ slug: string[]; lang: string }> = ({ slug, lang }) => {
+const MarkdocRenderer: React.FC<{ slug: string[] }> = ({ slug }) => {
   const filePath = `${path.join(process.cwd(), "markdoc", "content", ...slug)}.md`;
   const txtFilePath = `${path.join(process.cwd(), "public", `llms-${slug.join("-")}`)}.txt`;
   console.log(txtFilePath);
@@ -45,7 +45,7 @@ const MarkdocRenderer: React.FC<{ slug: string[]; lang: string }> = ({ slug, lan
   );
 
   return (
-    <MarkdocPage initialLang={lang}>
+    <MarkdocPage>
       <div className="relative flex max-w-6xl 2xl:max-w-7xl mx-auto">
         <div className="min-w-0 py-10 relative md:pr-10 marker:text-black dark:marker:text-gray-200 grow max-w-6xl w-full grow-4 prose dark:prose-invert ">
           <SidebarToggle path={slug} />
