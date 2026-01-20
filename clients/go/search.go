@@ -7,9 +7,23 @@ import (
 	"github.com/pkg/errors"
 )
 
+// ReadLevel controls whether search queries read from the write-ahead log (WAL).
+type ReadLevel string
+
+const (
+	// ReadLevelIndexAndWAL reads from both the compacted index and the WAL (default).
+	// All committed writes will be visible.
+	ReadLevelIndexAndWAL ReadLevel = "index_and_wal"
+
+	// ReadLevelIndexOnly reads only from the compacted index, skipping the WAL.
+	// Faster, but recent writes that haven't been compacted may not be visible.
+	ReadLevelIndexOnly ReadLevel = "index_only"
+)
+
 // SearchQuery holds one or more search requests to execute as a batch.
 type SearchQuery struct {
-	Searches []SearchRequest `json:"searches"`
+	Searches  []SearchRequest `json:"searches"`
+	ReadLevel ReadLevel       `json:"read_level,omitempty"`
 }
 
 // SearchResult represents the result of a search operation.
@@ -155,6 +169,19 @@ func (r *SearchRequest) MarshalJSON() ([]byte, error) {
 
 // SearchCollectionOption configures a [SearchQuery] for the collection's Search method.
 type SearchCollectionOption func(update *SearchQuery) error
+
+// WithReadLevel sets the read level for the search query.
+// Use ReadLevelIndexOnly for faster searches that may not include recent writes that haven't been compacted.
+// Default is ReadLevelIndexAndWAL which includes all committed writes.
+func WithReadLevel(level ReadLevel) SearchCollectionOption {
+	return func(query *SearchQuery) error {
+		if level != ReadLevelIndexAndWAL && level != ReadLevelIndexOnly {
+			return errors.Errorf("invalid read level: %q (expected %q or %q)", level, ReadLevelIndexAndWAL, ReadLevelIndexOnly)
+		}
+		query.ReadLevel = level
+		return nil
+	}
+}
 
 // SearchOption configures a [SearchRequest].
 type SearchOption func(req *SearchRequest) error
