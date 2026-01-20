@@ -149,6 +149,13 @@ jobs:
             parallelized: false
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
+          # Tests that create tenants need MULTI_REGION for spanner instance
+          - test-glob: "chromadb/test/api"
+            multi_region: true
+          - test-glob: "chromadb/test/property/test_collections_with_database_tenant.py"
+            multi_region: true
+          - test-glob: "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
+            multi_region: true
     runs-on: blacksmith-8vcpu-ubuntu-2404
     # OIDC token auth for AWS
     permissions:
@@ -175,6 +182,7 @@ jobs:
           PROPERTY_TESTING_PRESET: ${{ inputs.property_testing_preset }}
           CHROMA_RUST_FRONTEND_TEST_ONLY: "1"
           CHROMA_SERVER_HOST: "localhost:8000"
+          MULTI_REGION: ${{ matrix.multi_region && 'true' || '' }}
       - name: Compute artifact name
         if: always()
         id: compute-artifact-name
