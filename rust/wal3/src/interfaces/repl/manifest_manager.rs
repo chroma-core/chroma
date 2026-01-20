@@ -140,9 +140,14 @@ impl ManifestManager {
             )));
         };
         let mut stmt = Statement::new(
-            "SELECT enumeration_offset, collected FROM manifests WHERE log_id = @log_id LIMIT 1",
+            "
+            SELECT enumeration_offset, collected
+            FROM manifests INNER JOIN manifest_regions ON manifests.log_id = manifest_regions.log_id
+            WHERE log_id = @log_id AND region = @local_region LIMIT 1
+            ",
         );
         stmt.add_param("log_id", &log_id.to_string());
+        stmt.add_param("local_region", &self.local_region);
         let mut tx = spanner.read_only_transaction().await?;
         let mut reader = tx.query(stmt).await?;
         while let Some(row) = reader.next().await? {
