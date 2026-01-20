@@ -138,9 +138,9 @@ impl ArrowBlockfileProvider {
         for block_id in block_ids.iter() {
             // Don't prefetch if already cached.
             if !self.block_manager.cached(block_id).await {
-                // Use prefetch_to_disk to write to disk cache only, bypassing memory.
+                // Use prefetch to write to disk cache only, bypassing memory.
                 // This avoids polluting the memory cache with data that is not immediately needed.
-                futures.push(self.block_manager.prefetch_to_disk(
+                futures.push(self.block_manager.prefetch(
                     prefix_path,
                     block_id,
                     StorageRequestPriority::P1,
@@ -491,7 +491,7 @@ impl BlockManager {
     /// This is useful for prefetching data that is not immediately needed
     /// but may be accessed later. By writing to disk only, we avoid polluting
     /// the memory cache with data that is not immediately needed.
-    pub(super) async fn prefetch_to_disk(
+    pub(super) async fn prefetch(
         &self,
         prefix_path: &str,
         id: &Uuid,
@@ -545,7 +545,7 @@ impl BlockManager {
                             if disk_only {
                                 // Write to disk cache only, bypassing memory
                                 block_cache_clone
-                                    .insert_disk_only(id_clone, block.clone())
+                                    .insert_to_disk(id_clone, block.clone())
                                     .await;
                             } else {
                                 // Write to both memory and disk cache

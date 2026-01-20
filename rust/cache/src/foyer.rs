@@ -509,7 +509,7 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
-    async fn insert_disk_only(&self, key: K, value: V) {
+    async fn insert_to_disk(&self, key: K, value: V) {
         let hostname = std::slice::from_ref(&self.hostname);
         let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
         // Write directly to disk storage, bypassing the memory cache.

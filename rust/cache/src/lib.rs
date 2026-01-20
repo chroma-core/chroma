@@ -93,7 +93,7 @@ where
     ///
     /// The default implementation falls back to regular insert (memory + disk).
     /// Implementations should override this if they have a true disk tier.
-    async fn insert_disk_only(&self, key: K, value: V) {
+    async fn insert_to_disk(&self, key: K, value: V) {
         // Default: fall back to regular insert
         self.insert(key, value).await;
     }
