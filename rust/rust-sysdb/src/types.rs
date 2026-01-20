@@ -404,6 +404,8 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
 /// Internal request for getting a collection with its segments.
 #[derive(Debug, Clone)]
 pub struct GetCollectionWithSegmentsRequest {
+    /// The database containing the collection (required for routing)
+    pub database_name: DatabaseName,
     pub id: CollectionUuid,
 }
 
@@ -411,7 +413,19 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
     type Error = SysDbError;
 
     fn try_from(req: chroma_proto::GetCollectionWithSegmentsRequest) -> Result<Self, Self::Error> {
+        // Parse database name from proto (required)
+        let database_str = req
+            .database
+            .ok_or_else(|| SysDbError::Internal("database is required".to_string()))?;
+        let database_name = DatabaseName::new(&database_str).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                database_str
+            ))
+        })?;
+
         Ok(Self {
+            database_name,
             id: CollectionUuid(validate_uuid(&req.id)?),
         })
     }
@@ -587,9 +601,8 @@ impl Assignable for GetCollectionWithSegmentsRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Single collection lookup - no database context available, use default
-        // TODO(Sanket): Make database name mandatory in the request.
-        Backend::Spanner(factory.one_spanner().clone())
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
     }
 }
 

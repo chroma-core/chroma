@@ -4,7 +4,8 @@ use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sysdb::SysDb;
 use chroma_types::{
-    CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError, Schema, SchemaError,
+    CollectionAndSegments, CollectionUuid, DatabaseName, GetCollectionWithSegmentsError, Schema,
+    SchemaError,
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -141,6 +142,7 @@ impl CollectionsWithSegmentsProvider {
 
     pub(crate) async fn get_collection_with_segments(
         &mut self,
+        database_name: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, CollectionsWithSegmentsProviderError> {
         if let Some(collection_and_segments_with_ttl) = self
@@ -179,7 +181,7 @@ impl CollectionsWithSegmentsProvider {
             }
             tracing::info!("Cache miss for collection {}", collection_id);
             self.sysdb_client
-                .get_collection_with_segments(collection_id)
+                .get_collection_with_segments(database_name, collection_id)
                 .await?
         };
 

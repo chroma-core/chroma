@@ -522,14 +522,20 @@ impl SysDb {
         }
     }
 
+    // Database name is optional because it is not used for local chroma.
+    // Also for distributed chroma, if database name is not provided,
+    // it will be routed to the non-mcmr sysdb by default.
+    // If database name is provided, it will be routed to either the mcmr
+    // or non-mcmr sysdb depending on the prefix.
     pub async fn get_collection_with_segments(
         &mut self,
+        database: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
         match self {
             SysDb::Grpc(grpc_sys_db) => {
                 grpc_sys_db
-                    .get_collection_with_segments(collection_id)
+                    .get_collection_with_segments(database, collection_id)
                     .await
             }
             SysDb::Sqlite(sqlite) => sqlite.get_collection_with_segments(collection_id).await,
@@ -1091,10 +1097,17 @@ impl GrpcSysDb {
             offset,
         } = options;
 
+        // Route to MCMR client if database has a valid topology
+        let mut client = if let Some(ref db) = database {
+            self.client(db)
+                .map_err(|e| GetCollectionsError::Internal(Box::new(e)))?
+        } else {
+            self.client.clone()
+        };
+
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
-        let res = self
-            .client
+        let res = client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
                 ids_filter: collection_ids.map(|ids| {
@@ -1168,11 +1181,19 @@ impl GrpcSysDb {
         tenant: String,
         database: Option<DatabaseName>,
     ) -> Result<usize, CountCollectionsError> {
+        // Route to MCMR client if database has a valid topology
+        let mut client = if let Some(ref db) = database {
+            self.client(db)
+                .map_err(|_| CountCollectionsError::Internal)?
+        } else {
+            self.client.clone()
+        };
+
         let request = chroma_proto::CountCollectionsRequest {
             tenant,
             database: database.map(|d| d.into_string()),
         };
-        let res = self.client.count_collections(request).await;
+        let res = client.count_collections(request).await;
         match res {
             Ok(res) => Ok(res.into_inner().count as usize),
             Err(_) => Err(CountCollectionsError::Internal),
@@ -1553,12 +1574,19 @@ impl GrpcSysDb {
 
     async fn get_collection_with_segments(
         &mut self,
+        database: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<CollectionAndSegments, GetCollectionWithSegmentsError> {
-        let res = self
-            .client
+        let mut client = match &database {
+            Some(db) => self
+                .client(db)
+                .map_err(|e| GetCollectionWithSegmentsError::Internal(Box::new(e)))?,
+            None => self.client.clone(),
+        };
+        let res = client
             .get_collection_with_segments(chroma_proto::GetCollectionWithSegmentsRequest {
                 id: collection_id.to_string(),
+                database: database.map(|db| db.into_string()),
             })
             .await?
             .into_inner();
