@@ -10,7 +10,7 @@ pub mod utils;
 
 // Re-export types
 
-use chroma_cache::new_non_persistent_cache_for_test;
+use chroma_cache::new_cache_for_test;
 use chroma_storage::test_storage;
 pub use hnsw::*;
 use hnsw_provider::HnswIndexProvider;
@@ -24,7 +24,7 @@ pub fn test_hnsw_index_provider() -> (TempDir, HnswIndexProvider) {
     let provider = HnswIndexProvider::new(
         storage,
         temp_dir.path().to_path_buf(),
-        new_non_persistent_cache_for_test(),
+        new_cache_for_test(),
         16,
         false,
     );
