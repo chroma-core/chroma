@@ -375,7 +375,7 @@ impl MetadataProvider<'_> {
                             ),
                         }
                     }
-                    .instrument(tracing::trace_span!(parent: Span::current(), "Filter by metadata", key = %key))
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Filter by metadata"))
                     .await
                 } else {
                     Ok(RoaringBitmap::new())
