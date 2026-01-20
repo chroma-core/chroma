@@ -1,5 +1,4 @@
 import React from "react";
-import { Playfair_Display } from "next/font/google";
 import CopyButton from "@/components/markdoc/copy-button";
 import { capitalize } from "@/lib/utils";
 

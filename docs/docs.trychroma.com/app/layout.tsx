@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import React from "react";
 import ThemeProvider from "@/components/ui/theme-provider";
-import { Inter } from "next/font/google";
 import Header from "@/components/header/header";
 import PostHogProvider from "@/components/posthog/posthog-provider";
 import CloudSignUp from "@/components/header/cloud-signup";
@@ -46,8 +45,6 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
-const inter = Inter({ subsets: ["latin"] });
-
 export default function RootLayout({
   children
 }: Readonly<{
@@ -66,6 +63,9 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet" />
         <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-friendly content" />
         <script
           type="application/ld+json"
@@ -74,7 +74,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body data-invert-bg="true" className={`${inter.className} antialiased bg-white dark:bg-black bg-[url(/composite_noise.jpg)] bg-repeat relative text-[#27201C] dark:text-white dark:backdrop-invert`}>
+      <body data-invert-bg="true" className="font-sans antialiased bg-white dark:bg-black bg-[url(/composite_noise.jpg)] bg-repeat relative text-[#27201C] dark:text-white dark:backdrop-invert">
         {gtmId ? <GoogleTagManager gtmId={gtmId} /> : null}
         <ThemeProvider
           attribute="class"

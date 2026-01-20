@@ -1,13 +1,5 @@
 import React, { Suspense } from "react";
-import { Playfair_Display } from "next/font/google";
 import PageLink from "@/components/sidebar/page-link";
-
-const playfairDisplay = Playfair_Display({
-  subsets: ["latin"],
-  display: "swap",
-  weight: "500",
-  variable: "--font-playfair-display",
-});
 
 const PageIndex: React.FC<{
   basePath: string;

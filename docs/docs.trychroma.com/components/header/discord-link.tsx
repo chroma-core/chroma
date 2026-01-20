@@ -3,14 +3,23 @@ import Link from "next/link";
 import UIButton from "@/components/ui/ui-button";
 import { DiscordLogoIcon } from "@radix-ui/react-icons";
 
+async function getOnlineUsers() {
+  try {
+    const response = await fetch(
+      `https://discord.com/api/guilds/1073293645303795742/widget.json`,
+      { next: { revalidate: 3600 } },
+    );
+    if (response.ok) {
+      return (await response.json()).presence_count;
+    }
+  } catch {
+    // Network error - return undefined
+  }
+  return undefined;
+}
+
 const DiscordLink: React.FC = async () => {
-  const response = await fetch(
-    `https://discord.com/api/guilds/1073293645303795742/widget.json`,
-    { next: { revalidate: 3600 } },
-  );
-  const onlineUsers = response.ok
-    ? (await response.json()).presence_count
-    : undefined;
+  const onlineUsers = await getOnlineUsers();
 
   return (
     <Link

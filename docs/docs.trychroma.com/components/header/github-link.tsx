@@ -4,13 +4,23 @@ import { GitHubLogoIcon } from "@radix-ui/react-icons";
 import { formatToK } from "@/lib/utils";
 import Link from "next/link";
 
+async function getStars() {
+  try {
+    const response = await fetch(
+      `https://api.github.com/repos/chroma-core/chroma`,
+      { next: { revalidate: 3600 } },
+    );
+    if (response.ok) {
+      return (await response.json()).stargazers_count;
+    }
+  } catch {
+    // Network error - return undefined
+  }
+  return undefined;
+}
+
 const GithubLink: React.FC = async () => {
-  const response = await fetch(
-    `https://api.github.com/repos/chroma-core/chroma`,
-  );
-  const stars = response.ok
-    ? (await response.json()).stargazers_count
-    : undefined;
+  const stars = await getStars();
 
   return (
     <Link

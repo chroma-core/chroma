@@ -36,14 +36,15 @@ export const generateStaticParams = async () => {
 export async function generateMetadata({
   params,
 }: {
-  params: { slug: string[] };
+  params: Promise<{ slug: string[] }>;
 }): Promise<Metadata> {
+  const { slug } = await params;
   // Try to read a human-friendly title from the Markdoc file
   const filePath = `${path.join(
     process.cwd(),
     "markdoc",
     "content",
-    ...params.slug,
+    ...slug,
   )}.md`;
 
   let pageTitle: string | undefined;
@@ -72,7 +73,7 @@ export async function generateMetadata({
 
   const title = `${
     pageTitle ||
-    params.slug[params.slug.length - 1]
+    slug[slug.length - 1]
       .split("-")
       .map((s) => capitalize(s))
       .join(" ")
@@ -82,9 +83,13 @@ export async function generateMetadata({
   };
 }
 
-const Page: React.FC<{ params: { slug: string[] } }> = ({ params }) => {
-  const { slug } = params;
+async function Page({
+  params,
+}: {
+  params: Promise<{ slug: string[] }>;
+}) {
+  const { slug } = await params;
   return <MarkdocRenderer slug={slug} />;
-};
+}
 
 export default Page;

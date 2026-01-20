@@ -8,15 +8,16 @@ import MarkdocRenderer from "@/components/markdoc/markdoc-renderer";
 export async function generateMetadata({
   params,
 }: {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
+  const { slug } = await params;
   // Try to read a human-friendly title from the Markdoc file
   const filePath = `${path.join(
     process.cwd(),
     "markdoc",
     "content",
     "updates",
-    params.slug,
+    slug,
   )}.md`;
 
   let pageTitle: string | undefined;
@@ -43,15 +44,19 @@ export async function generateMetadata({
     // ignore and fallback
   }
 
-  const title = `${pageTitle || capitalize(params.slug)} - Chroma Docs`;
+  const title = `${pageTitle || capitalize(slug)} - Chroma Docs`;
   return {
     title,
   };
 }
 
-const Page: React.FC<{ params: { slug: string } }> = ({ params }) => {
-  const { slug } = params;
+async function Page({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
   return <MarkdocRenderer slug={["updates", slug]} />;
-};
+}
 
 export default Page;

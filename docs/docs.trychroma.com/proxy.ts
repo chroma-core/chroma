@@ -86,7 +86,7 @@ const legacyPathsMapping: Record<string, string> = {
   "/docs/overview/telemetry": "/docs/overview/oss#telemetry",
 };
 
-export const middleware = (request: NextRequest) => {
+export const proxy = (request: NextRequest) => {
   const path = request.nextUrl.pathname.toLowerCase();
 
   // Case-insensitive redirect
