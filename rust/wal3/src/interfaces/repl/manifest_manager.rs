@@ -126,6 +126,7 @@ impl ManifestManager {
 
     /// Manifest storers and accessors
     async fn head(
+        &self,
         spanner: &Client,
         log_id: Uuid,
         witness: &ManifestWitness,
@@ -143,7 +144,7 @@ impl ManifestManager {
             "
             SELECT enumeration_offset, collected
             FROM manifests INNER JOIN manifest_regions ON manifests.log_id = manifest_regions.log_id
-            WHERE log_id = @log_id AND region = @local_region LIMIT 1
+            WHERE manifests.log_id = @log_id AND region = @local_region LIMIT 1
             ",
         );
         stmt.add_param("log_id", &log_id.to_string());
@@ -797,7 +798,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
 
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error> {
-        Self::head(&self.spanner, self.log_id, witness).await
+        self.head(&self.spanner, self.log_id, witness).await
     }
 
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
@@ -836,6 +837,20 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                         mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
                     }
 
+                    // Query all regions to delete from manifest_regions.
+                    let mut stmt3 = Statement::new(
+                        "SELECT region FROM manifest_regions WHERE log_id = @log_id",
+                    );
+                    stmt3.add_param("log_id", &log_id);
+                    let mut iter = tx.query(stmt3).await?;
+                    while let Some(row) = iter.next().await? {
+                        let region = row.column_by_name::<String>("region")?;
+                        mutations.push(delete(
+                            "manifest_regions",
+                            Key::composite(&[&log_id, &region]),
+                        ));
+                    }
+
                     // Delete from manifests.
                     mutations.push(delete("manifests", Key::new(&log_id)));
 
@@ -862,7 +877,7 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
 
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error> {
-        Self::head(&self.spanner, self.log_id, witness).await
+        self.head(&self.spanner, self.log_id, witness).await
     }
 
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {

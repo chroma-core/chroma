@@ -81,6 +81,14 @@ impl FragmentUploader<(FragmentSeqNo, LogPosition)> for S3FragmentUploader {
         self.storages[self.preferred].storage.clone()
     }
 
+    async fn preferred_prefix(&self) -> String {
+        self.storages[self.preferred].prefix.clone()
+    }
+
+    async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+        &self.storages[self.preferred]
+    }
+
     async fn storages(&self) -> &[StorageWrapper] {
         &self.storages
     }

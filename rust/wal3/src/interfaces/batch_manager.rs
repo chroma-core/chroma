@@ -12,8 +12,8 @@ use chroma_types::Cmek;
 use crate::backoff::ExponentialBackoff;
 use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher};
 use crate::{
-    CursorStore, CursorStoreOptions, Error, FragmentIdentifier, LogPosition, LogWriterOptions,
-    ThrottleOptions,
+    CursorStore, CursorStoreOptions, Error, FragmentIdentifier, Garbage, LogPosition,
+    LogWriterOptions, ThrottleOptions,
 };
 
 use super::FragmentUploader;
@@ -322,10 +322,9 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
             options.headroom as f64,
         );
         let mut retry_count = 0;
-        let storages = self.fragment_uploader.storages().await;
-        let preferred = &storages[0];
+        let preferred = self.fragment_uploader.preferred_storage_wrapper().await;
         loop {
-            let path = format!("{}/gc/GARBAGE", preferred.prefix);
+            let path = Garbage::path(&preferred.prefix);
             let payload = serde_json::to_string(garbage)
                 .map_err(|e| {
                     Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
@@ -370,9 +369,8 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
     }
 
     async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
-        let storages = self.fragment_uploader.storages().await;
-        let storage = Arc::new(storages[0].storage.clone());
-        let prefix = storages[0].prefix.clone();
+        let storage = Arc::new(self.fragment_uploader.preferred_storage().await);
+        let prefix = self.fragment_uploader.preferred_prefix().await;
         CursorStore::new(options, storage, prefix, "batch_manager".to_string())
     }
 }

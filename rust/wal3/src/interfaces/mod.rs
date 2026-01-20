@@ -98,6 +98,12 @@ pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
     /// The preferred region for this cluster.
     async fn preferred_storage(&self) -> Storage;
 
+    /// The prefix for the preferred storage.
+    async fn preferred_prefix(&self) -> String;
+
+    /// The preferred storage wrapper for this cluster.
+    async fn preferred_storage_wrapper(&self) -> &StorageWrapper;
+
     /// The full list of storage wrappers for this cluster
     async fn storages(&self) -> &[StorageWrapper];
 }
