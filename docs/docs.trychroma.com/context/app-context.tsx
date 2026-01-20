@@ -1,7 +1,6 @@
 import React, { createContext, useState, ReactNode, useEffect } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
-
 export interface AppContextValue {
   language: string;
   setLanguage: (language: string) => void;
@@ -9,7 +8,7 @@ export interface AppContextValue {
 
 const AppContextDefaultValue: AppContextValue = {
   language: "python",
-  setLanguage: () => {},
+  setLanguage: () => { },
 };
 
 const AppContext = createContext<AppContextValue>(AppContextDefaultValue);
