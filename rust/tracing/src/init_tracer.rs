@@ -3,14 +3,34 @@
 // Keep them in-sync manually.
 
 use opentelemetry::trace::TracerProvider;
-use opentelemetry::{global, InstrumentationScope};
+use opentelemetry::{global, InstrumentationScope, KeyValue};
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
+use tokio::runtime::Handle;
 use tracing_subscriber::fmt;
 use tracing_subscriber::Registry;
 use tracing_subscriber::{layer::SubscriberExt, EnvFilter, Layer};
+
+use std::sync::OnceLock;
+
+static TOKIO_METRICS_INSTRUMENTS: OnceLock<TokioMetricsInstruments> = OnceLock::new();
+
+#[allow(dead_code)]
+struct TokioMetricsInstruments {
+    active_tasks_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    global_queue_depth_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    worker_park_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    worker_park_unpark_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    worker_busy_duration_gauge: opentelemetry::metrics::ObservableCounter<f64>,
+    // Unstable metrics
+    spawned_tasks_count_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    num_blocking_threads_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    num_idle_blocking_threads_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    blocking_queue_depth_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+    worker_local_queue_depth_gauge: opentelemetry::metrics::ObservableGauge<u64>,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -163,7 +183,167 @@ pub fn init_otel_layer(
         .with_resource(resource.clone())
         .build();
     global::set_meter_provider(meter_provider);
+
+    // Register runtime metrics callback
+    register_runtime_metrics();
+
     tracing_opentelemetry::OpenTelemetryLayer::new(tracer).boxed()
+}
+
+fn register_runtime_metrics() {
+    TOKIO_METRICS_INSTRUMENTS.get_or_init(|| {
+        let meter = global::meter("tokio_runtime");
+
+        let active_tasks_gauge = meter
+            .u64_observable_gauge("tokio_active_tasks")
+            .with_description("Number of currently alive tasks in the Tokio runtime")
+            .with_callback(|result| {
+                if let Ok(handle) = Handle::try_current() {
+                    let metrics = handle.metrics();
+                    result.observe(metrics.num_alive_tasks() as u64, &[]);
+                }
+            })
+            .build();
+
+        let global_queue_depth_gauge = meter
+            .u64_observable_gauge("tokio_global_queue_depth")
+            .with_description("Size of the global queue in the Tokio runtime")
+            .with_callback(|result| {
+                if let Ok(handle) = Handle::try_current() {
+                    let metrics = handle.metrics();
+                    result.observe(metrics.global_queue_depth() as u64, &[]);
+                }
+            })
+            .build();
+
+        let worker_park_gauge = meter
+            .u64_observable_gauge("tokio_worker_park_count")
+            .with_description("Number of times a worker has parked")
+            .with_callback(|result| {
+                if let Ok(handle) = Handle::try_current() {
+                    let metrics = handle.metrics();
+                    for i in 0..metrics.num_workers() {
+                        result.observe(
+                            metrics.worker_park_count(i),
+                            &[KeyValue::new("worker", i.to_string())],
+                        );
+                    }
+                }
+            })
+            .build();
+
+        let worker_park_unpark_gauge = meter
+            .u64_observable_gauge("tokio_worker_park_unpark_count")
+            .with_description("Number of times a worker has parked and unparked")
+            .with_callback(|result| {
+                if let Ok(handle) = Handle::try_current() {
+                    let metrics = handle.metrics();
+                    for i in 0..metrics.num_workers() {
+                        result.observe(
+                            metrics.worker_park_unpark_count(i),
+                            &[KeyValue::new("worker", i.to_string())],
+                        );
+                    }
+                }
+            })
+            .build();
+
+        let worker_busy_duration_gauge = meter
+            .f64_observable_counter("tokio_worker_busy_duration_seconds")
+            .with_description("Total time worker has been busy in seconds")
+            .with_callback(|result| {
+                if let Ok(handle) = Handle::try_current() {
+                    let metrics = handle.metrics();
+                    for i in 0..metrics.num_workers() {
+                        let duration = metrics.worker_total_busy_duration(i);
+                        result.observe(
+                            duration.as_secs_f64(),
+                            &[KeyValue::new("worker", i.to_string())],
+                        );
+                    }
+                }
+            })
+            .build();
+
+        // Unstable metrics (requires tokio_unstable)
+        let spawned_tasks_count_gauge = meter
+            .u64_observable_gauge("tokio_spawned_tasks_count")
+            .with_description("Total number of spawned tasks")
+            .with_callback(|_result| {
+                if let Ok(_handle) = Handle::try_current() {
+                    let _metrics = _handle.metrics();
+                    #[cfg(tokio_unstable)]
+                    _result.observe(_metrics.spawned_tasks_count(), &[]);
+                }
+            })
+            .build();
+
+        let num_blocking_threads_gauge = meter
+            .u64_observable_gauge("tokio_num_blocking_threads")
+            .with_description("Number of blocking threads")
+            .with_callback(|_result| {
+                if let Ok(_handle) = Handle::try_current() {
+                    let _metrics = _handle.metrics();
+                    #[cfg(tokio_unstable)]
+                    _result.observe(_metrics.num_blocking_threads() as u64, &[]);
+                }
+            })
+            .build();
+
+        let num_idle_blocking_threads_gauge = meter
+            .u64_observable_gauge("tokio_num_idle_blocking_threads")
+            .with_description("Number of idle blocking threads")
+            .with_callback(|_result| {
+                if let Ok(_handle) = Handle::try_current() {
+                    let _metrics = _handle.metrics();
+                    #[cfg(tokio_unstable)]
+                    _result.observe(_metrics.num_idle_blocking_threads() as u64, &[]);
+                }
+            })
+            .build();
+
+        let blocking_queue_depth_gauge = meter
+            .u64_observable_gauge("tokio_blocking_queue_depth")
+            .with_description("Blocking queue depth")
+            .with_callback(|_result| {
+                if let Ok(_handle) = Handle::try_current() {
+                    let _metrics = _handle.metrics();
+                    #[cfg(tokio_unstable)]
+                    _result.observe(_metrics.blocking_queue_depth() as u64, &[]);
+                }
+            })
+            .build();
+
+        let worker_local_queue_depth_gauge = meter
+            .u64_observable_gauge("tokio_worker_local_queue_depth")
+            .with_description("Worker local queue depth")
+            .with_callback(|_result| {
+                if let Ok(_handle) = Handle::try_current() {
+                    let _metrics = _handle.metrics();
+                    #[cfg(tokio_unstable)]
+                    for i in 0.._metrics.num_workers() {
+                        _result.observe(
+                            _metrics.worker_local_queue_depth(i) as u64,
+                            &[KeyValue::new("worker", i.to_string())],
+                        );
+                    }
+                }
+            })
+            .build();
+
+        TokioMetricsInstruments {
+            active_tasks_gauge,
+            global_queue_depth_gauge,
+            worker_park_gauge,
+            worker_park_unpark_gauge,
+            worker_busy_duration_gauge,
+            spawned_tasks_count_gauge,
+            num_blocking_threads_gauge,
+            num_idle_blocking_threads_gauge,
+            blocking_queue_depth_gauge,
+            worker_local_queue_depth_gauge,
+        }
+    });
 }
 
 pub fn init_stdout_layer() -> Box<dyn Layer<Registry> + Send + Sync> {
