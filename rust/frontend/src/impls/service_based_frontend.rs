@@ -22,27 +22,28 @@ use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
     plan::{Count, Get, Knn, Search},
     AddCollectionRecordsError, AddCollectionRecordsRequest, AddCollectionRecordsResponse,
-    AttachFunctionRequest, AttachFunctionResponse, Collection, CollectionUuid,
+    AttachFunctionRequest, AttachFunctionResponse, Cmek, Collection, CollectionUuid,
     CountCollectionsError, CountCollectionsRequest, CountCollectionsResponse, CountRequest,
     CountResponse, CreateCollectionError, CreateCollectionRequest, CreateCollectionResponse,
     CreateDatabaseError, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantRequest, CreateTenantResponse, DeleteCollectionError, DeleteCollectionRecordsError,
-    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, DeleteCollectionRequest,
-    DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionError,
-    DetachFunctionRequest, DetachFunctionResponse, ForkCollectionError, ForkCollectionRequest,
-    ForkCollectionResponse, GetCollectionByCrnError, GetCollectionByCrnRequest,
-    GetCollectionByCrnResponse, GetCollectionError, GetCollectionRequest, GetCollectionResponse,
-    GetCollectionsError, GetDatabaseError, GetDatabaseRequest, GetDatabaseResponse, GetRequest,
-    GetResponse, GetTenantError, GetTenantRequest, GetTenantResponse, HealthCheckResponse,
-    HeartbeatError, Include, KnnIndex, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse, Operation, OperationRecord,
-    QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse, Schema, SchemaError,
-    SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType, SegmentUuid,
-    UpdateCollectionError, UpdateCollectionRecordsError, UpdateCollectionRecordsRequest,
-    UpdateCollectionRecordsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
-    UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsError,
-    UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, VectorIndexConfiguration,
-    Where,
+    CreateTenantRequest, CreateTenantResponse, DatabaseName, DeleteCollectionError,
+    DeleteCollectionRecordsError, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse,
+    DeleteCollectionRequest, DeleteDatabaseError, DeleteDatabaseRequest, DeleteDatabaseResponse,
+    DetachFunctionError, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionError,
+    ForkCollectionRequest, ForkCollectionResponse, GetCollectionByCrnError,
+    GetCollectionByCrnRequest, GetCollectionByCrnResponse, GetCollectionError,
+    GetCollectionRequest, GetCollectionResponse, GetCollectionsError, GetDatabaseError,
+    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetResponse, GetTenantError,
+    GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
+    IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
+    ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
+    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
+    Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType,
+    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
+    UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
+    VectorIndexConfiguration, Where,
 };
 use opentelemetry::global;
 use opentelemetry::metrics::Counter;
@@ -182,27 +183,21 @@ impl ServiceBasedFrontend {
             .collection)
     }
 
-    async fn get_collection_dimension(
-        &mut self,
-        collection_id: CollectionUuid,
-    ) -> Result<Option<u32>, GetCollectionError> {
-        Ok(self
-            .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
-            .await
-            .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
-            .collection
-            .dimension
-            .map(|dim| dim as u32))
-    }
-
     async fn set_collection_dimension(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         dimension: u32,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(collection_id, None, None, Some(dimension), None)
+            .update_collection(
+                Some(database_name),
+                collection_id,
+                None,
+                None,
+                Some(dimension),
+                None,
+            )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
@@ -219,10 +214,11 @@ impl ServiceBasedFrontend {
         option_embeddings: Option<&Vec<Embedding>>,
         update_if_not_present: bool,
         read_length: F,
-    ) -> Result<(), ValidationError>
+    ) -> Result<Collection, ValidationError>
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
+        let collection = self.get_cached_collection(collection_id).await?;
         if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
                 .iter()
@@ -237,28 +233,29 @@ impl ServiceBasedFrontend {
                 low as u32
             } else {
                 // No embedding to check, return
-                return Ok(());
+                return Ok(collection);
             };
-            match self.get_collection_dimension(collection_id).await {
-                Ok(Some(expected_dim)) => {
+            match collection.dimension.map(|dim| dim as u32) {
+                Some(expected_dim) => {
                     if expected_dim != emb_dim {
                         return Err(ValidationError::DimensionMismatch(expected_dim, emb_dim));
                     }
-
-                    Ok(())
                 }
-                Ok(None) => {
+                None => {
                     if update_if_not_present {
-                        self.set_collection_dimension(collection_id, emb_dim)
+                        let database_name =
+                            DatabaseName::new(&collection.database).ok_or_else(|| {
+                                ValidationError::InvalidArgument(
+                                    "database name must be at least 3 characters".to_string(),
+                                )
+                            })?;
+                        self.set_collection_dimension(database_name, collection_id, emb_dim)
                             .await?;
                     }
-                    Ok(())
                 }
-                Err(err) => Err(err.into()),
-            }
-        } else {
-            Ok(())
+            };
         }
+        Ok(collection)
     }
 
     pub async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
@@ -640,6 +637,7 @@ impl ServiceBasedFrontend {
     pub async fn update_collection(
         &mut self,
         UpdateCollectionRequest {
+            database_name,
             collection_id,
             new_name,
             new_metadata,
@@ -649,6 +647,7 @@ impl ServiceBasedFrontend {
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
             .update_collection(
+                database_name,
                 collection_id,
                 new_name,
                 new_metadata,
@@ -675,14 +674,15 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteCollectionRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionError> {
+        let db_name = DatabaseName::new(&database_name).ok_or_else(|| {
+            DeleteCollectionError::Internal(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         let collection = self
             .get_collection(
-                GetCollectionRequest::try_new(
-                    tenant_id.clone(),
-                    database_name.clone(),
-                    collection_name,
-                )
-                .map_err(DeleteCollectionError::Validation)?,
+                GetCollectionRequest::try_new(tenant_id.clone(), db_name, collection_name)
+                    .map_err(DeleteCollectionError::Validation)?,
             )
             .await?;
 
@@ -714,15 +714,24 @@ impl ServiceBasedFrontend {
         &mut self,
         ForkCollectionRequest {
             tenant_id,
+            database_name,
             source_collection_id,
             target_collection_name,
             ..
         }: ForkCollectionRequest,
     ) -> Result<ForkCollectionResponse, ForkCollectionError> {
         let target_collection_id = CollectionUuid::new();
+        let database_name = DatabaseName::new(database_name).ok_or_else(|| {
+            ForkCollectionError::InvalidArgument("database_name cannot be empty".to_string())
+        })?;
         let log_offsets = self
             .log_client
-            .fork_logs(&tenant_id, source_collection_id, target_collection_id)
+            .fork_logs(
+                &tenant_id,
+                database_name,
+                source_collection_id,
+                target_collection_id,
+            )
             .await?;
         let mut collection_and_segments = self
             .sysdb_client
@@ -808,11 +817,13 @@ impl ServiceBasedFrontend {
     pub async fn retryable_push_logs(
         &mut self,
         tenant_id: &str,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         self.log_client
-            .push_logs(tenant_id, collection_id, records)
+            .push_logs(tenant_id, database_name, collection_id, records, cmek)
             .await
     }
 
@@ -820,6 +831,7 @@ impl ServiceBasedFrontend {
         &mut self,
         AddCollectionRecordsRequest {
             tenant_id,
+            database_name,
             collection_id,
             ids,
             embeddings,
@@ -829,14 +841,17 @@ impl ServiceBasedFrontend {
             ..
         }: AddCollectionRecordsRequest,
     ) -> Result<AddCollectionRecordsResponse, AddCollectionRecordsError> {
-        self.validate_embedding(
-            collection_id,
-            Some(&embeddings),
-            true,
-            |embedding: &Vec<f32>| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
+        let database_name = DatabaseName::new(database_name)
+            .ok_or(AddCollectionRecordsError::InvalidDatabaseName)?;
+        let collection = self
+            .validate_embedding(
+                collection_id,
+                Some(&embeddings),
+                true,
+                |embedding: &Vec<f32>| Some(embedding.len()),
+            )
+            .await
+            .map_err(|err| err.boxed())?;
 
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
@@ -849,9 +864,20 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let database_name_clone = database_name.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(
+                        &tenant_id_clone,
+                        database_name_clone,
+                        collection_id,
+                        records_clone,
+                        cmek_clone,
+                    )
                     .await
             }
         };
@@ -907,6 +933,7 @@ impl ServiceBasedFrontend {
         &mut self,
         UpdateCollectionRecordsRequest {
             tenant_id,
+            database_name,
             collection_id,
             ids,
             embeddings,
@@ -916,11 +943,14 @@ impl ServiceBasedFrontend {
             ..
         }: UpdateCollectionRecordsRequest,
     ) -> Result<UpdateCollectionRecordsResponse, UpdateCollectionRecordsError> {
-        self.validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-            embedding.as_ref().map(|emb| emb.len())
-        })
-        .await
-        .map_err(|err| err.boxed())?;
+        let database_name = DatabaseName::new(database_name)
+            .ok_or(UpdateCollectionRecordsError::InvalidDatabaseName)?;
+        let collection = self
+            .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
+                embedding.as_ref().map(|emb| emb.len())
+            })
+            .await
+            .map_err(|err| err.boxed())?;
 
         let (records, log_size_bytes) = to_records(
             ids,
@@ -937,9 +967,20 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let database_name_clone = database_name.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(
+                        &tenant_id_clone,
+                        database_name_clone,
+                        collection_id,
+                        records_clone,
+                        cmek_clone,
+                    )
                     .await
             }
         };
@@ -995,6 +1036,7 @@ impl ServiceBasedFrontend {
         &mut self,
         UpsertCollectionRecordsRequest {
             tenant_id,
+            database_name,
             collection_id,
             ids,
             embeddings,
@@ -1004,14 +1046,17 @@ impl ServiceBasedFrontend {
             ..
         }: UpsertCollectionRecordsRequest,
     ) -> Result<UpsertCollectionRecordsResponse, UpsertCollectionRecordsError> {
-        self.validate_embedding(
-            collection_id,
-            Some(&embeddings),
-            true,
-            |embedding: &Vec<f32>| Some(embedding.len()),
-        )
-        .await
-        .map_err(|err| err.boxed())?;
+        let database_name = DatabaseName::new(database_name)
+            .ok_or(UpsertCollectionRecordsError::InvalidDatabaseName)?;
+        let collection = self
+            .validate_embedding(
+                collection_id,
+                Some(&embeddings),
+                true,
+                |embedding: &Vec<f32>| Some(embedding.len()),
+            )
+            .await
+            .map_err(|err| err.boxed())?;
 
         let embeddings = Some(embeddings.into_iter().map(Some).collect());
 
@@ -1030,9 +1075,20 @@ impl ServiceBasedFrontend {
             let mut self_clone = self.clone();
             let records_clone = records.clone();
             let tenant_id_clone = tenant_id.clone();
+            let database_name_clone = database_name.clone();
+            let cmek_clone = collection
+                .schema
+                .as_ref()
+                .and_then(|schema| schema.cmek.clone());
             async move {
                 self_clone
-                    .retryable_push_logs(&tenant_id_clone, collection_id, records_clone)
+                    .retryable_push_logs(
+                        &tenant_id_clone,
+                        database_name_clone,
+                        collection_id,
+                        records_clone,
+                        cmek_clone,
+                    )
                     .await
             }
         };
@@ -1095,6 +1151,8 @@ impl ServiceBasedFrontend {
             ..
         }: DeleteCollectionRecordsRequest,
     ) -> Result<DeleteCollectionRecordsResponse, DeleteCollectionRecordsError> {
+        let database_name_typed = DatabaseName::new(database_name.clone())
+            .ok_or(DeleteCollectionRecordsError::InvalidDatabaseName)?;
         let mut records = Vec::new();
 
         let read_event = if let Some(where_clause) = r#where {
@@ -1213,16 +1271,27 @@ impl ServiceBasedFrontend {
 
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
-            self.log_client
-                .push_logs(&tenant_id, collection_id, records)
+            let cmek = self
+                .get_cached_collection(collection_id)
                 .await
-                .map_err(|err| {
-                    if err.code() == ErrorCodes::Unavailable {
-                        DeleteCollectionRecordsError::Backoff
-                    } else {
-                        DeleteCollectionRecordsError::Internal(Box::new(err) as _)
-                    }
-                })?;
+                .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
+                .schema
+                .and_then(|schema| schema.cmek.clone());
+            self.retryable_push_logs(
+                &tenant_id,
+                database_name_typed.clone(),
+                collection_id,
+                records,
+                cmek,
+            )
+            .await
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    DeleteCollectionRecordsError::Backoff
+                } else {
+                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                }
+            })?;
 
             // Attach metadata to the write context
             chroma_metering::with_current(|context| {
@@ -1268,7 +1337,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_delete(request_clone).await;
+                let res = Box::pin(self_clone.retryable_delete(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1284,20 +1353,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = delete_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying delete() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            delete_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying delete() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .delete_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
@@ -1411,6 +1482,52 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn indexing_status(
+        &mut self,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+    ) -> Result<IndexStatusResponse, IndexStatusError> {
+        let collection = self.get_cached_collection(collection_id).await?;
+
+        let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
+            IndexStatusError::Internal(Box::new(chroma_error::TonicError(tonic::Status::internal(
+                "Invalid log_position value: must be >= 0 and convertible to u64",
+            ))))
+        })?;
+
+        // It is important that we do scout_logs AFTER we get the collection +
+        // compaction offset in order to give a strictly conservative estimate
+        // of the unindexed ops.
+
+        // Saturating sub 1 to account for scout_logs returning the next log to be inserted
+        // The same logic is used in get_enum_offset_on_server in log-service/src/lib.rs
+        let enumeration_offset = self
+            .log_client
+            .scout_logs(&collection.tenant, database_name, collection_id, 0)
+            .await?
+            .saturating_sub(1);
+
+        let total_ops = enumeration_offset;
+        let num_unindexed_ops = total_ops.saturating_sub(num_indexed_ops);
+        let op_indexing_progress = if total_ops == 0 {
+            1.0
+        } else {
+            num_indexed_ops as f32 / total_ops as f32
+        };
+
+        chroma_metering::with_current(|context| {
+            context.latest_collection_logical_size_bytes(0);
+            context.finish_request(Instant::now());
+        });
+
+        Ok(IndexStatusResponse {
+            op_indexing_progress,
+            num_unindexed_ops,
+            num_indexed_ops,
+            total_ops,
+        })
+    }
+
     async fn retryable_get(
         &mut self,
         GetRequest {
@@ -1520,7 +1637,7 @@ impl ServiceBasedFrontend {
                 .collections_with_segments_cache
                 .clone();
             async move {
-                let res = self_clone.retryable_get(request_clone).await;
+                let res = Box::pin(self_clone.retryable_get(request_clone)).await;
                 match res {
                     Ok(res) => Ok(res),
                     Err(e) => {
@@ -1536,20 +1653,22 @@ impl ServiceBasedFrontend {
                 }
             }
         };
-        let res = get_to_retry
-            .retry(self.collections_with_segments_provider.get_retry_backoff())
-            // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-            .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
-            .notify(|_, _| {
-                let retried = retries.fetch_add(1, Ordering::Relaxed);
-                if retried > 0 {
-                    tracing::info!(
-                        "Retrying get() request for collection {}",
-                        request.collection_id
-                    );
-                }
-            })
-            .await;
+        let res = Box::pin(
+            get_to_retry
+                .retry(self.collections_with_segments_provider.get_retry_backoff())
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .notify(|_, _| {
+                    let retried = retries.fetch_add(1, Ordering::Relaxed);
+                    if retried > 0 {
+                        tracing::info!(
+                            "Retrying get() request for collection {}",
+                            request.collection_id
+                        );
+                    }
+                }),
+        )
+        .await;
         self.metrics
             .get_retries_counter
             .add(retries.load(Ordering::Relaxed) as u64, &[]);
@@ -1787,6 +1906,7 @@ impl ServiceBasedFrontend {
                 collection_and_segments,
             },
             payloads: request.searches,
+            read_level: request.read_level,
         };
 
         // Execute the single search plan using the executor
@@ -1885,7 +2005,7 @@ impl ServiceBasedFrontend {
     pub async fn attach_function(
         &mut self,
         tenant_name: String,
-        database_name: String,
+        database_name: DatabaseName,
         collection_id: String,
         AttachFunctionRequest {
             name,
@@ -1907,7 +2027,7 @@ impl ServiceBasedFrontend {
             })?);
 
         // Step 1: Create attached function with is_ready = false
-        let attached_function_id = self
+        let (attached_function_id, created) = self
             .sysdb_client
             .create_attached_function(
                 name.clone(),
@@ -1916,41 +2036,59 @@ impl ServiceBasedFrontend {
                 output_collection.clone(),
                 params,
                 tenant_name.clone(),
-                database_name,
+                database_name.clone().into_string(),
                 self.min_records_for_invocation,
             )
-            .await
-            .map_err(|e| match e {
-                chroma_sysdb::AttachFunctionError::AlreadyExists => {
-                    chroma_types::AttachFunctionError::AlreadyExists(name.clone())
-                }
-                chroma_sysdb::AttachFunctionError::FailedToCreateAttachedFunction(s) => {
-                    chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                        s,
-                    )))
-                }
-                chroma_sysdb::AttachFunctionError::ServerReturnedInvalidData => {
-                    chroma_types::AttachFunctionError::Internal(Box::new(
-                        chroma_sysdb::AttachFunctionError::ServerReturnedInvalidData,
-                    ))
-                }
-            })?;
-
-        // Step 2: Start backfill
-        self.start_backfill(tenant_name, input_collection_id, attached_function_id)
             .await?;
 
+        // If this was an idempotent request (function already exists and is ready),
+        // skip backfill and finish steps - just return the existing function
+        if !created {
+            return Ok(AttachFunctionResponse {
+                attached_function: chroma_types::AttachedFunctionInfo {
+                    id: attached_function_id.to_string(),
+                    name,
+                    function_name: function_id,
+                },
+                created,
+            });
+        }
+
+        // Step 2: Start backfill (only for newly created functions)
+        self.start_backfill(
+            tenant_name,
+            database_name,
+            input_collection_id,
+            attached_function_id,
+        )
+        .await?;
+
         // Step 3: Create output collection and set is_ready = true
-        self.sysdb_client
-            .finish_create_attached_function(attached_function_id)
+        // Generate a default HNSW schema for the output collection with the attached function ID
+        let mut output_schema = Schema::new_default(KnnIndex::Hnsw);
+        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema_str = serde_json::to_string(&output_schema).map_err(|e| {
+            chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
+                tonic::Status::internal(format!(
+                    "Failed to serialize output collection schema: {}",
+                    e
+                )),
+            )))
+        })?;
+
+        // The returned `created` flag from finish is for idempotency at this layer,
+        // but we already handle it via the initial create call's `created` flag
+        let _finish_created = self
+            .sysdb_client
+            .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .map_err(|e| {
-                chroma_types::AttachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                    tonic::Status::internal(format!(
-                        "Failed to finish creating attached function: {}",
-                        e
-                    )),
-                )))
+            .map_err(|e| match e {
+                chroma_types::FinishCreateAttachedFunctionError::OutputCollectionExists => {
+                    chroma_types::AttachFunctionError::OutputCollectionExists(
+                        output_collection.clone(),
+                    )
+                }
+                other => chroma_types::AttachFunctionError::from(other),
             })?;
 
         Ok(AttachFunctionResponse {
@@ -1959,6 +2097,7 @@ impl ServiceBasedFrontend {
                 name,
                 function_name: function_id,
             },
+            created,
         })
     }
 
@@ -1966,13 +2105,12 @@ impl ServiceBasedFrontend {
     async fn start_backfill(
         &mut self,
         tenant: String,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         _attached_function_id: chroma_types::AttachedFunctionUuid,
     ) -> Result<(), chroma_types::AttachFunctionError> {
-        let embedding_dim = self
-            .get_collection_dimension(collection_id)
-            .await?
-            .unwrap_or(1);
+        let collection = self.get_cached_collection(collection_id).await?;
+        let embedding_dim = collection.dimension.unwrap_or(1);
         let fake_embedding = vec![0.0; embedding_dim as usize];
         // TODO(tanujnay112): Make this either a configurable or better yet a separate
         // RPC to the logs service.
@@ -1988,8 +2126,9 @@ impl ServiceBasedFrontend {
             };
             num_fake_logs
         ];
-        self.log_client
-            .push_logs(&tenant, collection_id, logs)
+
+        let cmek = collection.schema.and_then(|schema| schema.cmek.clone());
+        self.retryable_push_logs(&tenant, database_name, collection_id, logs, cmek)
             .await?;
         Ok(())
     }
@@ -1997,7 +2136,7 @@ impl ServiceBasedFrontend {
     pub async fn get_attached_function(
         &mut self,
         _tenant_name: String,
-        _database_name: String,
+        _database_name: DatabaseName,
         collection_id: String,
         function_name: String,
     ) -> Result<chroma_types::AttachedFunction, chroma_sysdb::GetAttachedFunctionError> {
@@ -2013,58 +2152,48 @@ impl ServiceBasedFrontend {
             })?);
 
         // Get the attached function by name
-        self.sysdb_client
-            .get_attached_function_by_name(collection_uuid, function_name)
-            .await
+        let attached_functions = self
+            .sysdb_client
+            .get_attached_functions(
+                None,
+                Some(function_name.clone()),
+                Some(collection_uuid),
+                true,
+            )
+            .await?;
+        attached_functions
+            .into_iter()
+            .next()
+            .ok_or_else(|| chroma_sysdb::GetAttachedFunctionError::NotFound)
     }
 
     pub async fn detach_function(
         &mut self,
         _tenant_id: String,
-        _database_name: String,
-        attached_function_id: String,
-        DetachFunctionRequest {
-            delete_output,
-            input_collection_id,
-            ..
-        }: DetachFunctionRequest,
+        _database_name: DatabaseName,
+        collection_id: String,
+        name: String,
+        DetachFunctionRequest { delete_output, .. }: DetachFunctionRequest,
     ) -> Result<DetachFunctionResponse, DetachFunctionError> {
-        // Parse attached_function_id from path parameter - client-side validation
-        let attached_function_uuid = chroma_types::AttachedFunctionUuid(
-            uuid::Uuid::parse_str(&attached_function_id).map_err(|e| {
+        // Parse collection_id from path parameter - client-side validation
+        let collection_uuid =
+            chroma_types::CollectionUuid(uuid::Uuid::parse_str(&collection_id).map_err(|e| {
                 DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
                     tonic::Status::invalid_argument(format!(
-                        "Client validation error: Invalid attached_function_id UUID format: {}",
+                        "Client validation error: Invalid collection_id UUID format: {}",
                         e
                     )),
                 )))
-            })?,
-        );
-
-        // Parse input_collection_id from request - client-side validation
-        let input_collection_uuid = chroma_types::CollectionUuid(
-            uuid::Uuid::parse_str(&input_collection_id).map_err(|e| {
-                DetachFunctionError::Internal(Box::new(chroma_error::TonicError(
-                    tonic::Status::invalid_argument(format!(
-                        "Client validation error: Invalid input_collection_id UUID format: {}",
-                        e
-                    )),
-                )))
-            })?,
-        );
+            })?);
 
         // Detach function - soft delete it to prevent further runs
         // If delete_output is true, also delete the output collection
         self.sysdb_client
-            .soft_delete_attached_function(
-                attached_function_uuid,
-                input_collection_uuid,
-                delete_output,
-            )
+            .soft_delete_attached_function(name.clone(), collection_uuid, delete_output)
             .await
             .map_err(|e| match e {
                 chroma_sysdb::DeleteAttachedFunctionError::NotFound => {
-                    DetachFunctionError::NotFound(attached_function_id.clone())
+                    DetachFunctionError::NotFound(name.clone())
                 }
                 chroma_sysdb::DeleteAttachedFunctionError::FailedToDeleteAttachedFunction(s) => {
                     DetachFunctionError::Internal(Box::new(chroma_error::TonicError(s)))
@@ -2105,7 +2234,9 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             LocalSegmentManager::try_from_config(segment_manager_conf, registry).await?;
         };
 
-        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let sysdb =
+            SysDb::try_from_config(&(config.sysdb.clone(), config.mcmr_sysdb.clone()), registry)
+                .await?;
         let mut log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let max_batch_size = log.get_max_batch_size().await?;
 
@@ -2169,11 +2300,13 @@ mod tests {
             .await
             .unwrap();
 
+        let database_name =
+            DatabaseName::new("default_database").expect("database name should be valid");
         let collection = frontend
             .create_collection(
                 CreateCollectionRequest::try_new(
                     "default_tenant".to_string(),
-                    "default_database".to_string(),
+                    database_name,
                     "test".to_string(),
                     None,
                     None,
@@ -2223,7 +2356,7 @@ mod tests {
             port: 50051,
             ..Default::default()
         });
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+        let mut sysdb = SysDb::try_from_config(&(sysdb_config, None), &registry)
             .await
             .unwrap();
         let segments = sysdb
@@ -2274,7 +2407,7 @@ mod tests {
             port: 50051,
             ..Default::default()
         });
-        let mut sysdb = SysDb::try_from_config(&sysdb_config, &registry)
+        let mut sysdb = SysDb::try_from_config(&(sysdb_config, None), &registry)
             .await
             .unwrap();
 
@@ -2332,5 +2465,49 @@ mod tests {
         assert!(GetCollectionByCrnRequest::try_new(":db1:coll1".to_string()).is_err());
         assert!(GetCollectionByCrnRequest::try_new(":db1:coll1:".to_string()).is_err());
         assert!(GetCollectionByCrnRequest::try_new(":db1::".to_string()).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_indexing_status_basic() {
+        // Test the indexing status endpoint for a newly created collection
+        let client = reqwest::Client::new();
+        let create_response = client
+            .post("http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections")
+            .json(
+                &CreateCollectionPayload {
+                    name: Uuid::new_v4().to_string(),
+                    configuration: None,
+                    schema: None,
+                    metadata: None,
+                    get_or_create: false
+                },
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(create_response.status(), 200);
+        let collection: Collection = create_response.json().await.unwrap();
+
+        let status_url = format!(
+            "http://localhost:8000/api/v2/tenants/default_tenant/databases/default_database/collections/{}/indexing_status",
+            collection.collection_id
+        );
+        let status_response = client.get(&status_url).send().await.unwrap();
+
+        let status_code = status_response.status();
+        if status_code != 200 {
+            let body = status_response.text().await.unwrap();
+            panic!(
+                "Expected 200, got {}. URL: {}. Response: {}",
+                status_code, status_url, body
+            );
+        }
+        let status: IndexStatusResponse = status_response.json().await.unwrap();
+
+        assert_eq!(status.num_indexed_ops, 0);
+        assert_eq!(status.num_unindexed_ops, 0);
+        assert_eq!(status.total_ops, 0);
+        assert_eq!(status.op_indexing_progress, 1.0);
     }
 }

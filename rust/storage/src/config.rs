@@ -1,3 +1,4 @@
+use chroma_config::SpannerConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug, Serialize, Clone)]
@@ -241,4 +242,16 @@ impl Default for ObjectStorageConfig {
             upload_part_size_bytes: Self::default_upload_part_size_bytes(),
         }
     }
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct RegionalStorage {
+    #[serde(default)]
+    pub storage: StorageConfig,
+}
+
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TopologicalStorage {
+    #[serde(default)]
+    pub spanner: SpannerConfig,
 }

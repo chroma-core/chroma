@@ -104,7 +104,7 @@ pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_repair_log_offsets_timeout_seconds")]
     pub repair_log_offsets_timeout_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_failure_count")]
-    pub max_failure_count: u8,
+    pub max_failure_count: i32,
 }
 
 impl CompactorConfig {
@@ -156,7 +156,7 @@ impl CompactorConfig {
         60
     }
 
-    fn default_max_failure_count() -> u8 {
+    fn default_max_failure_count() -> i32 {
         5
     }
 }

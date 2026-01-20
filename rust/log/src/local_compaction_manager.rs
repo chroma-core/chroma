@@ -15,7 +15,8 @@ use chroma_sysdb::SysDb;
 use chroma_system::Handler;
 use chroma_system::{Component, ComponentContext};
 use chroma_types::{
-    Chunk, CollectionUuid, GetCollectionWithSegmentsError, LogRecord, Schema, SchemaError,
+    Chunk, CollectionUuid, DatabaseName, GetCollectionWithSegmentsError, LogRecord, Schema,
+    SchemaError,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -177,10 +178,14 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
         };
         // Get the logs from log service beyond this offset to backfill.
+        let dbname = DatabaseName::new(collection_and_segments.collection.database.clone())
+            .ok_or(CompactionManagerError::PullLogsFailure)?;
         let logs = self
             .log
             .read(
                 &collection_and_segments.collection.tenant,
+                // It is up to the log impl to use or not use this.
+                dbname,
                 collection_and_segments.collection.collection_id,
                 mt_max_seq_id.min(hnsw_max_seq_id) as i64,
                 -1,

@@ -52,6 +52,8 @@ pub struct GarbageCollectorConfig {
     pub(super) filter_min_versions_if_alive: Option<u64>,
     pub(super) disallow_collections: HashSet<CollectionUuid>,
     pub sysdb_config: chroma_sysdb::GrpcSysDbConfig,
+    #[serde(default)]
+    pub mcmr_sysdb_config: Option<chroma_sysdb::GrpcSysDbConfig>,
     pub dispatcher_config: DispatcherConfig,
     pub storage_config: StorageConfig,
     #[serde(default)]

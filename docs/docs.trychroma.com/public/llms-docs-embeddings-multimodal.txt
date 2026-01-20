@@ -1,6 +1,11 @@
+---
+id: embedding-multimodal
+name: Multimodal Embedding
+---
+
 # Multimodal
 
-Multimodal support is currently available only in Python. Javascript/Typescript support coming soon! 
+Multimodal support is currently available only in Python. Javascript/Typescript support coming soon!
 
 You can create multimodal Chroma collections; these are collections which can store, and can be queried by, multiple modalities of data.
 

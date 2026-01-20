@@ -7,6 +7,7 @@ mod collection_configuration;
 mod collection_schema;
 mod data_chunk;
 mod data_record;
+mod database_name;
 mod execution;
 mod flush;
 mod hnsw_configuration;
@@ -26,6 +27,7 @@ mod spann_posting_list;
 pub mod strategies;
 mod task;
 mod tenant;
+mod topology;
 mod validators;
 mod where_parsing;
 
@@ -43,6 +45,7 @@ pub use collection_configuration::*;
 pub use collection_schema::*;
 pub use data_chunk::*;
 pub use data_record::*;
+pub use database_name::*;
 pub use execution::*;
 pub use flush::*;
 pub use hnsw_configuration::*;
@@ -59,7 +62,9 @@ pub use spann_configuration::*;
 pub use spann_posting_list::*;
 pub use task::*;
 pub use tenant::*;
+pub use topology::*;
 pub use types::*;
+pub use validators::validate_name;
 pub use where_parsing::*;
 
 #[allow(clippy::all)]

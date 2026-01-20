@@ -149,13 +149,13 @@ impl GarbageCollector {
 
     async fn garbage_collect_attached_functions(
         &mut self,
-        attached_function_soft_delete_absolute_cutoff_time: SystemTime,
+        attached_function_gc_absolute_cutoff_time: SystemTime,
     ) -> (u32, u32) {
-        tracing::info!("Checking for soft-deleted attached functions to hard delete");
+        tracing::info!("Checking for attached functions to garbage collect (deleted or not ready)");
         match self
             .sysdb_client
-            .get_soft_deleted_attached_functions(
-                attached_function_soft_delete_absolute_cutoff_time,
+            .get_attached_functions_to_gc(
+                attached_function_gc_absolute_cutoff_time,
                 self.config.max_attached_functions_to_gc_per_run,
             )
             .await
@@ -163,7 +163,7 @@ impl GarbageCollector {
             Ok(attached_functions_to_delete) => {
                 if !attached_functions_to_delete.is_empty() {
                     tracing::info!(
-                        "Found {} soft-deleted attached functions to hard delete",
+                        "Found {} attached functions to garbage collect (deleted or not ready)",
                         attached_functions_to_delete.len()
                     );
 
@@ -212,12 +212,12 @@ impl GarbageCollector {
                     );
                     (num_deleted, num_failed)
                 } else {
-                    tracing::debug!("No soft-deleted attached functions found to hard delete");
+                    tracing::debug!("No attached functions found to garbage collect");
                     (0, 0)
                 }
             }
             Err(e) => {
-                tracing::error!("Failed to get soft-deleted attached functions: {}", e);
+                tracing::error!("Failed to get attached functions to garbage collect: {}", e);
                 (0, 0)
             }
         }
@@ -386,6 +386,7 @@ impl GarbageCollector {
             .collect()
     }
 
+    #[allow(clippy::result_large_err)]
     fn manual_garbage_collection_request(
         &self,
         collection_id: CollectionUuid,
@@ -715,7 +716,10 @@ impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
         (config, system): &(GarbageCollectorConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let sysdb_config = SysDbConfig::Grpc(config.sysdb_config.clone());
+        let sysdb_config = (
+            SysDbConfig::Grpc(config.sysdb_config.clone()),
+            config.mcmr_sysdb_config.clone(),
+        );
         let sysdb_client = SysDb::try_from_config(&sysdb_config, registry).await?;
         let storage = Storage::try_from_config(&config.storage_config, registry).await?;
 
@@ -948,6 +952,7 @@ mod tests {
                 request_timeout_ms: 10000,
                 num_channels: 1,
             },
+            mcmr_sysdb_config: None,
             dispatcher_config: DispatcherConfig::default(),
             storage_config: s3_config_for_localhost_with_bucket_name("chroma-storage").await,
             default_mode: CleanupMode::DryRunV2,
@@ -1177,9 +1182,15 @@ mod tests {
         // Create collections
         let mut clients = ChromaGrpcClients::new().await.unwrap();
         let mut sysdb = SysDb::Grpc(
-            GrpcSysDb::try_from_config(&config.sysdb_config, &registry)
-                .await
-                .unwrap(),
+            GrpcSysDb::try_from_config(
+                &(
+                    config.sysdb_config.clone(),
+                    config.mcmr_sysdb_config.clone(),
+                ),
+                &registry,
+            )
+            .await
+            .unwrap(),
         );
 
         let collection_handle = tokio::spawn({

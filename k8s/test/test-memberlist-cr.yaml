@@ -14,9 +14,10 @@ spec:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: test-memberlist-reader
+  namespace: chroma
 rules:
 - apiGroups:
   - chroma.cluster
@@ -35,12 +36,13 @@ rules:
 ---
 
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: test-memberlist-reader-binding
+  namespace: chroma
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: test-memberlist-reader
 subjects:
 - kind: ServiceAccount

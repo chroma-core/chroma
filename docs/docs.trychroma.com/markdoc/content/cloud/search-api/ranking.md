@@ -862,6 +862,7 @@ for (const [i, row] of rows.entries()) {
 
 ## Next Steps
 
+- Learn about [Group By & Aggregation](./group-by) to diversify search results by category
 - Learn about [hybrid search with RRF](./hybrid-search) for advanced ranking strategies
 - See [practical examples](./examples) of ranking in real-world scenarios
 - Explore [batch operations](./batch-operations) for multiple searches

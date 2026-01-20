@@ -12,6 +12,7 @@ use crate::operators_generated::{
     FUNCTION_STATISTICS_NAME,
 };
 use crate::plan::PlanToProtoError;
+use crate::plan::ReadLevel;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
@@ -23,6 +24,7 @@ use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DatabaseName;
 use crate::DistributedSpannParametersFromSegmentError;
 use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
@@ -351,14 +353,13 @@ impl ChromaError for UpdateTenantError {
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
-    #[validate(length(min = 3))]
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CreateDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let database_id = Uuid::new_v4();
         let request = Self {
@@ -368,6 +369,23 @@ impl CreateDatabaseRequest {
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum ClientResolutionError {
+    #[error("Not supported")]
+    McmrNotSupported,
+    #[error("Database not found")]
+    DatabaseNotFound,
+}
+
+impl ChromaError for ClientResolutionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ClientResolutionError::McmrNotSupported => ErrorCodes::InvalidArgument,
+            ClientResolutionError::DatabaseNotFound => ErrorCodes::NotFound,
+        }
     }
 }
 
@@ -381,6 +399,8 @@ pub enum CreateDatabaseError {
     AlreadyExists(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for CreateDatabaseError {
@@ -388,6 +408,7 @@ impl ChromaError for CreateDatabaseError {
         match self {
             CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateDatabaseError::Internal(status) => status.code(),
+            CreateDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
@@ -420,6 +441,16 @@ impl Database {
     #[getter]
     pub fn tenant(&self) -> &str {
         &self.tenant
+    }
+}
+
+impl From<Database> for crate::chroma_proto::Database {
+    fn from(d: Database) -> Self {
+        crate::chroma_proto::Database {
+            id: d.id.to_string(),
+            name: d.name,
+            tenant: d.tenant,
+        }
     }
 }
 
@@ -472,13 +503,13 @@ impl ChromaError for ListDatabasesError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl GetDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -499,6 +530,8 @@ pub enum GetDatabaseError {
     InvalidID(String),
     #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for GetDatabaseError {
@@ -507,6 +540,7 @@ impl ChromaError for GetDatabaseError {
             GetDatabaseError::Internal(err) => err.code(),
             GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
+            GetDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
@@ -576,7 +610,7 @@ impl ChromaError for FinishDatabaseDeletionError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     pub limit: Option<u32>,
     pub offset: u32,
 }
@@ -584,7 +618,7 @@ pub struct ListCollectionsRequest {
 impl ListCollectionsRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         limit: Option<u32>,
         offset: u32,
     ) -> Result<Self, ChromaValidationError> {
@@ -606,13 +640,13 @@ pub type ListCollectionsResponse = Vec<Collection>;
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CountCollectionsRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -630,14 +664,14 @@ pub type CountCollectionsResponse = u32;
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     pub collection_name: String,
 }
 
 impl GetCollectionRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         collection_name: String,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -677,7 +711,7 @@ impl ChromaError for GetCollectionError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     #[validate(custom(function = "validate_name"))]
     pub name: String,
     #[validate(custom(function = "validate_optional_metadata"))]
@@ -691,7 +725,7 @@ pub struct CreateCollectionRequest {
 impl CreateCollectionRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
@@ -885,6 +919,7 @@ pub enum CollectionMetadataUpdate {
 #[derive(Clone, Validate, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRequest {
+    pub database_name: Option<DatabaseName>,
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
     pub new_name: Option<String>,
@@ -895,12 +930,14 @@ pub struct UpdateCollectionRequest {
 
 impl UpdateCollectionRequest {
     pub fn try_new(
+        database_name: Option<DatabaseName>,
         collection_id: CollectionUuid,
         new_name: Option<String>,
         new_metadata: Option<CollectionMetadataUpdate>,
         new_configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
+            database_name,
             collection_id,
             new_name,
             new_metadata,
@@ -999,6 +1036,41 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct IndexStatusResponse {
+    pub op_indexing_progress: f32,
+    pub num_unindexed_ops: u64,
+    pub num_indexed_ops: u64,
+    pub total_ops: u64,
+}
+
+#[derive(Error, Debug)]
+pub enum IndexStatusError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl From<GetCollectionError> for IndexStatusError {
+    fn from(err: GetCollectionError) -> Self {
+        match err {
+            GetCollectionError::NotFound(msg) => IndexStatusError::NotFound(msg),
+            other => IndexStatusError::Internal(Box::new(other)),
+        }
+    }
+}
+
+impl ChromaError for IndexStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            IndexStatusError::NotFound(_) => ErrorCodes::NotFound,
+            IndexStatusError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[non_exhaustive]
 #[derive(Clone, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -1045,6 +1117,8 @@ pub enum ForkCollectionError {
     DuplicateSegment,
     #[error("Missing field: [{0}]")]
     Field(String),
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
     #[error("Collection forking is unsupported for local chroma")]
     Local,
     #[error(transparent)]
@@ -1065,6 +1139,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(e) => e.code(),
             ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(e) => e.code(),
             ForkCollectionError::SegmentConversionError(e) => e.code(),
@@ -1254,6 +1329,8 @@ pub enum AddCollectionRecordsError {
     Collection(#[from] GetCollectionError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1263,6 +1340,7 @@ impl ChromaError for AddCollectionRecordsError {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1340,6 +1418,8 @@ pub struct UpdateCollectionRecordsResponse {}
 pub enum UpdateCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1348,6 +1428,7 @@ impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1426,6 +1507,8 @@ pub struct UpsertCollectionRecordsResponse {}
 pub enum UpsertCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1434,6 +1517,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1510,6 +1594,8 @@ pub enum DeleteCollectionRecordsError {
     Get(#[from] ExecutorError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -1519,6 +1605,7 @@ impl ChromaError for DeleteCollectionRecordsError {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
             DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
@@ -2094,6 +2181,10 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequestPayload {
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    /// Defaults to IndexAndWal (full consistency).
+    #[serde(default)]
+    pub read_level: ReadLevel,
 }
 
 #[non_exhaustive]
@@ -2103,7 +2194,10 @@ pub struct SearchRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    #[validate(nested)]
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    pub read_level: ReadLevel,
 }
 
 impl SearchRequest {
@@ -2112,12 +2206,14 @@ impl SearchRequest {
         database_name: String,
         collection_id: CollectionUuid,
         searches: Vec<SearchPayload>,
+        read_level: ReadLevel,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
             searches,
+            read_level,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -2126,6 +2222,7 @@ impl SearchRequest {
     pub fn into_payload(self) -> SearchRequestPayload {
         SearchRequestPayload {
             searches: self.searches,
+            read_level: self.read_level,
         }
     }
 }
@@ -2330,6 +2427,8 @@ pub struct AttachedFunctionInfo {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
+    /// True if newly created, false if already existed (idempotent request)
+    pub created: bool,
 }
 
 /// API response struct for attached function with function_name instead of function_id
@@ -2396,16 +2495,24 @@ pub struct GetAttachedFunctionResponse {
 
 #[derive(Error, Debug)]
 pub enum AttachFunctionError {
-    #[error(" Attached Function with name [{0}] already exists")]
+    #[error("{0}")]
     AlreadyExists(String),
+    #[error("{0}")]
+    CollectionAlreadyHasFunction(String),
     #[error("Failed to get collection and segments")]
     GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
     #[error("Output collection [{0}] already exists")]
     OutputCollectionExists(String),
+    #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
+    FunctionNotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    FinishCreate(#[from] crate::FinishCreateAttachedFunctionError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -2414,10 +2521,14 @@ impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
             AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
             AttachFunctionError::GetCollectionError(err) => err.code(),
             AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            AttachFunctionError::FunctionNotFound(_) => ErrorCodes::NotFound,
             AttachFunctionError::Validation(err) => err.code(),
+            AttachFunctionError::FinishCreate(err) => err.code(),
             AttachFunctionError::Internal(err) => err.code(),
         }
     }
@@ -2447,22 +2558,14 @@ impl ChromaError for GetAttachedFunctionError {
 #[derive(Clone, Debug, Deserialize, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DetachFunctionRequest {
-    /// ID of the input collection
-    pub input_collection_id: String,
     /// Whether to delete the output collection as well
     #[serde(default)]
     pub delete_output: bool,
 }
 
 impl DetachFunctionRequest {
-    pub fn try_new(
-        input_collection_id: String,
-        delete_output: bool,
-    ) -> Result<Self, ChromaValidationError> {
-        let request = Self {
-            input_collection_id,
-            delete_output,
-        };
+    pub fn try_new(delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self { delete_output };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
@@ -2502,8 +2605,10 @@ mod test {
 
     #[test]
     fn test_create_database_min_length() {
-        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
-        assert!(request.is_err());
+        // DatabaseName requires at least 3 characters
+        assert!(DatabaseName::new("a").is_none());
+        assert!(DatabaseName::new("ab").is_none());
+        assert!(DatabaseName::new("abc").is_some());
     }
 
     #[test]

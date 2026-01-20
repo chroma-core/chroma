@@ -18,6 +18,8 @@ import {
   BoolInvertedIndexConfig,
   SparseVectorIndexConfig,
   VectorIndexConfig,
+  Cmek,
+  CmekProvider,
 } from "../src/schema";
 import { ChromaClient } from "../src/chroma-client";
 
@@ -1803,5 +1805,100 @@ describe("Schema", () => {
       deserialized?.keys["sparse_field"].sparseVector?.sparseVectorIndex?.config
         .sourceKey,
     ).toBe("#document");
+  });
+
+  it("CMEK basic creation and validation", () => {
+    // Test GCP CMEK creation
+    const cmek = Cmek.gcp(
+      "projects/test-project/locations/us-central1/keyRings/test-ring/cryptoKeys/test-key",
+    );
+    expect(cmek.provider).toBe(CmekProvider.GCP);
+    expect(cmek.resource).toBe(
+      "projects/test-project/locations/us-central1/keyRings/test-ring/cryptoKeys/test-key",
+    );
+
+    // Test valid pattern
+    expect(cmek.validatePattern()).toBe(true);
+
+    // Test invalid pattern
+    const invalidCmek = Cmek.gcp("invalid-format");
+    expect(invalidCmek.validatePattern()).toBe(false);
+  });
+
+  it("CMEK serialization and deserialization", () => {
+    const cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+
+    // Serialize - should use snake_case format matching Rust serde
+    const json = cmek.toJSON();
+    expect(json).toEqual({
+      gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    });
+    expect(json.gcp).toBe("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+
+    // Deserialize
+    const restored = Cmek.fromJSON(json);
+    expect(restored.provider).toBe(CmekProvider.GCP);
+    expect(restored.resource).toBe(cmek.resource);
+  });
+
+  it("CMEK in schema", () => {
+    const schema = new Schema();
+
+    // Initially no CMEK
+    expect(schema.cmek).toBeNull();
+
+    // Add CMEK
+    const cmek = Cmek.gcp(
+      "projects/test/locations/us/keyRings/ring/cryptoKeys/key",
+    );
+    schema.setCmek(cmek);
+
+    // Verify CMEK is set
+    expect(schema.cmek).not.toBeNull();
+    expect(schema.cmek?.provider).toBe(CmekProvider.GCP);
+    expect(schema.cmek?.resource).toBe(
+      "projects/test/locations/us/keyRings/ring/cryptoKeys/key",
+    );
+  });
+
+  it("schema serialization with CMEK", async () => {
+    const client = new ChromaClient();
+    const schema = new Schema();
+    const cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+    schema.setCmek(cmek);
+
+    // Serialize
+    const json = schema.serializeToJSON();
+
+    // Verify CMEK is in JSON with snake_case format
+    expect(json.cmek).toBeDefined();
+    expect(json.cmek).toEqual({
+      gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    });
+    expect((json.cmek as any).gcp).toBe(
+      "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    );
+
+    // Deserialize
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+    expect(deserialized?.cmek).not.toBeNull();
+    expect(deserialized?.cmek?.provider).toBe(CmekProvider.GCP);
+    expect(deserialized?.cmek?.resource).toBe(cmek.resource);
+  });
+
+  it("schema serialization without CMEK (backward compatibility)", async () => {
+    const client = new ChromaClient();
+    const schema = new Schema();
+    // Don't set CMEK
+
+    // Serialize
+    const json = schema.serializeToJSON();
+
+    // CMEK should not be in JSON
+    expect(json.cmek).toBeUndefined();
+
+    // Deserialize
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+    expect(deserialized?.cmek).toBeNull();
   });
 });

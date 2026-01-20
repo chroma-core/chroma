@@ -5,7 +5,7 @@ use chroma_sysdb::SysDbConfig;
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
@@ -116,19 +116,12 @@ pub struct QueryServiceConfig {
     pub otel_endpoint: String,
     #[serde(default = "QueryServiceConfig::default_otel_filters")]
     pub otel_filters: Vec<OtelFilter>,
-    #[allow(dead_code)]
-    #[serde(default = "QueryServiceConfig::default_my_member_id")]
-    pub my_member_id: String,
     #[serde(default = "QueryServiceConfig::default_my_port")]
     pub my_port: u16,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub assignment_policy: assignment::config::AssignmentPolicyConfig,
-    #[allow(dead_code)]
-    #[serde(default)]
-    pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     #[serde(default)]
     pub sysdb: SysDbConfig,
+    #[serde(default)]
+    pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
     #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
     #[serde(default)]
@@ -151,10 +144,6 @@ pub struct QueryServiceConfig {
         default = "QueryServiceConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
-    // TODO: This is a temporary config to enable bm25 for certain tenants.
-    // This should be removed once we have collection schema ready.
-    #[serde(default)]
-    pub bm25_tenant: HashSet<String>,
 }
 
 impl QueryServiceConfig {
@@ -171,10 +160,6 @@ impl QueryServiceConfig {
             crate_name: "worker".to_string(),
             filter_level: OtelFilterLevel::Trace,
         }]
-    }
-
-    fn default_my_member_id() -> String {
-        "query-service-0".to_string()
     }
 
     fn default_my_port() -> u16 {
@@ -219,6 +204,8 @@ pub struct CompactionServiceConfig {
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     #[serde(default)]
     pub sysdb: SysDbConfig,
+    #[serde(default)]
+    pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
     #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
     #[serde(default)]

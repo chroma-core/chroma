@@ -27,6 +27,7 @@ import Steps, { Step } from "@/components/markdoc/steps";
 import ImageHoverText from "@/components/markdoc/image-hover-text";
 import PythonInstallation from "@/components/markdoc/python-installation";
 import CollapsibleCodeBlock from "@/components/markdoc/collapsible-code-block";
+import TypescriptInstallation from "@/components/markdoc/ts-installation";
 
 interface MarkDocConfig extends Config {
   components?: Record<string, React.FC<any>>;
@@ -248,6 +249,16 @@ const markdocConfig: MarkDocConfig = {
         },
       },
     },
+    TypescriptInstallation: {
+      render: "TypescriptInstallation",
+      selfClosing: true,
+      attributes: {
+        packages: {
+          type: String,
+          required: true,
+        },
+      },
+    },
     CollapsibleCodeBlock: {
       render: "CollapsibleCodeBlock",
       selfClosing: false,
@@ -282,6 +293,7 @@ const markdocConfig: MarkDocConfig = {
     ImageHoverText,
     PythonInstallation,
     CollapsibleCodeBlock,
+    TypescriptInstallation,
   },
 };
 

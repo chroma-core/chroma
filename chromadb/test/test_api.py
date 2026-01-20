@@ -1983,7 +1983,9 @@ def test_sparse_vector_in_metadata_validation():
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
         invalid_metadata_4 = {
             "text": "non-numeric value",
-            "sparse_embedding": SparseVector(indices=[0, 1], values=[0.1, "not_a_number"]),  # type: ignore
+            "sparse_embedding": SparseVector(
+                indices=[0, 1], values=[0.1, "not_a_number"]
+            ),  # type: ignore
         }
 
     # Test 7: Multiple sparse vectors in metadata
@@ -2683,6 +2685,59 @@ def test_rrf_to_dict() -> None:
     print("All RRF tests passed!")
 
 
+def test_group_by_serialization() -> None:
+    """Test GroupBy, MinK, and MaxK serialization and deserialization."""
+    import pytest
+    from chromadb.execution.expression.operator import (
+        GroupBy,
+        MinK,
+        MaxK,
+        Key,
+        Aggregate,
+    )
+
+    # to_dict with OneOrMany keys
+    group_by = GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=3))
+    assert group_by.to_dict() == {
+        "keys": ["category"],
+        "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}},
+    }
+
+    # to_dict with multiple keys and MaxK
+    group_by = GroupBy(
+        keys=[Key("year"), Key("category")],
+        aggregate=MaxK(keys=[Key.SCORE, Key("priority")], k=5),
+    )
+    assert group_by.to_dict() == {
+        "keys": ["year", "category"],
+        "aggregate": {"$max_k": {"keys": ["#score", "priority"], "k": 5}},
+    }
+
+    # Round-trip
+    original = GroupBy(keys=[Key("category")], aggregate=MinK(keys=[Key.SCORE], k=3))
+    assert GroupBy.from_dict(original.to_dict()).to_dict() == original.to_dict()
+
+    # Empty GroupBy serializes to {} and from_dict({}) returns default GroupBy
+    empty_group_by = GroupBy()
+    assert empty_group_by.to_dict() == {}
+    assert GroupBy.from_dict({}).to_dict() == {}
+
+    # Error cases
+    with pytest.raises(ValueError, match="requires 'keys' field"):
+        GroupBy.from_dict({"aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}})
+
+    with pytest.raises(ValueError, match="requires 'aggregate' field"):
+        GroupBy.from_dict({"keys": ["category"]})
+
+    with pytest.raises(ValueError, match="keys cannot be empty"):
+        GroupBy.from_dict(
+            {"keys": [], "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}}
+        )
+
+    with pytest.raises(ValueError, match="Unknown aggregate operator"):
+        Aggregate.from_dict({"$unknown": {"keys": ["#score"], "k": 3}})
+
+
 # Expression API Tests - Testing dict support and from_dict methods
 class TestSearchDictSupport:
     """Test Search class dict input support."""
@@ -2785,6 +2840,49 @@ class TestSearchDictSupport:
 
         with pytest.raises(TypeError, match="select must be"):
             Search(select=123)
+
+    def test_search_with_group_by(self):
+        """Test Search accepts group_by as dict, object, and builder method."""
+        import pytest
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import GroupBy, MinK, Key
+
+        # Dict input
+        search = Search(
+            group_by={
+                "keys": ["category"],
+                "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}},
+            }
+        )
+        assert isinstance(search._group_by, GroupBy)
+
+        # Object input and builder method
+        group_by = GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=3))
+        assert Search(group_by=group_by)._group_by is group_by
+        assert Search().group_by(group_by)._group_by.aggregate is not None
+
+        # Invalid inputs
+        with pytest.raises(TypeError, match="group_by must be"):
+            Search(group_by="invalid")
+        with pytest.raises(ValueError, match="requires 'aggregate' field"):
+            Search(group_by={"keys": ["category"]})
+
+    def test_search_group_by_serialization(self):
+        """Test Search serializes group_by correctly."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import GroupBy, MinK, Key, Knn
+
+        # Without group_by - empty dict
+        search = Search().rank(Knn(query=[0.1, 0.2])).limit(10)
+        assert search.to_dict()["group_by"] == {}
+
+        # With group_by - has keys and aggregate
+        search = Search().group_by(
+            GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=3))
+        )
+        result = search.to_dict()["group_by"]
+        assert result["keys"] == ["category"]
+        assert result["aggregate"] == {"$min_k": {"keys": ["#score"], "k": 3}}
 
 
 class TestWhereFromDict:
@@ -3310,3 +3408,27 @@ class TestRoundTripConversion:
                 return d1 == d2
 
         assert compare_search_dicts(new_dict, search_dict)
+
+    def test_search_round_trip_with_group_by(self):
+        """Test Search round-trip with group_by."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import Key, GroupBy, MinK
+
+        original = Search(
+            where=Key("status") == "active",
+            group_by=GroupBy(
+                keys=[Key("category")],
+                aggregate=MinK(keys=[Key.SCORE], k=3),
+            ),
+        )
+
+        # Verify group_by round-trip
+        search_dict = original.to_dict()
+        assert search_dict["group_by"]["keys"] == ["category"]
+        assert search_dict["group_by"]["aggregate"] == {
+            "$min_k": {"keys": ["#score"], "k": 3}
+        }
+
+        # Reconstruct and compare group_by
+        restored = Search(group_by=GroupBy.from_dict(search_dict["group_by"]))
+        assert restored.to_dict()["group_by"] == search_dict["group_by"]

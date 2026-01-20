@@ -9,16 +9,17 @@
 //! Collections support the following categories of operations:
 //!
 //! - **Metadata access**: [`database()`](ChromaCollection::database), [`metadata()`](ChromaCollection::metadata), [`schema()`](ChromaCollection::schema), [`tenant()`](ChromaCollection::tenant)
-//! - **Read operations**: [`count()`](ChromaCollection::count), [`get()`](ChromaCollection::get), [`query()`](ChromaCollection::query), [`search()`](ChromaCollection::search)
+//! - **Read operations**: [`count()`](ChromaCollection::count), [`get()`](ChromaCollection::get), [`get_indexing_status()`](ChromaCollection::get_indexing_status), [`query()`](ChromaCollection::query), [`search()`](ChromaCollection::search)
 //! - **Write operations**: [`add()`](ChromaCollection::add), [`update()`](ChromaCollection::update), [`upsert()`](ChromaCollection::upsert), [`delete()`](ChromaCollection::delete), [`modify()`](ChromaCollection::modify)
 
 use std::sync::Arc;
 
 use chroma_api_types::ForkCollectionPayload;
 use chroma_types::{
-    plan::SearchPayload, AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection,
-    CollectionUuid, DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest,
-    GetResponse, IncludeList, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
+    plan::{ReadLevel, SearchPayload},
+    AddCollectionRecordsRequest, AddCollectionRecordsResponse, Collection, CollectionUuid,
+    DeleteCollectionRecordsRequest, DeleteCollectionRecordsResponse, GetRequest, GetResponse,
+    IncludeList, IndexStatusResponse, Metadata, QueryRequest, QueryResponse, Schema, SearchRequest,
     SearchResponse, UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse,
     UpdateMetadata, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse, Where,
 };
@@ -157,6 +158,36 @@ impl ChromaCollection {
     pub async fn count(&self) -> Result<u32, ChromaHttpClientError> {
         self.send::<(), u32>("count", "count", Method::GET, None)
             .await
+    }
+
+    /// Gets the indexing status of this collection.
+    ///
+    /// Returns information about how many operations have been indexed versus how many are
+    /// pending. This is useful for monitoring the progress of bulk data ingestion.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if network communication fails, or if unauthenticated.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chroma::ChromaCollection;
+    /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let status = collection.get_indexing_status().await?;
+    /// println!("Indexing progress: {:.1}%", status.op_indexing_progress * 100.0);
+    /// println!("Indexed: {} / Total: {}", status.num_indexed_ops, status.total_ops);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_indexing_status(&self) -> Result<IndexStatusResponse, ChromaHttpClientError> {
+        self.send::<(), IndexStatusResponse>(
+            "indexing_status",
+            "indexing_status",
+            Method::GET,
+            None,
+        )
+        .await
     }
 
     /// Modifies the collection's name or metadata.
@@ -474,11 +505,52 @@ impl ChromaCollection {
         &self,
         searches: Vec<SearchPayload>,
     ) -> Result<SearchResponse, ChromaHttpClientError> {
+        self.search_with_options(searches, ReadLevel::IndexAndWal)
+            .await
+    }
+
+    /// Search with custom read level controlling whether to read from the write-ahead log.
+    ///
+    /// By default, searches read from both the compacted index and the write-ahead log (WAL),
+    /// ensuring all committed writes are visible. For higher throughput at the cost of
+    /// potentially missing recent uncommitted writes, use `ReadLevel::IndexOnly` to skip
+    /// the WAL and read only from the compacted index.
+    ///
+    /// # Arguments
+    ///
+    /// * `searches` - Vector of search payloads to execute
+    /// * `read_level` - Controls data sources for the query:
+    ///   - [`ReadLevel::IndexAndWal`] - Read from both the compacted index and WAL (default).
+    ///     All committed writes will be visible.
+    ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
+    ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::plan::{SearchPayload, ReadLevel};
+    ///
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// let search = SearchPayload::default().limit(Some(10), 0);
+    ///
+    /// // Skip WAL for faster queries (may miss recent writes)
+    /// let results = collection
+    ///     .search_with_options(vec![search], ReadLevel::IndexOnly)
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn search_with_options(
+        &self,
+        searches: Vec<SearchPayload>,
+        read_level: ReadLevel,
+    ) -> Result<SearchResponse, ChromaHttpClientError> {
         let request = SearchRequest::try_new(
             self.collection.tenant.clone(),
             self.collection.database.clone(),
             self.collection.collection_id,
             searches,
+            read_level,
         )?;
         let request = request.into_payload();
         self.send("search", "search", Method::POST, Some(request))
@@ -742,6 +814,8 @@ impl ChromaCollection {
 #[cfg(test)]
 mod tests {
     use crate::tests::{unique_collection_name, with_client};
+    use chroma_types::operator::{Key, QueryVector, RankExpr};
+    use chroma_types::plan::{ReadLevel, SearchPayload};
     use chroma_types::{
         Include, IncludeList, Metadata, MetadataComparison, MetadataExpression, MetadataValue,
         PrimitiveOperator, UpdateMetadata, UpdateMetadataValue, Where,
@@ -769,6 +843,40 @@ mod tests {
             let count = collection.count().await.unwrap();
             println!("Empty collection count: {}", count);
             assert_eq!(count, 0);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_get_indexing_status() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_indexing_status").await;
+
+            // Test on empty collection
+            let status = collection.get_indexing_status().await.unwrap();
+            println!("Indexing status: {:?}", status);
+            assert_eq!(status.total_ops, 0);
+            assert_eq!(status.num_indexed_ops, 0);
+            assert_eq!(status.num_unindexed_ops, 0);
+
+            // Add some records
+            collection
+                .add(
+                    vec!["id1".to_string(), "id2".to_string()],
+                    vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            // Check status after adding records
+            let status = collection.get_indexing_status().await.unwrap();
+            println!("Indexing status after add: {:?}", status);
+            assert_eq!(status.total_ops, 2);
+            assert!(status.op_indexing_progress >= 0.0 && status.op_indexing_progress <= 1.0);
         })
         .await;
     }
@@ -1234,6 +1342,65 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
+    async fn test_live_cloud_search_with_read_levels() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_search_read_level").await;
+
+            collection
+                .add(
+                    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+                    vec![
+                        vec![1.0, 2.0, 3.0],
+                        vec![1.1, 2.1, 3.1],
+                        vec![0.9, 1.9, 2.9],
+                    ],
+                    Some(vec![
+                        Some("first".to_string()),
+                        Some("second".to_string()),
+                        Some("third".to_string()),
+                    ]),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let search = SearchPayload::default()
+                .rank(RankExpr::Knn {
+                    query: QueryVector::Dense(vec![1.0, 2.0, 3.0]),
+                    key: Key::Embedding,
+                    limit: 10,
+                    default: None,
+                    return_rank: false,
+                })
+                .limit(Some(5), 0)
+                .select([Key::Document, Key::Score]);
+
+            let index_and_wal = collection
+                .search_with_options(vec![search.clone()], ReadLevel::IndexAndWal)
+                .await
+                .unwrap();
+            assert_eq!(index_and_wal.ids.len(), 1);
+            assert!(!index_and_wal.ids[0].is_empty());
+            assert_eq!(index_and_wal.ids[0].len(), 3);
+            assert!(index_and_wal.documents[0].is_some());
+            assert!(index_and_wal.scores[0].is_some());
+
+            // IndexOnly may omit recent WAL writes; just ensure the call succeeds
+            // and the response structure matches the requested payload.
+            let index_only = collection
+                .search_with_options(vec![search], ReadLevel::IndexOnly)
+                .await
+                .unwrap();
+            assert_eq!(index_only.ids.len(), 1);
+            assert!(index_only.documents[0].is_some());
+            assert!(index_only.scores[0].is_some());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
     async fn test_live_cloud_update_embeddings() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_update_embeddings").await;
@@ -1575,6 +1742,7 @@ mod tests {
 
             let target_name = unique_collection_name("test_fork_target");
             let forked = collection.fork(target_name.clone()).await.unwrap();
+            client.track(&forked);
             println!("Forked collection: {:?}", forked);
 
             assert_eq!(forked.collection.name, target_name);
@@ -1609,6 +1777,7 @@ mod tests {
 
             let target_name = unique_collection_name("test_fork_preserves_target");
             let forked = collection.fork(target_name).await.unwrap();
+            client.track(&forked);
 
             let forked_get_response = forked
                 .get(
@@ -1646,6 +1815,7 @@ mod tests {
 
             let target_name = unique_collection_name("test_fork_independence_target");
             let forked = collection.fork(target_name).await.unwrap();
+            client.track(&forked);
 
             forked
                 .add(

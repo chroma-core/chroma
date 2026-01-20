@@ -181,7 +181,7 @@ impl TestSysDb {
                 collection_id,
                 name.clone(),
                 tenant.clone(),
-                database.clone(),
+                database.clone().map(|d| d.into_string()),
             ) {
                 continue;
             }
@@ -281,6 +281,7 @@ impl TestSysDb {
             tenants.push(Tenant {
                 id: tenant_id,
                 last_compaction_time,
+                resource_name: None,
             });
         }
         Ok(tenants)
@@ -692,6 +693,14 @@ impl TestSysDb {
         let mut inner = self.inner.lock();
         inner.tenant_resource_names.insert(tenant_id, resource_name);
         Ok(UpdateTenantResponse {})
+    }
+
+    /// Increment the compaction failure count for a collection.
+    pub fn increment_compaction_failure_count(&mut self, collection_id: CollectionUuid) {
+        let mut inner = self.inner.lock();
+        if let Some(collection) = inner.collections.get_mut(&collection_id) {
+            collection.compaction_failure_count += 1;
+        }
     }
 }
 

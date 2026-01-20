@@ -1,3 +1,8 @@
+---
+id: collections-delete
+name: Delete Data
+---
+
 # Deleting Data from Chroma Collections
 
 Chroma supports deleting items from a collection by `id` using `.delete`. The embeddings, documents, and metadata associated with each item will be deleted.

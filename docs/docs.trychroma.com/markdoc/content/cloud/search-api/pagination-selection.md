@@ -386,6 +386,7 @@ async function searchWithPagination(
 
 ## Next Steps
 
+- Learn about [Group By & Aggregation](./group-by) to diversify search results by category
 - Learn about [batch operations](./batch-operations) for running multiple searches
 - See [practical examples](./examples) of pagination in production
 - Explore [search basics](./search-basics) for building complete queries

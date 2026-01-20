@@ -19,6 +19,152 @@ import { ChromaClient } from "./chroma-client";
 export const DOCUMENT_KEY = "#document";
 export const EMBEDDING_KEY = "#embedding";
 
+// ============================================================================
+// CMEK (Customer-Managed Encryption Key) Support
+// ============================================================================
+
+/**
+ * Supported cloud providers for customer-managed encryption keys.
+ * Currently only Google Cloud Platform (GCP) is supported.
+ */
+export enum CmekProvider {
+  GCP = "gcp",
+}
+
+/**
+ * Customer-managed encryption key (CMEK) for collection data encryption.
+ *
+ * CMEK allows you to use your own encryption keys managed by cloud providers'
+ * key management services (KMS) instead of default provider-managed keys. This
+ * gives you greater control over key lifecycle, access policies, and audit logging.
+ *
+ * @example
+ * ```typescript
+ * // Create a CMEK for GCP
+ * const cmek = Cmek.gcp(
+ *   "projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key"
+ * );
+ *
+ * // Validate the resource name format
+ * if (cmek.validatePattern()) {
+ *   console.log("Valid CMEK format");
+ * }
+ *
+ * // Use in collection schema
+ * const schema = new Schema();
+ * schema.setCmek(cmek);
+ * ```
+ *
+ * @note Pattern validation only checks format correctness. It does not verify
+ * that the key exists or is accessible. Key permissions and access control
+ * must be configured separately in your cloud provider's console.
+ */
+export class Cmek {
+  private static readonly GCP_PATTERN =
+    /^projects\/.+\/locations\/.+\/keyRings\/.+\/cryptoKeys\/.+$/;
+
+  readonly provider: CmekProvider;
+  readonly resource: string;
+
+  private constructor(provider: CmekProvider, resource: string) {
+    this.provider = provider;
+    this.resource = resource;
+  }
+
+  /**
+   * Create a CMEK instance for Google Cloud Platform.
+   *
+   * @param resource - GCP Cloud KMS resource name in the format:
+   *   projects/{project-id}/locations/{location}/keyRings/{key-ring}/cryptoKeys/{key-name}
+   *
+   * @returns A new CMEK instance configured for GCP
+   *
+   * @example
+   * ```typescript
+   * const cmek = Cmek.gcp(
+   *   "projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key"
+   * );
+   * ```
+   */
+  static gcp(resource: string): Cmek {
+    return new Cmek(CmekProvider.GCP, resource);
+  }
+
+  /**
+   * Validate the CMEK resource name format.
+   *
+   * Validates that the resource name matches the expected pattern for the
+   * provider. This is a format check only and does not verify that the key
+   * exists or that you have access to it.
+   *
+   * For GCP, the expected format is:
+   *   projects/{project}/locations/{location}/keyRings/{keyRing}/cryptoKeys/{cryptoKey}
+   *
+   * @returns true if the resource name format is valid, false otherwise
+   *
+   * @example
+   * ```typescript
+   * const cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+   * cmek.validatePattern(); // Returns true
+   *
+   * const badCmek = Cmek.gcp("invalid-format");
+   * badCmek.validatePattern(); // Returns false
+   * ```
+   */
+  validatePattern(): boolean {
+    if (this.provider === CmekProvider.GCP) {
+      return Cmek.GCP_PATTERN.test(this.resource);
+    }
+    return false;
+  }
+
+  /**
+   * Serialize CMEK to object format for API transport.
+   *
+   * Returns an object with the provider variant as the key and resource as the value.
+   *
+   * @returns Object containing the provider variant and resource identifier
+   *
+   * @example
+   * ```typescript
+   * const cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+   * cmek.toJSON();
+   * // Returns: { gcp: 'projects/p/locations/l/keyRings/r/cryptoKeys/k' }
+   * ```
+   */
+  toJSON(): Record<string, unknown> {
+    if (this.provider === CmekProvider.GCP) {
+      return { gcp: this.resource };
+    }
+    // Unreachable with current providers, but future-proof
+    throw new Error(`Unknown CMEK provider: ${this.provider}`);
+  }
+
+  /**
+   * Deserialize CMEK from object format.
+   *
+   * Expects the provider variant as the key and resource as the value.
+   *
+   * @param data - Object containing provider variant and resource
+   * @returns Deserialized CMEK instance
+   * @throws Error if the provider is unsupported or data is malformed
+   *
+   * @example
+   * ```typescript
+   * const data = { gcp: 'projects/p/locations/l/keyRings/r/cryptoKeys/k' };
+   * const cmek = Cmek.fromJSON(data);
+   * ```
+   */
+  static fromJSON(data: Record<string, unknown>): Cmek {
+    if ("gcp" in data && typeof data.gcp === "string") {
+      return Cmek.gcp(data.gcp);
+    }
+    throw new Error(
+      `Unsupported or missing CMEK provider in data: ${JSON.stringify(data)}`,
+    );
+  }
+}
+
 const STRING_VALUE_NAME = "string";
 const FLOAT_LIST_VALUE_NAME = "float_list";
 const SPARSE_VECTOR_VALUE_NAME = "sparse_vector";
@@ -76,7 +222,7 @@ export class VectorIndexConfig {
     this.sourceKey =
       options.sourceKey instanceof Key
         ? options.sourceKey.name
-        : (options.sourceKey ?? null);
+        : options.sourceKey ?? null;
     this.hnsw = options.hnsw ?? null;
     this.spann = options.spann ?? null;
   }
@@ -99,16 +245,13 @@ export class SparseVectorIndexConfig {
     this.sourceKey =
       options.sourceKey instanceof Key
         ? options.sourceKey.name
-        : (options.sourceKey ?? null);
+        : options.sourceKey ?? null;
     this.bm25 = options.bm25 ?? null;
   }
 }
 
 export class FtsIndexType {
-  constructor(
-    public enabled: boolean,
-    public config: FtsIndexConfig,
-  ) {}
+  constructor(public enabled: boolean, public config: FtsIndexConfig) {}
 }
 
 export class StringInvertedIndexType {
@@ -119,10 +262,7 @@ export class StringInvertedIndexType {
 }
 
 export class VectorIndexType {
-  constructor(
-    public enabled: boolean,
-    public config: VectorIndexConfig,
-  ) {}
+  constructor(public enabled: boolean, public config: VectorIndexConfig) {}
 }
 
 export class SparseVectorIndexType {
@@ -133,10 +273,7 @@ export class SparseVectorIndexType {
 }
 
 export class IntInvertedIndexType {
-  constructor(
-    public enabled: boolean,
-    public config: IntInvertedIndexConfig,
-  ) {}
+  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) {}
 }
 
 export class FloatInvertedIndexType {
@@ -317,15 +454,52 @@ const ensureBoolValueType = (valueTypes: ValueTypes): BoolValueType => {
   return valueTypes.boolean;
 };
 
+/**
+ * Collection schema for configuring indexes and encryption.
+ *
+ * The schema controls how data is indexed and can optionally specify
+ * customer-managed encryption keys (CMEK) for data at rest.
+ *
+ * @example
+ * ```typescript
+ * const schema = new Schema();
+ * // Optionally add CMEK
+ * schema.setCmek(Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k"));
+ * ```
+ */
 export class Schema {
   defaults: ValueTypes;
   keys: Record<string, ValueTypes>;
+  cmek: Cmek | null;
 
   constructor() {
     this.defaults = new ValueTypes();
     this.keys = {};
+    this.cmek = null;
     this.initializeDefaults();
     this.initializeKeys();
+  }
+
+  /**
+   * Set the customer-managed encryption key for this collection.
+   *
+   * CMEK allows you to use your own encryption keys managed by cloud providers'
+   * key management services instead of default provider-managed keys.
+   *
+   * @param cmek - CMEK instance or null to remove encryption
+   * @returns this for method chaining
+   *
+   * @example
+   * ```typescript
+   * const schema = new Schema();
+   * schema.setCmek(Cmek.gcp(
+   *   "projects/my-project/locations/us-central1/keyRings/my-ring/cryptoKeys/my-key"
+   * ));
+   * ```
+   */
+  setCmek(cmek: Cmek | null): this {
+    this.cmek = cmek;
+    return this;
   }
 
   createIndex(config?: IndexConfig, key?: string): this {
@@ -442,10 +616,17 @@ export class Schema {
       keys[keyName] = this.serializeValueTypes(valueTypes);
     }
 
-    return {
+    const result: InternalSchema = {
       defaults,
       keys,
     };
+
+    // Add CMEK if present
+    if (this.cmek !== null) {
+      result.cmek = this.cmek.toJSON();
+    }
+
+    return result;
   }
 
   static async deserializeFromJSON(
@@ -470,6 +651,13 @@ export class Schema {
         client,
       );
     }
+
+    // Deserialize CMEK if present
+    instance.cmek = null;
+    if (data.cmek && typeof data.cmek === "object") {
+      instance.cmek = Cmek.fromJSON(data.cmek as Record<string, unknown>);
+    }
+
     return instance;
   }
 
@@ -686,7 +874,9 @@ export class Schema {
       !config.embeddingFunction
     ) {
       throw new Error(
-        `If sourceKey is provided then embeddingFunction must also be provided since there is no default embedding function. Config: ${JSON.stringify(config)}`,
+        `If sourceKey is provided then embeddingFunction must also be provided since there is no default embedding function. Config: ${JSON.stringify(
+          config,
+        )}`,
       );
     }
   }
@@ -885,7 +1075,9 @@ export class Schema {
       !embeddingFunction.supportedSpaces().includes(resolvedSpace)
     ) {
       console.warn(
-        `Space '${resolvedSpace}' is not supported by embedding function '${resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"}'. Supported spaces: ${embeddingFunction
+        `Space '${resolvedSpace}' is not supported by embedding function '${
+          resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"
+        }'. Supported spaces: ${embeddingFunction
           .supportedSpaces()
           .join(", ")}`,
       );

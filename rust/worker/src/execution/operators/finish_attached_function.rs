@@ -127,6 +127,7 @@ impl Operator<FinishAttachedFunctionInput, FinishAttachedFunctionOutput>
         for collection in &input.collections {
             log.update_collection_log_offset(
                 &collection.tenant_id,
+                collection.database_name.clone(),
                 collection.collection_id,
                 collection.log_position,
             )

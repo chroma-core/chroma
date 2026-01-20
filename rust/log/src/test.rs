@@ -52,6 +52,7 @@ pub fn modulo_metadata(value: usize) -> HashMap<String, UpdateMetadataValue> {
         ("id".to_string(), UpdateMetadataValue::Int(value as i64)),
         (
             "is_even".to_string(),
+            #[allow(clippy::manual_is_multiple_of)]
             UpdateMetadataValue::Bool(value % 2 == 0),
         ),
         (
@@ -71,6 +72,7 @@ pub fn random_document(len: usize) -> String {
         .collect()
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 pub fn modulo_document(value: usize) -> String {
     let cat = if value % 3 == 0 { "<cat>" } else { "" };
     let dog = if value % 5 == 0 { "<dog>" } else { "" };
@@ -92,6 +94,7 @@ pub fn upsert_generator(offset: usize) -> OperationRecord {
 ///
 /// # Illustration for head of log
 /// [Add 1], [Add 2], [Add 3], [Add 4], [Add 5], [Del 1], [Add 6] ...
+#[allow(clippy::manual_is_multiple_of)]
 pub fn add_delete_generator(offset: usize) -> OperationRecord {
     if offset % 6 == 0 {
         OperationRecord {

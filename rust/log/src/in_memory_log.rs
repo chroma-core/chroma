@@ -84,10 +84,7 @@ impl InMemoryLog {
         batch_size: i32,
         end_timestamp: Option<i64>,
     ) -> Vec<LogRecord> {
-        let end_timestamp = match end_timestamp {
-            Some(end_timestamp) => end_timestamp,
-            None => i64::MAX,
-        };
+        let end_timestamp = end_timestamp.unwrap_or(i64::MAX);
 
         let logs = match self.collection_to_log.get(&collection_id) {
             Some(logs) => logs,

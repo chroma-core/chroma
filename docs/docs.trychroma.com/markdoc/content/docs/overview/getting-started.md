@@ -25,7 +25,144 @@ For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_so
 
 {% /Banner %}
 
-### 1. Install
+## Install with AI
+
+Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI agent. It will quickly set you up with Chroma.
+
+{% Tabs %}
+
+{% Tab label="python" %}
+
+{% TabbedUseCaseCodeBlock language="Prompt" %}
+
+{% Tab label="Chroma Cloud" %}
+
+```prompt
+In this directory create a new Python project with Chroma set up. 
+Use a virtual environment.
+
+Write a small example that adds some data to a collection and queries it. 
+Do not delete the data from the collection when it's complete. 
+Run the script when you are done setting up the environment and writing the 
+script. The output should show what data was ingested, what was the query, 
+and the results. 
+Your own summary should include this output so the user can see it.
+
+First, install `chromadb`.
+
+The project should be set up with Chroma Cloud. When you install `chromadb`, 
+you get access to the Chroma CLI. You can run `chroma login` to authenticate. 
+This will open a browser for authentication and save a connection profile 
+locally. 
+
+You can also use `chroma profile show` to see if the user already has an 
+active profile saved locally. If so, you can skip the login step.
+
+Then create a DB using the CLI with `chroma db create chroma-getting-started`. 
+This will create a DB with this name. 
+
+Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
+This will create a .env file in the current directory with the connection 
+variables for this DB and account, so the CloudClient can be instantiated 
+with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
+
+```
+
+{% /Tab %}
+
+{% Tab label="OSS" %}
+
+```text
+In this directory create a new Python project with Chroma set up.
+Use a virtual environment.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+Use Chroma's in-memory client: `chromadb.Client()`
+```
+
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+{% /Tab %}
+
+{% Tab label="typescript" %}
+
+{% TabbedUseCaseCodeBlock language="Prompt" %}
+
+{% Tab label="Chroma Cloud" %}
+
+```prompt
+In this directory create a new Typescript project with Chroma set up. 
+
+Write a small example that adds some data to a collection and queries it. 
+Do not delete the data from the collection when it's complete. 
+Run the script when you are done setting up the environment and writing the 
+script. The output should show what data was ingested, what was the query, 
+and the results. 
+Your own summary should include this output so the user can see it.
+
+First, install `chromadb`.
+
+The project should be set up with Chroma Cloud. When you install `chromadb`, 
+you get access to the Chroma CLI. You can run `chroma login` to authenticate. 
+This will open a browser for authentication and save a connection profile 
+locally. 
+
+You can also use `chroma profile show` to see if the user already has an 
+active profile saved locally. If so, you can skip the login step.
+
+Then create a DB using the CLI with `chroma db create chroma-getting-started`. 
+This will create a DB with this name. 
+
+Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
+This will create a .env file in the current directory with the connection 
+variables for this DB and account, so the CloudClient can be instantiated 
+with: new CloudClient().
+
+```
+
+{% /Tab %}
+
+{% Tab label="OSS" %}
+
+```prompt
+In this directory create a new Typescript project with Chroma set up.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+You will have to run a local Chroma server to make this work. When you install 
+`chromadb` you get access to the Chroma CLI, which can start a local server 
+for you with `chroma run`.
+
+Make sure to instruct the user on how to start a local Chroma server in your 
+summary.
+```
+
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+{% /Tab %}
+
+{% /Tabs %}
+
+## Install Manually
+
+{% Steps %}
+
+{% Step title="Install" %}
 
 {% Tabs %}
 
@@ -103,7 +240,9 @@ bun add chromadb @chroma-core/default-embed
 
 {% /Tabs %}
 
-### 2. Create a Chroma Client
+{% /Step %}
+
+{% Step title="Create a Chroma Client" %}
 
 {% Tabs %}
 
@@ -168,7 +307,9 @@ const client = new ChromaClient();
 
 {% /Tabs %}
 
-### 3. Create a collection
+{% /Step %}
+
+{% Step title="Create a collection" %}
 
 Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
 
@@ -194,7 +335,9 @@ const collection = await client.createCollection({
 
 {% /TabbedCodeBlock %}
 
-### 4. Add some text documents to the collection
+{% /Step %}
+
+{% Step title="Add some text documents to the collection" %}
 
 Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
 
@@ -230,7 +373,9 @@ await collection.add({
 
 {% /TabbedCodeBlock %}
 
-### 5. Query the collection
+{% /Step %}
+
+{% Step title="Query the collection" %}
 
 You can query the collection with a list of query texts, and Chroma will return the `n` most similar results. It's that easy!
 
@@ -265,7 +410,9 @@ console.log(results);
 
 If `n_results` is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set `n_results=2`.
 
-### 6. Inspect Results
+{% /Step %}
+
+{% Step title="Inspect Results" %}
 
 From the above - you can see that our query about `hawaii` is semantically most similar to the document about `pineapple`.
 
@@ -315,7 +462,9 @@ From the above - you can see that our query about `hawaii` is semantically most 
 
 {% /TabbedCodeBlock %}
 
-### 7. Try it out yourself
+{% /Step %}
+
+{% Step title="Try it out yourself" %}
 
 What if we tried querying with `"This is a document about florida"`? Here is a full example.
 
@@ -381,11 +530,15 @@ console.log(results);
 
 {% /TabbedCodeBlock %}
 
+{% /Step %}
+
+{% /Steps %}
+
+## Next steps
+
 {% Tabs %}
 
 {% Tab label="python" %}
-
-## Next steps
 
 In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](../run-chroma/persistent-client) or run Chroma in [client-server mode](../run-chroma/client-server) if you need data persistence.
 
@@ -396,7 +549,6 @@ In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client
 {% /Tab %}
 
 {% Tab label="typescript" %}
-## Next steps
 
 - We offer [first class support](/docs/embeddings/embedding-functions) for various embedding providers via our embedding function interface. Each embedding function ships in its own npm package.
 - Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server

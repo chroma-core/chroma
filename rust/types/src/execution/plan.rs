@@ -1,13 +1,14 @@
 use super::{
     error::QueryConversionError,
     operator::{
-        Filter, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError, Select,
+        Filter, GroupBy, KnnBatch, KnnProjection, Limit, Projection, Rank, Scan, ScanToProtoError,
+        Select,
     },
 };
 use crate::{
     chroma_proto,
     operator::{Key, RankExpr},
-    validators::validate_rank,
+    validators::{validate_group_by, validate_rank, validate_search_payload},
     Where,
 };
 use serde::{Deserialize, Serialize};
@@ -226,12 +227,16 @@ impl TryFrom<Knn> for chroma_proto::KnnPlan {
 ///     .select([Key::Document, Key::Score]);
 /// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize, Validate)]
+#[validate(schema(function = "validate_search_payload"))]
 pub struct SearchPayload {
     #[serde(default)]
     pub filter: Filter,
     #[serde(default)]
     #[validate(custom(function = "validate_rank"))]
     pub rank: Rank,
+    #[serde(default)]
+    #[validate(custom(function = "validate_group_by"))]
+    pub group_by: GroupBy,
     #[serde(default)]
     pub limit: Limit,
     #[serde(default)]
@@ -405,6 +410,33 @@ impl SearchPayload {
         self.filter.where_clause = Some(r#where);
         self
     }
+
+    /// Groups results by metadata keys and aggregates within each group.
+    ///
+    /// # Arguments
+    ///
+    /// * `group_by` - GroupBy configuration with keys and aggregation
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::plan::SearchPayload;
+    /// use chroma_types::operator::{GroupBy, Aggregate, Key};
+    ///
+    /// // Top 3 best documents per category
+    /// let search = SearchPayload::default()
+    ///     .group_by(GroupBy {
+    ///         keys: vec![Key::field("category")],
+    ///         aggregate: Some(Aggregate::MinK {
+    ///             keys: vec![Key::Score],
+    ///             k: 3,
+    ///         }),
+    ///     });
+    /// ```
+    pub fn group_by(mut self, group_by: GroupBy) -> Self {
+        self.group_by = group_by;
+        self
+    }
 }
 
 #[cfg(feature = "utoipa")]
@@ -428,6 +460,20 @@ impl PartialSchema for SearchPayload {
                         ),
                 )
                 .property("rank", Object::with_type(SchemaType::Type(Type::Object)))
+                .property(
+                    "group_by",
+                    ObjectBuilder::new()
+                        .schema_type(SchemaType::Type(Type::Object))
+                        .property(
+                            "keys",
+                            ArrayBuilder::new()
+                                .items(Object::with_type(SchemaType::Type(Type::String))),
+                        )
+                        .property(
+                            "aggregate",
+                            Object::with_type(SchemaType::Type(Type::Object)),
+                        ),
+                )
                 .property(
                     "limit",
                     ObjectBuilder::new()
@@ -466,6 +512,11 @@ impl TryFrom<chroma_proto::SearchPayload> for SearchPayload {
                 .rank
                 .ok_or(QueryConversionError::field("rank"))?
                 .try_into()?,
+            group_by: value
+                .group_by
+                .map(TryInto::try_into)
+                .transpose()?
+                .unwrap_or_default(),
             limit: value
                 .limit
                 .ok_or(QueryConversionError::field("limit"))?
@@ -485,9 +536,41 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
         Ok(Self {
             filter: Some(value.filter.try_into()?),
             rank: Some(value.rank.try_into()?),
+            group_by: Some(value.group_by.try_into()?),
             limit: Some(value.limit.into()),
             select: Some(value.select.try_into()?),
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub enum ReadLevel {
+    /// Read from both the index and the write-ahead log (default).
+    /// Provides full consistency with all committed writes visible.
+    #[default]
+    IndexAndWal,
+    /// Read only from the index, skipping the write-ahead log.
+    /// Provides eventual consistency - recent uncommitted writes may not be visible.
+    IndexOnly,
+}
+
+impl From<chroma_proto::ReadLevel> for ReadLevel {
+    fn from(value: chroma_proto::ReadLevel) -> Self {
+        match value {
+            chroma_proto::ReadLevel::IndexAndWal => ReadLevel::IndexAndWal,
+            chroma_proto::ReadLevel::IndexOnly => ReadLevel::IndexOnly,
+        }
+    }
+}
+
+impl From<ReadLevel> for chroma_proto::ReadLevel {
+    fn from(value: ReadLevel) -> Self {
+        match value {
+            ReadLevel::IndexAndWal => chroma_proto::ReadLevel::IndexAndWal,
+            ReadLevel::IndexOnly => chroma_proto::ReadLevel::IndexOnly,
+        }
     }
 }
 
@@ -495,12 +578,14 @@ impl TryFrom<SearchPayload> for chroma_proto::SearchPayload {
 pub struct Search {
     pub scan: Scan,
     pub payloads: Vec<SearchPayload>,
+    pub read_level: ReadLevel,
 }
 
 impl TryFrom<chroma_proto::SearchPlan> for Search {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::SearchPlan) -> Result<Self, Self::Error> {
+        let read_level = value.read_level().into();
         Ok(Self {
             scan: value
                 .scan
@@ -511,6 +596,7 @@ impl TryFrom<chroma_proto::SearchPlan> for Search {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
+            read_level,
         })
     }
 }
@@ -526,6 +612,7 @@ impl TryFrom<Search> for chroma_proto::SearchPlan {
                 .into_iter()
                 .map(TryInto::try_into)
                 .collect::<Result<Vec<_>, _>>()?,
+            read_level: chroma_proto::ReadLevel::from(value.read_level).into(),
         })
     }
 }

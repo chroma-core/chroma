@@ -2,6 +2,7 @@ use std::ops::Add;
 use std::sync::Arc;
 use std::time::Duration;
 
+use chroma_storage::PutMode;
 use setsum::Setsum;
 
 use chroma_storage::{
@@ -9,12 +10,15 @@ use chroma_storage::{
     StorageError,
 };
 
+use crate::interfaces::{
+    FragmentManagerFactory, FragmentPointer, ManifestManagerFactory, ManifestPublisher,
+};
 use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
 use crate::{
-    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment, FragmentSeqNo,
-    GarbageCollectionOptions, LogPosition, LogWriterOptions, Manifest, ScrubError, Snapshot,
-    SnapshotCache, SnapshotPointer, ThrottleOptions,
+    deserialize_setsum, prefixed_fragment_path, serialize_setsum, Error, Fragment,
+    FragmentIdentifier, FragmentSeqNo, GarbageCollectionOptions, LogPosition, LogWriterOptions,
+    Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
@@ -26,6 +30,8 @@ pub struct Garbage {
     pub snapshot_for_root: Option<SnapshotPointer>,
     pub fragments_to_drop_start: FragmentSeqNo,
     pub fragments_to_drop_limit: FragmentSeqNo,
+    #[serde(default)]
+    pub fragments_are_uuids: bool,
     #[serde(
         deserialize_with = "deserialize_setsum",
         serialize_with = "serialize_setsum"
@@ -40,11 +46,17 @@ impl Garbage {
             snapshots_to_drop: Vec::new(),
             snapshots_to_make: Vec::new(),
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(0),
-            fragments_to_drop_limit: FragmentSeqNo(0),
+            fragments_to_drop_start: FragmentSeqNo::ZERO,
+            fragments_to_drop_limit: FragmentSeqNo::ZERO,
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         }
+    }
+
+    pub fn check_invariants_for_repl(&self) -> Result<(), Error> {
+        // TODO(rescrv, mcmr):  Scrub more.
+        Ok(())
     }
 
     pub fn is_empty(&self) -> bool {
@@ -56,12 +68,10 @@ impl Garbage {
     }
 
     #[allow(clippy::result_large_err)]
-    pub async fn new(
-        storage: &Storage,
-        prefix: &str,
+    pub async fn new<P: FragmentPointer>(
         manifest: &Manifest,
-        throttle: &ThrottleOptions,
         snapshots: &dyn SnapshotCache,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         mut first_to_keep: LogPosition,
     ) -> Result<Option<Self>, Error> {
         let dropped_snapshots = manifest
@@ -88,9 +98,13 @@ impl Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(0),
-            fragments_to_drop_limit: FragmentSeqNo(0),
+            fragments_to_drop_start: FragmentSeqNo::ZERO,
+            fragments_to_drop_limit: FragmentSeqNo::ZERO,
             setsum_to_discard: Setsum::default(),
+            fragments_are_uuids: manifest
+                .fragments
+                .iter()
+                .all(|f| matches!(f.seq_no, FragmentIdentifier::Uuid(_))),
             first_to_keep,
         };
         let mut first = true;
@@ -98,11 +112,9 @@ impl Garbage {
         for snap in dropped_snapshots {
             drop_acc += ret
                 .drop_snapshot(
-                    storage,
-                    prefix,
                     snap,
-                    throttle,
                     snapshots,
+                    manifest_publisher,
                     &mut first,
                     &mut first_to_keep,
                 )
@@ -114,11 +126,9 @@ impl Garbage {
         for snap in replaced_snapshots {
             let (drop_delta, root) = ret
                 .replace_snapshot(
-                    storage,
-                    prefix,
                     snap,
-                    throttle,
                     snapshots,
+                    manifest_publisher,
                     &mut first_to_keep,
                     &mut first,
                 )
@@ -178,15 +188,16 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(self, storage))]
-    pub async fn install(
+    #[tracing::instrument(skip(self, manifest_publisher, storage))]
+    pub async fn install<P: FragmentPointer>(
         &self,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         options: &ThrottleOptions,
         storage: &Storage,
         prefix: &str,
         existing: Option<&ETag>,
     ) -> Result<Option<ETag>, Error> {
-        self.install_new_snapshots(storage, prefix, options).await?;
+        self.install_new_snapshots(manifest_publisher).await?;
         Self::transition(options, storage, prefix, existing, self).await
     }
 
@@ -224,10 +235,11 @@ impl Garbage {
                     Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
                 })?
                 .into_bytes();
+            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
             let options = if let Some(e_tag) = existing {
-                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
+                options.with_mode(PutMode::IfMatch(e_tag.clone()))
             } else {
-                PutOptions::if_not_exists(StorageRequestPriority::P0)
+                options.with_mode(PutMode::IfNotExist)
             };
             match storage.put_bytes(&path, payload, options).await {
                 Ok(e_tag) => return Ok(e_tag),
@@ -256,21 +268,22 @@ impl Garbage {
         for snap in self.snapshots_to_drop.iter() {
             paths.push(format!("{}/{}", prefix, snap.path_to_snapshot));
         }
-        paths.into_iter().chain(
-            (self.fragments_to_drop_start.0..self.fragments_to_drop_limit.0)
-                .map(move |seq_no| (seq_no, Arc::clone(&prefix)))
-                .map(|(seq_no, prefix)| prefixed_fragment_path(&prefix, FragmentSeqNo(seq_no))),
-        )
+        let start = self.fragments_to_drop_start.as_u64();
+        let limit = self.fragments_to_drop_limit.as_u64();
+        paths.into_iter().chain((start..limit).map(move |seq_no| {
+            prefixed_fragment_path(
+                &prefix,
+                FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(seq_no)),
+            )
+        }))
     }
 
-    pub async fn install_new_snapshots(
+    pub async fn install_new_snapshots<P: FragmentPointer>(
         &self,
-        storage: &Storage,
-        prefix: &str,
-        throttle: &ThrottleOptions,
+        manifest_publisher: &dyn ManifestPublisher<P>,
     ) -> Result<(), Error> {
         for snap in self.snapshots_to_make.iter() {
-            snap.install(throttle, storage, prefix).await?;
+            manifest_publisher.snapshot_install(snap).await?;
         }
         Ok(())
     }
@@ -281,15 +294,21 @@ impl Garbage {
         first: &mut bool,
         first_to_keep: &mut LogPosition,
     ) -> Result<Setsum, Error> {
-        if self.fragments_to_drop_limit != frag.seq_no && !*first {
-            return Err(Error::ScrubError(Box::new(ScrubError::Internal(
-                "fragment sequence numbers collected out of order".to_string(),
-            ))));
+        if let Some(seq_no) = frag.seq_no.as_seq_no() {
+            if FragmentIdentifier::from(self.fragments_to_drop_limit) != frag.seq_no && !*first {
+                return Err(Error::ScrubError(Box::new(ScrubError::Internal(
+                    "fragment sequence numbers collected out of order".to_string(),
+                ))));
+            }
+            if *first {
+                self.fragments_to_drop_start = seq_no;
+            }
+            self.fragments_to_drop_limit = seq_no.successor().ok_or_else(|| {
+                Error::ScrubError(Box::new(ScrubError::Internal(
+                    "fragment sequence number has no successor".to_string(),
+                )))
+            })?;
         }
-        if *first {
-            self.fragments_to_drop_start = frag.seq_no;
-        }
-        self.fragments_to_drop_limit = frag.seq_no + 1;
         self.setsum_to_discard += frag.setsum;
         *first = false;
         *first_to_keep = frag.limit;
@@ -297,19 +316,17 @@ impl Garbage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn drop_snapshot(
+    pub async fn drop_snapshot<P: FragmentPointer>(
         &mut self,
-        storage: &Storage,
-        prefix: &str,
         ptr: &SnapshotPointer,
-        throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         first: &mut bool,
         first_to_keep: &mut LogPosition,
     ) -> Result<Setsum, Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
-            None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
+            None => match manifest_publisher.snapshot_load(ptr).await? {
                 Some(snapshot) => snapshot,
                 None => {
                     return Err(Box::new(ScrubError::MissingSnapshot {
@@ -322,11 +339,9 @@ impl Garbage {
         let mut drop_acc = Setsum::default();
         for snap in snapshot.snapshots.iter() {
             drop_acc += Box::pin(self.drop_snapshot(
-                storage,
-                prefix,
                 snap,
-                throttle,
                 snapshot_cache,
+                manifest_publisher,
                 first,
                 first_to_keep,
             ))
@@ -349,19 +364,17 @@ impl Garbage {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn replace_snapshot(
+    pub async fn replace_snapshot<P: FragmentPointer>(
         &mut self,
-        storage: &Storage,
-        prefix: &str,
         ptr: &SnapshotPointer,
-        throttle: &ThrottleOptions,
         snapshot_cache: &dyn SnapshotCache,
+        manifest_publisher: &dyn ManifestPublisher<P>,
         first_to_keep: &mut LogPosition,
         first: &mut bool,
     ) -> Result<(Setsum, Option<SnapshotPointer>), Error> {
         let snapshot = match snapshot_cache.get(ptr).await? {
             Some(snapshot) => snapshot,
-            None => match Snapshot::load(throttle, storage, prefix, ptr).await? {
+            None => match manifest_publisher.snapshot_load(ptr).await? {
                 Some(snapshot) => snapshot,
                 None => {
                     return Err(Box::new(ScrubError::MissingSnapshot {
@@ -417,11 +430,9 @@ impl Garbage {
         for snap in snapshots_to_drop.iter() {
             drop_acc += self
                 .drop_snapshot(
-                    storage,
-                    prefix,
                     snap,
-                    throttle,
                     snapshot_cache,
+                    manifest_publisher,
                     first,
                     first_to_keep,
                 )
@@ -431,11 +442,9 @@ impl Garbage {
         // SAFETY(rescrv):  This has 0 or 1 elements by the snapshot balance check above.
         if let Some(to_split) = snapshots_to_split.pop() {
             let (drop_delta, new_child) = Box::pin(self.replace_snapshot(
-                storage,
-                prefix,
                 &to_split,
-                throttle,
                 snapshot_cache,
+                manifest_publisher,
                 first_to_keep,
                 first,
             ))
@@ -510,6 +519,7 @@ impl Garbage {
             fragments_to_drop_start: seq_no,
             fragments_to_drop_limit: seq_no,
             setsum_to_discard: Setsum::default(),
+            fragments_are_uuids: false,
             first_to_keep: offset,
         };
         for snapshot in manifest.snapshots.iter() {
@@ -524,24 +534,36 @@ impl Garbage {
 
 ///////////////////////////////////////// GarbageCollector /////////////////////////////////////////
 
-pub struct GarbageCollector {
-    log: Arc<OnceLogWriter>,
+pub struct GarbageCollector<
+    P: FragmentPointer,
+    FP: FragmentManagerFactory<FragmentPointer = P>,
+    MP: ManifestManagerFactory<FragmentPointer = P>,
+> {
+    log: Arc<OnceLogWriter<P, FP::Publisher, MP::Publisher>>,
 }
 
-impl GarbageCollector {
+impl<
+        P: FragmentPointer,
+        FP: FragmentManagerFactory<FragmentPointer = P>,
+        MP: ManifestManagerFactory<FragmentPointer = P>,
+    > GarbageCollector<P, FP, MP>
+{
     /// Open the log into a state where it can be garbage collected.
     pub async fn open(
         options: LogWriterOptions,
         storage: Arc<Storage>,
+        new_fragment_publisher: FP,
+        new_manifest_publisher: MP,
         prefix: &str,
-        writer: &str,
     ) -> Result<Self, Error> {
+        let batch_manager = new_fragment_publisher.make_publisher().await?;
+        let manifest_manager = new_manifest_publisher.open_publisher().await?;
         let log = OnceLogWriter::open_for_read_only_and_stale_ops(
             options.clone(),
             Arc::clone(&storage),
+            batch_manager,
+            manifest_manager,
             prefix.to_string(),
-            writer.to_string(),
-            Arc::new(()),
         )
         .await?;
         Ok(Self { log })
@@ -575,16 +597,21 @@ mod tests {
 
     #[test]
     fn case_seen_in_the_wild() {
-        let manifest_json =
-            include_str!("../tests/test_k8s_integration_AA_construct_garbage/MANIFEST");
+        let manifest_json = include_str!("../tests/s3_AA_construct_garbage/MANIFEST");
         let manifest: Manifest = serde_json::from_str(manifest_json).unwrap();
         let output = Garbage::bug_patch_construct_garbage_from_manifest(
             &manifest,
-            FragmentSeqNo(806913),
+            FragmentSeqNo::from_u64(806913),
             LogPosition::from_offset(900883),
         );
-        assert_eq!(output.fragments_to_drop_start, FragmentSeqNo(806913));
-        assert_eq!(output.fragments_to_drop_limit, FragmentSeqNo(806913));
+        assert_eq!(
+            output.fragments_to_drop_start,
+            FragmentSeqNo::from_u64(806913)
+        );
+        assert_eq!(
+            output.fragments_to_drop_limit,
+            FragmentSeqNo::from_u64(806913)
+        );
         assert_eq!(
             output.setsum_to_discard.hexdigest(),
             "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"
@@ -593,5 +620,118 @@ mod tests {
         for snapshot in output.snapshots_to_drop.iter() {
             assert!(snapshot.limit <= output.first_to_keep);
         }
+    }
+
+    /// Deserialize from JSON to verify the stable format of Garbage.
+    #[test]
+    fn deserialize_garbage_from_json() {
+        let json = r#"{
+            "snapshots_to_drop": [
+                {
+                    "setsum": "25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792",
+                    "path_to_snapshot": "snapshot/SNAPSHOT.25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792",
+                    "depth": 1,
+                    "start": {"offset": 1},
+                    "limit": {"offset": 2379},
+                    "num_bytes": 3796051
+                }
+            ],
+            "snapshots_to_make": [
+                {
+                    "path": "snapshot/SNAPSHOT.abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+                    "depth": 2,
+                    "setsum": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234",
+                    "writer": "garbage collection",
+                    "snapshots": [],
+                    "fragments": [
+                        {
+                            "path": "log/0/1",
+                            "seq_no": 1,
+                            "start": {"offset": 1},
+                            "limit": {"offset": 100},
+                            "num_bytes": 1024,
+                            "setsum": "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+                        }
+                    ]
+                }
+            ],
+            "snapshot_for_root": {
+                "setsum": "1b5797c4029b6664a74ccebba552f95767a22731a375cdddc0538afd01e88116",
+                "path_to_snapshot": "snapshot/SNAPSHOT.1b5797c4029b6664a74ccebba552f95767a22731a375cdddc0538afd01e88116",
+                "depth": 1,
+                "start": {"offset": 2379},
+                "limit": {"offset": 4816},
+                "num_bytes": 3694483
+            },
+            "fragments_to_drop_start": 100,
+            "fragments_to_drop_limit": 200,
+            "setsum_to_discard": "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380",
+            "first_to_keep": {"offset": 900883}
+        }"#;
+
+        let garbage: Garbage = serde_json::from_str(json).unwrap();
+
+        // Verify snapshots_to_drop
+        assert_eq!(garbage.snapshots_to_drop.len(), 1);
+        assert_eq!(
+            garbage.snapshots_to_drop[0].setsum.hexdigest(),
+            "25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792"
+        );
+        assert_eq!(
+            garbage.snapshots_to_drop[0].path_to_snapshot,
+            "snapshot/SNAPSHOT.25bdf4e28c8079d3e0324db417fa28eede29f8d7cc34c71fac19c39ca4691792"
+        );
+        assert_eq!(garbage.snapshots_to_drop[0].depth, 1);
+        assert_eq!(
+            garbage.snapshots_to_drop[0].start,
+            LogPosition::from_offset(1)
+        );
+        assert_eq!(
+            garbage.snapshots_to_drop[0].limit,
+            LogPosition::from_offset(2379)
+        );
+        assert_eq!(garbage.snapshots_to_drop[0].num_bytes, 3796051);
+
+        // Verify snapshots_to_make
+        assert_eq!(garbage.snapshots_to_make.len(), 1);
+        assert_eq!(
+            garbage.snapshots_to_make[0].setsum.hexdigest(),
+            "abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234abcd1234"
+        );
+        assert_eq!(garbage.snapshots_to_make[0].depth, 2);
+        assert_eq!(garbage.snapshots_to_make[0].writer, "garbage collection");
+        assert_eq!(garbage.snapshots_to_make[0].fragments.len(), 1);
+        assert_eq!(
+            garbage.snapshots_to_make[0].fragments[0].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))
+        );
+
+        // Verify snapshot_for_root
+        let root = garbage.snapshot_for_root.as_ref().unwrap();
+        assert_eq!(
+            root.setsum.hexdigest(),
+            "1b5797c4029b6664a74ccebba552f95767a22731a375cdddc0538afd01e88116"
+        );
+        assert_eq!(root.start, LogPosition::from_offset(2379));
+        assert_eq!(root.limit, LogPosition::from_offset(4816));
+
+        // Verify fragment identifiers
+        assert_eq!(
+            garbage.fragments_to_drop_start,
+            FragmentSeqNo::from_u64(100)
+        );
+        assert_eq!(
+            garbage.fragments_to_drop_limit,
+            FragmentSeqNo::from_u64(200)
+        );
+
+        // Verify setsum_to_discard
+        assert_eq!(
+            garbage.setsum_to_discard.hexdigest(),
+            "c921d21a0820be5d3b6f2d90942648f2853188bb0e3c6a22fe3dbd81c1e1c380"
+        );
+
+        // Verify first_to_keep
+        assert_eq!(garbage.first_to_keep, LogPosition::from_offset(900883));
     }
 }

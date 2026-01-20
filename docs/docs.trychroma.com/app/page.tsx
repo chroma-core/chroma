@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
-
+// Redirect handled by next.config.mjs
+// This page should never be rendered
 export default function Home() {
-  return redirect("/docs/overview/introduction");
+  return null;
 }

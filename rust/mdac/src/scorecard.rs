@@ -95,7 +95,7 @@ impl<T: ScorecardMetrics> ScorecardMetrics for &T {
 /// It is a sync/send data structure that is implemented to be highly concurrent.
 #[derive(Debug)]
 pub struct Scorecard<'a> {
-    metrics: &'a (dyn ScorecardMetrics),
+    metrics: &'a dyn ScorecardMetrics,
     stride: usize,
     rules: Mutex<Arc<RuleEvaluator>>,
     buckets: Vec<Bucket>,
@@ -285,17 +285,13 @@ impl std::str::FromStr for Rule {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let pieces = s.split_whitespace().collect::<Vec<_>>();
         if pieces.len() < 2 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "rule must follow PATTERN LIMIT; neither specified",
             ));
         }
         let num_rules = pieces.len() - 1;
         let Ok(limit) = pieces[num_rules].parse::<usize>() else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "rule must have numeric LIMIT",
-            ));
+            return Err(std::io::Error::other("rule must have numeric LIMIT"));
         };
         let Some(patterns) = pieces
             .into_iter()
@@ -303,10 +299,7 @@ impl std::str::FromStr for Rule {
             .map(Pattern::new)
             .collect::<Option<Vec<_>>>()
         else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "pattern must be a valid glob",
-            ));
+            return Err(std::io::Error::other("pattern must be a valid glob"));
         };
         Ok(Rule::new(patterns, limit))
     }

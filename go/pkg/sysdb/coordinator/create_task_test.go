@@ -69,7 +69,7 @@ func (suite *AttachFunctionTestSuite) setupAttachFunctionMocks(ctx context.Conte
 	// Phase 1: Create attached function in transaction
 	// Check if any attached function exists for this collection
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -147,9 +147,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
-		Fields: map[string]*structpb.Value{
-			"param1": structpb.NewStringValue("value1"),
-		},
+		Fields: map[string]*structpb.Value{},
 	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
@@ -167,7 +165,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_SuccessfulCreation() {
 	// Setup mocks that will be called within the transaction (using mock.Anything for context)
 	// Check if any attached function exists for this collection
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	// Look up database
@@ -241,7 +239,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	functionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
 	MinRecordsForInvocation := uint64(100)
 
 	params := &structpb.Struct{
@@ -285,13 +283,12 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 
 			// Inside transaction: check for existing attached functions
 			suite.mockMetaDomain.On("AttachedFunctionDb", txCtx).Return(suite.mockAttachedFunctionDb).Once()
-			suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
+			inputCollID := inputCollectionID
+			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollID, false).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
-			// Validate function by ID
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
-			suite.mockFunctionDb.On("GetByID", functionID).
-				Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup),
+			// not FunctionDb.GetByID, so no mock needed for FunctionDb here
 
 			// Validate database matches
 			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
@@ -317,7 +314,6 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Alrea
 	// Verify all read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
-	suite.mockFunctionDb.AssertExpectations(suite.T())
 	suite.mockDatabaseDb.AssertExpectations(suite.T())
 }
 
@@ -339,15 +335,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	functionID := uuid.New()
+	functionID := dbmodel.FunctionRecordCounter
 	MinRecordsForInvocation := uint64(100)
 	now := time.Now()
-
-	params := &structpb.Struct{
-		Fields: map[string]*structpb.Value{
-			"param1": structpb.NewStringValue("value1"),
-		},
-	}
 
 	request := &coordinatorpb.AttachFunctionRequest{
 		Name:                    attachedFunctionName,
@@ -357,14 +347,13 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 		TenantId:                tenantID,
 		Database:                databaseName,
 		MinRecordsForInvocation: MinRecordsForInvocation,
-		Params:                  params,
 	}
 
 	// ========== FIRST ATTEMPT: Heap Push Fails ==========
 
 	// Phase 1: Create attached function in transaction
 	suite.mockMetaDomain.On("AttachedFunctionDb", mock.Anything).Return(suite.mockAttachedFunctionDb).Once()
-	suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
+	suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollectionID, false).
 		Return([]*dbmodel.AttachedFunction{}, nil).Once()
 
 	suite.mockMetaDomain.On("DatabaseDb", mock.Anything).Return(suite.mockDatabaseDb).Once()
@@ -420,13 +409,12 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_RecoveryFlow() {
 
 			// Inside transaction: check for existing attached functions
 			suite.mockMetaDomain.On("AttachedFunctionDb", txCtx).Return(suite.mockAttachedFunctionDb).Once()
-			suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
+			inputCollID := inputCollectionID
+			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollID, false).
 				Return([]*dbmodel.AttachedFunction{incompleteAttachedFunction}, nil).Once()
 
-			// Validate function matches
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
-			suite.mockFunctionDb.On("GetByID", functionID).
-				Return(&dbmodel.Function{ID: functionID, Name: functionName}, nil).Once()
+			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup),
+			// not FunctionDb.GetByID, so no mock needed for FunctionDb here
 
 			// Validate database matches
 			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
@@ -467,7 +455,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	tenantID := "test-tenant"
 	databaseName := "test-database"
 	databaseID := "database-uuid"
-	existingOperatorID := uuid.New()
+	existingOperatorID := dbmodel.FunctionRecordCounter
 	MinRecordsForInvocation := uint64(100)
 	now := time.Now()
 
@@ -498,6 +486,7 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 		OutputCollectionName:    outputCollectionName,
 		FunctionID:              existingOperatorID,
 		MinRecordsForInvocation: int64(MinRecordsForInvocation),
+		IsReady:                 true,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -511,24 +500,16 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 
 			// Inside transaction: check for existing attached functions
 			suite.mockMetaDomain.On("AttachedFunctionDb", txCtx).Return(suite.mockAttachedFunctionDb).Once()
-			suite.mockAttachedFunctionDb.On("GetByCollectionID", inputCollectionID).
+			inputCollID := inputCollectionID
+			suite.mockAttachedFunctionDb.On("GetAttachedFunctions", (*uuid.UUID)(nil), (*string)(nil), &inputCollID, false).
 				Return([]*dbmodel.AttachedFunction{existingAttachedFunction}, nil).Once()
 
-			// Validate function - returns DIFFERENT function name
-			suite.mockMetaDomain.On("FunctionDb", txCtx).Return(suite.mockFunctionDb).Once()
-			suite.mockFunctionDb.On("GetByID", existingOperatorID).
-				Return(&dbmodel.Function{
-					ID:   existingOperatorID,
-					Name: existingOperatorName, // Different from request
-				}, nil).Once()
-
-			// Database lookup happens before the error is returned
-			suite.mockMetaDomain.On("DatabaseDb", txCtx).Return(suite.mockDatabaseDb).Once()
-			suite.mockDatabaseDb.On("GetDatabases", tenantID, databaseName).
-				Return([]*dbmodel.Database{{ID: databaseID, Name: databaseName}}, nil).Once()
+			// Note: validateAttachedFunctionMatchesRequest uses dbmodel.GetFunctionNameByID (static lookup)
+			// which returns "record_counter" for FunctionRecordCounter - different from requestedOperatorName
+			// Validation returns (false, nil) early, so DatabaseDb.GetDatabases is NOT called
 
 			_ = txFunc(txCtx)
-		}).Return(status.Errorf(codes.AlreadyExists, "different function is attached with this name: existing=%s, requested=%s", existingOperatorName, requestedOperatorName)).Once()
+		}).Return(status.Errorf(codes.AlreadyExists, "collection already has an attached function: name=%s, function=%s, output_collection=%s", attachedFunctionName, existingOperatorName, outputCollectionName)).Once()
 
 	// Execute AttachFunction
 	response, err := suite.coordinator.AttachFunction(ctx, request)
@@ -536,9 +517,9 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Assertions - should fail with AlreadyExists error
 	suite.Error(err)
 	suite.Nil(response)
-	suite.Contains(err.Error(), "different function is attached with this name")
+	suite.Contains(err.Error(), "collection already has an attached function")
 	suite.Contains(err.Error(), existingOperatorName)
-	suite.Contains(err.Error(), requestedOperatorName)
+	suite.Contains(err.Error(), outputCollectionName)
 
 	// Verify no writes occurred (Transaction IS called but Insert/Push are not)
 	suite.mockTxImpl.AssertNumberOfCalls(suite.T(), "Transaction", 1)
@@ -547,16 +528,15 @@ func (suite *AttachFunctionTestSuite) TestAttachFunction_IdempotentRequest_Param
 	// Verify read mocks were called
 	suite.mockMetaDomain.AssertExpectations(suite.T())
 	suite.mockAttachedFunctionDb.AssertExpectations(suite.T())
-	suite.mockFunctionDb.AssertExpectations(suite.T())
 }
 
 func TestAttachFunctionTestSuite(t *testing.T) {
 	suite.Run(t, new(AttachFunctionTestSuite))
 }
 
-// TestGetSoftDeletedAttachedFunctions_TimestampConsistency verifies that timestamps
+// TestGetAttachedFunctionsToGc_TimestampConsistency verifies that timestamps
 // are returned in microseconds (UnixMicro) to match other API methods
-func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
+func TestGetAttachedFunctionsToGc_TimestampConsistency(t *testing.T) {
 	ctx := context.Background()
 
 	// Create test timestamps with known values
@@ -582,7 +562,7 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 		},
 	}
 
-	mockAttachedFunctionDb.On("GetSoftDeletedAttachedFunctions", mock.Anything, mock.Anything).
+	mockAttachedFunctionDb.On("GetAttachedFunctionsToGc", mock.Anything, mock.Anything).
 		Return(attachedFunctions, nil)
 
 	coordinator := &Coordinator{
@@ -591,16 +571,16 @@ func TestGetSoftDeletedAttachedFunctions_TimestampConsistency(t *testing.T) {
 		},
 	}
 
-	// Call GetSoftDeletedAttachedFunctions
+	// Call GetAttachedFunctionsToGc
 	cutoffTime := timestamppb.New(testTime.Add(-24 * time.Hour))
-	resp, err := coordinator.GetSoftDeletedAttachedFunctions(ctx, &coordinatorpb.GetSoftDeletedAttachedFunctionsRequest{
+	resp, err := coordinator.GetAttachedFunctionsToGc(ctx, &coordinatorpb.GetAttachedFunctionsToGcRequest{
 		CutoffTime: cutoffTime,
 		Limit:      100,
 	})
 
 	// Verify response
 	if err != nil {
-		t.Fatalf("GetSoftDeletedAttachedFunctions failed: %v", err)
+		t.Fatalf("GetAttachedFunctionsToGc failed: %v", err)
 	}
 	if len(resp.AttachedFunctions) != 1 {
 		t.Fatalf("Expected 1 attached function, got %d", len(resp.AttachedFunctions))

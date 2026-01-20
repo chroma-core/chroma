@@ -13,17 +13,13 @@ const sidebarConfig: AppSection[] = [
   {
     id: "docs",
     name: "Docs",
-    default: "/overview/introduction",
+    default: "/overview/getting-started",
     icon: BookText,
     subsections: [
       {
         id: "overview",
         name: "Overview",
         pages: [
-          {
-            id: "introduction",
-            name: "Introduction",
-          },
           {
             id: "getting-started",
             name: "Getting Started",
@@ -33,20 +29,8 @@ const sidebarConfig: AppSection[] = [
             name: "Architecture",
           },
           {
-            id: "data-model",
-            name: "Data Model",
-          },
-          {
-            id: "roadmap",
-            name: "Roadmap",
-          },
-          {
-            id: "contributing",
-            name: "Contributing",
-          },
-          {
-            id: "telemetry",
-            name: "Telemetry",
+            id: "oss",
+            name: "Open Source",
           },
           {
             id: "migration",
@@ -56,20 +40,14 @@ const sidebarConfig: AppSection[] = [
             id: "troubleshooting",
             name: "Troubleshooting",
           },
-          {
-            id: "about",
-            name: "About",
-          },
         ],
       },
       {
         id: "run-chroma",
         name: "Run Chroma",
         pages: [
-          { id: "ephemeral-client", name: "Ephemeral Client" },
-          { id: "persistent-client", name: "Persistent Client" },
+          { id: "clients", name: "Chroma Clients" },
           { id: "client-server", name: "Client-Server Mode" },
-          { id: "cloud-client", name: "Cloud Client" },
         ],
       },
       {
@@ -152,6 +130,7 @@ const sidebarConfig: AppSection[] = [
           { id: "search-basics", name: "Search Basics" },
           { id: "filtering", name: "Filtering with Where" },
           { id: "ranking", name: "Ranking and Scoring" },
+          { id: "group-by", name: "Group By & Aggregation" },
           { id: "hybrid-search", name: "Hybrid Search with RRF" },
           { id: "pagination-selection", name: "Pagination & Selection" },
           { id: "batch-operations", name: "Batch Operations" },
@@ -190,7 +169,10 @@ const sidebarConfig: AppSection[] = [
         pages: [
           { id: "building-with-ai", name: "Building With AI" },
           { id: "intro-to-retrieval", name: "Introduction to Retrieval" },
+          { id: "look-at-your-data", name: "Look at Your Data" },
+          { id: "chunking", name: "Chunking" },
           { id: "agentic-search", name: "Agentic Search" },
+          { id: "agentic-memory", name: "Agentic Memory" },
         ],
       },
       // { id: "develop", name: "Develop", generatePages: true },

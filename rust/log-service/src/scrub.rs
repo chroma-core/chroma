@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use chroma_error::ChromaError;
 use chroma_types::{
     chroma_proto::{scrub_log_request::LogToScrub, ScrubLogRequest, ScrubLogResponse},
@@ -7,7 +5,7 @@ use chroma_types::{
 };
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
-use wal3::{Limits, LogReader, LogReaderOptions};
+use wal3::Limits;
 
 use crate::{LogServer, MarkDirty};
 
@@ -31,9 +29,10 @@ impl LogServer {
             }
         };
 
-        let reader = LogReader::open(LogReaderOptions::default(), Arc::clone(&self.storage), path)
-            .await
-            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+        let reader =
+            Self::make_log_reader_with_defaults(std::sync::Arc::clone(&self.storage), path)
+                .await
+                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
 
         let limits = Limits {
             max_files: Some(scrub_log.max_files_to_read.into()),

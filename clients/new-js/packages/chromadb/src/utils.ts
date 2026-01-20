@@ -279,7 +279,9 @@ export const validateMetadata = (metadata?: Metadata) => {
 
 const SPARSE_VECTOR_TYPE = "sparse_vector" as const;
 
-type SerializedSparseVector = SparseVector & { "#type": typeof SPARSE_VECTOR_TYPE };
+type SerializedSparseVector = SparseVector & {
+  "#type": typeof SPARSE_VECTOR_TYPE;
+};
 
 type SerializedMetadataValue =
   | boolean
@@ -291,7 +293,9 @@ type SerializedMetadataValue =
 
 export type SerializedMetadata = Record<string, SerializedMetadataValue>;
 
-const toSerializedSparseVector = (vector: SparseVector): SerializedSparseVector => ({
+const toSerializedSparseVector = (
+  vector: SparseVector,
+): SerializedSparseVector => ({
   "#type": SPARSE_VECTOR_TYPE,
   indices: vector.indices,
   values: vector.values,
@@ -335,7 +339,9 @@ export const serializeMetadatas = (
   return metadatas.map((metadata) => serializeMetadata(metadata) ?? null);
 };
 
-const isSerializedSparseVector = (value: unknown): value is SerializedSparseVector => {
+const isSerializedSparseVector = (
+  value: unknown,
+): value is SerializedSparseVector => {
   if (typeof value !== "object" || value === null) {
     return false;
   }

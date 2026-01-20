@@ -14,7 +14,7 @@ use chroma_sysdb::{GetCollectionsOptions, GrpcSysDb, GrpcSysDbConfig, SysDb};
 use chroma_system::Orchestrator;
 use chroma_system::{Dispatcher, DispatcherConfig, System};
 use chroma_types::chroma_proto::CollectionVersionFile;
-use chroma_types::{CollectionUuid, Segment, SegmentScope, SegmentType};
+use chroma_types::{CollectionUuid, DatabaseName, Segment, SegmentScope, SegmentType};
 use chrono::DateTime;
 use futures::StreamExt;
 use garbage_collector_library::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator;
@@ -102,18 +102,16 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             };
 
             let mut sysdb = SysDb::Grpc(
-                GrpcSysDb::try_from_config(&config, &registry)
+                GrpcSysDb::try_from_config(&(config, None), &registry)
                     .await
                     .unwrap(),
             );
 
             sysdb.create_tenant(ref_state.tenant.clone()).await.unwrap();
+            let db_name =
+                DatabaseName::new(ref_state.db_name.clone()).expect("db_name should be valid");
             sysdb
-                .create_database(
-                    ref_state.db_id.0,
-                    ref_state.db_name.clone(),
-                    ref_state.tenant.clone(),
-                )
+                .create_database(ref_state.db_id.0, db_name, ref_state.tenant.clone())
                 .await
                 .unwrap();
             let system = System::new();
@@ -187,11 +185,13 @@ impl StateMachineTest for GarbageCollectorUnderTest {
                         .collection_id_to_segment_ids
                         .insert(collection_id, segment_ids);
 
+                    let db_name = DatabaseName::new(ref_state.db_name.clone())
+                        .expect("db_name should be valid");
                     state
                         .sysdb
                         .create_collection(
                             ref_state.tenant.clone(),
-                            ref_state.db_name.clone(),
+                            db_name,
                             collection_id,
                             format!("Collection {}", collection_id),
                             segments,

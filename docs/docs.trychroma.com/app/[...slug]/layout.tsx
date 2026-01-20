@@ -1,8 +1,5 @@
 import React from "react";
 import Sidebar from "@/components/sidebar/sidebar";
-import path from "path";
-import fs from "fs";
-import matter from "gray-matter";
 
 interface LayoutProps {
   children: React.ReactNode;

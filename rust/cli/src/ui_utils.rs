@@ -24,21 +24,31 @@ pub const LOGO: &str = "
                 \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[0m
 ";
 
+pub const HOLIDAY_LOGO: &str = "
+\x1b[97m  *       .                                     *              .
+  .                 \x1b[38;5;069m(((((((((    \x1b[38;5;203m(((((\x1b[38;5;220m####\x1b[97m              *
+    *            \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((\x1b[38;5;220m#########\x1b[97m    .
+  .            \x1b[38;5;069m(((((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m###########\x1b[97m        *
+      *      \x1b[38;5;069m((((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m############\x1b[97m  .
+  *         \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############\x1b[97m
+    .       \x1b[38;5;069m(((((((((((((\x1b[38;5;203m((((((((((((((\x1b[38;5;220m#############\x1b[97m     *
+  .          \x1b[38;5;069m((((((((((((\x1b[38;5;203m(((((((((((((\x1b[38;5;220m##############\x1b[97m .
+      *      \x1b[38;5;069m((((((((((((\x1b[38;5;203m((((((((((((\x1b[38;5;220m##############\x1b[97m      *
+  *            \x1b[38;5;069m((((((((((\x1b[38;5;203m(((((((((((\x1b[38;5;220m#############\x1b[97m   .
+  .      *         \x1b[38;5;069m(((((\x1b[38;5;203m((((    \x1b[38;5;220m#########\x1b[97m          .
+      .        *                        .        *           .\x1b[0m
+";
+
 pub enum ColorLevel {
     Ansi256,
     TrueColor,
 }
 
-#[derive(Debug, Clone, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, ValueEnum, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Theme {
+    #[default]
     Dark,
     Light,
-}
-
-impl Default for Theme {
-    fn default() -> Self {
-        Self::Dark
-    }
 }
 
 pub fn read_secret(prompt: &str) -> io::Result<String> {

@@ -37,7 +37,10 @@ export class Select {
       return new Select(input as Iterable<SelectKeyInput>);
     }
 
-    if (typeof input === "object" && "keys" in (input as Record<string, unknown>)) {
+    if (
+      typeof input === "object" &&
+      "keys" in (input as Record<string, unknown>)
+    ) {
       const { keys } = input as { keys?: Iterable<SelectKeyInput> };
       return new Select(keys ?? []);
     }

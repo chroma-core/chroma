@@ -1204,13 +1204,16 @@ mod tests {
 
         // Connect to Grpc SysDb (requires Tilt running)
         let grpc_sysdb = chroma_sysdb::GrpcSysDb::try_from_config(
-            &chroma_sysdb::GrpcSysDbConfig {
-                host: "localhost".to_string(),
-                port: 50051,
-                connect_timeout_ms: 5000,
-                request_timeout_ms: 10000,
-                num_channels: 4,
-            },
+            &(
+                chroma_sysdb::GrpcSysDbConfig {
+                    host: "localhost".to_string(),
+                    port: 50051,
+                    connect_timeout_ms: 5000,
+                    request_timeout_ms: 10000,
+                    num_channels: 4,
+                },
+                None,
+            ),
             &registry,
         )
         .await
@@ -1223,11 +1226,14 @@ mod tests {
         // Create input collection
         let collection_name = format!("test_statistics_{}", uuid::Uuid::new_v4());
         let collection_id = CollectionUuid::new();
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
 
         sysdb
             .create_collection(
                 test_segments.collection.tenant,
-                test_segments.collection.database,
+                database_name,
                 collection_id,
                 collection_name,
                 vec![
@@ -1312,7 +1318,7 @@ mod tests {
         let output_collection_name = format!("test_stats_output_{}", test_run_id);
 
         // Create statistics attached function via sysdb
-        let attached_function_id = sysdb
+        let (attached_function_id, _created) = sysdb
             .create_attached_function(
                 attached_function_name.to_string(),
                 "statistics".to_string(),
@@ -1325,10 +1331,13 @@ mod tests {
             )
             .await
             .expect("Attached function creation should succeed");
+        let mut output_schema = chroma_types::Schema::new_default(chroma_types::KnnIndex::Hnsw);
+        output_schema.source_attached_function_id = Some(attached_function_id.0.to_string());
+        let output_schema_str = serde_json::to_string(&output_schema).unwrap();
         sysdb
-            .finish_create_attached_function(attached_function_id)
+            .finish_create_attached_function(attached_function_id, output_schema_str)
             .await
-            .expect("Attached function creation finish should succeed");
+            .unwrap();
 
         Box::pin(compact::compact(
             system.clone(),
@@ -1350,9 +1359,18 @@ mod tests {
         .expect("Compaction should succeed");
 
         // Verify statistics were generated
-        let updated_attached_function = sysdb
-            .get_attached_function_by_name(collection_id, attached_function_name.clone())
+        let attached_functions = sysdb
+            .get_attached_functions(
+                None,
+                Some(attached_function_name.clone()),
+                Some(collection_id),
+                true,
+            )
             .await
+            .expect("Attached function query should succeed");
+        let updated_attached_function = attached_functions
+            .into_iter()
+            .next()
             .expect("Attached function should be found");
 
         // Note: completion_offset is 14, all 15 records (0-14) were processed

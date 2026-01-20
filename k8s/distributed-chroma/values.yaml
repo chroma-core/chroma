@@ -20,7 +20,7 @@ sysdb:
   replicaCount: 1
   env:
     - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+      value: 'value: "jaeger.chroma.svc.cluster.local:4317"'
   resources:
     limits:
       cpu: '2000m'
@@ -85,3 +85,15 @@ garbageCollector:
   cache:
     hostPath: '/local/cache/chroma-garbage-collector'
     mountPath: '/cache/'
+rustSysdbService:
+  image:
+    repository: 'rust-sysdb-service'
+    tag: 'latest'
+  replicaCount: 0
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'

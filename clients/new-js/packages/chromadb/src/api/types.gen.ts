@@ -21,6 +21,10 @@ export type AttachFunctionRequest = {
 
 export type AttachFunctionResponse = {
     attached_function: AttachedFunctionInfo;
+    /**
+     * True if newly created, false if already existed (idempotent request)
+     */
+    created: boolean;
 };
 
 /**
@@ -173,10 +177,6 @@ export type DetachFunctionRequest = {
      * Whether to delete the output collection as well
      */
     delete_output?: boolean;
-    /**
-     * ID of the input collection
-     */
-    input_collection_id: string;
 };
 
 export type DetachFunctionResponse = {
@@ -304,6 +304,13 @@ export type Include = 'distances' | 'documents' | 'embeddings' | 'metadatas' | '
 
 export type IncludeList = Array<Include>;
 
+export type IndexStatusResponse = {
+    num_indexed_ops: number;
+    num_unindexed_ops: number;
+    op_indexing_progress: number;
+    total_ops: number;
+};
+
 export type IntInvertedIndexConfig = {
     [key: string]: never;
 };
@@ -412,12 +419,20 @@ export type RawWhereFields = {
     where_document?: unknown;
 };
 
+export type ReadLevel = 'index_and_wal' | 'index_only';
+
 /**
  * Schema representation for collection index configurations
  *
  * This represents the server-side schema structure used for index management
  */
 export type Schema = {
+    /**
+     * Customer-managed encryption key for collection data
+     */
+    cmek?: {
+        [key: string]: unknown;
+    } | null;
     /**
      * Default index configurations for each value type
      */
@@ -429,6 +444,10 @@ export type Schema = {
     keys: {
         [key: string]: ValueTypes;
     };
+    /**
+     * ID of the attached function that created this output collection (if applicable)
+     */
+    source_attached_function_id?: string | null;
 };
 
 export type SearchPayload = {
@@ -437,6 +456,12 @@ export type SearchPayload = {
         where_clause?: {
             [key: string]: unknown;
         };
+    };
+    group_by?: {
+        aggregate?: {
+            [key: string]: unknown;
+        };
+        keys?: Array<string>;
     };
     limit?: {
         limit?: number;
@@ -451,6 +476,11 @@ export type SearchPayload = {
 };
 
 export type SearchRequestPayload = {
+    /**
+     * Specifies the read level for consistency vs performance tradeoffs.
+     * Defaults to IndexAndWal (full consistency).
+     */
+    read_level?: ReadLevel;
     searches: Array<SearchPayload>;
 };
 
@@ -1108,48 +1138,6 @@ export type GetDatabaseResponses = {
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
 
-export type DetachFunctionData = {
-    body: DetachFunctionRequest;
-    path: {
-        /**
-         * Tenant ID
-         */
-        tenant: string;
-        /**
-         * Database name
-         */
-        database: string;
-        /**
-         * Attached Function ID
-         */
-        attached_function_id: string;
-    };
-    query?: never;
-    url: '/api/v2/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach';
-};
-
-export type DetachFunctionErrors = {
-    /**
-     * Unauthorized
-     */
-    401: ErrorResponse;
-    /**
-     * Server error
-     */
-    500: ErrorResponse;
-};
-
-export type DetachFunctionError = DetachFunctionErrors[keyof DetachFunctionErrors];
-
-export type DetachFunctionResponses = {
-    /**
-     * Function detached successfully
-     */
-    200: DetachFunctionResponse;
-};
-
-export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
-
 export type ListCollectionsData = {
     body?: never;
     path: {
@@ -1399,6 +1387,52 @@ export type CollectionAddResponses = {
 };
 
 export type CollectionAddResponse = CollectionAddResponses[keyof CollectionAddResponses];
+
+export type DetachFunctionData = {
+    body: DetachFunctionRequest;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Input collection ID
+         */
+        collection_id: string;
+        /**
+         * Attached function name
+         */
+        name: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach';
+};
+
+export type DetachFunctionErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type DetachFunctionError = DetachFunctionErrors[keyof DetachFunctionErrors];
+
+export type DetachFunctionResponses = {
+    /**
+     * Function detached successfully
+     */
+    200: DetachFunctionResponse;
+};
+
+export type DetachFunctionResponse2 = DetachFunctionResponses[keyof DetachFunctionResponses];
 
 export type CollectionCountData = {
     body?: never;
@@ -1675,6 +1709,52 @@ export type CollectionGetResponses = {
 };
 
 export type CollectionGetResponse = CollectionGetResponses[keyof CollectionGetResponses];
+
+export type IndexingStatusData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant ID
+         */
+        tenant: string;
+        /**
+         * Database name for the collection
+         */
+        database: string;
+        /**
+         * Collection ID to get index status for
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status';
+};
+
+export type IndexingStatusErrors = {
+    /**
+     * Unauthorized
+     */
+    401: ErrorResponse;
+    /**
+     * Collection not found
+     */
+    404: ErrorResponse;
+    /**
+     * Server error
+     */
+    500: ErrorResponse;
+};
+
+export type IndexingStatusError = IndexingStatusErrors[keyof IndexingStatusErrors];
+
+export type IndexingStatusResponses = {
+    /**
+     * Index status retrieved successfully
+     */
+    200: IndexStatusResponse;
+};
+
+export type IndexingStatusResponse = IndexingStatusResponses[keyof IndexingStatusResponses];
 
 export type CollectionQueryData = {
     body: QueryRequestPayload;

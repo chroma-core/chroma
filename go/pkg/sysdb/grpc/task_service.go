@@ -8,6 +8,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/status"
 )
 
 func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFunctionRequest) (*coordinatorpb.AttachFunctionResponse, error) {
@@ -19,19 +20,7 @@ func (s *Server) AttachFunction(ctx context.Context, req *coordinatorpb.AttachFu
 		if err == common.ErrAttachedFunctionAlreadyExists {
 			return nil, grpcutils.BuildAlreadyExistsGrpcError(err.Error())
 		}
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) GetAttachedFunctionByName(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByNameRequest) (*coordinatorpb.GetAttachedFunctionByNameResponse, error) {
-	log.Info("GetAttachedFunctionByName", zap.String("input_collection_id", req.InputCollectionId), zap.String("name", req.Name))
-
-	res, err := s.coordinator.GetAttachedFunctionByName(ctx, req)
-	if err != nil {
-		log.Error("GetAttachedFunctionByName failed", zap.Error(err))
-		if err == common.ErrAttachedFunctionNotFound {
+		if err == common.ErrFunctionNotFound {
 			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
 		}
 		return nil, err
@@ -40,27 +29,16 @@ func (s *Server) GetAttachedFunctionByName(ctx context.Context, req *coordinator
 	return res, nil
 }
 
-func (s *Server) ListAttachedFunctions(ctx context.Context, req *coordinatorpb.ListAttachedFunctionsRequest) (*coordinatorpb.ListAttachedFunctionsResponse, error) {
-	log.Info("ListAttachedFunctions", zap.String("input_collection_id", req.InputCollectionId))
+func (s *Server) GetAttachedFunctions(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsRequest) (*coordinatorpb.GetAttachedFunctionsResponse, error) {
+	log.Info("GetAttachedFunctions",
+		zap.Any("id", req.Id),
+		zap.Any("name", req.Name),
+		zap.Any("input_collection_id", req.InputCollectionId),
+		zap.Any("only_ready", req.OnlyReady))
 
-	res, err := s.coordinator.ListAttachedFunctions(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctions(ctx, req)
 	if err != nil {
-		log.Error("ListAttachedFunctions failed", zap.Error(err))
-		return nil, err
-	}
-
-	return res, nil
-}
-
-func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinatorpb.GetAttachedFunctionByUuidRequest) (*coordinatorpb.GetAttachedFunctionByUuidResponse, error) {
-	log.Info("GetAttachedFunctionByUuid", zap.String("id", req.Id))
-
-	res, err := s.coordinator.GetAttachedFunctionByUuid(ctx, req)
-	if err != nil {
-		log.Error("GetAttachedFunctionByUuid failed", zap.Error(err))
-		if err == common.ErrAttachedFunctionNotFound {
-			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
-		}
+		log.Error("GetAttachedFunctions failed", zap.Error(err))
 		return nil, err
 	}
 
@@ -68,11 +46,14 @@ func (s *Server) GetAttachedFunctionByUuid(ctx context.Context, req *coordinator
 }
 
 func (s *Server) DetachFunction(ctx context.Context, req *coordinatorpb.DetachFunctionRequest) (*coordinatorpb.DetachFunctionResponse, error) {
-	log.Info("DetachFunction", zap.String("attached_function_id", req.AttachedFunctionId))
+	log.Info("DetachFunction", zap.String("name", req.Name), zap.String("input_collection_id", req.InputCollectionId))
 
 	res, err := s.coordinator.DetachFunction(ctx, req)
 	if err != nil {
 		log.Error("DetachFunction failed", zap.Error(err))
+		if err == common.ErrAttachedFunctionNotFound {
+			return nil, grpcutils.BuildNotFoundGrpcError(err.Error())
+		}
 		return nil, err
 	}
 
@@ -104,16 +85,16 @@ func (s *Server) CleanupExpiredPartialAttachedFunctions(ctx context.Context, req
 	return res, nil
 }
 
-func (s *Server) GetSoftDeletedAttachedFunctions(ctx context.Context, req *coordinatorpb.GetSoftDeletedAttachedFunctionsRequest) (*coordinatorpb.GetSoftDeletedAttachedFunctionsResponse, error) {
-	log.Info("GetSoftDeletedAttachedFunctions", zap.Time("cutoff_time", req.CutoffTime.AsTime()), zap.Int32("limit", req.Limit))
+func (s *Server) GetAttachedFunctionsToGc(ctx context.Context, req *coordinatorpb.GetAttachedFunctionsToGcRequest) (*coordinatorpb.GetAttachedFunctionsToGcResponse, error) {
+	log.Info("GetAttachedFunctionsToGc", zap.Time("cutoff_time", req.CutoffTime.AsTime()), zap.Int32("limit", req.Limit))
 
-	res, err := s.coordinator.GetSoftDeletedAttachedFunctions(ctx, req)
+	res, err := s.coordinator.GetAttachedFunctionsToGc(ctx, req)
 	if err != nil {
-		log.Error("GetSoftDeletedAttachedFunctions failed", zap.Error(err))
+		log.Error("GetAttachedFunctionsToGc failed", zap.Error(err))
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 
-	log.Info("GetSoftDeletedAttachedFunctions succeeded", zap.Int("count", len(res.AttachedFunctions)))
+	log.Info("GetAttachedFunctionsToGc succeeded", zap.Int("count", len(res.AttachedFunctions)))
 	return res, nil
 }
 
@@ -123,6 +104,10 @@ func (s *Server) FinishCreateAttachedFunction(ctx context.Context, req *coordina
 	res, err := s.coordinator.FinishCreateAttachedFunction(ctx, req)
 	if err != nil {
 		log.Error("FinishCreateAttachedFunction failed", zap.Error(err))
+		// If it's already a gRPC status error, return it directly
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
 		return nil, grpcutils.BuildInternalGrpcError(err.Error())
 	}
 

@@ -18,7 +18,8 @@ use chroma_system::System;
 use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
-    CollectionUuid, ForkLogsResponse, LogRecord, OperationRecord, RecordConversionError,
+    Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
+    RecordConversionError,
 };
 use std::fmt::Debug;
 use std::time::Duration;
@@ -308,6 +309,7 @@ impl GrpcLog {
     // ScoutLogs returns the offset of the next record to be inserted into the log.
     pub(super) async fn scout_logs(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         _start_from: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
@@ -316,6 +318,7 @@ impl GrpcLog {
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let request = client.scout_logs(chroma_proto::ScoutLogsRequest {
             collection_id: collection_id.0.to_string(),
+            database_name: database_name.into_string(),
         });
         let response = request.await;
         let response = match response {
@@ -331,18 +334,16 @@ impl GrpcLog {
 
     pub(super) async fn read(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
         end_timestamp: Option<i64>,
     ) -> Result<Vec<LogRecord>, GrpcPullLogsError> {
-        let end_timestamp = match end_timestamp {
-            Some(end_timestamp) => end_timestamp,
-            None => i64::MAX,
-        };
+        let end_timestamp = end_timestamp.unwrap_or(i64::MAX);
         let mut client = self.client_for(collection_id)?;
         let request = client.pull_logs(chroma_proto::PullLogsRequest {
-            // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+            database_name: database_name.into_string(),
             collection_id: collection_id.0.to_string(),
             start_from_offset: offset,
             batch_size,
@@ -382,11 +383,18 @@ impl GrpcLog {
 
     pub(super) async fn push_logs(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), GrpcPushLogsError> {
         let num_records = records.len();
+
+        // Convert Cmek to protobuf format
+        let cmek_proto = cmek.map(|c| c.into());
+
         let request = chroma_proto::PushLogsRequest {
+            database_name: database_name.into_string(),
             collection_id: collection_id.0.to_string(),
 
             records:
@@ -394,6 +402,7 @@ impl GrpcLog {
                     Vec<chroma_types::chroma_proto::OperationRecord>,
                     RecordConversionError,
                 >>()?,
+            cmek: cmek_proto,
         };
 
         let resp = self
@@ -425,12 +434,14 @@ impl GrpcLog {
 
     pub(super) async fn fork_logs(
         &mut self,
+        database_name: DatabaseName,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
     ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
         let response = self
             .client_for(source_collection_id)?
             .fork_logs(chroma_proto::ForkLogsRequest {
+                database_name: database_name.into_string(),
                 source_collection_id: source_collection_id.to_string(),
                 target_collection_id: target_collection_id.to_string(),
             })
@@ -489,6 +500,7 @@ impl GrpcLog {
         Self::post_process_get_all(combined_response)
     }
 
+    #[allow(clippy::result_large_err)]
     fn post_process_get_all(
         combined_response: Vec<GetAllCollectionInfoToCompactResponse>,
     ) -> Result<Vec<CollectionInfo>, GrpcGetCollectionsWithNewDataError> {
@@ -526,13 +538,14 @@ impl GrpcLog {
 
     pub(super) async fn update_collection_log_offset(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
         let mut client = self.client_for(collection_id)?;
         let request =
             client.update_collection_log_offset(chroma_proto::UpdateCollectionLogOffsetRequest {
-                // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                database_name: database_name.into_string(),
                 collection_id: collection_id.0.to_string(),
                 log_offset: new_offset,
             });
@@ -545,6 +558,7 @@ impl GrpcLog {
 
     pub(super) async fn update_collection_log_offset_on_every_node(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), GrpcUpdateCollectionLogOffsetError> {
@@ -553,7 +567,7 @@ impl GrpcLog {
             let mut client = client.clone();
             let request = client.update_collection_log_offset(
                 chroma_proto::UpdateCollectionLogOffsetRequest {
-                    // NOTE(rescrv):  Use the untyped string representation of the collection ID.
+                    database_name: database_name.clone().into_string(),
                     collection_id: collection_id.0.to_string(),
                     log_offset: new_offset,
                 },
@@ -587,7 +601,6 @@ impl GrpcLog {
                 let _permit = limiter.acquire().await;
                 client
                     .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
-                        // NOTE(rescrv):  Use the untyped string representation of the collection ID.
                         collection_ids: collection_ids_clone
                             .iter()
                             .map(ToString::to_string)
@@ -614,6 +627,7 @@ impl GrpcLog {
 
     pub async fn garbage_collect_phase2(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<(), GarbageCollectError> {
         let mut client = self
@@ -631,6 +645,7 @@ impl GrpcLog {
                         collection_id.to_string(),
                     ),
                 ),
+                database_name: database_name.into_string(),
             })
             .await?;
         Ok(())
@@ -672,6 +687,7 @@ impl GrpcLog {
                     "rust-log-service-{ordinal}"
                 )),
             ),
+            database_name: "ignored".to_string(),
         })
         .await?;
         Ok(())

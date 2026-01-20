@@ -39,6 +39,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
+    ReadLevel,
     Schema,
     SearchResult,
 )
@@ -49,7 +50,7 @@ from chromadb.execution.expression.plan import Search
 import chromadb_rust_bindings
 
 
-from typing import Optional, Sequence, List, Dict, Any
+from typing import Optional, Sequence, List, Dict, Any, Tuple
 from overrides import override
 from uuid import UUID
 import json
@@ -335,12 +336,22 @@ class RustBindingsAPI(ServerAPI):
         )
 
     @override
+    def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "IndexingStatus":
+        raise NotImplementedError("Indexing status is not implemented for Local Chroma")
+
+    @override
     def _search(
         self,
         collection_id: UUID,
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         raise NotImplementedError("Search is not implemented for Local Chroma")
 
@@ -613,7 +624,7 @@ class RustBindingsAPI(ServerAPI):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
@@ -637,26 +648,12 @@ class RustBindingsAPI(ServerAPI):
     @override
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
     ) -> bool:
-        """Attached functions are not supported in the Rust bindings (local embedded mode)."""
-        raise NotImplementedError(
-            "Attached functions are only supported when connecting to a Chroma server via HttpClient. "
-            "The Rust bindings (embedded mode) do not support attached function operations."
-        )
-
-    @override
-    def get_attached_function(
-        self,
-        name: str,
-        input_collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
         """Attached functions are not supported in the Rust bindings (local embedded mode)."""
         raise NotImplementedError(
             "Attached functions are only supported when connecting to a Chroma server via HttpClient. "

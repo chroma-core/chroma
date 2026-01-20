@@ -9,9 +9,11 @@ use chroma_error::{ChromaError, ErrorCodes};
 pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
+pub mod metrics;
 pub mod object_storage;
 pub mod s3;
 pub mod stream;
+use chroma_types::Cmek;
 use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
@@ -403,22 +405,8 @@ impl Storage {
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.delete(key, options).await,
-            Storage::Object(obj) => {
-                if options.if_match.is_some() {
-                    return Err(StorageError::Message {
-                        message: "if match not supported for object store backend".to_string(),
-                    });
-                }
-                obj.delete(key).await
-            }
-            Storage::Local(local) => {
-                if options.if_match.is_some() {
-                    return Err(StorageError::Message {
-                        message: "if match not supported for local backend".to_string(),
-                    });
-                }
-                local.delete(key).await
-            }
+            Storage::Object(obj) => obj.delete(key).await,
+            Storage::Local(local) => local.delete(key).await,
             Storage::AdmissionControlledS3(ac) => ac.delete(key, options).await,
         }
     }
@@ -503,10 +491,18 @@ pub fn test_storage() -> (TempDir, Storage) {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum PutMode {
+    IfMatch(ETag),
+    IfNotExist,
+    #[default]
+    Upsert,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PutOptions {
-    if_not_exists: bool,
-    if_match: Option<ETag>,
+    mode: PutMode,
     priority: StorageRequestPriority,
+    cmek: Option<Cmek>,
 }
 
 #[derive(Error, Debug)]
@@ -516,36 +512,19 @@ pub enum PutOptionsCreateError {
 }
 
 impl PutOptions {
-    pub fn if_not_exists(priority: StorageRequestPriority) -> Self {
-        // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(true, None, priority).unwrap()
+    pub fn with_cmek(mut self, cmek: Cmek) -> Self {
+        self.cmek = Some(cmek);
+        self
     }
 
-    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
-        // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(false, Some(e_tag.clone()), priority).unwrap()
+    pub fn with_mode(mut self, mode: PutMode) -> Self {
+        self.mode = mode;
+        self
     }
 
-    pub fn with_priority(priority: StorageRequestPriority) -> Self {
-        Self {
-            priority,
-            ..Default::default()
-        }
-    }
-
-    pub fn new(
-        if_not_exists: bool,
-        if_match: Option<ETag>,
-        priority: StorageRequestPriority,
-    ) -> Result<PutOptions, PutOptionsCreateError> {
-        if if_not_exists && if_match.is_some() {
-            return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
-        }
-        Ok(PutOptions {
-            if_not_exists,
-            if_match,
-            priority,
-        })
+    pub fn with_priority(mut self, priority: StorageRequestPriority) -> Self {
+        self.priority = priority;
+        self
     }
 }
 
@@ -580,39 +559,14 @@ impl GetOptions {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct DeleteOptions {
-    if_match: Option<ETag>,
     priority: StorageRequestPriority,
 }
 
 impl DeleteOptions {
-    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
-        Self::new(Some(e_tag.clone()), priority)
-    }
-
-    pub fn with_priority(priority: StorageRequestPriority) -> Self {
-        Self {
-            priority,
-            ..Default::default()
-        }
-    }
-
-    fn new(if_match: Option<ETag>, priority: StorageRequestPriority) -> DeleteOptions {
-        DeleteOptions { if_match, priority }
+    pub fn new(priority: StorageRequestPriority) -> DeleteOptions {
+        DeleteOptions { priority }
     }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ETag(pub String);
-
-/////////////////////////////////////////////// tests //////////////////////////////////////////////
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn put_options_ctors() {
-        let _x = PutOptions::if_not_exists(StorageRequestPriority::P0);
-        let _x = PutOptions::if_matches(&ETag("123".to_string()), StorageRequestPriority::P0);
-    }
-}

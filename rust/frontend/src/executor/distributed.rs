@@ -93,7 +93,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
 
         let retry_config = &config.retry;
         let backoff = retry_config.into();
-        let client_selection_config = config.client_selection_config.clone();
+        let client_selection_config = config.client_selection.clone();
 
         Ok(Self {
             client_assigner,
@@ -252,6 +252,7 @@ impl DistributedExecutor {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn choose_client_weighted<T: Clone>(
     clients: &[T],
     config: &ClientSelectionConfig,
@@ -301,6 +302,7 @@ fn choose_client_weighted<T: Clone>(
     Ok(clients[idx].clone())
 }
 
+#[allow(clippy::result_large_err)]
 fn choose_query_client_weighted(
     clients: &[QueryClient],
     config: &ClientSelectionConfig,

@@ -26,8 +26,10 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    IndexingStatus,
     Schema,
     Metadatas,
+    ReadLevel,
     URIs,
     Where,
     WhereDocument,
@@ -379,6 +381,25 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("FastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> IndexingStatus:
+        resp_json = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+        )
+        return IndexingStatus(
+            num_indexed_ops=resp_json["num_indexed_ops"],
+            num_unindexed_ops=resp_json["num_unindexed_ops"],
+            total_ops=resp_json["total_ops"],
+            op_indexing_progress=resp_json["op_indexing_progress"],
+        )
+
     @trace_method("FastAPI._search", OpenTelemetryGranularity.OPERATION)
     @override
     def _search(
@@ -387,10 +408,14 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Performs hybrid search on a collection"""
         # Convert Search objects to dictionaries
-        payload = {"searches": [s.to_dict() for s in searches]}
+        payload = {
+            "searches": [s.to_dict() for s in searches],
+            "read_level": read_level,
+        }
 
         resp_json = self._make_request(
             "post",
@@ -773,7 +798,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attach a function to a collection."""
         resp_json = self._make_request(
             "post",
@@ -786,7 +811,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             },
         )
 
-        return AttachedFunction(
+        attached_function = AttachedFunction(
             client=self,
             id=UUID(resp_json["attached_function"]["id"]),
             name=resp_json["attached_function"]["name"],
@@ -797,6 +822,10 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             tenant=tenant,
             database=database,
         )
+        created = resp_json.get(
+            "created", True
+        )  # Default to True for backwards compatibility
+        return (attached_function, created)
 
     @trace_method("FastAPI.get_attached_function", OpenTelemetryGranularity.ALL)
     @override
@@ -830,7 +859,7 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -839,10 +868,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         """Detach a function and prevent any further runs."""
         resp_json = self._make_request(
             "post",
-            f"/tenants/{tenant}/databases/{database}/attached_functions/{attached_function_id}/detach",
+            f"/tenants/{tenant}/databases/{database}/collections/{input_collection_id}/attached_functions/{name}/detach",
             json={
                 "delete_output": delete_output,
-                "input_collection_id": str(input_collection_id),
             },
         )
         return cast(bool, resp_json["success"])

@@ -4,17 +4,18 @@
 
 use std::sync::Arc;
 
-use bytes::Bytes;
-use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use setsum::Setsum;
 
-use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage, StorageError,
-};
+use chroma_storage::Storage;
 
+use crate::interfaces::s3;
+use crate::interfaces::{
+    FragmentConsumer, FragmentManagerFactory, FragmentPointer, ManifestConsumer,
+    ManifestManagerFactory,
+};
 use crate::{
-    parse_fragment_path, Error, Fragment, LogPosition, LogReaderOptions, Manifest, ManifestAndETag,
-    ScrubError, ScrubSuccess, Snapshot, SnapshotCache,
+    Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest, ManifestAndWitness,
+    ScrubError, ScrubSuccess, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -37,36 +38,145 @@ impl Limits {
     };
 }
 
-/// LogReader is a reader for the log.
-pub struct LogReader {
-    options: LogReaderOptions,
-    storage: Arc<Storage>,
-    cache: Option<Arc<dyn SnapshotCache>>,
-    pub(crate) prefix: String,
+/// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
+/// return Some(Vec<Fragment>).  If the read would require reading from the future or
+/// snapshots, return None.  Scan is more appropriate for that.
+///
+/// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
+///    interval.
+/// 2. Up to, and including, the number of files to return.
+/// 3. Up to, and including, the total number of bytes to return.
+pub fn scan_from_manifest(
+    manifest: &Manifest,
+    from: LogPosition,
+    limits: Limits,
+) -> Option<Vec<Fragment>> {
+    let log_position_range = if let Some(max_records) = limits.max_records {
+        if from.offset().saturating_add(max_records) == u64::MAX {
+            return None;
+        }
+        (from, from + max_records)
+    } else {
+        (from, LogPosition::MAX)
+    };
+    // If no there is no fragment with a start earlier than the from LogPosition, that means
+    // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
+    // to indicate that it's not satisfiable and do no I/O.
+    if !manifest
+        .fragments
+        .iter()
+        .any(|f| f.start <= log_position_range.0)
+    {
+        return None;
+    }
+    // If no there is no fragment with a limit later than the upper-bound LogPosition, that
+    // means we have a stale manifest.  Since this is an in-memory only function, we return
+    // "None" to indicate that it's not satisfiable and do no I/O.
+    if !manifest
+        .fragments
+        .iter()
+        .any(|f| f.limit > log_position_range.1)
+    {
+        return None;
+    }
+    let fragments = manifest
+        .fragments
+        .iter()
+        .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut short_read = false;
+    Some(post_process_fragments(
+        fragments,
+        from,
+        limits,
+        &mut short_read,
+    ))
 }
 
-impl LogReader {
-    pub fn new(options: LogReaderOptions, storage: Arc<Storage>, prefix: String) -> Self {
+/// Post process the fragments such that only records starting at from and not exceeding limits
+/// will be processed.  Sets *short_read=true when the limits truncate the log.
+fn post_process_fragments(
+    mut fragments: Vec<Fragment>,
+    from: LogPosition,
+    limits: Limits,
+    short_read: &mut bool,
+) -> Vec<Fragment> {
+    fragments.sort_by_key(|f| f.start.offset());
+    if let Some(max_files) = limits.max_files {
+        if fragments.len() as u64 > max_files {
+            *short_read = true;
+            fragments.truncate(max_files as usize);
+        }
+    }
+    while fragments.len() > 1
+        // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
+        // records without it we can pop.
+        && fragments[fragments.len() - 1].start - from
+            > limits.max_records.unwrap_or(u64::MAX)
+    {
+        fragments.pop();
+        *short_read = true;
+    }
+    while fragments.len() > 1
+        && fragments
+            .iter()
+            .map(|f| f.num_bytes)
+            .fold(0, u64::saturating_add)
+            > limits.max_bytes.unwrap_or(u64::MAX)
+    {
+        fragments.pop();
+        *short_read = true;
+    }
+    fragments
+}
+
+/// LogReader is a reader for the log.
+pub struct LogReader<
+    P: FragmentPointer = (FragmentSeqNo, LogPosition),
+    FC: FragmentConsumer<FragmentPointer = P> = s3::S3FragmentPuller,
+    MC: ManifestConsumer<P> = s3::ManifestReader,
+> {
+    _options: LogReaderOptions,
+    fragment_consumer: FC,
+    manifest_consumer: MC,
+    cache: Option<Arc<dyn SnapshotCache>>,
+}
+
+impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
+    std::fmt::Debug for LogReader<P, FC, MC>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LogReader")
+            .field("_options", &self._options)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<P: FragmentPointer, FC: FragmentConsumer<FragmentPointer = P>, MC: ManifestConsumer<P>>
+    LogReader<P, FC, MC>
+{
+    pub fn new(options: LogReaderOptions, fragment_consumer: FC, manifest_consumer: MC) -> Self {
         let cache = None;
         Self {
-            options,
-            storage,
+            _options: options,
+            fragment_consumer,
+            manifest_consumer,
             cache,
-            prefix,
         }
     }
 
     pub async fn open(
         options: LogReaderOptions,
-        storage: Arc<Storage>,
-        prefix: String,
+        fragment_consumer: FC,
+        manifest_consumer: MC,
     ) -> Result<Self, Error> {
         let cache = None;
         Ok(Self {
-            options,
-            storage,
+            _options: options,
+            fragment_consumer,
+            manifest_consumer,
             cache,
-            prefix,
         })
     }
 
@@ -75,46 +185,38 @@ impl LogReader {
     }
 
     /// Verify that the reader would read the same manifest as the one provided in
-    /// manifest_and_etag, but do it in a way that doesn't load the whole manifest.
-    pub async fn verify(&self, manifest_and_etag: &ManifestAndETag) -> Result<bool, Error> {
-        Manifest::head(
-            &self.options.throttle,
-            &self.storage,
-            &self.prefix,
-            &manifest_and_etag.e_tag,
-        )
-        .await
+    /// manifest_and_witness, but do it in a way that doesn't load the whole manifest.
+    pub async fn verify(&self, manifest_and_witness: &ManifestAndWitness) -> Result<bool, Error> {
+        self.manifest_consumer
+            .manifest_head(&manifest_and_witness.witness)
+            .await
     }
 
     pub async fn manifest(&self) -> Result<Option<Manifest>, Error> {
-        Ok(
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
-                .await?
-                .map(|(m, _)| m),
-        )
+        Ok(self
+            .manifest_consumer
+            .manifest_load()
+            .await?
+            .map(|(m, _)| m))
     }
 
-    pub async fn manifest_and_e_tag(&self) -> Result<Option<ManifestAndETag>, Error> {
-        match Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await {
-            Ok(Some((manifest, e_tag))) => Ok(Some(ManifestAndETag { manifest, e_tag })),
+    pub async fn manifest_and_witness(&self) -> Result<Option<ManifestAndWitness>, Error> {
+        match self.manifest_consumer.manifest_load().await {
+            Ok(Some((manifest, witness))) => Ok(Some(ManifestAndWitness { manifest, witness })),
             Ok(None) => Ok(None),
             Err(err) => Err(err),
         }
     }
 
     pub async fn oldest_timestamp(&self) -> Result<LogPosition, Error> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
-        else {
+        let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
         };
         Ok(manifest.oldest_timestamp())
     }
 
     pub async fn next_write_timestamp(&self) -> Result<LogPosition, Error> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
-        else {
+        let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
         };
         Ok(manifest.next_write_timestamp())
@@ -126,9 +228,7 @@ impl LogReader {
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix).await?
-        else {
+        let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
         };
         let mut short_read = false;
@@ -172,22 +272,19 @@ impl LogReader {
             let futures = snapshots
                 .iter()
                 .map(|s| {
-                    let options = self.options.clone();
-                    let storage = Arc::clone(&self.storage);
                     let cache = self.cache.as_ref().map(Arc::clone);
                     async move {
                         if let Some(cache) = cache {
                             if let Some(snapshot) = cache.get(s).await? {
                                 return Ok(Some(snapshot));
                             }
-                            let snap = Snapshot::load(&options.throttle, &storage, &self.prefix, s)
-                                .await?;
+                            let snap = self.manifest_consumer.snapshot_load(s).await?;
                             if let Some(snap) = snap.as_ref() {
                                 cache.put(s, snap).await?;
                             }
                             Ok(snap)
                         } else {
-                            Snapshot::load(&options.throttle, &storage, &self.prefix, s).await
+                            self.manifest_consumer.snapshot_load(s).await
                         }
                     }
                 })
@@ -211,122 +308,7 @@ impl LogReader {
         }
         fragments.retain(|f| f.limit > from);
         fragments.sort_by_key(|f| f.start.offset());
-        Ok(Self::post_process_fragments(
-            fragments, from, limits, short_read,
-        ))
-    }
-
-    /// Do a consistent stale read of the manifest.  If the read can be returned without I/O,
-    /// return Some(Vec<Fragment>).  If the read would require reading from the future or
-    /// snapshots, return None.  Scan is more appropriate for that.
-    ///
-    /// 1. Up to, but not including, the offset of the log position.  This makes it a half-open
-    ///    interval.
-    /// 2. Up to, and including, the number of files to return.
-    /// 3. Up to, and including, the total number of bytes to return.
-    pub fn scan_from_manifest(
-        manifest: &Manifest,
-        from: LogPosition,
-        limits: Limits,
-    ) -> Option<Vec<Fragment>> {
-        let log_position_range = if let Some(max_records) = limits.max_records {
-            if from.offset().saturating_add(max_records) == u64::MAX {
-                return None;
-            }
-            (from, from + max_records)
-        } else {
-            (from, LogPosition::MAX)
-        };
-        // If no there is no fragment with a start earlier than the from LogPosition, that means
-        // we'd need to load snapshots.  Since this is an in-memory only function, we return "None"
-        // to indicate that it's not satisfiable and do no I/O.
-        if !manifest
-            .fragments
-            .iter()
-            .any(|f| f.start <= log_position_range.0)
-        {
-            return None;
-        }
-        // If no there is no fragment with a limit later than the upper-bound LogPosition, that
-        // means we have a stale manifest.  Since this is an in-memory only function, we return
-        // "None" to indicate that it's not satisfiable and do no I/O.
-        if !manifest
-            .fragments
-            .iter()
-            .any(|f| f.limit > log_position_range.1)
-        {
-            return None;
-        }
-        let fragments = manifest
-            .fragments
-            .iter()
-            .filter(|f| ranges_overlap(log_position_range, (f.start, f.limit)))
-            .cloned()
-            .collect::<Vec<_>>();
-        let mut short_read = false;
-        Some(Self::post_process_fragments(
-            fragments,
-            from,
-            limits,
-            &mut short_read,
-        ))
-    }
-
-    // Post process the fragments such that only records starting at from and not exceeding limits
-    // will be processed.  Sets *short_read=true when the limits truncate the log.
-    fn post_process_fragments(
-        mut fragments: Vec<Fragment>,
-        from: LogPosition,
-        limits: Limits,
-        short_read: &mut bool,
-    ) -> Vec<Fragment> {
-        fragments.sort_by_key(|f| f.start.offset());
-        if let Some(max_files) = limits.max_files {
-            if fragments.len() as u64 > max_files {
-                *short_read = true;
-                fragments.truncate(max_files as usize);
-            }
-        }
-        while fragments.len() > 1
-            // NOTE(rescrv):  We take the start of the last fragment, because if there are enough
-            // records without it we can pop.
-            && fragments[fragments.len() - 1].start - from
-                > limits.max_records.unwrap_or(u64::MAX)
-        {
-            fragments.pop();
-            *short_read = true;
-        }
-        while fragments.len() > 1
-            && fragments
-                .iter()
-                .map(|f| f.num_bytes)
-                .fold(0, u64::saturating_add)
-                > limits.max_bytes.unwrap_or(u64::MAX)
-        {
-            fragments.pop();
-            *short_read = true;
-        }
-        fragments
-    }
-
-    #[tracing::instrument(skip(self))]
-    pub async fn fetch(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
-        Self::stateless_fetch(&self.storage, &self.prefix, fragment).await
-    }
-
-    /// A class method to fetch data (no state from an instantiated log reader)
-    #[tracing::instrument]
-    pub async fn stateless_fetch(
-        storage: &Storage,
-        prefix: &str,
-        fragment: &Fragment,
-    ) -> Result<Arc<Vec<u8>>, Error> {
-        let path = fragment_path(prefix, &fragment.path);
-        Ok(storage
-            .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
-            .await
-            .map_err(Arc::new)?
-            .0)
+        Ok(post_process_fragments(fragments, from, limits, short_read))
     }
 
     #[tracing::instrument(skip(self))]
@@ -334,16 +316,19 @@ impl LogReader {
     pub async fn read_parquet(
         &self,
         fragment: &Fragment,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
-        read_parquet(&self.storage, &self.prefix, &fragment.path).await
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        self.fragment_consumer
+            .read_parquet(&fragment.path, fragment.start)
+            .await
     }
 
     #[tracing::instrument(skip(self), ret)]
     pub async fn scrub(&self, limits: Limits) -> Result<ScrubSuccess, Vec<Error>> {
-        let Some((manifest, _)) =
-            Manifest::load(&self.options.throttle, &self.storage, &self.prefix)
-                .await
-                .map_err(|x| vec![x])?
+        let Some((manifest, _)) = self
+            .manifest_consumer
+            .manifest_load()
+            .await
+            .map_err(|x| vec![x])?
         else {
             return Err(vec![Error::UninitializedLog]);
         };
@@ -357,7 +342,9 @@ impl LogReader {
         let futures = fragments
             .iter()
             .map(|reference| async {
-                if let Some(empirical) = read_fragment(&self.storage, &self.prefix, &reference.path)
+                if let Some(empirical) = self
+                    .fragment_consumer
+                    .read_fragment(&reference.path, reference.start)
                     .await
                     .map_err(|x| vec![x])?
                 {
@@ -468,98 +455,39 @@ impl LogReader {
     }
 }
 
-pub fn fragment_path(prefix: &str, path: &str) -> String {
-    format!("{prefix}/{path}")
-}
-
-pub async fn read_parquet(
-    storage: &Storage,
-    prefix: &str,
-    path: &str,
-) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64), Error> {
-    let path = fragment_path(prefix, path);
-    let parquet = storage
-        .get(&path, GetOptions::new(StorageRequestPriority::P0))
-        .await
-        .map_err(Arc::new)?;
-    let num_bytes = parquet.len() as u64;
-    let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::from_owner(parquet.to_vec()))
-        .map_err(Arc::new)?;
-    let reader = builder.build().map_err(Arc::new)?;
-    let mut setsum = Setsum::default();
-    let mut records = vec![];
-    for batch in reader {
-        let batch = batch.map_err(|_| Error::CorruptFragment(path.to_string()))?;
-        let offset = batch
-            .column_by_name("offset")
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let epoch_micros = batch
-            .column_by_name("timestamp_us")
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let body = batch
-            .column_by_name("body")
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let offset = offset
-            .as_any()
-            .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let epoch_micros = epoch_micros
-            .as_any()
-            .downcast_ref::<arrow::array::UInt64Array>()
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        let body = body
-            .as_any()
-            .downcast_ref::<arrow::array::BinaryArray>()
-            .ok_or_else(|| Error::CorruptFragment(path.to_string()))?;
-        for i in 0..batch.num_rows() {
-            let offset = offset.value(i);
-            let epoch_micros = epoch_micros.value(i);
-            let body = body.value(i);
-            setsum.insert_vectored(&[&offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
-            records.push((LogPosition::from_offset(offset), body.to_vec()));
-        }
+impl LogReader<(FragmentSeqNo, LogPosition), s3::S3FragmentPuller, s3::ManifestReader> {
+    /// Open a LogReader with the classic S3-backed BatchManager and ManifestManager bindings.
+    ///
+    /// This is a convenience method that creates placeholder publishers since the LogReader
+    /// primarily uses storage directly for reading operations.
+    pub async fn open_classic(
+        options: LogReaderOptions,
+        storage: Arc<Storage>,
+        prefix: String,
+    ) -> Result<Self, Error> {
+        let write = crate::LogWriterOptions::default();
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            write,
+            options.clone(),
+            Arc::clone(&storage),
+            prefix.clone(),
+            "classic-reader".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let fragment_consumer = fragment_factory.make_consumer().await?;
+        let manifest_consumer = manifest_factory.make_consumer().await?;
+        Self::open(options, fragment_consumer, manifest_consumer).await
     }
-    Ok((setsum, records, num_bytes))
-}
-
-pub async fn read_fragment(
-    storage: &Storage,
-    prefix: &str,
-    path: &str,
-) -> Result<Option<Fragment>, Error> {
-    let seq_no = parse_fragment_path(path)
-        .ok_or_else(|| Error::MissingFragmentSequenceNumber(path.to_string()))?;
-    let (setsum, data, num_bytes) = match read_parquet(storage, prefix, path).await {
-        Ok((setsum, data, num_bytes)) => (setsum, data, num_bytes),
-        Err(Error::StorageError(storage)) => {
-            if matches!(&*storage, StorageError::NotFound { .. }) {
-                return Ok(None);
-            }
-            return Err(Error::StorageError(storage));
-        }
-        Err(e) => return Err(e),
-    };
-    if data.is_empty() {
-        return Err(Error::CorruptFragment(path.to_string()));
-    }
-    let start = LogPosition::from_offset(data.iter().map(|(p, _)| p.offset()).min().unwrap_or(0));
-    let limit =
-        LogPosition::from_offset(data.iter().map(|(p, _)| p.offset() + 1).max().unwrap_or(0));
-    Ok(Some(Fragment {
-        path: path.to_string(),
-        seq_no,
-        start,
-        limit,
-        num_bytes,
-        setsum,
-    }))
 }
 
 #[cfg(test)]
 mod tests {
     use setsum::Setsum;
 
-    use crate::{Fragment, FragmentSeqNo};
+    use crate::interfaces::s3::{ManifestManager, ManifestReader};
+    use crate::interfaces::{FragmentManagerFactory, ManifestManagerFactory};
+    use crate::{Fragment, FragmentIdentifier, FragmentSeqNo};
 
     use super::*;
 
@@ -568,7 +496,7 @@ mod tests {
         let fragments = vec![
             Fragment {
                 path: "fragment1".to_string(),
-                seq_no: FragmentSeqNo(1),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                 start: LogPosition::from_offset(100),
                 limit: LogPosition::from_offset(150),
                 num_bytes: 1000,
@@ -576,7 +504,7 @@ mod tests {
             },
             Fragment {
                 path: "fragment2".to_string(),
-                seq_no: FragmentSeqNo(2),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 start: LogPosition::from_offset(150),
                 limit: LogPosition::from_offset(200),
                 num_bytes: 1000,
@@ -584,7 +512,7 @@ mod tests {
             },
             Fragment {
                 path: "fragment3".to_string(),
-                seq_no: FragmentSeqNo(3),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
                 start: LogPosition::from_offset(200),
                 limit: LogPosition::from_offset(250),
                 num_bytes: 1000,
@@ -602,8 +530,7 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result =
-            LogReader::post_process_fragments(fragments.clone(), from, limits, &mut short_read);
+        let result = post_process_fragments(fragments.clone(), from, limits, &mut short_read);
 
         // With the fix: last fragment start (200) - from (125) = 75 records
         // This should be under the 100 record limit, so all fragments should remain
@@ -621,17 +548,19 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result_strict = LogReader::post_process_fragments(
-            fragments.clone(),
-            from,
-            limits_strict,
-            &mut short_read,
-        );
+        let result_strict =
+            post_process_fragments(fragments.clone(), from, limits_strict, &mut short_read);
 
         // With the fix: 200 - 125 = 75 > 74, so last fragment should be removed
         assert_eq!(result_strict.len(), 2);
-        assert_eq!(result_strict[0].seq_no, FragmentSeqNo(1));
-        assert_eq!(result_strict[1].seq_no, FragmentSeqNo(2));
+        assert_eq!(
+            result_strict[0].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))
+        );
+        assert_eq!(
+            result_strict[1].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
+        );
         assert!(short_read);
     }
 
@@ -645,7 +574,7 @@ mod tests {
         let fragments = vec![
             Fragment {
                 path: "fragment1".to_string(),
-                seq_no: FragmentSeqNo(1),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(101),
                 num_bytes: 1000,
@@ -653,7 +582,7 @@ mod tests {
             },
             Fragment {
                 path: "fragment2".to_string(),
-                seq_no: FragmentSeqNo(2),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 start: LogPosition::from_offset(101),
                 limit: LogPosition::from_offset(201),
                 num_bytes: 1000,
@@ -670,8 +599,7 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result =
-            LogReader::post_process_fragments(fragments.clone(), from, limits, &mut short_read);
+        let result = post_process_fragments(fragments.clone(), from, limits, &mut short_read);
 
         // With the fix: both fragments should be returned
         // The calculation is: last fragment start (101) - from (50) = 51 records
@@ -681,8 +609,14 @@ mod tests {
             2,
             "Both fragments should be returned for 75 records from offset 50"
         );
-        assert_eq!(result[0].seq_no, FragmentSeqNo(1));
-        assert_eq!(result[1].seq_no, FragmentSeqNo(2));
+        assert_eq!(
+            result[0].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))
+        );
+        assert_eq!(
+            result[1].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2))
+        );
         assert!(!short_read);
 
         // Test the edge case where the old bug would have incorrectly calculated:
@@ -695,12 +629,8 @@ mod tests {
         };
 
         let mut short_read = false;
-        let result_edge = LogReader::post_process_fragments(
-            fragments.clone(),
-            from,
-            limits_edge_case,
-            &mut short_read,
-        );
+        let result_edge =
+            post_process_fragments(fragments.clone(), from, limits_edge_case, &mut short_read);
 
         // With the fix: 101 - 50 = 51 > 50, so the second fragment should be removed
         assert_eq!(
@@ -708,7 +638,10 @@ mod tests {
             1,
             "Only first fragment should remain with 50 record limit"
         );
-        assert_eq!(result_edge[0].seq_no, FragmentSeqNo(1));
+        assert_eq!(
+            result_edge[0].seq_no,
+            FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))
+        );
         assert!(short_read);
     }
 
@@ -820,7 +753,7 @@ mod tests {
         let fragments = vec![
             Fragment {
                 path: "fragment1".to_string(),
-                seq_no: FragmentSeqNo(1),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                 start: LogPosition::from_offset(1),
                 limit: LogPosition::from_offset(101),
                 num_bytes: 1000,
@@ -828,7 +761,7 @@ mod tests {
             },
             Fragment {
                 path: "fragment2".to_string(),
-                seq_no: FragmentSeqNo(2),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                 start: LogPosition::from_offset(101),
                 limit: LogPosition::from_offset(201), // Manifest max is 201
                 num_bytes: 1000,
@@ -844,7 +777,7 @@ mod tests {
             snapshots: vec![],
             fragments: fragments.clone(),
             initial_offset: Some(LogPosition::from_offset(1)),
-            initial_seq_no: Some(FragmentSeqNo(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
 
         // Boundary case 1: Request exactly at the manifest limit
@@ -854,7 +787,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(100), // Would need data up to exactly offset 200
         };
-        let result = LogReader::scan_from_manifest(&manifest, from, limits);
+        let result = scan_from_manifest(&manifest, from, limits);
         assert!(
             result.is_some(),
             "Should succeed when request stays within manifest coverage"
@@ -866,7 +799,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(101), // Would need data up to offset 201, manifest limit is 201
         };
-        let result_at_limit = LogReader::scan_from_manifest(&manifest, from, limits_at_limit);
+        let result_at_limit = scan_from_manifest(&manifest, from, limits_at_limit);
         assert!(
             result_at_limit.is_none(),
             "Should fail when request  exceeds limit"
@@ -878,7 +811,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(102), // Would need data up to offset 202, beyond manifest limit of 201
         };
-        let result_beyond = LogReader::scan_from_manifest(&manifest, from, limits_beyond);
+        let result_beyond = scan_from_manifest(&manifest, from, limits_beyond);
         assert!(
             result_beyond.is_none(),
             "Should return None when request exceeds manifest coverage"
@@ -891,7 +824,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(1), // Would need data up to offset 201, exactly at manifest limit
         };
-        let result_at_end = LogReader::scan_from_manifest(&manifest, from_end, limits_at_end);
+        let result_at_end = scan_from_manifest(&manifest, from_end, limits_at_end);
         assert!(
             result_at_end.is_none(),
             "Should fail when reading exactly at manifest boundary"
@@ -904,7 +837,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(1),
         };
-        let result_beyond = LogReader::scan_from_manifest(&manifest, from_beyond, limits_beyond);
+        let result_beyond = scan_from_manifest(&manifest, from_beyond, limits_beyond);
         assert!(
             result_beyond.is_none(),
             "Should return None when starting beyond manifest coverage"
@@ -917,8 +850,7 @@ mod tests {
             max_bytes: None,
             max_records: None, // This creates a range to LogPosition::MAX
         };
-        let result_unlimited =
-            LogReader::scan_from_manifest(&manifest, from_middle, limits_unlimited);
+        let result_unlimited = scan_from_manifest(&manifest, from_middle, limits_unlimited);
         assert!(
             result_unlimited.is_none(),
             "Should return None when unlimited range extends beyond manifest"
@@ -935,8 +867,7 @@ mod tests {
             initial_offset: None,
             initial_seq_no: None,
         };
-        let result_empty =
-            LogReader::scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
+        let result_empty = scan_from_manifest(&empty_manifest, LogPosition::from_offset(0), limits);
         assert!(
             result_empty.is_none(),
             "Should return None for empty manifest"
@@ -949,8 +880,7 @@ mod tests {
             max_bytes: None,
             max_records: Some(20), // This would overflow if not handled properly
         };
-        let result_overflow =
-            LogReader::scan_from_manifest(&manifest, from_overflow_test, limits_overflow);
+        let result_overflow = scan_from_manifest(&manifest, from_overflow_test, limits_overflow);
         assert!(
             result_overflow.is_none(),
             "Should handle potential overflow gracefully"
@@ -969,7 +899,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000001.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(1),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                     start: LogPosition { offset: 1 },
                     limit: LogPosition { offset: 101 },
                     num_bytes: 140461,
@@ -978,7 +908,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000002.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(2),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                     start: LogPosition { offset: 101 },
                     limit: LogPosition { offset: 201 },
                     num_bytes: 139431,
@@ -987,7 +917,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000003.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(3),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
                     start: LogPosition { offset: 201 },
                     limit: LogPosition { offset: 301 },
                     num_bytes: 152250,
@@ -996,7 +926,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000004.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(4),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(4)),
                     start: LogPosition { offset: 301 },
                     limit: LogPosition { offset: 401 },
                     num_bytes: 141502,
@@ -1005,7 +935,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000005.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(5),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)),
                     start: LogPosition { offset: 401 },
                     limit: LogPosition { offset: 501 },
                     num_bytes: 139784,
@@ -1014,7 +944,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000006.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(6),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(6)),
                     start: LogPosition { offset: 501 },
                     limit: LogPosition { offset: 601 },
                     num_bytes: 133366,
@@ -1023,7 +953,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000007.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(7),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(7)),
                     start: LogPosition { offset: 601 },
                     limit: LogPosition { offset: 701 },
                     num_bytes: 135825,
@@ -1032,7 +962,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000008.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(8),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(8)),
                     start: LogPosition { offset: 701 },
                     limit: LogPosition { offset: 801 },
                     num_bytes: 133677,
@@ -1041,7 +971,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000009.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(9),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(9)),
                     start: LogPosition { offset: 801 },
                     limit: LogPosition { offset: 901 },
                     num_bytes: 131341,
@@ -1050,7 +980,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000000a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(10),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
                     start: LogPosition { offset: 901 },
                     limit: LogPosition { offset: 1001 },
                     num_bytes: 139558,
@@ -1059,7 +989,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000000b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(11),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(11)),
                     start: LogPosition { offset: 1001 },
                     limit: LogPosition { offset: 1101 },
                     num_bytes: 139566,
@@ -1068,7 +998,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000000c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(12),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(12)),
                     start: LogPosition { offset: 1101 },
                     limit: LogPosition { offset: 1201 },
                     num_bytes: 138893,
@@ -1077,7 +1007,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000000d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(13),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(13)),
                     start: LogPosition { offset: 1201 },
                     limit: LogPosition { offset: 1301 },
                     num_bytes: 144141,
@@ -1086,7 +1016,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000000e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(14),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(14)),
                     start: LogPosition { offset: 1301 },
                     limit: LogPosition { offset: 1401 },
                     num_bytes: 136472,
@@ -1095,7 +1025,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000000f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(15),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(15)),
                     start: LogPosition { offset: 1401 },
                     limit: LogPosition { offset: 1501 },
                     num_bytes: 136962,
@@ -1104,7 +1034,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000010.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(16),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(16)),
                     start: LogPosition { offset: 1501 },
                     limit: LogPosition { offset: 1601 },
                     num_bytes: 135440,
@@ -1113,7 +1043,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000011.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(17),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(17)),
                     start: LogPosition { offset: 1601 },
                     limit: LogPosition { offset: 1701 },
                     num_bytes: 136610,
@@ -1122,7 +1052,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000012.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(18),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(18)),
                     start: LogPosition { offset: 1701 },
                     limit: LogPosition { offset: 1801 },
                     num_bytes: 138079,
@@ -1131,7 +1061,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000013.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(19),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(19)),
                     start: LogPosition { offset: 1801 },
                     limit: LogPosition { offset: 1901 },
                     num_bytes: 132739,
@@ -1140,7 +1070,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000014.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(20),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(20)),
                     start: LogPosition { offset: 1901 },
                     limit: LogPosition { offset: 2001 },
                     num_bytes: 155167,
@@ -1149,7 +1079,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000015.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(21),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(21)),
                     start: LogPosition { offset: 2001 },
                     limit: LogPosition { offset: 2101 },
                     num_bytes: 133472,
@@ -1158,7 +1088,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000016.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(22),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(22)),
                     start: LogPosition { offset: 2101 },
                     limit: LogPosition { offset: 2201 },
                     num_bytes: 137153,
@@ -1167,7 +1097,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000017.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(23),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(23)),
                     start: LogPosition { offset: 2201 },
                     limit: LogPosition { offset: 2301 },
                     num_bytes: 133490,
@@ -1176,7 +1106,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000018.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(24),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(24)),
                     start: LogPosition { offset: 2301 },
                     limit: LogPosition { offset: 2401 },
                     num_bytes: 136554,
@@ -1185,7 +1115,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000019.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(25),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(25)),
                     start: LogPosition { offset: 2401 },
                     limit: LogPosition { offset: 2501 },
                     num_bytes: 138884,
@@ -1194,7 +1124,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(26),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(26)),
                     start: LogPosition { offset: 2501 },
                     limit: LogPosition { offset: 2601 },
                     num_bytes: 137372,
@@ -1203,7 +1133,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(27),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(27)),
                     start: LogPosition { offset: 2601 },
                     limit: LogPosition { offset: 2701 },
                     num_bytes: 138278,
@@ -1212,7 +1142,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(28),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(28)),
                     start: LogPosition { offset: 2701 },
                     limit: LogPosition { offset: 2801 },
                     num_bytes: 134956,
@@ -1221,7 +1151,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(29),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(29)),
                     start: LogPosition { offset: 2801 },
                     limit: LogPosition { offset: 2901 },
                     num_bytes: 140997,
@@ -1230,7 +1160,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(30),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(30)),
                     start: LogPosition { offset: 2901 },
                     limit: LogPosition { offset: 3001 },
                     num_bytes: 138062,
@@ -1239,7 +1169,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000001f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(31),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(31)),
                     start: LogPosition { offset: 3001 },
                     limit: LogPosition { offset: 3101 },
                     num_bytes: 134711,
@@ -1248,7 +1178,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000020.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(32),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(32)),
                     start: LogPosition { offset: 3101 },
                     limit: LogPosition { offset: 3201 },
                     num_bytes: 144809,
@@ -1257,7 +1187,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000021.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(33),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(33)),
                     start: LogPosition { offset: 3201 },
                     limit: LogPosition { offset: 3301 },
                     num_bytes: 138345,
@@ -1266,7 +1196,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000022.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(34),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(34)),
                     start: LogPosition { offset: 3301 },
                     limit: LogPosition { offset: 3401 },
                     num_bytes: 136250,
@@ -1275,7 +1205,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000023.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(35),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(35)),
                     start: LogPosition { offset: 3401 },
                     limit: LogPosition { offset: 3501 },
                     num_bytes: 146369,
@@ -1284,7 +1214,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000024.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(36),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(36)),
                     start: LogPosition { offset: 3501 },
                     limit: LogPosition { offset: 3601 },
                     num_bytes: 138827,
@@ -1293,7 +1223,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000025.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(37),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(37)),
                     start: LogPosition { offset: 3601 },
                     limit: LogPosition { offset: 3701 },
                     num_bytes: 133829,
@@ -1302,7 +1232,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000026.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(38),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(38)),
                     start: LogPosition { offset: 3701 },
                     limit: LogPosition { offset: 3801 },
                     num_bytes: 140918,
@@ -1311,7 +1241,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000027.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(39),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(39)),
                     start: LogPosition { offset: 3801 },
                     limit: LogPosition { offset: 3901 },
                     num_bytes: 141103,
@@ -1320,7 +1250,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000028.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(40),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(40)),
                     start: LogPosition { offset: 3901 },
                     limit: LogPosition { offset: 4001 },
                     num_bytes: 141949,
@@ -1329,7 +1259,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000029.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(41),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(41)),
                     start: LogPosition { offset: 4001 },
                     limit: LogPosition { offset: 4101 },
                     num_bytes: 139094,
@@ -1338,7 +1268,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000002a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(42),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42)),
                     start: LogPosition { offset: 4101 },
                     limit: LogPosition { offset: 4201 },
                     num_bytes: 139944,
@@ -1347,7 +1277,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000002b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(43),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(43)),
                     start: LogPosition { offset: 4201 },
                     limit: LogPosition { offset: 4301 },
                     num_bytes: 140248,
@@ -1356,7 +1286,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000002c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(44),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(44)),
                     start: LogPosition { offset: 4301 },
                     limit: LogPosition { offset: 4401 },
                     num_bytes: 140256,
@@ -1365,7 +1295,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000002d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(45),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(45)),
                     start: LogPosition { offset: 4401 },
                     limit: LogPosition { offset: 4501 },
                     num_bytes: 141742,
@@ -1374,7 +1304,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000002e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(46),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(46)),
                     start: LogPosition { offset: 4501 },
                     limit: LogPosition { offset: 4601 },
                     num_bytes: 142404,
@@ -1383,7 +1313,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000002f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(47),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(47)),
                     start: LogPosition { offset: 4601 },
                     limit: LogPosition { offset: 4701 },
                     num_bytes: 137577,
@@ -1392,7 +1322,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000030.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(48),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(48)),
                     start: LogPosition { offset: 4701 },
                     limit: LogPosition { offset: 4801 },
                     num_bytes: 134633,
@@ -1401,7 +1331,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000031.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(49),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(49)),
                     start: LogPosition { offset: 4801 },
                     limit: LogPosition { offset: 4901 },
                     num_bytes: 141037,
@@ -1410,7 +1340,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000032.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(50),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(50)),
                     start: LogPosition { offset: 4901 },
                     limit: LogPosition { offset: 5001 },
                     num_bytes: 131669,
@@ -1419,7 +1349,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000033.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(51),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(51)),
                     start: LogPosition { offset: 5001 },
                     limit: LogPosition { offset: 5101 },
                     num_bytes: 138795,
@@ -1428,7 +1358,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000034.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(52),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(52)),
                     start: LogPosition { offset: 5101 },
                     limit: LogPosition { offset: 5201 },
                     num_bytes: 133732,
@@ -1437,7 +1367,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000035.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(53),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(53)),
                     start: LogPosition { offset: 5201 },
                     limit: LogPosition { offset: 5301 },
                     num_bytes: 135872,
@@ -1446,7 +1376,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000036.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(54),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(54)),
                     start: LogPosition { offset: 5301 },
                     limit: LogPosition { offset: 5401 },
                     num_bytes: 139780,
@@ -1455,7 +1385,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000037.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(55),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(55)),
                     start: LogPosition { offset: 5401 },
                     limit: LogPosition { offset: 5501 },
                     num_bytes: 139217,
@@ -1464,7 +1394,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000038.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(56),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(56)),
                     start: LogPosition { offset: 5501 },
                     limit: LogPosition { offset: 5601 },
                     num_bytes: 136125,
@@ -1473,7 +1403,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000039.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(57),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(57)),
                     start: LogPosition { offset: 5601 },
                     limit: LogPosition { offset: 5701 },
                     num_bytes: 139423,
@@ -1482,7 +1412,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000003a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(58),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(58)),
                     start: LogPosition { offset: 5701 },
                     limit: LogPosition { offset: 5801 },
                     num_bytes: 142812,
@@ -1491,7 +1421,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000003b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(59),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(59)),
                     start: LogPosition { offset: 5801 },
                     limit: LogPosition { offset: 5901 },
                     num_bytes: 141047,
@@ -1500,7 +1430,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000003c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(60),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(60)),
                     start: LogPosition { offset: 5901 },
                     limit: LogPosition { offset: 6001 },
                     num_bytes: 142000,
@@ -1509,7 +1439,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000003d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(61),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(61)),
                     start: LogPosition { offset: 6001 },
                     limit: LogPosition { offset: 6101 },
                     num_bytes: 136870,
@@ -1518,7 +1448,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000003e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(62),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(62)),
                     start: LogPosition { offset: 6101 },
                     limit: LogPosition { offset: 6201 },
                     num_bytes: 134251,
@@ -1527,7 +1457,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000003f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(63),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(63)),
                     start: LogPosition { offset: 6201 },
                     limit: LogPosition { offset: 6301 },
                     num_bytes: 158023,
@@ -1536,7 +1466,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000040.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(64),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(64)),
                     start: LogPosition { offset: 6301 },
                     limit: LogPosition { offset: 6401 },
                     num_bytes: 136371,
@@ -1545,7 +1475,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000041.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(65),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(65)),
                     start: LogPosition { offset: 6401 },
                     limit: LogPosition { offset: 6501 },
                     num_bytes: 145348,
@@ -1554,7 +1484,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000042.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(66),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(66)),
                     start: LogPosition { offset: 6501 },
                     limit: LogPosition { offset: 6601 },
                     num_bytes: 138702,
@@ -1563,7 +1493,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000043.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(67),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(67)),
                     start: LogPosition { offset: 6601 },
                     limit: LogPosition { offset: 6701 },
                     num_bytes: 152525,
@@ -1572,7 +1502,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000044.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(68),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(68)),
                     start: LogPosition { offset: 6701 },
                     limit: LogPosition { offset: 6801 },
                     num_bytes: 139994,
@@ -1581,7 +1511,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000045.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(69),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(69)),
                     start: LogPosition { offset: 6801 },
                     limit: LogPosition { offset: 6901 },
                     num_bytes: 136266,
@@ -1590,7 +1520,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000046.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(70),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(70)),
                     start: LogPosition { offset: 6901 },
                     limit: LogPosition { offset: 7001 },
                     num_bytes: 138243,
@@ -1599,7 +1529,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000047.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(71),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(71)),
                     start: LogPosition { offset: 7001 },
                     limit: LogPosition { offset: 7101 },
                     num_bytes: 139202,
@@ -1608,7 +1538,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000048.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(72),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(72)),
                     start: LogPosition { offset: 7101 },
                     limit: LogPosition { offset: 7201 },
                     num_bytes: 138727,
@@ -1617,7 +1547,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000049.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(73),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(73)),
                     start: LogPosition { offset: 7201 },
                     limit: LogPosition { offset: 7301 },
                     num_bytes: 136865,
@@ -1626,7 +1556,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000004a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(74),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(74)),
                     start: LogPosition { offset: 7301 },
                     limit: LogPosition { offset: 7401 },
                     num_bytes: 138886,
@@ -1635,7 +1565,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000004b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(75),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(75)),
                     start: LogPosition { offset: 7401 },
                     limit: LogPosition { offset: 7501 },
                     num_bytes: 137304,
@@ -1644,7 +1574,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000004c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(76),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(76)),
                     start: LogPosition { offset: 7501 },
                     limit: LogPosition { offset: 7601 },
                     num_bytes: 136574,
@@ -1653,7 +1583,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000004d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(77),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(77)),
                     start: LogPosition { offset: 7601 },
                     limit: LogPosition { offset: 7701 },
                     num_bytes: 140747,
@@ -1662,7 +1592,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000004e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(78),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(78)),
                     start: LogPosition { offset: 7701 },
                     limit: LogPosition { offset: 7801 },
                     num_bytes: 144560,
@@ -1671,7 +1601,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000004f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(79),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(79)),
                     start: LogPosition { offset: 7801 },
                     limit: LogPosition { offset: 7901 },
                     num_bytes: 137682,
@@ -1680,7 +1610,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000050.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(80),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(80)),
                     start: LogPosition { offset: 7901 },
                     limit: LogPosition { offset: 8001 },
                     num_bytes: 141263,
@@ -1689,7 +1619,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000051.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(81),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(81)),
                     start: LogPosition { offset: 8001 },
                     limit: LogPosition { offset: 8101 },
                     num_bytes: 136293,
@@ -1698,7 +1628,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000052.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(82),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(82)),
                     start: LogPosition { offset: 8101 },
                     limit: LogPosition { offset: 8201 },
                     num_bytes: 134459,
@@ -1707,7 +1637,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000053.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(83),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(83)),
                     start: LogPosition { offset: 8201 },
                     limit: LogPosition { offset: 8301 },
                     num_bytes: 137102,
@@ -1716,7 +1646,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000054.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(84),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(84)),
                     start: LogPosition { offset: 8301 },
                     limit: LogPosition { offset: 8401 },
                     num_bytes: 140636,
@@ -1725,7 +1655,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000055.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(85),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(85)),
                     start: LogPosition { offset: 8401 },
                     limit: LogPosition { offset: 8501 },
                     num_bytes: 137111,
@@ -1734,7 +1664,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000056.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(86),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(86)),
                     start: LogPosition { offset: 8501 },
                     limit: LogPosition { offset: 8601 },
                     num_bytes: 135579,
@@ -1743,7 +1673,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000057.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(87),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(87)),
                     start: LogPosition { offset: 8601 },
                     limit: LogPosition { offset: 8701 },
                     num_bytes: 137219,
@@ -1752,7 +1682,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000058.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(88),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(88)),
                     start: LogPosition { offset: 8701 },
                     limit: LogPosition { offset: 8801 },
                     num_bytes: 141777,
@@ -1761,7 +1691,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000059.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(89),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(89)),
                     start: LogPosition { offset: 8801 },
                     limit: LogPosition { offset: 8901 },
                     num_bytes: 133803,
@@ -1770,7 +1700,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000005a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(90),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(90)),
                     start: LogPosition { offset: 8901 },
                     limit: LogPosition { offset: 9001 },
                     num_bytes: 135483,
@@ -1779,7 +1709,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000005b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(91),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(91)),
                     start: LogPosition { offset: 9001 },
                     limit: LogPosition { offset: 9101 },
                     num_bytes: 140399,
@@ -1788,7 +1718,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000005c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(92),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(92)),
                     start: LogPosition { offset: 9101 },
                     limit: LogPosition { offset: 9201 },
                     num_bytes: 143820,
@@ -1797,7 +1727,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000005d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(93),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(93)),
                     start: LogPosition { offset: 9201 },
                     limit: LogPosition { offset: 9301 },
                     num_bytes: 139460,
@@ -1806,7 +1736,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000005e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(94),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(94)),
                     start: LogPosition { offset: 9301 },
                     limit: LogPosition { offset: 9401 },
                     num_bytes: 137437,
@@ -1815,7 +1745,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000005f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(95),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(95)),
                     start: LogPosition { offset: 9401 },
                     limit: LogPosition { offset: 9501 },
                     num_bytes: 142969,
@@ -1824,7 +1754,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000060.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(96),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(96)),
                     start: LogPosition { offset: 9501 },
                     limit: LogPosition { offset: 9601 },
                     num_bytes: 141351,
@@ -1833,7 +1763,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000061.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(97),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(97)),
                     start: LogPosition { offset: 9601 },
                     limit: LogPosition { offset: 9701 },
                     num_bytes: 138392,
@@ -1842,7 +1772,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000062.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(98),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(98)),
                     start: LogPosition { offset: 9701 },
                     limit: LogPosition { offset: 9801 },
                     num_bytes: 142135,
@@ -1851,7 +1781,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000063.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(99),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(99)),
                     start: LogPosition { offset: 9801 },
                     limit: LogPosition { offset: 9901 },
                     num_bytes: 135380,
@@ -1860,7 +1790,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000064.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(100),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100)),
                     start: LogPosition { offset: 9901 },
                     limit: LogPosition { offset: 10001 },
                     num_bytes: 141166,
@@ -1869,7 +1799,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000065.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(101),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(101)),
                     start: LogPosition { offset: 10001 },
                     limit: LogPosition { offset: 10101 },
                     num_bytes: 145075,
@@ -1878,7 +1808,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000066.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(102),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(102)),
                     start: LogPosition { offset: 10101 },
                     limit: LogPosition { offset: 10201 },
                     num_bytes: 139179,
@@ -1887,7 +1817,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000067.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(103),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(103)),
                     start: LogPosition { offset: 10201 },
                     limit: LogPosition { offset: 10301 },
                     num_bytes: 141121,
@@ -1896,7 +1826,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000068.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(104),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(104)),
                     start: LogPosition { offset: 10301 },
                     limit: LogPosition { offset: 10401 },
                     num_bytes: 133021,
@@ -1905,7 +1835,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000069.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(105),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(105)),
                     start: LogPosition { offset: 10401 },
                     limit: LogPosition { offset: 10501 },
                     num_bytes: 133919,
@@ -1914,7 +1844,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000006a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(106),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(106)),
                     start: LogPosition { offset: 10501 },
                     limit: LogPosition { offset: 10601 },
                     num_bytes: 145022,
@@ -1923,7 +1853,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000006b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(107),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(107)),
                     start: LogPosition { offset: 10601 },
                     limit: LogPosition { offset: 10701 },
                     num_bytes: 141337,
@@ -1932,7 +1862,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000006c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(108),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(108)),
                     start: LogPosition { offset: 10701 },
                     limit: LogPosition { offset: 10801 },
                     num_bytes: 150894,
@@ -1941,7 +1871,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000006d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(109),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(109)),
                     start: LogPosition { offset: 10801 },
                     limit: LogPosition { offset: 10901 },
                     num_bytes: 146528,
@@ -1950,7 +1880,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000006e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(110),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(110)),
                     start: LogPosition { offset: 10901 },
                     limit: LogPosition { offset: 11001 },
                     num_bytes: 136972,
@@ -1959,7 +1889,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000006f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(111),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(111)),
                     start: LogPosition { offset: 11001 },
                     limit: LogPosition { offset: 11101 },
                     num_bytes: 137727,
@@ -1968,7 +1898,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000070.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(112),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(112)),
                     start: LogPosition { offset: 11101 },
                     limit: LogPosition { offset: 11201 },
                     num_bytes: 140892,
@@ -1977,7 +1907,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000071.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(113),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(113)),
                     start: LogPosition { offset: 11201 },
                     limit: LogPosition { offset: 11301 },
                     num_bytes: 141376,
@@ -1986,7 +1916,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000072.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(114),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(114)),
                     start: LogPosition { offset: 11301 },
                     limit: LogPosition { offset: 11401 },
                     num_bytes: 139071,
@@ -1995,7 +1925,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000073.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(115),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(115)),
                     start: LogPosition { offset: 11401 },
                     limit: LogPosition { offset: 11501 },
                     num_bytes: 132369,
@@ -2004,7 +1934,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000074.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(116),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(116)),
                     start: LogPosition { offset: 11501 },
                     limit: LogPosition { offset: 11601 },
                     num_bytes: 136670,
@@ -2013,7 +1943,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000075.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(117),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(117)),
                     start: LogPosition { offset: 11601 },
                     limit: LogPosition { offset: 11701 },
                     num_bytes: 143230,
@@ -2022,7 +1952,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000076.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(118),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(118)),
                     start: LogPosition { offset: 11701 },
                     limit: LogPosition { offset: 11801 },
                     num_bytes: 147801,
@@ -2031,7 +1961,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000077.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(119),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(119)),
                     start: LogPosition { offset: 11801 },
                     limit: LogPosition { offset: 11901 },
                     num_bytes: 139923,
@@ -2040,7 +1970,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000078.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(120),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(120)),
                     start: LogPosition { offset: 11901 },
                     limit: LogPosition { offset: 12001 },
                     num_bytes: 139459,
@@ -2049,7 +1979,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000079.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(121),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(121)),
                     start: LogPosition { offset: 12001 },
                     limit: LogPosition { offset: 12101 },
                     num_bytes: 138578,
@@ -2058,7 +1988,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000007a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(122),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(122)),
                     start: LogPosition { offset: 12101 },
                     limit: LogPosition { offset: 12201 },
                     num_bytes: 138652,
@@ -2067,7 +1997,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000007b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(123),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(123)),
                     start: LogPosition { offset: 12201 },
                     limit: LogPosition { offset: 12301 },
                     num_bytes: 141800,
@@ -2076,7 +2006,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000007c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(124),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(124)),
                     start: LogPosition { offset: 12301 },
                     limit: LogPosition { offset: 12401 },
                     num_bytes: 137535,
@@ -2085,7 +2015,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000007d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(125),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(125)),
                     start: LogPosition { offset: 12401 },
                     limit: LogPosition { offset: 12501 },
                     num_bytes: 137534,
@@ -2094,7 +2024,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000007e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(126),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(126)),
                     start: LogPosition { offset: 12501 },
                     limit: LogPosition { offset: 12601 },
                     num_bytes: 139740,
@@ -2103,7 +2033,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000007f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(127),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(127)),
                     start: LogPosition { offset: 12601 },
                     limit: LogPosition { offset: 12701 },
                     num_bytes: 139313,
@@ -2112,7 +2042,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000080.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(128),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(128)),
                     start: LogPosition { offset: 12701 },
                     limit: LogPosition { offset: 12801 },
                     num_bytes: 141420,
@@ -2121,7 +2051,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000081.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(129),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(129)),
                     start: LogPosition { offset: 12801 },
                     limit: LogPosition { offset: 12901 },
                     num_bytes: 144742,
@@ -2130,7 +2060,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000082.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(130),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(130)),
                     start: LogPosition { offset: 12901 },
                     limit: LogPosition { offset: 13001 },
                     num_bytes: 140023,
@@ -2139,7 +2069,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000083.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(131),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(131)),
                     start: LogPosition { offset: 13001 },
                     limit: LogPosition { offset: 13101 },
                     num_bytes: 141135,
@@ -2148,7 +2078,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000084.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(132),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(132)),
                     start: LogPosition { offset: 13101 },
                     limit: LogPosition { offset: 13201 },
                     num_bytes: 139778,
@@ -2157,7 +2087,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000085.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(133),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(133)),
                     start: LogPosition { offset: 13201 },
                     limit: LogPosition { offset: 13301 },
                     num_bytes: 141698,
@@ -2166,7 +2096,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000086.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(134),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(134)),
                     start: LogPosition { offset: 13301 },
                     limit: LogPosition { offset: 13401 },
                     num_bytes: 149539,
@@ -2175,7 +2105,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000087.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(135),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(135)),
                     start: LogPosition { offset: 13401 },
                     limit: LogPosition { offset: 13501 },
                     num_bytes: 137223,
@@ -2184,7 +2114,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000088.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(136),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(136)),
                     start: LogPosition { offset: 13501 },
                     limit: LogPosition { offset: 13601 },
                     num_bytes: 138479,
@@ -2193,7 +2123,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000089.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(137),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(137)),
                     start: LogPosition { offset: 13601 },
                     limit: LogPosition { offset: 13701 },
                     num_bytes: 138107,
@@ -2202,7 +2132,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000008a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(138),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(138)),
                     start: LogPosition { offset: 13701 },
                     limit: LogPosition { offset: 13801 },
                     num_bytes: 132080,
@@ -2211,7 +2141,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000008b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(139),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(139)),
                     start: LogPosition { offset: 13801 },
                     limit: LogPosition { offset: 13901 },
                     num_bytes: 132956,
@@ -2220,7 +2150,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000008c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(140),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(140)),
                     start: LogPosition { offset: 13901 },
                     limit: LogPosition { offset: 14001 },
                     num_bytes: 137782,
@@ -2229,7 +2159,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000008d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(141),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(141)),
                     start: LogPosition { offset: 14001 },
                     limit: LogPosition { offset: 14101 },
                     num_bytes: 135937,
@@ -2238,7 +2168,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000008e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(142),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(142)),
                     start: LogPosition { offset: 14101 },
                     limit: LogPosition { offset: 14201 },
                     num_bytes: 135979,
@@ -2247,7 +2177,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000008f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(143),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(143)),
                     start: LogPosition { offset: 14201 },
                     limit: LogPosition { offset: 14301 },
                     num_bytes: 137787,
@@ -2256,7 +2186,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000090.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(144),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(144)),
                     start: LogPosition { offset: 14301 },
                     limit: LogPosition { offset: 14401 },
                     num_bytes: 136146,
@@ -2265,7 +2195,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000091.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(145),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(145)),
                     start: LogPosition { offset: 14401 },
                     limit: LogPosition { offset: 14501 },
                     num_bytes: 135798,
@@ -2274,7 +2204,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000092.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(146),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(146)),
                     start: LogPosition { offset: 14501 },
                     limit: LogPosition { offset: 14601 },
                     num_bytes: 140262,
@@ -2283,7 +2213,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000093.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(147),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(147)),
                     start: LogPosition { offset: 14601 },
                     limit: LogPosition { offset: 14701 },
                     num_bytes: 140513,
@@ -2292,7 +2222,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000094.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(148),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(148)),
                     start: LogPosition { offset: 14701 },
                     limit: LogPosition { offset: 14801 },
                     num_bytes: 143028,
@@ -2301,7 +2231,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000095.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(149),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(149)),
                     start: LogPosition { offset: 14801 },
                     limit: LogPosition { offset: 14901 },
                     num_bytes: 141584,
@@ -2310,7 +2240,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000096.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(150),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(150)),
                     start: LogPosition { offset: 14901 },
                     limit: LogPosition { offset: 15001 },
                     num_bytes: 134143,
@@ -2319,7 +2249,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000097.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(151),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(151)),
                     start: LogPosition { offset: 15001 },
                     limit: LogPosition { offset: 15101 },
                     num_bytes: 134158,
@@ -2328,7 +2258,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000098.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(152),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(152)),
                     start: LogPosition { offset: 15101 },
                     limit: LogPosition { offset: 15201 },
                     num_bytes: 131993,
@@ -2337,7 +2267,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000099.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(153),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(153)),
                     start: LogPosition { offset: 15201 },
                     limit: LogPosition { offset: 15301 },
                     num_bytes: 143121,
@@ -2346,7 +2276,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000009a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(154),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(154)),
                     start: LogPosition { offset: 15301 },
                     limit: LogPosition { offset: 15401 },
                     num_bytes: 140176,
@@ -2355,7 +2285,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000009b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(155),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(155)),
                     start: LogPosition { offset: 15401 },
                     limit: LogPosition { offset: 15501 },
                     num_bytes: 129247,
@@ -2364,7 +2294,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000009c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(156),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(156)),
                     start: LogPosition { offset: 15501 },
                     limit: LogPosition { offset: 15601 },
                     num_bytes: 135408,
@@ -2373,7 +2303,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000009d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(157),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(157)),
                     start: LogPosition { offset: 15601 },
                     limit: LogPosition { offset: 15701 },
                     num_bytes: 140057,
@@ -2382,7 +2312,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000009e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(158),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(158)),
                     start: LogPosition { offset: 15701 },
                     limit: LogPosition { offset: 15801 },
                     num_bytes: 142579,
@@ -2391,7 +2321,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000009f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(159),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(159)),
                     start: LogPosition { offset: 15801 },
                     limit: LogPosition { offset: 15901 },
                     num_bytes: 132968,
@@ -2400,7 +2330,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a0.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(160),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(160)),
                     start: LogPosition { offset: 15901 },
                     limit: LogPosition { offset: 16001 },
                     num_bytes: 144536,
@@ -2409,7 +2339,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a1.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(161),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(161)),
                     start: LogPosition { offset: 16001 },
                     limit: LogPosition { offset: 16101 },
                     num_bytes: 135808,
@@ -2418,7 +2348,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a2.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(162),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(162)),
                     start: LogPosition { offset: 16101 },
                     limit: LogPosition { offset: 16201 },
                     num_bytes: 142077,
@@ -2427,7 +2357,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a3.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(163),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(163)),
                     start: LogPosition { offset: 16201 },
                     limit: LogPosition { offset: 16301 },
                     num_bytes: 128320,
@@ -2436,7 +2366,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a4.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(164),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(164)),
                     start: LogPosition { offset: 16301 },
                     limit: LogPosition { offset: 16401 },
                     num_bytes: 141075,
@@ -2445,7 +2375,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a5.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(165),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(165)),
                     start: LogPosition { offset: 16401 },
                     limit: LogPosition { offset: 16501 },
                     num_bytes: 147777,
@@ -2454,7 +2384,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a6.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(166),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(166)),
                     start: LogPosition { offset: 16501 },
                     limit: LogPosition { offset: 16601 },
                     num_bytes: 142136,
@@ -2463,7 +2393,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a7.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(167),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(167)),
                     start: LogPosition { offset: 16601 },
                     limit: LogPosition { offset: 16701 },
                     num_bytes: 139917,
@@ -2472,7 +2402,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a8.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(168),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(168)),
                     start: LogPosition { offset: 16701 },
                     limit: LogPosition { offset: 16801 },
                     num_bytes: 135551,
@@ -2481,7 +2411,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000a9.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(169),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(169)),
                     start: LogPosition { offset: 16801 },
                     limit: LogPosition { offset: 16901 },
                     num_bytes: 138513,
@@ -2490,7 +2420,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000aa.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(170),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(170)),
                     start: LogPosition { offset: 16901 },
                     limit: LogPosition { offset: 16998 },
                     num_bytes: 128558,
@@ -2499,7 +2429,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ab.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(171),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(171)),
                     start: LogPosition { offset: 16998 },
                     limit: LogPosition { offset: 17098 },
                     num_bytes: 140852,
@@ -2508,7 +2438,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ac.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(172),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(172)),
                     start: LogPosition { offset: 17098 },
                     limit: LogPosition { offset: 17198 },
                     num_bytes: 137489,
@@ -2517,7 +2447,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ad.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(173),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(173)),
                     start: LogPosition { offset: 17198 },
                     limit: LogPosition { offset: 17230 },
                     num_bytes: 58889,
@@ -2526,7 +2456,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ae.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(174),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(174)),
                     start: LogPosition { offset: 17230 },
                     limit: LogPosition { offset: 17330 },
                     num_bytes: 132866,
@@ -2535,7 +2465,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000af.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(175),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(175)),
                     start: LogPosition { offset: 17330 },
                     limit: LogPosition { offset: 17430 },
                     num_bytes: 136424,
@@ -2544,7 +2474,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b0.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(176),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(176)),
                     start: LogPosition { offset: 17430 },
                     limit: LogPosition { offset: 17462 },
                     num_bytes: 65028,
@@ -2553,7 +2483,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b1.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(177),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(177)),
                     start: LogPosition { offset: 17462 },
                     limit: LogPosition { offset: 17562 },
                     num_bytes: 143723,
@@ -2562,7 +2492,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b2.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(178),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(178)),
                     start: LogPosition { offset: 17562 },
                     limit: LogPosition { offset: 17662 },
                     num_bytes: 141430,
@@ -2571,7 +2501,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b3.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(179),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(179)),
                     start: LogPosition { offset: 17662 },
                     limit: LogPosition { offset: 17747 },
                     num_bytes: 117091,
@@ -2580,7 +2510,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b4.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(180),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(180)),
                     start: LogPosition { offset: 17747 },
                     limit: LogPosition { offset: 17847 },
                     num_bytes: 136364,
@@ -2589,7 +2519,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b5.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(181),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(181)),
                     start: LogPosition { offset: 17847 },
                     limit: LogPosition { offset: 17947 },
                     num_bytes: 143624,
@@ -2598,7 +2528,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b6.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(182),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(182)),
                     start: LogPosition { offset: 17947 },
                     limit: LogPosition { offset: 17960 },
                     num_bytes: 40448,
@@ -2607,7 +2537,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b7.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(183),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(183)),
                     start: LogPosition { offset: 17960 },
                     limit: LogPosition { offset: 18060 },
                     num_bytes: 132795,
@@ -2616,7 +2546,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b8.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(184),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(184)),
                     start: LogPosition { offset: 18060 },
                     limit: LogPosition { offset: 18103 },
                     num_bytes: 82080,
@@ -2625,7 +2555,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000b9.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(185),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(185)),
                     start: LogPosition { offset: 18103 },
                     limit: LogPosition { offset: 18203 },
                     num_bytes: 135489,
@@ -2634,7 +2564,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ba.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(186),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(186)),
                     start: LogPosition { offset: 18203 },
                     limit: LogPosition { offset: 18281 },
                     num_bytes: 119440,
@@ -2643,7 +2573,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000bb.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(187),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(187)),
                     start: LogPosition { offset: 18281 },
                     limit: LogPosition { offset: 18381 },
                     num_bytes: 137393,
@@ -2652,7 +2582,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000bc.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(188),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(188)),
                     start: LogPosition { offset: 18381 },
                     limit: LogPosition { offset: 18481 },
                     num_bytes: 143793,
@@ -2661,7 +2591,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000bd.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(189),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(189)),
                     start: LogPosition { offset: 18481 },
                     limit: LogPosition { offset: 18495 },
                     num_bytes: 40225,
@@ -2670,7 +2600,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000be.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(190),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(190)),
                     start: LogPosition { offset: 18495 },
                     limit: LogPosition { offset: 18595 },
                     num_bytes: 135172,
@@ -2679,7 +2609,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000bf.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(191),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(191)),
                     start: LogPosition { offset: 18595 },
                     limit: LogPosition { offset: 18673 },
                     num_bytes: 114019,
@@ -2688,7 +2618,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c0.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(192),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(192)),
                     start: LogPosition { offset: 18673 },
                     limit: LogPosition { offset: 18773 },
                     num_bytes: 134766,
@@ -2697,7 +2627,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c1.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(193),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(193)),
                     start: LogPosition { offset: 18773 },
                     limit: LogPosition { offset: 18833 },
                     num_bytes: 93267,
@@ -2706,7 +2636,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c2.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(194),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(194)),
                     start: LogPosition { offset: 18833 },
                     limit: LogPosition { offset: 18933 },
                     num_bytes: 135209,
@@ -2715,7 +2645,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c3.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(195),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(195)),
                     start: LogPosition { offset: 18933 },
                     limit: LogPosition { offset: 18958 },
                     num_bytes: 56317,
@@ -2724,7 +2654,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c4.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(196),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(196)),
                     start: LogPosition { offset: 18958 },
                     limit: LogPosition { offset: 19058 },
                     num_bytes: 138040,
@@ -2733,7 +2663,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c5.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(197),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(197)),
                     start: LogPosition { offset: 19058 },
                     limit: LogPosition { offset: 19136 },
                     num_bytes: 116094,
@@ -2742,7 +2672,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c6.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(198),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(198)),
                     start: LogPosition { offset: 19136 },
                     limit: LogPosition { offset: 19236 },
                     num_bytes: 146527,
@@ -2751,7 +2681,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c7.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(199),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(199)),
                     start: LogPosition { offset: 19236 },
                     limit: LogPosition { offset: 19336 },
                     num_bytes: 138535,
@@ -2760,7 +2690,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c8.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(200),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(200)),
                     start: LogPosition { offset: 19336 },
                     limit: LogPosition { offset: 19368 },
                     num_bytes: 59758,
@@ -2769,7 +2699,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000c9.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(201),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(201)),
                     start: LogPosition { offset: 19368 },
                     limit: LogPosition { offset: 19468 },
                     num_bytes: 136268,
@@ -2778,7 +2708,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ca.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(202),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(202)),
                     start: LogPosition { offset: 19468 },
                     limit: LogPosition { offset: 19511 },
                     num_bytes: 74216,
@@ -2787,7 +2717,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000cb.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(203),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(203)),
                     start: LogPosition { offset: 19511 },
                     limit: LogPosition { offset: 19600 },
                     num_bytes: 122984,
@@ -2796,7 +2726,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000cc.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(204),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(204)),
                     start: LogPosition { offset: 19600 },
                     limit: LogPosition { offset: 19700 },
                     num_bytes: 135231,
@@ -2805,7 +2735,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000cd.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(205),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(205)),
                     start: LogPosition { offset: 19700 },
                     limit: LogPosition { offset: 19800 },
                     num_bytes: 146693,
@@ -2814,7 +2744,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ce.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(206),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(206)),
                     start: LogPosition { offset: 19800 },
                     limit: LogPosition { offset: 19831 },
                     num_bytes: 62674,
@@ -2823,7 +2753,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000cf.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(207),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(207)),
                     start: LogPosition { offset: 19831 },
                     limit: LogPosition { offset: 19931 },
                     num_bytes: 141046,
@@ -2832,7 +2762,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d0.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(208),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(208)),
                     start: LogPosition { offset: 19931 },
                     limit: LogPosition { offset: 20031 },
                     num_bytes: 142907,
@@ -2841,7 +2771,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d1.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(209),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(209)),
                     start: LogPosition { offset: 20031 },
                     limit: LogPosition { offset: 20045 },
                     num_bytes: 41411,
@@ -2850,7 +2780,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d2.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(210),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(210)),
                     start: LogPosition { offset: 20045 },
                     limit: LogPosition { offset: 20145 },
                     num_bytes: 144353,
@@ -2859,7 +2789,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d3.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(211),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(211)),
                     start: LogPosition { offset: 20145 },
                     limit: LogPosition { offset: 20223 },
                     num_bytes: 119791,
@@ -2868,7 +2798,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d4.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(212),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(212)),
                     start: LogPosition { offset: 20223 },
                     limit: LogPosition { offset: 20323 },
                     num_bytes: 140264,
@@ -2877,7 +2807,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d5.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(213),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(213)),
                     start: LogPosition { offset: 20323 },
                     limit: LogPosition { offset: 20401 },
                     num_bytes: 117603,
@@ -2886,7 +2816,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d6.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(214),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(214)),
                     start: LogPosition { offset: 20401 },
                     limit: LogPosition { offset: 20501 },
                     num_bytes: 137419,
@@ -2895,7 +2825,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d7.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(215),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(215)),
                     start: LogPosition { offset: 20501 },
                     limit: LogPosition { offset: 20601 },
                     num_bytes: 134816,
@@ -2904,7 +2834,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d8.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(216),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(216)),
                     start: LogPosition { offset: 20601 },
                     limit: LogPosition { offset: 20615 },
                     num_bytes: 44611,
@@ -2913,7 +2843,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000d9.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(217),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(217)),
                     start: LogPosition { offset: 20615 },
                     limit: LogPosition { offset: 20715 },
                     num_bytes: 147000,
@@ -2922,7 +2852,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000da.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(218),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(218)),
                     start: LogPosition { offset: 20715 },
                     limit: LogPosition { offset: 20776 },
                     num_bytes: 100711,
@@ -2931,7 +2861,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000db.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(219),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(219)),
                     start: LogPosition { offset: 20776 },
                     limit: LogPosition { offset: 20876 },
                     num_bytes: 130467,
@@ -2940,7 +2870,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000dc.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(220),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(220)),
                     start: LogPosition { offset: 20876 },
                     limit: LogPosition { offset: 20918 },
                     num_bytes: 78680,
@@ -2949,7 +2879,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000dd.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(221),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(221)),
                     start: LogPosition { offset: 20918 },
                     limit: LogPosition { offset: 21018 },
                     num_bytes: 141027,
@@ -2958,7 +2888,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000de.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(222),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(222)),
                     start: LogPosition { offset: 21018 },
                     limit: LogPosition { offset: 21118 },
                     num_bytes: 137172,
@@ -2967,7 +2897,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000df.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(223),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(223)),
                     start: LogPosition { offset: 21118 },
                     limit: LogPosition { offset: 21120 },
                     num_bytes: 28577,
@@ -2976,7 +2906,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e0.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(224),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(224)),
                     start: LogPosition { offset: 21120 },
                     limit: LogPosition { offset: 21220 },
                     num_bytes: 142801,
@@ -2985,7 +2915,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e1.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(225),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(225)),
                     start: LogPosition { offset: 21220 },
                     limit: LogPosition { offset: 21317 },
                     num_bytes: 132718,
@@ -2994,7 +2924,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e2.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(226),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(226)),
                     start: LogPosition { offset: 21317 },
                     limit: LogPosition { offset: 21417 },
                     num_bytes: 141569,
@@ -3003,7 +2933,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e3.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(227),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(227)),
                     start: LogPosition { offset: 21417 },
                     limit: LogPosition { offset: 21517 },
                     num_bytes: 135554,
@@ -3012,7 +2942,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e4.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(228),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(228)),
                     start: LogPosition { offset: 21517 },
                     limit: LogPosition { offset: 21617 },
                     num_bytes: 139003,
@@ -3021,7 +2951,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e5.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(229),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(229)),
                     start: LogPosition { offset: 21617 },
                     limit: LogPosition { offset: 21717 },
                     num_bytes: 138216,
@@ -3030,7 +2960,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e6.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(230),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(230)),
                     start: LogPosition { offset: 21717 },
                     limit: LogPosition { offset: 21723 },
                     num_bytes: 37598,
@@ -3039,7 +2969,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e7.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(231),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(231)),
                     start: LogPosition { offset: 21723 },
                     limit: LogPosition { offset: 21823 },
                     num_bytes: 141600,
@@ -3048,7 +2978,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e8.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(232),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(232)),
                     start: LogPosition { offset: 21823 },
                     limit: LogPosition { offset: 21923 },
                     num_bytes: 143969,
@@ -3057,7 +2987,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000e9.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(233),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(233)),
                     start: LogPosition { offset: 21923 },
                     limit: LogPosition { offset: 21971 },
                     num_bytes: 80795,
@@ -3066,7 +2996,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ea.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(234),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(234)),
                     start: LogPosition { offset: 21971 },
                     limit: LogPosition { offset: 22071 },
                     num_bytes: 137429,
@@ -3075,7 +3005,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000eb.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(235),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(235)),
                     start: LogPosition { offset: 22071 },
                     limit: LogPosition { offset: 22171 },
                     num_bytes: 138327,
@@ -3084,7 +3014,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ec.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(236),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(236)),
                     start: LogPosition { offset: 22171 },
                     limit: LogPosition { offset: 22213 },
                     num_bytes: 72307,
@@ -3093,7 +3023,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ed.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(237),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(237)),
                     start: LogPosition { offset: 22213 },
                     limit: LogPosition { offset: 22313 },
                     num_bytes: 134711,
@@ -3102,7 +3032,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ee.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(238),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(238)),
                     start: LogPosition { offset: 22313 },
                     limit: LogPosition { offset: 22413 },
                     num_bytes: 143139,
@@ -3111,7 +3041,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ef.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(239),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(239)),
                     start: LogPosition { offset: 22413 },
                     limit: LogPosition { offset: 22432 },
                     num_bytes: 49336,
@@ -3120,7 +3050,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f0.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(240),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(240)),
                     start: LogPosition { offset: 22432 },
                     limit: LogPosition { offset: 22532 },
                     num_bytes: 139229,
@@ -3129,7 +3059,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f1.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(241),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(241)),
                     start: LogPosition { offset: 22532 },
                     limit: LogPosition { offset: 22609 },
                     num_bytes: 113924,
@@ -3138,7 +3068,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f2.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(242),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(242)),
                     start: LogPosition { offset: 22609 },
                     limit: LogPosition { offset: 22709 },
                     num_bytes: 142130,
@@ -3147,7 +3077,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f3.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(243),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(243)),
                     start: LogPosition { offset: 22709 },
                     limit: LogPosition { offset: 22809 },
                     num_bytes: 133268,
@@ -3156,7 +3086,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f4.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(244),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(244)),
                     start: LogPosition { offset: 22809 },
                     limit: LogPosition { offset: 22891 },
                     num_bytes: 113712,
@@ -3165,7 +3095,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f5.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(245),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(245)),
                     start: LogPosition { offset: 22891 },
                     limit: LogPosition { offset: 22991 },
                     num_bytes: 135405,
@@ -3174,7 +3104,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f6.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(246),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(246)),
                     start: LogPosition { offset: 22991 },
                     limit: LogPosition { offset: 23091 },
                     num_bytes: 134463,
@@ -3183,7 +3113,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f7.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(247),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(247)),
                     start: LogPosition { offset: 23091 },
                     limit: LogPosition { offset: 23146 },
                     num_bytes: 86577,
@@ -3192,7 +3122,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f8.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(248),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(248)),
                     start: LogPosition { offset: 23146 },
                     limit: LogPosition { offset: 23246 },
                     num_bytes: 133988,
@@ -3201,7 +3131,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000f9.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(249),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(249)),
                     start: LogPosition { offset: 23246 },
                     limit: LogPosition { offset: 23346 },
                     num_bytes: 140277,
@@ -3210,7 +3140,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000fa.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(250),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(250)),
                     start: LogPosition { offset: 23346 },
                     limit: LogPosition { offset: 23446 },
                     num_bytes: 136722,
@@ -3219,7 +3149,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000fb.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(251),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(251)),
                     start: LogPosition { offset: 23446 },
                     limit: LogPosition { offset: 23475 },
                     num_bytes: 58492,
@@ -3228,7 +3158,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000fc.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(252),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(252)),
                     start: LogPosition { offset: 23475 },
                     limit: LogPosition { offset: 23575 },
                     num_bytes: 141272,
@@ -3237,7 +3167,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000fd.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(253),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(253)),
                     start: LogPosition { offset: 23575 },
                     limit: LogPosition { offset: 23675 },
                     num_bytes: 137722,
@@ -3246,7 +3176,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000fe.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(254),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(254)),
                     start: LogPosition { offset: 23675 },
                     limit: LogPosition { offset: 23742 },
                     num_bytes: 100808,
@@ -3255,7 +3185,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000ff.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(255),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(255)),
                     start: LogPosition { offset: 23742 },
                     limit: LogPosition { offset: 23842 },
                     num_bytes: 134240,
@@ -3264,7 +3194,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000100.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(256),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(256)),
                     start: LogPosition { offset: 23842 },
                     limit: LogPosition { offset: 23942 },
                     num_bytes: 135368,
@@ -3273,7 +3203,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000101.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(257),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(257)),
                     start: LogPosition { offset: 23942 },
                     limit: LogPosition { offset: 24029 },
                     num_bytes: 121177,
@@ -3282,7 +3212,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000102.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(258),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(258)),
                     start: LogPosition { offset: 24029 },
                     limit: LogPosition { offset: 24129 },
                     num_bytes: 131830,
@@ -3291,7 +3221,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000103.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(259),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(259)),
                     start: LogPosition { offset: 24129 },
                     limit: LogPosition { offset: 24229 },
                     num_bytes: 137812,
@@ -3300,7 +3230,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000104.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(260),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(260)),
                     start: LogPosition { offset: 24229 },
                     limit: LogPosition { offset: 24301 },
                     num_bytes: 104740,
@@ -3309,7 +3239,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000105.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(261),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(261)),
                     start: LogPosition { offset: 24301 },
                     limit: LogPosition { offset: 24401 },
                     num_bytes: 136602,
@@ -3318,7 +3248,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000106.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(262),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(262)),
                     start: LogPosition { offset: 24401 },
                     limit: LogPosition { offset: 24485 },
                     num_bytes: 115053,
@@ -3327,7 +3257,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000107.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(263),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(263)),
                     start: LogPosition { offset: 24485 },
                     limit: LogPosition { offset: 24585 },
                     num_bytes: 141135,
@@ -3336,7 +3266,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000108.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(264),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(264)),
                     start: LogPosition { offset: 24585 },
                     limit: LogPosition { offset: 24685 },
                     num_bytes: 136246,
@@ -3345,7 +3275,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000109.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(265),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(265)),
                     start: LogPosition { offset: 24685 },
                     limit: LogPosition { offset: 24785 },
                     num_bytes: 136663,
@@ -3354,7 +3284,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000010a.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(266),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(266)),
                     start: LogPosition { offset: 24785 },
                     limit: LogPosition { offset: 24790 },
                     num_bytes: 35690,
@@ -3363,7 +3293,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000010b.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(267),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(267)),
                     start: LogPosition { offset: 24790 },
                     limit: LogPosition { offset: 24890 },
                     num_bytes: 138674,
@@ -3372,7 +3302,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000010c.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(268),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(268)),
                     start: LogPosition { offset: 24890 },
                     limit: LogPosition { offset: 24990 },
                     num_bytes: 140703,
@@ -3381,7 +3311,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000010d.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(269),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(269)),
                     start: LogPosition { offset: 24990 },
                     limit: LogPosition { offset: 25045 },
                     num_bytes: 85851,
@@ -3390,7 +3320,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000010e.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(270),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(270)),
                     start: LogPosition { offset: 25045 },
                     limit: LogPosition { offset: 25145 },
                     num_bytes: 141113,
@@ -3399,7 +3329,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=000000000000010f.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(271),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(271)),
                     start: LogPosition { offset: 25145 },
                     limit: LogPosition { offset: 25245 },
                     num_bytes: 135896,
@@ -3408,7 +3338,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000110.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(272),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(272)),
                     start: LogPosition { offset: 25245 },
                     limit: LogPosition { offset: 25345 },
                     num_bytes: 137036,
@@ -3417,7 +3347,7 @@ mod tests {
                 Fragment {
                     path: "log/Bucket=0000000000000000/FragmentSeqNo=0000000000000111.parquet"
                         .to_string(),
-                    seq_no: FragmentSeqNo(273),
+                    seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(273)),
                     start: LogPosition { offset: 25345 },
                     limit: LogPosition { offset: 25445 },
                     num_bytes: 135284,
@@ -3425,9 +3355,9 @@ mod tests {
                 },
             ],
             initial_offset: Some(LogPosition { offset: 1 }),
-            initial_seq_no: Some(FragmentSeqNo(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
-        let Some(fragments) = LogReader::scan_from_manifest(
+        let Some(fragments) = scan_from_manifest(
             &manifest,
             LogPosition::from_offset(20776),
             Limits {
@@ -3438,14 +3368,13 @@ mod tests {
         ) else {
             panic!("failed to get fragments");
         };
-        eprintln!("{fragments:?}");
         assert_eq!(fragments.len(), 2);
         assert_eq!(
             fragments[0],
             Fragment {
                 path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000db.parquet"
                     .to_string(),
-                seq_no: FragmentSeqNo(219),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(219)),
                 start: LogPosition { offset: 20776 },
                 limit: LogPosition { offset: 20876 },
                 num_bytes: 130467,
@@ -3457,7 +3386,7 @@ mod tests {
             Fragment {
                 path: "log/Bucket=0000000000000000/FragmentSeqNo=00000000000000dc.parquet"
                     .to_string(),
-                seq_no: FragmentSeqNo(220),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(220)),
                 start: LogPosition { offset: 20876 },
                 limit: LogPosition { offset: 20918 },
                 num_bytes: 78680,
@@ -3471,11 +3400,11 @@ mod tests {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+        let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
             &storage,
             &prefix,
             manifest.clone(),
@@ -3483,17 +3412,31 @@ mod tests {
         .await
         .unwrap();
 
-        let (loaded_manifest, etag) = Manifest::load(&reader.options.throttle, &storage, &prefix)
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            writer_options,
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            prefix.clone(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let batch_manager = fragment_factory.make_consumer().await.unwrap();
+        let manifest_manager = manifest_factory.make_consumer().await.unwrap();
+
+        let reader = LogReader::new(options.clone(), batch_manager, manifest_manager);
+
+        let (loaded_manifest, etag) = ManifestReader::load(&options.throttle, &storage, &prefix)
             .await
             .unwrap()
             .unwrap();
 
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest: loaded_manifest,
-            e_tag: etag,
+            witness: crate::ManifestWitness::ETag(etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(result, "verify should return true for matching etag");
     }
 
@@ -3502,11 +3445,11 @@ mod tests {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+        let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
             &storage,
             &prefix,
             manifest.clone(),
@@ -3514,13 +3457,27 @@ mod tests {
         .await
         .unwrap();
 
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            writer_options,
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            prefix.clone(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let batch_manager = fragment_factory.make_consumer().await.unwrap();
+        let manifest_manager = manifest_factory.make_consumer().await.unwrap();
+
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
+
         let fake_etag = chroma_storage::ETag("fake-etag-that-wont-match".to_string());
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest,
-            e_tag: fake_etag,
+            witness: crate::ManifestWitness::ETag(fake_etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await.unwrap();
+        let result = reader.verify(&manifest_and_witness).await.unwrap();
         assert!(!result, "verify should return false for non-matching etag");
     }
 
@@ -3533,16 +3490,41 @@ mod tests {
         )));
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage, prefix);
+        let writer_options = crate::LogWriterOptions::default();
 
+        // Initialize a manifest first so we can create the managers
+        // but we'll point the reader at a nonexistent prefix
         let manifest = Manifest::new_empty("test-writer");
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
+            &storage,
+            &prefix,
+            manifest.clone(),
+        )
+        .await
+        .unwrap();
+
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            writer_options,
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            prefix.clone(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let batch_manager = fragment_factory.make_consumer().await.unwrap();
+        let manifest_manager = manifest_factory.make_consumer().await.unwrap();
+
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
+
         let fake_etag = chroma_storage::ETag("fake-etag".to_string());
-        let manifest_and_etag = ManifestAndETag {
+        let manifest_and_witness = ManifestAndWitness {
             manifest,
-            e_tag: fake_etag,
+            witness: crate::ManifestWitness::ETag(fake_etag),
         };
 
-        let result = reader.verify(&manifest_and_etag).await;
+        let result = reader.verify(&manifest_and_witness).await;
         match result {
             Err(crate::Error::StorageError(storage_error)) => {
                 match storage_error.as_ref() {
@@ -3557,15 +3539,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_e_tag_returns_both_manifest_and_etag() {
+    async fn test_k8s_integration_manifest_and_witness_returns_both_manifest_and_witness() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "test-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage.clone(), prefix.clone());
+        let writer_options = crate::LogWriterOptions::default();
 
         let manifest = Manifest::new_empty("test-writer");
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
+        ManifestManager::initialize_from_manifest(
+            &writer_options,
             &storage,
             &prefix,
             manifest.clone(),
@@ -3573,31 +3555,71 @@ mod tests {
         .await
         .unwrap();
 
-        let result = reader.manifest_and_e_tag().await.unwrap();
+        let (fragment_factory, manifest_factory) = s3::create_s3_factories(
+            writer_options,
+            LogReaderOptions::default(),
+            Arc::clone(&storage),
+            prefix.clone(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        );
+        let batch_manager = fragment_factory.make_consumer().await.unwrap();
+        let manifest_manager = manifest_factory.make_consumer().await.unwrap();
+
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
+
+        let result = reader.manifest_and_witness().await.unwrap();
         assert!(
             result.is_some(),
-            "manifest_and_e_tag should return Some when manifest exists"
+            "manifest_and_witness should return Some when manifest exists"
         );
 
-        let manifest_and_etag = result.unwrap();
-        assert_eq!(manifest_and_etag.manifest.writer, "test-writer");
-        assert!(
-            !manifest_and_etag.e_tag.0.is_empty(),
-            "etag should not be empty"
-        );
+        let manifest_and_witness = result.unwrap();
+        assert_eq!(manifest_and_witness.manifest.writer, "test-writer");
+        match manifest_and_witness.witness {
+            crate::ManifestWitness::ETag(e_tag) => {
+                assert!(!e_tag.0.is_empty(), "etag should not be empty");
+            }
+            crate::ManifestWitness::Position(_) => {
+                panic!("Expected ETag witness, got Position");
+            }
+        }
     }
 
     #[tokio::test]
-    async fn test_k8s_integration_manifest_and_e_tag_returns_none_when_no_manifest() {
+    async fn test_k8s_integration_manifest_and_witness_returns_none_when_no_manifest() {
         let storage = Arc::new(chroma_storage::s3::s3_client_for_test_with_new_bucket().await);
         let prefix = "nonexistent-prefix".to_string();
         let options = LogReaderOptions::default();
-        let reader = LogReader::new(options, storage, prefix);
+        let writer_options = crate::LogWriterOptions::default();
 
-        let result = reader.manifest_and_e_tag().await.unwrap();
+        // Create factories pointing to a prefix with no manifest.
+        let fragment_factory = crate::S3FragmentManagerFactory {
+            write: writer_options.clone(),
+            read: LogReaderOptions::default(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            mark_dirty: Arc::new(()),
+        };
+        let manifest_factory = crate::S3ManifestManagerFactory {
+            write: writer_options.clone(),
+            read: LogReaderOptions::default(),
+            storage: Arc::clone(&storage),
+            prefix: prefix.clone(),
+            writer: "test-writer".to_string(),
+            mark_dirty: Arc::new(()),
+            snapshot_cache: Arc::new(()),
+        };
+        let batch_manager = fragment_factory.make_consumer().await.unwrap();
+        let manifest_manager = manifest_factory.make_consumer().await.unwrap();
+
+        let reader = LogReader::new(options, batch_manager, manifest_manager);
+
+        let result = reader.manifest_and_witness().await.unwrap();
         assert!(
             result.is_none(),
-            "manifest_and_e_tag should return None when no manifest exists"
+            "manifest_and_witness should return None when no manifest exists"
         );
     }
 }

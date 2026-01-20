@@ -61,92 +61,41 @@ func (s *attachedFunctionDb) Update(attachedFunction *dbmodel.AttachedFunction) 
 	return nil
 }
 
-func (s *attachedFunctionDb) GetByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("name = ?", name).
-		Where("is_deleted = ?", false).
-		Where("is_ready = ?", true).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetByName failed", zap.Error(err))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetAnyByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("name = ?", name).
-		Where("is_deleted = ?", false).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetAnyByName failed", zap.Error(err))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("id = ?", id).
-		Where("is_deleted = ?", false).
-		Where("is_ready = ?", true).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetByID failed", zap.Error(err), zap.String("id", id.String()))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetAnyByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
-	var attachedFunction dbmodel.AttachedFunction
-	err := s.db.
-		Where("id = ?", id).
-		Where("is_deleted = ?", false).
-		First(&attachedFunction).Error
-
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		log.Error("GetAnyByID failed", zap.Error(err), zap.String("id", id.String()))
-		return nil, err
-	}
-
-	return &attachedFunction, nil
-}
-
-func (s *attachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
+// GetAttachedFunctions is a consolidated getter that supports various query patterns
+// Parameters can be nil to indicate they should not be filtered on
+// - id: Filter by attached function ID
+// - name: Filter by attached function name
+// - inputCollectionID: Filter by input collection ID
+// - onlyReady: If true, only returns attached functions where is_ready = true
+func (s *attachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
 	var attachedFunctions []*dbmodel.AttachedFunction
-	err := s.db.
-		Where("input_collection_id = ?", inputCollectionID).
-		Where("is_deleted = ?", false).
-		Where("is_ready = ?", true).
-		Find(&attachedFunctions).Error
 
+	query := s.db.Where("is_deleted = ?", false)
+
+	if id != nil {
+		query = query.Where("id = ?", *id)
+	}
+
+	if name != nil {
+		query = query.Where("name = ?", *name)
+	}
+
+	if inputCollectionID != nil {
+		query = query.Where("input_collection_id = ?", *inputCollectionID)
+	}
+
+	if onlyReady {
+		query = query.Where("is_ready = ?", true)
+	}
+
+	err := query.Find(&attachedFunctions).Error
 	if err != nil {
-		log.Error("GetByCollectionID failed", zap.Error(err), zap.String("input_collection_id", inputCollectionID))
+		log.Error("GetAttachedFunctions failed",
+			zap.Error(err),
+			zap.Any("id", id),
+			zap.Any("name", name),
+			zap.Any("input_collection_id", inputCollectionID),
+			zap.Bool("only_ready", onlyReady))
 		return nil, err
 	}
 
@@ -322,34 +271,35 @@ func (s *attachedFunctionDb) CleanupExpiredPartial(maxAgeSeconds uint64) ([]uuid
 	return ids, nil
 }
 
-// GetSoftDeletedAttachedFunctions returns attached functions that are soft deleted
-// and were updated before the cutoff time (eligible for hard deletion)
-func (s *attachedFunctionDb) GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
+// GetAttachedFunctionsToGc returns attached functions eligible for garbage collection:
+// either soft deleted OR stuck in non-ready state, and updated before the cutoff time
+func (s *attachedFunctionDb) GetAttachedFunctionsToGc(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
 	var attachedFunctions []*dbmodel.AttachedFunction
 	err := s.db.
-		Where("is_deleted = ?", true).
+		Where("(is_deleted = ? OR is_ready = ?)", true, false).
 		Where("updated_at < ?", cutoffTime).
 		Limit(int(limit)).
 		Find(&attachedFunctions).Error
 
 	if err != nil {
-		log.Error("GetSoftDeletedAttachedFunctions failed",
+		log.Error("GetAttachedFunctionsToGc failed",
 			zap.Error(err),
 			zap.Time("cutoff_time", cutoffTime))
 		return nil, err
 	}
 
-	log.Debug("GetSoftDeletedAttachedFunctions found attached functions",
+	log.Debug("GetAttachedFunctionsToGc found attached functions",
 		zap.Int("count", len(attachedFunctions)),
 		zap.Time("cutoff_time", cutoffTime))
 
 	return attachedFunctions, nil
 }
 
-// HardDeleteAttachedFunction permanently deletes an attached function from the database
-// This should only be called after the soft delete grace period has passed
+// HardDeleteAttachedFunction permanently deletes an attached function from the database.
+// Deletes records that are either soft-deleted or stuck in non-ready state.
+// This should only be called after the grace period has passed (via GetAttachedFunctionsToGc).
 func (s *attachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
-	result := s.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ? AND is_deleted = true", id)
+	result := s.db.Unscoped().Delete(&dbmodel.AttachedFunction{}, "id = ? AND (is_deleted = ? OR is_ready = ?)", id, true, false)
 
 	if result.Error != nil {
 		log.Error("HardDeleteAttachedFunction failed",
@@ -359,9 +309,9 @@ func (s *attachedFunctionDb) HardDeleteAttachedFunction(id uuid.UUID) error {
 	}
 
 	if result.RowsAffected == 0 {
-		log.Warn("HardDeleteAttachedFunction: no rows affected (attached function not found)",
+		log.Warn("HardDeleteAttachedFunction: no rows affected (attached function not found or not eligible for deletion)",
 			zap.String("id", id.String()))
-		return nil // Idempotent - no error if not found
+		return nil // Idempotent - no error if not found or not eligible
 	}
 
 	log.Info("HardDeleteAttachedFunction succeeded",

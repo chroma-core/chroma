@@ -185,7 +185,7 @@ impl CompactionManager {
 
     #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
     async fn start_compaction_batch(&mut self) {
-        self.process_completions();
+        self.process_completions().await;
         let compact_awaiter_channel = &self.compact_awaiter_channel;
         self.scheduler.schedule().await;
 
@@ -309,7 +309,7 @@ impl CompactionManager {
         self.context.heap_service.as_mut()
     }
 
-    fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
+    async fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
         let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
         let mut completed_collections = Vec::new();
         while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
@@ -323,14 +323,16 @@ impl CompactionManager {
                     }
                     CompactionResponse::RequireCompactionOffsetRepair {
                         job_id: collection_id,
+                        database_name,
                         witnessed_offset_in_sysdb,
                     } => {
                         if *collection_id != resp.job_id {
                             tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *collection_id, rhs =? resp.job_id);
-                            self.scheduler.fail_job(resp.job_id);
+                            self.scheduler.fail_job(resp.job_id).await;
                         } else {
                             self.scheduler.require_repair(
                                 chroma_types::CollectionUuid(resp.job_id.0),
+                                database_name.clone(),
                                 *witnessed_offset_in_sysdb,
                             );
                             self.scheduler.succeed_job(resp.job_id);
@@ -338,7 +340,7 @@ impl CompactionManager {
                     }
                 },
                 Err(_) => {
-                    self.scheduler.fail_job(resp.job_id);
+                    self.scheduler.fail_job(resp.job_id).await;
                 }
             }
             completed_collections.push(resp);
@@ -418,8 +420,8 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 return Err(err);
             }
         };
-        let sysdb_config = &config.sysdb;
-        let sysdb = match SysDb::try_from_config(sysdb_config, registry).await {
+        let sysdb_config = (config.sysdb.clone(), config.mcmr_sysdb.clone());
+        let sysdb = match SysDb::try_from_config(&sysdb_config, registry).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
@@ -765,9 +767,11 @@ impl Handler<ListDeadJobsMessage> for CompactionManager {
         message: ListDeadJobsMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
-        let dead_jobs = self.scheduler.get_dead_jobs();
-        if let Err(e) = message.response_tx.send(dead_jobs.into_iter().collect()) {
-            tracing::error!("Failed to send dead jobs response: {:?}", e);
+        // Dead jobs are now tracked in sysdb via compaction_failure_count, not in memory
+        // Return empty list as this endpoint is deprecated
+        // TODO(tanujnay112): remove this endpoint
+        if let Err(e) = message.response_tx.send(Vec::new()) {
+            tracing::warn!("Failed to send dead jobs response: {:?}", e);
         }
     }
 }
@@ -1060,7 +1064,7 @@ mod tests {
 
         while completed_compactions.len() < expected_compactions.len() && start.elapsed() < timeout
         {
-            let completed = manager.process_completions();
+            let completed = manager.process_completions().await;
             completed_compactions.extend(
                 completed
                     .iter()
@@ -1088,39 +1092,5 @@ mod tests {
                 panic!("Expected hnsw purge to be successful")
             }
         }
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_list_dead_jobs() {
-        // Create a simple system for testing
-        let system = System::new();
-        let dispatcher = Dispatcher::new(DispatcherConfig::default());
-        let _dispatcher_handle = system.start_component(dispatcher);
-
-        // Create test scheduler with dead jobs
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
-        assignment_policy.set_members(vec!["test-member".to_string()]);
-
-        let mut scheduler = Scheduler::new(
-            "test-member".to_string(),
-            Log::InMemory(InMemoryLog::new()),
-            SysDb::Test(TestSysDb::new()),
-            Box::new(LasCompactionTimeSchedulerPolicy {}),
-            10,
-            100,
-            assignment_policy,
-            HashSet::new(),
-            60,
-            3,
-        );
-
-        // Simulate a dead job by marking a collection as killed (moved to dead_jobs)
-        let test_collection_id = CollectionUuid::new();
-        scheduler.kill_job(test_collection_id.into());
-
-        // Verify it's in dead jobs
-        let dead_jobs = scheduler.get_dead_jobs();
-        assert_eq!(dead_jobs.len(), 1);
-        assert!(dead_jobs.contains(&test_collection_id.into()));
     }
 }

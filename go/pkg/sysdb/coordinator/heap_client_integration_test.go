@@ -370,20 +370,21 @@ func (suite *HeapClientIntegrationTestSuite) TestPartialTaskCleanup_ThenRecreate
 	suite.T().Logf("Cleanup completed, removed %d tasks", cleanupResp.CleanedUpCount)
 
 	// STEP 3: Verify task still exists and can be retrieved
-	getResp, err := suite.sysdbClient.GetAttachedFunctionByName(ctx, &coordinatorpb.GetAttachedFunctionByNameRequest{
-		InputCollectionId: collectionID,
-		Name:              taskName,
+	getResp, err := suite.sysdbClient.GetAttachedFunctions(ctx, &coordinatorpb.GetAttachedFunctionsRequest{
+		InputCollectionId: &collectionID,
+		Name:              &taskName,
 	})
 	suite.NoError(err, "Task should still exist after cleanup")
 	suite.NotNil(getResp)
-	suite.Equal(taskResp.AttachedFunction.Id, getResp.AttachedFunction.Id)
-	suite.T().Logf("Task still exists after cleanup: %s", getResp.AttachedFunction.Id)
+	suite.Require().Len(getResp.AttachedFunctions, 1)
+	suite.Equal(taskResp.AttachedFunction.Id, getResp.AttachedFunctions[0].Id)
+	suite.T().Logf("Task still exists after cleanup: %s", getResp.AttachedFunctions[0].Id)
 
 	// STEP 4: Delete the task
 	_, err = suite.sysdbClient.DetachFunction(ctx, &coordinatorpb.DetachFunctionRequest{
-		AttachedFunctionId: taskResp.AttachedFunction.Id,
-		InputCollectionId:  collectionID,
-		DeleteOutput:       true,
+		Name:              taskName,
+		InputCollectionId: collectionID,
+		DeleteOutput:      true,
 	})
 	suite.NoError(err, "Should delete task")
 

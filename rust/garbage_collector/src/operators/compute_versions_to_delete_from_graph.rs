@@ -2,7 +2,7 @@ use crate::types::{VersionGraph, VersionStatus};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_system::{Operator, OperatorType};
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName};
 use chrono::{DateTime, Utc};
 use petgraph::visit::Topo;
 use std::collections::{HashMap, HashSet};
@@ -17,6 +17,7 @@ pub struct ComputeVersionsToDeleteInput {
     pub soft_deleted_collections: HashSet<CollectionUuid>,
     pub cutoff_time: DateTime<Utc>,
     pub min_versions_to_keep: u32,
+    pub database_names: HashMap<CollectionUuid, DatabaseName>,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -27,7 +28,7 @@ pub enum CollectionVersionAction {
 
 #[derive(Debug, Clone)]
 pub struct ComputeVersionsToDeleteOutput {
-    pub versions: HashMap<CollectionUuid, HashMap<i64, CollectionVersionAction>>,
+    pub versions: HashMap<CollectionUuid, (DatabaseName, HashMap<i64, CollectionVersionAction>)>,
 }
 
 #[derive(Error, Debug)]
@@ -120,7 +121,8 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
         Ok(ComputeVersionsToDeleteOutput {
             versions: versions_by_collection
                 .into_iter()
-                .map(|(collection_id, versions)| {
+                .filter_map(|(collection_id, versions)| {
+                    let database_name = input.database_names.get(&collection_id)?.clone();
                     let versions: HashMap<_, _> = versions
                         .into_iter()
                         .map(|(version, _, mode)| (version, mode))
@@ -146,7 +148,7 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                         );
                     }
 
-                    (collection_id, versions)
+                    Some((collection_id, (database_name, versions)))
                 })
                 .collect(),
         })
@@ -206,11 +208,16 @@ mod tests {
         graph.add_edge(v2, v3, ());
         graph.add_edge(v3, v4, ());
 
+        let database_name = DatabaseName::new("test_db").unwrap();
+        let mut database_names = HashMap::new();
+        database_names.insert(collection_id, database_name);
+
         let input = ComputeVersionsToDeleteInput {
             graph,
             cutoff_time: now - Duration::hours(6),
             min_versions_to_keep: 1,
             soft_deleted_collections: HashSet::new(),
+            database_names,
         };
 
         let mut result = ComputeVersionsToDeleteOperator {}
@@ -220,7 +227,7 @@ mod tests {
 
         // v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
         assert_eq!(result.versions.len(), 1);
-        let versions = result.versions.remove(&collection_id).unwrap();
+        let (_database_name, versions) = result.versions.remove(&collection_id).unwrap();
         let mut versions = versions.into_iter().collect::<Vec<_>>();
         versions.sort_by_key(|(version, _)| *version);
         assert_eq!(
@@ -319,11 +326,17 @@ mod tests {
         // C was forked from B
         graph.add_edge(b_v2, c_v0, ());
 
+        let mut database_names = HashMap::new();
+        database_names.insert(a_collection_id, DatabaseName::new("test_db").unwrap());
+        database_names.insert(b_collection_id, DatabaseName::new("test_db").unwrap());
+        database_names.insert(c_collection_id, DatabaseName::new("test_db").unwrap());
+
         let input = ComputeVersionsToDeleteInput {
             graph,
             cutoff_time: now - Duration::hours(6),
             min_versions_to_keep: 1,
             soft_deleted_collections: HashSet::new(),
+            database_names,
         };
 
         let mut result = ComputeVersionsToDeleteOperator {}
@@ -332,7 +345,7 @@ mod tests {
             .unwrap();
 
         // For collection A: v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
-        let a_versions = result.versions.remove(&a_collection_id).unwrap();
+        let (_database_name, a_versions) = result.versions.remove(&a_collection_id).unwrap();
         let mut a_versions = a_versions.into_iter().collect::<Vec<_>>();
         a_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(
@@ -347,7 +360,7 @@ mod tests {
         );
 
         // For collection B: v0 is always kept, and the most recent version (v2) is kept. So v1 is marked for deletion.
-        let b_versions = result.versions.remove(&b_collection_id).unwrap();
+        let (_database_name, b_versions) = result.versions.remove(&b_collection_id).unwrap();
         let mut b_versions = b_versions.into_iter().collect::<Vec<_>>();
         b_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(
@@ -360,7 +373,7 @@ mod tests {
         );
 
         // For collection C: v0 is always kept.
-        let c_versions = result.versions.remove(&c_collection_id).unwrap();
+        let (_database_name, c_versions) = result.versions.remove(&c_collection_id).unwrap();
         let mut c_versions = c_versions.into_iter().collect::<Vec<_>>();
         c_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(c_versions, vec![(0, CollectionVersionAction::Keep)]);
@@ -450,11 +463,17 @@ mod tests {
         // C was forked from B
         graph.add_edge(b_v2, c_v0, ());
 
+        let mut database_names = HashMap::new();
+        database_names.insert(a_collection_id, DatabaseName::new("test_db").unwrap());
+        database_names.insert(b_collection_id, DatabaseName::new("test_db").unwrap());
+        database_names.insert(c_collection_id, DatabaseName::new("test_db").unwrap());
+
         let input = ComputeVersionsToDeleteInput {
             graph,
             cutoff_time: now - Duration::hours(6),
             min_versions_to_keep: 1,
             soft_deleted_collections: HashSet::from([b_collection_id]), // B was soft deleted
+            database_names,
         };
 
         let mut result = ComputeVersionsToDeleteOperator {}
@@ -463,7 +482,7 @@ mod tests {
             .unwrap();
 
         // For collection A: v0 is always kept, and the most recent version (v4) is kept. v3 is not eligible for deletion because it is after the cutoff time. So v1 and v2 are marked for deletion.
-        let a_versions = result.versions.remove(&a_collection_id).unwrap();
+        let (_database_name, a_versions) = result.versions.remove(&a_collection_id).unwrap();
         let mut a_versions = a_versions.into_iter().collect::<Vec<_>>();
         a_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(
@@ -478,7 +497,7 @@ mod tests {
         );
 
         // Collection B was soft deleted, so all versions are marked for deletion.
-        let b_versions = result.versions.remove(&b_collection_id).unwrap();
+        let (_database_name, b_versions) = result.versions.remove(&b_collection_id).unwrap();
         let mut b_versions = b_versions.into_iter().collect::<Vec<_>>();
         b_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(
@@ -491,9 +510,223 @@ mod tests {
         );
 
         // For collection C: v0 is always kept.
-        let c_versions = result.versions.remove(&c_collection_id).unwrap();
+        let (_database_name, c_versions) = result.versions.remove(&c_collection_id).unwrap();
         let mut c_versions = c_versions.into_iter().collect::<Vec<_>>();
         c_versions.sort_by_key(|(version, _)| *version);
         assert_eq!(c_versions, vec![(0, CollectionVersionAction::Keep)]);
+    }
+
+    /// Collections missing from database_names are filtered out of the output entirely.
+    #[tokio::test]
+    #[traced_test]
+    async fn collection_missing_from_database_names_is_filtered_out() {
+        let now = Utc::now();
+
+        let collection_with_db = CollectionUuid::new();
+        let collection_without_db = CollectionUuid::new();
+
+        let mut graph = VersionGraph::new();
+        let v0_with = graph.add_node(VersionGraphNode {
+            collection_id: collection_with_db,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(48)),
+            },
+        });
+        let v1_with = graph.add_node(VersionGraphNode {
+            collection_id: collection_with_db,
+            version: 1,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(24)),
+            },
+        });
+        graph.add_edge(v0_with, v1_with, ());
+
+        let v0_without = graph.add_node(VersionGraphNode {
+            collection_id: collection_without_db,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(48)),
+            },
+        });
+        let v1_without = graph.add_node(VersionGraphNode {
+            collection_id: collection_without_db,
+            version: 1,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(24)),
+            },
+        });
+        graph.add_edge(v0_without, v1_without, ());
+
+        let mut database_names = HashMap::new();
+        database_names.insert(collection_with_db, DatabaseName::new("test_db").unwrap());
+        // Deliberately not inserting collection_without_db.
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            database_names,
+        };
+
+        let result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        // Only collection_with_db should be in output; collection_without_db is filtered.
+        assert_eq!(result.versions.len(), 1);
+        assert!(result.versions.contains_key(&collection_with_db));
+        assert!(!result.versions.contains_key(&collection_without_db));
+    }
+
+    /// Verify database name in input is propagated correctly to output.
+    #[tokio::test]
+    #[traced_test]
+    async fn database_name_propagated_to_output() {
+        let now = Utc::now();
+        let collection_id = CollectionUuid::new();
+        let expected_db_name = DatabaseName::new("my_special_database").unwrap();
+
+        let mut graph = VersionGraph::new();
+        let v0 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(48)),
+            },
+        });
+        let v1 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 1,
+            status: VersionStatus::Alive { created_at: now },
+        });
+        graph.add_edge(v0, v1, ());
+
+        let mut database_names = HashMap::new();
+        database_names.insert(collection_id, expected_db_name.clone());
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            database_names,
+        };
+
+        let result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        let (actual_db_name, _versions) = result.versions.get(&collection_id).unwrap();
+        assert_eq!(*actual_db_name, expected_db_name);
+    }
+
+    /// Empty database_names results in an empty output, even with collections in graph.
+    #[tokio::test]
+    #[traced_test]
+    async fn empty_database_names_produces_empty_output() {
+        let now = Utc::now();
+        let collection_id = CollectionUuid::new();
+
+        let mut graph = VersionGraph::new();
+        let v0 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(48)),
+            },
+        });
+        let v1 = graph.add_node(VersionGraphNode {
+            collection_id,
+            version: 1,
+            status: VersionStatus::Alive { created_at: now },
+        });
+        graph.add_edge(v0, v1, ());
+
+        let database_names = HashMap::new();
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            database_names,
+        };
+
+        let result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        assert!(result.versions.is_empty());
+    }
+
+    /// Different collections can have different database names.
+    #[tokio::test]
+    #[traced_test]
+    async fn different_database_names_for_different_collections() {
+        let now = Utc::now();
+
+        let collection_a = CollectionUuid::new();
+        let collection_b = CollectionUuid::new();
+        let db_name_a = DatabaseName::new("database_alpha").unwrap();
+        let db_name_b = DatabaseName::new("database_beta").unwrap();
+
+        let mut graph = VersionGraph::new();
+        let a_v0 = graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(48)),
+            },
+        });
+        let a_v1 = graph.add_node(VersionGraphNode {
+            collection_id: collection_a,
+            version: 1,
+            status: VersionStatus::Alive { created_at: now },
+        });
+        graph.add_edge(a_v0, a_v1, ());
+
+        let b_v0 = graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 0,
+            status: VersionStatus::Alive {
+                created_at: (now - Duration::hours(48)),
+            },
+        });
+        let b_v1 = graph.add_node(VersionGraphNode {
+            collection_id: collection_b,
+            version: 1,
+            status: VersionStatus::Alive { created_at: now },
+        });
+        graph.add_edge(b_v0, b_v1, ());
+
+        let mut database_names = HashMap::new();
+        database_names.insert(collection_a, db_name_a.clone());
+        database_names.insert(collection_b, db_name_b.clone());
+
+        let input = ComputeVersionsToDeleteInput {
+            graph,
+            cutoff_time: now - Duration::hours(6),
+            min_versions_to_keep: 1,
+            soft_deleted_collections: HashSet::new(),
+            database_names,
+        };
+
+        let result = ComputeVersionsToDeleteOperator {}
+            .run(&input)
+            .await
+            .unwrap();
+
+        assert_eq!(result.versions.len(), 2);
+
+        let (actual_db_a, _) = result.versions.get(&collection_a).unwrap();
+        assert_eq!(*actual_db_a, db_name_a);
+
+        let (actual_db_b, _) = result.versions.get(&collection_b).unwrap();
+        assert_eq!(*actual_db_b, db_name_b);
     }
 }

@@ -1,5 +1,6 @@
 ---
-title: Collection
+id: collection-python
+name: Collection (Python)
 ---
 
 # Python Collection
@@ -40,7 +41,7 @@ Add embeddings to the data store.
 
 **Returns**:
 
-  None
+None
 
 **Raises**:
 
@@ -98,6 +99,7 @@ Get the first few results in the database up to limit
 def query(
         query_embeddings: Optional[OneOrMany[Embedding]] = None,
         query_texts: Optional[OneOrMany[Document]] = None,
+        ids: Optional[OneOrMany[ID]] = None,
         n_results: int = 10,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
@@ -142,7 +144,7 @@ Modify the collection name or metadata
 
 **Returns**:
 
-  None
+None
 
 ## update
 
@@ -164,7 +166,7 @@ Update the embeddings, metadatas or documents for provided ids.
 
 **Returns**:
 
-  None
+None
 
 ## upsert
 
@@ -186,7 +188,7 @@ Update the embeddings, metadatas or documents for provided ids, or create them i
 
 **Returns**:
 
-  None
+None
 
 ## delete
 
@@ -206,4 +208,4 @@ Delete the embeddings based on ids and/or a where filter
 
 **Returns**:
 
-  None
+None

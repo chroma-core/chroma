@@ -34,7 +34,7 @@ use uuid::Uuid;
 /// This is the database that stores metadata about databases, tenants, and collections etc
 /// ## Notes
 /// - The SqliteSysDb should be "Shareable" - it should be possible to clone it and use it in multiple threads
-///     without having divergent state
+///   without having divergent state
 pub struct SqliteSysDb {
     db: SqliteDb,
     log_topic_namespace: String,
@@ -379,6 +379,7 @@ impl SqliteSysDb {
             lineage_file_path: None,
             updated_at: SystemTime::UNIX_EPOCH,
             database_id: database_uuid,
+            compaction_failure_count: 0,
         })
     }
 
@@ -562,7 +563,7 @@ impl SqliteSysDb {
             collection_id,
             name,
             tenant,
-            database,
+            database.map(|d| d.into_string()),
             limit,
             offset,
         )
@@ -673,28 +674,13 @@ impl SqliteSysDb {
         _tenant_id: String,
         _database_id: String,
         _min_records_for_attached_function: u64,
-    ) -> Result<chroma_types::AttachedFunctionUuid, crate::AttachFunctionError> {
+    ) -> Result<(chroma_types::AttachedFunctionUuid, bool), crate::AttachFunctionError> {
         // TODO: Implement this when attached function support is added to SqliteSysDb
-        Err(crate::AttachFunctionError::FailedToCreateAttachedFunction(
+        Err(crate::AttachFunctionError::InternalError(
             tonic::Status::unimplemented(
                 " Attached Function operations not yet implemented in SqliteSysDb",
             ),
         ))
-    }
-
-    pub(crate) async fn get_attached_function_by_name(
-        &self,
-        _input_collection_id: chroma_types::CollectionUuid,
-        _attached_function_name: String,
-    ) -> Result<chroma_types::AttachedFunction, crate::GetAttachedFunctionError> {
-        // TODO: Implement this when attached function support is added to SqliteSysDb
-        Err(
-            crate::GetAttachedFunctionError::FailedToGetAttachedFunction(
-                tonic::Status::unimplemented(
-                    " Attached Function operations not yet implemented in SqliteSysDb",
-                ),
-            ),
-        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -860,6 +846,7 @@ impl SqliteSysDb {
                     lineage_file_path: None,
                     updated_at: SystemTime::UNIX_EPOCH,
                     database_id,
+                    compaction_failure_count: 0,
                 }))
             })
             .collect::<Result<Vec<_>, GetCollectionsError>>()?;

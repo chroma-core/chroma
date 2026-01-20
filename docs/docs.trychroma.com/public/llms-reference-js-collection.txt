@@ -1,24 +1,33 @@
+---
+id: collection-js-ts
+name: Collection (JS/TS)
+---
+
 # Class: Collection
 
 ## Properties
 
-* `id: string`
-* `metadata: CollectionMetadata`
-* `name: string`
+- `id: string`
+- `metadata: CollectionMetadata`
+- `name: string`
 
 ## Methods
 
 ### add
 
-* `add(params): Promise<void>`
+- `add(params): Promise<void>`
 
 Add items to the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `AddRecordsParams` | The parameters for the query. |
+| Name                | Type          | Description                                                      |
+| :------------------ | :------------ | :--------------------------------------------------------------- |
+| `params.ids`        | `string[]`    | Unique identifiers for the records (required).                   |
+| `params.embeddings?` | `number[][]`  | Optional pre-computed embeddings.                                 |
+| `params.metadatas?` | `Metadata[]`  | Optional metadata for each record.                               |
+| `params.documents?` | `string[]`    | Optional document text (will be embedded if embeddings not provided). |
+| `params.uris?`      | `string[]`    | Optional URIs for the records.                                  |
 
 #### Returns
 
@@ -31,15 +40,18 @@ Add items to the collection
 ```typescript
 const response = await collection.add({
   ids: ["id1", "id2"],
-  embeddings: [[1, 2, 3], [4, 5, 6]],
-  metadatas: [{ "key": "value" }, { "key": "value" }],
-  documents: ["document1", "document2"]
+  embeddings: [
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
+  metadatas: [{ key: "value" }, { key: "value" }],
+  documents: ["document1", "document2"],
 });
 ```
 
 ### count
 
-* `count(): Promise<number>`
+- `count(): Promise<number>`
 
 Count the number of items in the collection
 
@@ -57,21 +69,23 @@ const count = await collection.count();
 
 ### delete
 
-* `delete(params?): Promise<string[]>`
+- `delete(params?): Promise<void>`
 
 Deletes items from the collection.
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `DeleteParams` | The parameters for deleting items from the collection. |
+| Name                 | Type          | Description                                            |
+| :------------------- | :------------ | :----------------------------------------------------- |
+| `params.ids?`        | `string[]`    | Specific record IDs to delete.                         |
+| `params.where?`      | `Where`       | Metadata-based filtering for deletion.                 |
+| `params.whereDocument?` | `WhereDocument` | Document content-based filtering for deletion.      |
 
 #### Returns
 
-`Promise<string[]>`
+`Promise<void>`
 
-A promise that resolves to the IDs of the deleted items.
+A promise that resolves when the deletion is complete.
 
 **Throws**
 
@@ -81,27 +95,32 @@ If there is an issue deleting items from the collection.
 
 ```typescript
 const results = await collection.delete({
-  ids: "some_id",
-  where: {"name": {"$eq": "John Doe"}},
-  whereDocument: {"$contains":"search_string"}
+  ids: ["some_id"],
+  where: { name: { $eq: "John Doe" } },
+  whereDocument: { $contains: "search_string" },
 });
 ```
 
 ### get
 
-* `get(params?): Promise<MultiGetResponse>`
+- `get(params?): Promise<GetResult>`
 
 Get items from the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `BaseGetParams` | The parameters for the query. |
+| Name                 | Type            | Description                                                      |
+| :------------------- | :-------------- | :--------------------------------------------------------------- |
+| `params.ids?`        | `string[]`      | Specific record IDs to retrieve.                                 |
+| `params.where?`      | `Where`         | Metadata-based filtering conditions.                              |
+| `params.limit?`      | `number`        | Maximum number of records to return.                             |
+| `params.offset?`     | `number`        | Number of records to skip.                                      |
+| `params.whereDocument?` | `WhereDocument` | Document content-based filtering conditions.                      |
+| `params.include?`     | `Include[]`     | Fields to include in the response. Options: `"distances"`, `"documents"`, `"embeddings"`, `"metadatas"`, `"uris"`. Default: `["documents", "metadatas"]`. |
 
 #### Returns
 
-`Promise<MultiGetResponse>`
+`Promise<GetResult>`
 
 The response from the server.
 
@@ -110,58 +129,64 @@ The response from the server.
 ```typescript
 const response = await collection.get({
   ids: ["id1", "id2"],
-  where: { "key": "value" },
+  where: { key: "value" },
   limit: 10,
   offset: 0,
   include: ["embeddings", "metadatas", "documents"],
-  whereDocument: { "$contains": "value" },
+  whereDocument: { $contains: "value" },
 });
 ```
 
 ### modify
 
-* `modify(params): Promise<CollectionParams>`
+- `modify(params): Promise<void>`
 
-Modify the collection name or metadata
+Modify the collection name, metadata, or configuration
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `Object` | The parameters for the query. |
-| `params.metadata?` | `CollectionMetadata` | Optional new metadata for the collection. |
-| `params.name?` | `string` | Optional new name for the collection. |
+| Name                    | Type                        | Description                               |
+| :---------------------- | :-------------------------- | :---------------------------------------- |
+| `params.name?`          | `string`                    | Optional new name for the collection.     |
+| `params.metadata?`       | `CollectionMetadata`       | Optional new metadata for the collection. |
+| `params.configuration?` | `UpdateCollectionConfiguration` | Optional new configuration settings.     |
 
 #### Returns
 
-`Promise<CollectionParams>`
+`Promise<void>`
 
-The response from the API.
+A promise that resolves when the modification is complete.
 
 **Example**
 
 ```typescript
-const response = await client.updateCollection({
+await collection.modify({
   name: "new name",
-  metadata: { "key": "value" },
+  metadata: { key: "value" },
+  configuration: {
+    hnsw: {
+      ef_search: 100,
+      batch_size: 1000
+    }
+  }
 });
 ```
 
 ### peek
 
-* `peek(params?): Promise<MultiGetResponse>`
+- `peek(params?): Promise<GetResult>`
 
 Peek inside the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `PeekParams` | The parameters for the query. |
+| Name            | Type     | Description                   |
+| :-------------- | :------- | :---------------------------- |
+| `params.limit?` | `number` | Maximum number of records to return. Default: `10`. |
 
 #### Returns
 
-`Promise<MultiGetResponse>`
+`Promise<GetResult>`
 
 A promise that resolves to the query results.
 
@@ -173,25 +198,32 @@ If there is an issue executing the query.
 
 ```typescript
 const results = await collection.peek({
-  limit: 10
+  limit: 10,
 });
 ```
 
 ### query
 
-* `query(params): Promise<MultiQueryResponse>`
+- `query(params): Promise<QueryResult>`
 
 Performs a query on the collection using the specified parameters.
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `QueryRecordsParams` | The parameters for the query. |
+| Name                  | Type            | Description                                                      |
+| :-------------------- | :-------------- | :--------------------------------------------------------------- |
+| `params.queryEmbeddings?` | `number[][]` | Pre-computed query embedding vectors.                           |
+| `params.queryTexts?` | `string[]`      | Query text to be embedded and searched.                          |
+| `params.queryURIs?`   | `string[]`      | Query URIs to be processed.                                      |
+| `params.ids?`         | `string[]`      | Filter to specific record IDs.                                  |
+| `params.nResults?`    | `number`        | Maximum number of results per query. Default: `10`.              |
+| `params.where?`       | `Where`         | Metadata-based filtering conditions.                            |
+| `params.whereDocument?` | `WhereDocument` | Full-text search conditions.                                    |
+| `params.include?`       | `Include[]`     | Fields to include in the response. Options: `"distances"`, `"documents"`, `"embeddings"`, `"metadatas"`, `"uris"`. Default: `["metadatas", "documents", "distances"]`. |
 
 #### Returns
 
-`Promise<MultiQueryResponse>`
+`Promise<QueryResult>`
 
 A promise that resolves to the query results.
 
@@ -205,31 +237,74 @@ If there is an issue executing the query.
 // Query the collection using embeddings
 const embeddingsResults = await collection.query({
   queryEmbeddings: [[0.1, 0.2, ...], ...],
+  ids: ["id1", "id2", ...],
   nResults: 10,
   where: {"name": {"$eq": "John Doe"}},
-  include: ["metadata", "document"]
+  include: ["metadatas", "documents"]
 });
 
 // Query the collection using query text
 const textResults = await collection.query({
-    queryTexts: "some text",
+    queryTexts: ["some text"],
+    ids: ["id1", "id2", ...],
     nResults: 10,
     where: {"name": {"$eq": "John Doe"}},
-    include: ["metadata", "document"]
+    include: ["metadatas", "documents"]
 });
+```
+
+### search
+
+- `search(searches): Promise<SearchResult>`
+
+Performs hybrid search on the collection using expression builders. This method provides a flexible, composable API for building complex search queries with filtering, ranking, and result selection.
+
+#### Parameters
+
+| Name      | Type                              | Description                                                      |
+| :-------- | :-------------------------------- | :--------------------------------------------------------------- |
+| `searches` | `SearchLike \| SearchLike[]`      | A single search expression or an array of search expressions.   |
+
+#### Returns
+
+`Promise<SearchResult>`
+
+A promise that resolves to search results in column-major format. Use the `.rows()` method to convert to row-major format.
+
+**Throws**
+
+If there is an issue executing the search or if no search payload is provided.
+
+**Example**
+
+```typescript
+import { Search, K, Knn, Rrf, Val } from "chromadb";
+
+// Basic search with KNN ranking
+const results = await collection.search(
+  new Search()
+    .where(K("category").eq("science"))
+    .rank(Knn({ query: [0.1, 0.2, 0.3], limit: 10 }))
+    .limit(5)
+    .select(K.DOCUMENT, K.SCORE, "title")
+);
 ```
 
 ### update
 
-* `update(params): Promise<void>`
+- `update(params): Promise<void>`
 
 Update items in the collection
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `UpdateRecordsParams` | The parameters for the query. |
+| Name                | Type         | Description                   |
+| :------------------ | :----------- | :---------------------------- |
+| `params.ids`         | `string[]`   | IDs of records to update (required). |
+| `params.embeddings?` | `number[][]` | New embedding vectors.        |
+| `params.metadatas?`  | `Metadata[]` | New metadata.                 |
+| `params.documents?`  | `string[]`   | New document text.            |
+| `params.uris?`       | `string[]`   | New URIs.                     |
 
 #### Returns
 
@@ -238,25 +313,32 @@ Update items in the collection
 **Example**
 
 ```typescript
-const response = await collection.update({
+await collection.update({
   ids: ["id1", "id2"],
-  embeddings: [[1, 2, 3], [4, 5, 6]],
-  metadatas: [{ "key": "value" }, { "key": "value" }],
+  embeddings: [
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
+  metadatas: [{ key: "value" }, { key: "value" }],
   documents: ["document1", "document2"],
 });
 ```
 
 ### upsert
 
-* `upsert(params): Promise<void>`
+- `upsert(params): Promise<void>`
 
-Upsert items to the collection
+Upsert items to the collection (inserts new records or updates existing ones)
 
 #### Parameters
 
-| Name | Type | Description |
-| :------ | :------ | :------ |
-| `params` | `AddRecordsParams` | The parameters for the query. |
+| Name                | Type         | Description                   |
+| :------------------ | :----------- | :---------------------------- |
+| `params.ids`         | `string[]`   | IDs of records to upsert (required). |
+| `params.embeddings?`  | `number[][]` | Embedding vectors.            |
+| `params.metadatas?`  | `Metadata[]` | Metadata.                     |
+| `params.documents?`  | `string[]`   | Document text.                |
+| `params.uris?`       | `string[]`   | URIs.                         |
 
 #### Returns
 
@@ -265,10 +347,13 @@ Upsert items to the collection
 **Example**
 
 ```typescript
-const response = await collection.upsert({
+await collection.upsert({
   ids: ["id1", "id2"],
-  embeddings: [[1, 2, 3], [4, 5, 6]],
-  metadatas: [{ "key": "value" }, { "key": "value" }],
+  embeddings: [
+    [1, 2, 3],
+    [4, 5, 6],
+  ],
+  metadatas: [{ key: "value" }, { key: "value" }],
   documents: ["document1", "document2"],
 });
 ```

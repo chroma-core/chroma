@@ -27,7 +27,7 @@ const TabbedCodeBlock: React.FC<{
 
   return (
     <CodeTabs>
-      <div className="flex items-center justify-between bg-gray-900 rounded-t-sm">
+      <div className="flex items-center justify-between bg-neutral-100 dark:bg-gray-900 rounded-t-sm border dark:border-gray-700">
         <TabsList className="bg-transparent dark:bg-transparent rounded-none p-0 h-fit m-0">
           {tabs.map((tab) => (
             <TabsTrigger

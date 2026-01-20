@@ -393,7 +393,7 @@ impl<'log_data, 'segment_data: 'log_data> HydratedMaterializedLogRecord<'log_dat
         }
     }
 
-    pub fn get_data_record(&self) -> Option<&DataRecord> {
+    pub fn get_data_record(&'_ self) -> Option<&'_ DataRecord<'_>> {
         self.segment_data_record.as_ref()
     }
 
@@ -494,7 +494,7 @@ impl MaterializeLogsResult {
         self.has_backfill
     }
 
-    pub fn iter(&self) -> MaterializeLogsResultIter {
+    pub fn iter(&'_ self) -> MaterializeLogsResultIter<'_> {
         MaterializeLogsResultIter {
             logs: &self.logs,
             chunk: &self.materialized,
@@ -597,7 +597,7 @@ pub async fn materialize_logs(
         user_ids.sort_unstable();
         user_ids.dedup();
         async {
-            reader.prefetch_user_id_to_id(&user_ids).await;
+            reader.load_user_id_to_id(user_ids.iter().cloned()).await;
 
             let mut existing_offset_ids = Vec::with_capacity(user_ids.len());
             for user_id in user_ids {
@@ -610,7 +610,9 @@ pub async fn materialize_logs(
                 };
             }
 
-            reader.prefetch_id_to_data(&existing_offset_ids).await;
+            reader
+                .load_id_to_data(existing_offset_ids.iter().cloned())
+                .await;
             Ok::<_, LogMaterializerError>(())
         }
         .instrument(Span::current())
@@ -917,6 +919,7 @@ pub async fn materialize_logs(
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum VectorSegmentWriter {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
     Spann(SpannSegmentWriter),
@@ -976,6 +979,7 @@ impl VectorSegmentWriter {
 }
 
 #[derive(Clone, Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ChromaSegmentWriter<'bf> {
     RecordSegment(RecordSegmentWriter),
     MetadataSegment(MetadataSegmentWriter<'bf>),
@@ -1044,12 +1048,14 @@ impl ChromaSegmentWriter<'_> {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum VectorSegmentFlusher {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
     Spann(SpannSegmentFlusher),
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ChromaSegmentFlusher {
     RecordSegment(RecordSegmentFlusher),
     MetadataSegment(MetadataSegmentFlusher),
@@ -1158,6 +1164,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1166,6 +1173,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1315,6 +1323,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1323,6 +1332,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1460,6 +1470,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1468,6 +1479,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1608,6 +1620,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1616,6 +1629,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1754,6 +1768,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1762,6 +1777,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1922,6 +1938,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1930,6 +1947,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2058,6 +2076,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2303,6 +2322,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");

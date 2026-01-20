@@ -33,10 +33,14 @@ from chromadb.execution.expression import (  # noqa: F401, F403
     Sub,
     Sum,
     Val,
+    Aggregate,
+    MinK,
+    MaxK,
+    GroupBy,
 )
 
 from abc import ABC, abstractmethod
-from typing import Sequence, Optional, List, Dict, Any
+from typing import Sequence, Optional, List, Dict, Any, Tuple
 from uuid import UUID
 
 from overrides import override
@@ -58,6 +62,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     Loadable,
     Metadatas,
+    ReadLevel,
     Schema,
     URIs,
     Where,
@@ -694,12 +699,22 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         pass
 
     @abstractmethod
+    def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "IndexingStatus":
+        pass
+
+    @abstractmethod
     def _search(
         self,
         collection_id: UUID,
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         pass
 
@@ -824,7 +839,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         params: Optional[Dict[str, Any]] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
+    ) -> Tuple["AttachedFunction", bool]:
         """Attach a function to a collection.
 
         Args:
@@ -837,7 +852,8 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
             database: The database name
 
         Returns:
-            AttachedFunction: Object representing the attached function
+            Tuple of (AttachedFunction, created) where created is True if newly created,
+            False if already existed (idempotent request)
         """
         pass
 
@@ -868,7 +884,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
     @abstractmethod
     def detach_function(
         self,
-        attached_function_id: UUID,
+        name: str,
         input_collection_id: UUID,
         delete_output: bool = False,
         tenant: str = DEFAULT_TENANT,
@@ -877,7 +893,7 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
         """Detach a function and prevent any further runs.
 
         Args:
-            attached_function_id: ID of the attached function to remove
+            name: Name of the attached function to remove
             input_collection_id: ID of the input collection
             delete_output: Whether to also delete the output collection
             tenant: The tenant name
@@ -885,29 +901,5 @@ class ServerAPI(BaseAPI, AdminAPI, Component):
 
         Returns:
             bool: True if successful
-        """
-        pass
-
-    @abstractmethod
-    def get_attached_function(
-        self,
-        name: str,
-        input_collection_id: UUID,
-        tenant: str = DEFAULT_TENANT,
-        database: str = DEFAULT_DATABASE,
-    ) -> "AttachedFunction":
-        """Get an attached function by name for a specific collection.
-
-        Args:
-            name: Name of the attached function
-            input_collection_id: ID of the input collection
-            tenant: The tenant name
-            database: The database name
-
-        Returns:
-            AttachedFunction: The attached function object
-
-        Raises:
-            NotFoundError: If the attached function doesn't exist
         """
         pass

@@ -1,6 +1,6 @@
 use crate::CollectionRequest;
 use chroma_frontend::impls::in_memory_frontend::InMemoryFrontend;
-use chroma_types::{Collection, CreateCollectionRequest, GetRequest, IncludeList};
+use chroma_types::{Collection, CreateCollectionRequest, DatabaseName, GetRequest, IncludeList};
 use proptest::prelude::*;
 use proptest_state_machine::ReferenceStateMachine;
 use std::sync::Arc;
@@ -123,12 +123,14 @@ impl ReferenceStateMachine for FrontendReferenceStateMachine {
     fn apply(mut state: Self::State, transition: &Self::Transition) -> Self::State {
         if let CollectionRequest::Init { dimension } = transition {
             let mut frontend = InMemoryFrontend::new();
+            let database_name =
+                DatabaseName::new("default_database").expect("database name should be valid");
 
             let mut collection = frontend
                 .create_collection(
                     CreateCollectionRequest::try_new(
                         "default_tenant".to_string(),
-                        "default_database".to_string(),
+                        database_name,
                         "test".to_string(),
                         None,
                         None,

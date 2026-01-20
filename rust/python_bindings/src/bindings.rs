@@ -1,4 +1,4 @@
-use crate::errors::{ChromaPyResult, WrappedPyErr, WrappedUuidError};
+use crate::errors::{ChromaPyResult, InvalidDatabaseNameError, WrappedPyErr, WrappedUuidError};
 use chroma_cache::FoyerCacheConfig;
 use chroma_cli::chroma_cli;
 use chroma_config::{registry::Registry, Configurable};
@@ -18,9 +18,9 @@ use chroma_system::System;
 use chroma_types::{
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CountCollectionsRequest,
     CountResponse, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest, Database,
-    DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest, GetDatabaseRequest,
-    GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError, IncludeList,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
+    DatabaseName, DeleteCollectionRequest, DeleteDatabaseRequest, GetCollectionRequest,
+    GetDatabaseRequest, GetResponse, GetTenantRequest, GetTenantResponse, HeartbeatError,
+    IncludeList, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, KnnIndex,
     ListCollectionsRequest, ListDatabasesRequest, Metadata, QueryResponse,
     UpdateCollectionConfiguration, UpdateCollectionRequest, UpdateMetadata, WrappedSerdeJsonError,
 };
@@ -120,6 +120,7 @@ impl Bindings {
             segment_manager: Some(segment_manager_config),
             sqlitedb: Some(sqlite_db_config),
             sysdb: sysdb_config,
+            mcmr_sysdb: None,
             collections_with_segments_provider: collection_cache_config,
             log: log_config,
             executor: executor_config,
@@ -154,7 +155,10 @@ impl Bindings {
     ////////////////////////////// Admin API //////////////////////////////
 
     fn create_database(&self, name: String, tenant: String, _py: Python<'_>) -> ChromaPyResult<()> {
-        let request = CreateDatabaseRequest::try_new(tenant, name)?;
+        let database_name = DatabaseName::new(name).ok_or_else(|| {
+            InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
+        })?;
+        let request = CreateDatabaseRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
 
         self.runtime
@@ -169,7 +173,10 @@ impl Bindings {
         tenant: String,
         _py: Python<'_>,
     ) -> ChromaPyResult<Database> {
-        let request = GetDatabaseRequest::try_new(tenant, name)?;
+        let database_name = DatabaseName::new(name).ok_or_else(|| {
+            InvalidDatabaseNameError("database name must be at least 3 characters".to_string())
+        })?;
+        let request = GetDatabaseRequest::try_new(tenant, database_name)?;
 
         let mut frontend = self.frontend.clone();
         let database = self
@@ -225,7 +232,9 @@ impl Bindings {
 
     ////////////////////////////// Base API //////////////////////////////
     fn count_collections(&self, tenant: String, database: String) -> ChromaPyResult<u32> {
-        let request = CountCollectionsRequest::try_new(tenant, database)?;
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
+        let request = CountCollectionsRequest::try_new(tenant, database_name)?;
         let mut frontend = self.frontend.clone();
         let count = self
             .runtime
@@ -241,8 +250,10 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<Vec<Collection>> {
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request =
-            ListCollectionsRequest::try_new(tenant, database, limit, offset.unwrap_or(0))?;
+            ListCollectionsRequest::try_new(tenant, database_name, limit, offset.unwrap_or(0))?;
         let mut frontend = self.frontend.clone();
         let collections = self
             .runtime
@@ -298,9 +309,11 @@ impl Bindings {
             None => None,
         };
 
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
         let request = CreateCollectionRequest::try_new(
             tenant,
-            database,
+            database_name,
             name,
             metadata,
             configuration,
@@ -322,7 +335,9 @@ impl Bindings {
         tenant: String,
         database: String,
     ) -> ChromaPyResult<Collection> {
-        let request = GetCollectionRequest::try_new(tenant, database, name)?;
+        let database_name =
+            DatabaseName::new(database.clone()).ok_or(InvalidDatabaseNameError(database))?;
+        let request = GetCollectionRequest::try_new(tenant, database_name, name)?;
         let mut frontend = self.frontend.clone();
         let collection = self
             .runtime
@@ -362,6 +377,7 @@ impl Bindings {
         };
 
         let request = UpdateCollectionRequest::try_new(
+            None,
             collection_id,
             new_name,
             new_metadata.map(CollectionMetadataUpdate::UpdateMetadata),

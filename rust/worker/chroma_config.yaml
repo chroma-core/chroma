@@ -4,20 +4,11 @@
 # for now we nest it in the worker directory
 query_service:
   service_name: "query-service"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   otel_filters:
     - crate_name: "worker"
       filter_level: "trace"
-  my_member_id: "query-service-0"
   my_port: 50051
-  assignment_policy:
-    rendezvous_hashing:
-      hasher: Murmur3
-  memberlist_provider:
-    custom_resource:
-      kube_namespace: "chroma"
-      memberlist_name: "query-service-memberlist"
-      queue_size: 100
   sysdb:
     grpc:
       host: "sysdb.chroma"
@@ -43,6 +34,11 @@ query_service:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
   dispatcher:
     num_worker_threads: 4
     dispatcher_queue_size: 1000
@@ -87,7 +83,7 @@ query_service:
   fetch_log_batch_size: 1000
 compaction_service:
   service_name: "compaction-service"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   otel_filters:
     - crate_name: "worker"
       filter_level: "trace"
@@ -126,6 +122,11 @@ compaction_service:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 60000 # 1 minute
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
   dispatcher:
     num_worker_threads: 4
     dispatcher_queue_size: 1000
@@ -179,25 +180,12 @@ log_service:
   reinsert_threshold: 0
   opentelemetry:
     service_name: "rust-log-service"
-    endpoint: "http://otel-collector:4317"
+    endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
     filters:
       - crate_name: "chroma_log"
         filter_level: "trace"
       - crate_name: "wal3"
         filter_level: "trace"
-  storage:
-    admission_controlled_s3:
-      s3_config:
-        bucket: "chroma-storage"
-        credentials: "Minio"
-        connect_timeout_ms: 5000
-        request_timeout_ms: 60000 # 1 minute
-        upload_part_size_bytes: 536870912 # 512MiB
-        download_part_size_bytes: 8388608 # 8MiB
-      rate_limiting_policy:
-        count_based_policy:
-          max_concurrent_requests: 500
-          bandwidth_allocation: [1.0]
   cache:
     memory:
       capacity: 100000000 # 100 MB
@@ -207,9 +195,56 @@ log_service:
       batch_size_bytes: 8388608 # 8MiB
       throughput: 3300
       headroom: 200
+  regions_and_topologies:
+    preferred: tilt-config-1
+    regions:
+    - name: tilt-config-1
+      provider: tilt
+      region: config-1
+      config:
+        storage:
+          admission_controlled_s3:
+            s3_config:
+              bucket: "chroma-storage"
+              credentials: "Minio"
+              connect_timeout_ms: 5000
+              request_timeout_ms: 60000 # 1 minute
+              upload_part_size_bytes: 536870912 # 512MiB
+              download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+              count_based_policy:
+                max_concurrent_requests: 500
+                bandwidth_allocation: [1.0]
+    - name: tilt-config-2
+      provider: tilt
+      region: config-2
+      config:
+        storage:
+          admission_controlled_s3:
+            s3_config:
+              bucket: "chroma-storage2"
+              credentials: "Minio"
+              connect_timeout_ms: 5000
+              request_timeout_ms: 30000 # 1 minute
+              upload_part_size_bytes: 536870912 # 512MiB
+              download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+              count_based_policy:
+                max_concurrent_requests: 30
+                bandwidth_allocation: [0.7, 0.3]
+    topologies:
+    - name: tilt-topo-1
+      regions:
+      - tilt-config-1
+      config: {}
+    - name: tilt-spanning
+      regions:
+      - tilt-config-1
+      - tilt-config-2
+      config: {}
 garbage_collector:
   service_name: "garbage-collector"
-  otel_endpoint: "http://otel-collector:4317"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
   otel_filters:
     - crate_name: "garbage_collector"
       filter_level: "debug"
@@ -244,3 +279,66 @@ garbage_collector:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
+      memberlist_provider:
+        custom_resource:
+          kube_namespace: "chroma"
+          memberlist_name: "rust-log-service-memberlist"
+          queue_size: 100
+sysdb_service:
+  service_name: "rust-sysdb-service"
+  otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
+  otel_filters:
+    - crate_name: "rust_sysdb"
+      filter_level: "trace"
+  port: 50051
+  regions_and_topologies:
+    preferred: tilt-config-1
+    regions:
+    - name: tilt-config-1
+      provider: tilt
+      region: config-1
+      config:
+        storage:
+          admission_controlled_s3:
+            s3_config:
+              bucket: "chroma-storage"
+              credentials: "Minio"
+              connect_timeout_ms: 5000
+              request_timeout_ms: 60000 # 1 minute
+              upload_part_size_bytes: 536870912 # 512MiB
+              download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+              count_based_policy:
+                max_concurrent_requests: 1000
+                bandwidth_allocation: [1.0]
+    - name: tilt-config-2
+      provider: tilt
+      region: config-2
+      config:
+        storage:
+          admission_controlled_s3:
+            s3_config:
+              bucket: "chroma-storage2"
+              credentials: "Minio"
+              connect_timeout_ms: 5000
+              request_timeout_ms: 30000 # 1 minute
+              upload_part_size_bytes: 536870912 # 512MiB
+              download_part_size_bytes: 8388608 # 8MiB
+            rate_limiting_policy:
+              count_based_policy:
+                max_concurrent_requests: 1000
+                bandwidth_allocation: [1.0]
+    topologies:
+    - name: tilt-spanning
+      regions:
+      - tilt-config-1
+      - tilt-config-2
+      config:
+        spanner:
+          emulator:
+            host: "spanner.chroma.svc.cluster.local"
+            grpc_port: 9010
+            rest_port: 9020
+            project: "local-project"
+            instance: "test-instance"
+            database: "local-sysdb-database"

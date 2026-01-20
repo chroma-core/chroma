@@ -7,11 +7,13 @@ import {
   BaseRecordSet,
   CollectionMetadata,
   GetResult,
+  IndexingStatus,
   Metadata,
   PreparedRecordSet,
   PreparedInsertRecordSet,
   QueryRecordSet,
   QueryResult,
+  ReadLevel,
   RecordSet,
   Where,
   WhereDocument,
@@ -203,7 +205,22 @@ export interface Collection {
    * @param searches - Single search payload or array of payloads
    * @returns Promise resolving to column-major search results
    */
-  search(searches: SearchLike | SearchLike[]): Promise<SearchResult>;
+  search(
+    searches: SearchLike | SearchLike[],
+    options?: {
+      /**
+       * Controls whether to read from the write-ahead log.
+       * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
+       * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+       */
+      readLevel?: ReadLevel;
+    },
+  ): Promise<SearchResult>;
+  /**
+   * Gets the indexing status of the collection.
+   * @returns Promise resolving to indexing status information
+   */
+  getIndexingStatus(): Promise<IndexingStatus>;
 }
 
 /**
@@ -887,6 +904,9 @@ export class CollectionImpl implements Collection {
 
   public async search(
     searches: SearchLike | SearchLike[],
+    options?: {
+      readLevel?: ReadLevel;
+    },
   ): Promise<SearchResult> {
     const items = Array.isArray(searches) ? searches : [searches];
 
@@ -906,7 +926,10 @@ export class CollectionImpl implements Collection {
     const { data } = await Api.collectionSearch({
       client: this.apiClient,
       path: await this.path(),
-      body: { searches: payloads },
+      body: {
+        searches: payloads,
+        read_level: options?.readLevel,
+      },
     });
 
     return new SearchResult(data);
@@ -1078,5 +1101,14 @@ export class CollectionImpl implements Collection {
         where_document: whereDocument,
       },
     });
+  }
+
+  public async getIndexingStatus(): Promise<IndexingStatus> {
+    const { data } = await Api.indexingStatus({
+      client: this.apiClient,
+      path: await this.path(),
+    });
+
+    return data;
   }
 }

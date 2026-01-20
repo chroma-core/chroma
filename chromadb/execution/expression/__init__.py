@@ -39,6 +39,11 @@ from chromadb.execution.expression.operator import (
     Sub,
     Sum,
     Val,
+    # GroupBy and Aggregate expressions
+    Aggregate,
+    MinK,
+    MaxK,
+    GroupBy,
 )
 
 from chromadb.execution.expression.plan import (
@@ -87,4 +92,9 @@ __all__ = [
     "Sub",
     "Sum",
     "Val",
+    # GroupBy and Aggregate expressions
+    "Aggregate",
+    "MinK",
+    "MaxK",
+    "GroupBy",
 ]

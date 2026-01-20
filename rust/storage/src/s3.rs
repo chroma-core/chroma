@@ -9,11 +9,12 @@
 // streaming from s3.
 
 use super::config::{S3CredentialsConfig, StorageConfig};
+use super::metrics::StorageMetrics;
 use super::stream::ByteStreamItem;
 use super::stream::S3ByteStream;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
-use crate::{ETag, GetOptions, StorageError};
+use crate::{ETag, GetOptions, PutMode, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -36,7 +37,6 @@ use futures::stream;
 use futures::FutureExt;
 use futures::Stream;
 use futures::StreamExt;
-use opentelemetry::metrics::{Counter, Histogram};
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -49,109 +49,6 @@ use tracing::Instrument;
 pub struct DeletedObjects {
     pub deleted: Vec<String>,
     pub errors: Vec<StorageError>,
-}
-#[derive(Clone)]
-pub struct StorageMetrics {
-    s3_get_count: Counter<u64>,
-    s3_put_count: Counter<u64>,
-    s3_delete_count: Counter<u64>,
-    s3_delete_many_count: Counter<u64>,
-    s3_get_latency_ms: Histogram<u64>,
-    s3_put_latency_ms: Histogram<u64>,
-    s3_put_bytes: Histogram<u64>,
-    s3_put_bytes_slow: Histogram<u64>,
-    s3_multipart_upload_parts: Histogram<u64>,
-    s3_upload_part_bytes: Histogram<u64>,
-    s3_put_error_count: Counter<u64>,
-    s3_copy_count: Counter<u64>,
-    s3_copy_latency_ms: Histogram<u64>,
-    s3_rename_count: Counter<u64>,
-    s3_rename_latency_ms: Histogram<u64>,
-    s3_list_count: Counter<u64>,
-    s3_list_latency_ms: Histogram<u64>,
-}
-
-impl Default for StorageMetrics {
-    fn default() -> Self {
-        Self {
-            s3_get_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_get_count")
-                .with_description("Number of S3 get operations")
-                .build(),
-            s3_put_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_put_count")
-                .with_description("Number of S3 put operations")
-                .build(),
-            s3_delete_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_delete_count")
-                .with_description("Number of S3 delete operations")
-                .build(),
-            s3_delete_many_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_delete_many_count")
-                .with_description("Number of S3 delete many operations")
-                .build(),
-            s3_get_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_get_latency_ms")
-                .with_description("Latency of S3 get operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_put_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_put_latency_ms")
-                .with_description("Latency of S3 put operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_put_bytes: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_put_bytes")
-                .with_description("Bytes written per S3 put operation")
-                .with_unit("bytes")
-                .build(),
-            s3_put_bytes_slow: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_put_bytes_slow")
-                .with_description("Bytes written per S3 put operation that took more than 1 second")
-                .with_unit("bytes")
-                .build(),
-            s3_multipart_upload_parts: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_multipart_upload_parts")
-                .with_description("Number of parts in multipart uploads")
-                .build(),
-            s3_upload_part_bytes: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_upload_part_bytes")
-                .with_description("Bytes per upload part in multipart uploads")
-                .with_unit("bytes")
-                .build(),
-            s3_put_error_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_put_error_count")
-                .with_description("Number of failed S3 put operations")
-                .build(),
-            s3_copy_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_copy_count")
-                .with_description("Number of S3 copy operations")
-                .build(),
-            s3_copy_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_copy_latency_ms")
-                .with_description("Latency of S3 copy operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_rename_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_rename_count")
-                .with_description("Number of S3 rename operations")
-                .build(),
-            s3_rename_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_rename_latency_ms")
-                .with_description("Latency of S3 rename operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_list_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_list_count")
-                .with_description("Number of S3 list operations")
-                .build(),
-            s3_list_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_list_latency_ms")
-                .with_description("Latency of S3 list operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -652,14 +549,10 @@ impl S3Storage {
             .bucket(&self.bucket)
             .key(key)
             .body(create_bytestream_fn(0..total_size_bytes).await?);
-        let req = match options.if_not_exists {
-            true => req.if_none_match('*'),
-            false => req,
-        };
-
-        let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag.0),
-            None => req,
+        let req = match options.mode {
+            PutMode::IfMatch(etag) => req.if_match(etag.0),
+            PutMode::IfNotExist => req.if_none_match('*'),
+            PutMode::Upsert => req,
         };
 
         let resp = req.send().await.map_err(|err| {
@@ -791,15 +684,10 @@ impl S3Storage {
                     .build(),
             )
             .upload_id(upload_id);
-
-        let complete_req = match options.if_not_exists {
-            true => complete_req.if_none_match('*'),
-            false => complete_req,
-        };
-
-        let complete_req = match options.if_match {
-            Some(e_tag) => complete_req.if_match(e_tag.0),
-            None => complete_req,
+        let complete_req = match options.mode {
+            PutMode::IfMatch(etag) => complete_req.if_match(etag.0),
+            PutMode::IfNotExist => complete_req.if_none_match('*'),
+            PutMode::Upsert => complete_req,
         };
 
         let resp = complete_req
@@ -853,11 +741,6 @@ impl S3Storage {
         self.metrics.s3_delete_count.add(1, &[]);
 
         let req = self.client.delete_object().bucket(&self.bucket).key(key);
-
-        let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag.0),
-            None => req,
-        };
 
         match req.send().await {
             Ok(_) => {
@@ -1378,11 +1261,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1392,11 +1271,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap_err();
@@ -1418,11 +1293,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1434,11 +1305,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: false,
-                    if_match: e_tag,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfMatch(e_tag.unwrap())),
             )
             .await
             .unwrap();
@@ -1452,11 +1319,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1466,11 +1329,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: false,
-                    if_match: Some(ETag("e_tag".to_string())),
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfMatch(ETag("e_tag".to_string()))),
             )
             .await
             .unwrap_err();
@@ -1491,11 +1350,14 @@ mod tests {
 
     #[test]
     fn test_put_options_default() {
-        let default = PutOptions::default();
-
-        assert!(!default.if_not_exists);
-        assert_eq!(default.if_match, None);
-        assert_eq!(default.priority, StorageRequestPriority::P0);
+        assert_eq!(
+            PutOptions::default(),
+            PutOptions {
+                cmek: None,
+                mode: PutMode::Upsert,
+                priority: StorageRequestPriority::P0
+            }
+        );
     }
 
     #[tokio::test]
@@ -1506,11 +1368,7 @@ mod tests {
                 "test/00",
                 9,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::from("ABC123XYZ"))))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1531,11 +1389,7 @@ mod tests {
                     &format!("test/{:02x}", i),
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                    PutOptions {
-                        if_not_exists: true,
-                        if_match: None,
-                        priority: StorageRequestPriority::P0,
-                    },
+                    PutOptions::default().with_mode(PutMode::IfNotExist),
                 )
                 .await
                 .unwrap();
@@ -1563,11 +1417,7 @@ mod tests {
                     &key,
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                    PutOptions {
-                        if_not_exists: true,
-                        if_match: None,
-                        priority: StorageRequestPriority::P0,
-                    },
+                    PutOptions::default().with_mode(PutMode::IfNotExist),
                 )
                 .await
                 .unwrap();

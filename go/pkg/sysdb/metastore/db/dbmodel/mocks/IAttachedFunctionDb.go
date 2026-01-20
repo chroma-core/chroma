@@ -82,149 +82,29 @@ func (_m *IAttachedFunctionDb) Finish(attachedFunctionID uuid.UUID) error {
 	return r0
 }
 
-// GetByID provides a mock function with given fields: attachedFunctionID
-func (_m *IAttachedFunctionDb) GetByID(attachedFunctionID uuid.UUID) (*dbmodel.AttachedFunction, error) {
-	ret := _m.Called(attachedFunctionID)
+// GetAttachedFunctions provides a mock function with given fields: id, name, inputCollectionID, onlyReady
+func (_m *IAttachedFunctionDb) GetAttachedFunctions(id *uuid.UUID, name *string, inputCollectionID *string, onlyReady bool) ([]*dbmodel.AttachedFunction, error) {
+	ret := _m.Called(id, name, inputCollectionID, onlyReady)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetByID")
-	}
-
-	var r0 *dbmodel.AttachedFunction
-	var r1 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID) (*dbmodel.AttachedFunction, error)); ok {
-		return rf(attachedFunctionID)
-	}
-	if rf, ok := ret.Get(0).(func(uuid.UUID) *dbmodel.AttachedFunction); ok {
-		r0 = rf(attachedFunctionID)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*dbmodel.AttachedFunction)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(uuid.UUID) error); ok {
-		r1 = rf(attachedFunctionID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetByCollectionID provides a mock function with given fields: inputCollectionID
-func (_m *IAttachedFunctionDb) GetByCollectionID(inputCollectionID string) ([]*dbmodel.AttachedFunction, error) {
-	ret := _m.Called(inputCollectionID)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetByCollectionID")
+		panic("no return value specified for GetAttachedFunctions")
 	}
 
 	var r0 []*dbmodel.AttachedFunction
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]*dbmodel.AttachedFunction, error)); ok {
-		return rf(inputCollectionID)
+	if rf, ok := ret.Get(0).(func(*uuid.UUID, *string, *string, bool) ([]*dbmodel.AttachedFunction, error)); ok {
+		return rf(id, name, inputCollectionID, onlyReady)
 	}
-	if rf, ok := ret.Get(0).(func(string) []*dbmodel.AttachedFunction); ok {
-		r0 = rf(inputCollectionID)
+	if rf, ok := ret.Get(0).(func(*uuid.UUID, *string, *string, bool) []*dbmodel.AttachedFunction); ok {
+		r0 = rf(id, name, inputCollectionID, onlyReady)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*dbmodel.AttachedFunction)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(inputCollectionID)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetByName provides a mock function with given fields: inputCollectionID, attachedFunctionName
-func (_m *IAttachedFunctionDb) GetByName(inputCollectionID string, attachedFunctionName string) (*dbmodel.AttachedFunction, error) {
-	ret := _m.Called(inputCollectionID, attachedFunctionName)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetByName")
-	}
-
-	var r0 *dbmodel.AttachedFunction
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*dbmodel.AttachedFunction, error)); ok {
-		return rf(inputCollectionID, attachedFunctionName)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *dbmodel.AttachedFunction); ok {
-		r0 = rf(inputCollectionID, attachedFunctionName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*dbmodel.AttachedFunction)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(inputCollectionID, attachedFunctionName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetAnyByName provides a mock function with given fields: inputCollectionID, name
-func (_m *IAttachedFunctionDb) GetAnyByName(inputCollectionID string, name string) (*dbmodel.AttachedFunction, error) {
-	ret := _m.Called(inputCollectionID, name)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetAnyByName")
-	}
-
-	var r0 *dbmodel.AttachedFunction
-	var r1 error
-	if rf, ok := ret.Get(0).(func(string, string) (*dbmodel.AttachedFunction, error)); ok {
-		return rf(inputCollectionID, name)
-	}
-	if rf, ok := ret.Get(0).(func(string, string) *dbmodel.AttachedFunction); ok {
-		r0 = rf(inputCollectionID, name)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*dbmodel.AttachedFunction)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(string, string) error); ok {
-		r1 = rf(inputCollectionID, name)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// GetAnyByID provides a mock function with given fields: id
-func (_m *IAttachedFunctionDb) GetAnyByID(id uuid.UUID) (*dbmodel.AttachedFunction, error) {
-	ret := _m.Called(id)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetAnyByID")
-	}
-
-	var r0 *dbmodel.AttachedFunction
-	var r1 error
-	if rf, ok := ret.Get(0).(func(uuid.UUID) (*dbmodel.AttachedFunction, error)); ok {
-		return rf(id)
-	}
-	if rf, ok := ret.Get(0).(func(uuid.UUID) *dbmodel.AttachedFunction); ok {
-		r0 = rf(id)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*dbmodel.AttachedFunction)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(uuid.UUID) error); ok {
-		r1 = rf(id)
+	if rf, ok := ret.Get(1).(func(*uuid.UUID, *string, *string, bool) error); ok {
+		r1 = rf(id, name, inputCollectionID, onlyReady)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -412,12 +292,12 @@ func (_m *IAttachedFunctionDb) CleanupExpiredPartialAttachedFunctions(maxAgeSeco
 	return r0, r1
 }
 
-// GetSoftDeletedAttachedFunctions provides a mock function with given fields: cutoffTime, limit
-func (_m *IAttachedFunctionDb) GetSoftDeletedAttachedFunctions(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
+// GetAttachedFunctionsToGc provides a mock function with given fields: cutoffTime, limit
+func (_m *IAttachedFunctionDb) GetAttachedFunctionsToGc(cutoffTime time.Time, limit int32) ([]*dbmodel.AttachedFunction, error) {
 	ret := _m.Called(cutoffTime, limit)
 
 	if len(ret) == 0 {
-		panic("no return value specified for GetSoftDeletedAttachedFunctions")
+		panic("no return value specified for GetAttachedFunctionsToGc")
 	}
 
 	var r0 []*dbmodel.AttachedFunction

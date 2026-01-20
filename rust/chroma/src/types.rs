@@ -1,11 +1,15 @@
 //! Type definitions and re-exports for client requests and responses.
 
 pub use chroma_api_types::{GetUserIdentityResponse, HeartbeatResponse};
+pub use chroma_types::{IndexStatusError, IndexStatusResponse};
 
 pub use chroma_types::operator::rrf;
+pub use chroma_types::operator::Aggregate;
 pub use chroma_types::operator::Filter;
+pub use chroma_types::operator::GroupBy;
 pub use chroma_types::operator::Key;
 pub use chroma_types::operator::Limit;
+pub use chroma_types::operator::QueryVector;
 pub use chroma_types::operator::Rank;
 pub use chroma_types::operator::RankExpr;
 pub use chroma_types::operator::Select;
@@ -20,6 +24,7 @@ pub use chroma_types::BoolInvertedIndexConfig;
 pub use chroma_types::BoolInvertedIndexType;
 pub use chroma_types::BoolValueType;
 pub use chroma_types::BooleanOperator;
+pub use chroma_types::Cmek;
 pub use chroma_types::Collection;
 pub use chroma_types::CollectionConfiguration;
 pub use chroma_types::CollectionConversionError;

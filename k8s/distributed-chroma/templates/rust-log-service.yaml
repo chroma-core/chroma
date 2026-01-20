@@ -11,6 +11,12 @@ data:
 
 ---
 
+{{ if .Values.rustLogService.additionalConfigMaps }}
+{{ toYaml .Values.rustLogService.additionalConfigMaps }}
+{{ end }}
+
+---
+
 apiVersion: v1
 kind: Service
 metadata:
@@ -64,6 +70,9 @@ spec:
             path: {{ $cache.hostPath }}
             type: {{ $.Values.rustLogService.cache.type }}
         {{- end }}
+        {{ if .Values.rustLogService.additionalVolumes }}
+        {{ toYaml .Values.rustLogService.additionalVolumes | nindent 8 }}
+        {{ end }}
       containers:
         - name: rust-log-service
           {{ if .Values.rustLogService.command }}
@@ -72,7 +81,7 @@ spec:
           image: "{{ .Values.rustLogService.image.repository }}:{{ .Values.rustLogService.image.tag }}"
           imagePullPolicy: IfNotPresent
           readinessProbe:
-            periodSeconds: 1
+            periodSeconds: 5
             failureThreshold: 30 # 30 seconds to allow for initial startup
             grpc:
               port: 50051
@@ -89,6 +98,9 @@ spec:
             - name: rust-log-service-cache-{{ add $i 1 }}
               mountPath: {{ $cache.mountPath }}
             {{- end }}
+            {{ if .Values.rustLogService.additionalVolumeMounts }}
+            {{ toYaml .Values.rustLogService.additionalVolumeMounts | nindent 12 }}
+            {{ end }}
           ports:
             - containerPort: 50051
           env:

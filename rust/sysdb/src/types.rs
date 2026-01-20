@@ -1,4 +1,4 @@
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName};
 
 #[derive(Default, Debug)]
 pub struct GetCollectionsOptions {
@@ -7,7 +7,7 @@ pub struct GetCollectionsOptions {
     pub include_soft_deleted: bool,
     pub name: Option<String>,
     pub tenant: Option<String>,
-    pub database: Option<String>,
+    pub database: Option<DatabaseName>,
     pub limit: Option<u32>,
     pub offset: u32,
 }

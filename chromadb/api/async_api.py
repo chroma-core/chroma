@@ -19,8 +19,10 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    IndexingStatus,
     Loadable,
     Metadatas,
+    ReadLevel,
     Schema,
     URIs,
     Where,
@@ -649,12 +651,22 @@ class AsyncServerAPI(AsyncBaseAPI, AsyncAdminAPI, Component):
         pass
 
     @abstractmethod
+    async def _get_indexing_status(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> "IndexingStatus":
+        pass
+
+    @abstractmethod
     async def _search(
         self,
         collection_id: UUID,
         searches: List[Search],
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         pass
 

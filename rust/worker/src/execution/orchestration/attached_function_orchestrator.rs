@@ -195,6 +195,7 @@ where
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum AttachedFunctionOrchestratorResponse {
     /// No attached function was found, so nothing was executed
     NoAttachedFunction { job_id: JobId },
@@ -236,6 +237,7 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Get the output collection info if it has been set
+    #[allow(clippy::result_large_err)]
     pub fn get_output_collection_info(
         &self,
     ) -> Result<&CollectionCompactInfo, AttachedFunctionOrchestratorError> {
@@ -245,6 +247,7 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Get the output collection ID if it has been set
+    #[allow(clippy::result_large_err)]
     pub fn get_output_collection_id(
         &self,
     ) -> Result<CollectionUuid, AttachedFunctionOrchestratorError> {
@@ -255,6 +258,7 @@ impl AttachedFunctionOrchestrator {
     }
 
     /// Set the output collection info
+    #[allow(clippy::result_large_err)]
     pub fn set_output_collection_info(
         &mut self,
         collection_info: CollectionCompactInfo,
@@ -605,6 +609,15 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             }
         };
 
+        // Extract CMEK from input collection schema (inherit for output collection segments)
+        // The output collection inherits the input collection's encryption policy
+        let cmek = self
+            .get_input_collection_info()
+            .collection
+            .schema
+            .as_ref()
+            .and_then(|s| s.cmek.clone());
+
         let record_writer = match self
             .ok_or_terminate(
                 RecordSegmentWriter::from_segment(
@@ -612,6 +625,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &collection.database_id,
                     &message.record_segment,
                     &self.output_context.blockfile_provider,
+                    cmek.clone(),
                 )
                 .await,
                 ctx,
@@ -629,6 +643,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                     &collection.database_id,
                     &message.metadata_segment,
                     &self.output_context.blockfile_provider,
+                    cmek.clone(),
                 )
                 .await,
                 ctx,
@@ -644,7 +659,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 .ok_or_terminate(
                     self.output_context
                         .spann_provider
-                        .write(collection, &message.vector_segment, dimension)
+                        .write(collection, &message.vector_segment, dimension, cmek)
                         .await,
                     ctx,
                 )
@@ -660,6 +675,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                         &message.vector_segment,
                         dimension,
                         self.output_context.hnsw_provider.clone(),
+                        cmek,
                     )
                     .await
                     .map_err(|err| *err),

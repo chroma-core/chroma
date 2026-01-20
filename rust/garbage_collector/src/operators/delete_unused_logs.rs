@@ -8,11 +8,15 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName};
 use futures::future::try_join_all;
 use thiserror::Error;
 use tracing::Level;
-use wal3::{GarbageCollectionOptions, GarbageCollector, LogPosition, LogWriterOptions};
+use wal3::{
+    create_s3_factories, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector, LogPosition,
+    LogReaderOptions, LogWriterOptions, ManifestManager, S3FragmentManagerFactory,
+    S3ManifestManagerFactory, SnapshotOptions, ThrottleOptions,
+};
 
 use crate::types::CleanupMode;
 
@@ -28,7 +32,7 @@ pub struct DeleteUnusedLogsOperator {
 #[derive(Clone, Debug)]
 pub struct DeleteUnusedLogsInput {
     pub collections_to_destroy: HashSet<CollectionUuid>,
-    pub collections_to_garbage_collect: HashMap<CollectionUuid, LogPosition>,
+    pub collections_to_garbage_collect: HashMap<CollectionUuid, (DatabaseName, LogPosition)>,
 }
 
 pub type DeleteUnusedLogsOutput = ();
@@ -71,17 +75,35 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
         let storage_arc = Arc::new(self.storage.clone());
         if !input.collections_to_garbage_collect.is_empty() {
             let mut log_gc_futures = Vec::with_capacity(input.collections_to_garbage_collect.len());
-            for (collection_id, minimum_log_offset_to_keep) in &input.collections_to_garbage_collect
+            for (collection_id, (database_name, minimum_log_offset_to_keep)) in
+                &input.collections_to_garbage_collect
             {
                 let collection_id = *collection_id;
+                let database_name = database_name.clone();
                 let storage_clone = storage_arc.clone();
                 let mut logs = self.logs.clone();
                 log_gc_futures.push(async move {
-                    let writer = match GarbageCollector::open(
-                        LogWriterOptions::default(),
+                    let prefix = collection_id.storage_prefix_for_log();
+                    let options = LogWriterOptions::default();
+                    let (fragment_manager_factory, manifest_manager_factory) = create_s3_factories(
+                        options.clone(),
+                        LogReaderOptions::default(),
+                        storage_clone.clone(),
+                        prefix.clone(),
+                        "garbage collection service".to_string(),
+                        Arc::new(()),
+                        Arc::new(()),
+                    );
+                    let writer = match GarbageCollector::<
+                        (FragmentSeqNo, LogPosition),
+                        S3FragmentManagerFactory,
+                        S3ManifestManagerFactory,
+                    >::open(
+                        options,
                         storage_clone,
-                        &collection_id.storage_prefix_for_log(),
-                        "garbage collection service",
+                        fragment_manager_factory,
+                        manifest_manager_factory,
+                        &prefix,
                     )
                     .await
                     {
@@ -124,7 +146,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                             }
                         };
                     }
-                    if let Err(err) = logs.garbage_collect_phase2(collection_id).await {
+                    if let Err(err) = logs.garbage_collect_phase2(database_name, collection_id).await {
                         tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                         return Err(DeleteUnusedLogsError::Gc(err));
                     };
@@ -157,15 +179,37 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                         let collection_id = *collection_id;
                         let storage_clone = storage_arc.clone();
                         log_destroy_futures.push(async move {
-                            match wal3::destroy(storage_clone, &collection_id.storage_prefix_for_log())
-                                .await
+                            let prefix = collection_id.storage_prefix_for_log();
+                            let manifest_manager = match ManifestManager::new(
+                                ThrottleOptions::default(),
+                                SnapshotOptions::default(),
+                                storage_clone.clone(),
+                                prefix.clone(),
+                                "destroy service".to_string(),
+                                Arc::new(()),
+                                Arc::new(()),
+                            )
+                            .await
                             {
+                                Ok(mm) => mm,
+                                Err(wal3::Error::UninitializedLog) => return Ok(()),
+                                Err(err) => {
+                                    tracing::error!(
+                                        "Unable to create manifest manager for collection [{collection_id}]: {err:?}"
+                                    );
+                                    return Err(DeleteUnusedLogsError::Wal3 {
+                                        collection_id,
+                                        err,
+                                    });
+                                }
+                            };
+                            match wal3::destroy(storage_clone, &prefix, &manifest_manager).await {
                                 Ok(()) => Ok(()),
                                 Err(err) => {
                                     tracing::error!(
                                         "Unable to destroy log for collection [{collection_id}]: {err:?}"
                                     );
-                                    Err(DeleteUnusedLogsError::Wal3{ collection_id, err})
+                                    Err(DeleteUnusedLogsError::Wal3 { collection_id, err })
                                 }
                             }
                         })

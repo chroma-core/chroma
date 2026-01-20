@@ -52,8 +52,8 @@ enum Command {
     },
     #[command(about = "Detach a function")]
     DetachFunction {
-        #[arg(long, help = "ID of the attached function to delete")]
-        attached_function_id: String,
+        #[arg(long, help = "Name of the attached function to delete")]
+        name: String,
         #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
         #[arg(long, help = "Whether to delete the output collection")]
@@ -138,15 +138,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             input_collection_id,
             name,
         } => {
-            let request = chroma_proto::GetAttachedFunctionByNameRequest {
-                input_collection_id,
-                name,
+            let request = chroma_proto::GetAttachedFunctionsRequest {
+                id: None,
+                name: Some(name),
+                input_collection_id: Some(input_collection_id),
+                only_ready: Some(true),
             };
 
-            let response = client.get_attached_function_by_name(request).await?;
-            let attached_function = response
-                .into_inner()
-                .attached_function
+            let response = client.get_attached_functions(request).await?;
+            let attached_functions = response.into_inner().attached_functions;
+            let attached_function = attached_functions
+                .into_iter()
+                .next()
                 .ok_or("Server did not return attached function")?;
 
             println!("Attached Function ID: {:?}", attached_function.id);
@@ -175,12 +178,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Command::DetachFunction {
-            attached_function_id,
+            name,
             input_collection_id,
             delete_output,
         } => {
             let request = chroma_proto::DetachFunctionRequest {
-                attached_function_id,
+                name,
                 input_collection_id,
                 delete_output,
             };
