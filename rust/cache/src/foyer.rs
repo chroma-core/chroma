@@ -445,7 +445,9 @@ where
     }
 
     /// Insert directly to disk, bypassing memory cache.
-    /// Used for testing. For production use, prefer the trait method `insert_disk_only`.
+    /// Insert directly to disk, bypassing memory cache.
+    /// Used for testing. For production use, prefer the trait method `insert_to_disk`.
+    pub fn insert_to_disk(&self, key: K, value: V) {
     pub fn insert_to_disk(&self, key: K, value: V) {
         self.cache.storage_writer(key).insert(value);
     }
