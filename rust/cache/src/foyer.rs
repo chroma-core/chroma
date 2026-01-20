@@ -443,8 +443,9 @@ where
         })
     }
 
-    #[allow(dead_code)]
-    fn insert_to_disk(&self, key: K, value: V) {
+    /// Insert directly to disk, bypassing memory cache.
+    /// Used for testing. For production use, prefer the trait method `insert_disk_only`.
+    pub fn insert_to_disk(&self, key: K, value: V) {
         self.cache.storage_writer(key).insert(value);
     }
 }
@@ -502,11 +503,19 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<K, V> super::PersistentCache<K, V> for FoyerHybridCache<K, V>
 where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
+    async fn insert_disk_only(&self, key: K, value: V) {
+        let hostname = std::slice::from_ref(&self.hostname);
+        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
+        // Write directly to disk storage, bypassing the memory cache.
+        // This is useful for prefetching data that is not immediately needed.
+        self.cache.storage_writer(key).insert(value);
+    }
 }
 
 #[derive(Clone)]
@@ -682,11 +691,13 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<K, V> super::PersistentCache<K, V> for FoyerPlainCache<K, V>
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
+    // Uses default implementation which falls back to regular insert (no disk tier for FoyerPlainCache)
 }
 
 #[cfg(test)]

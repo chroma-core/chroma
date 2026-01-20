@@ -83,9 +83,11 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<K, V> super::PersistentCache<K, V> for UnboundedCache<K, V>
 where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
+    // Uses default implementation which falls back to regular insert (no disk tier for UnboundedCache)
 }

@@ -138,7 +138,9 @@ impl ArrowBlockfileProvider {
         for block_id in block_ids.iter() {
             // Don't prefetch if already cached.
             if !self.block_manager.cached(block_id).await {
-                futures.push(self.block_manager.get(
+                // Use prefetch_to_disk to write to disk cache only, bypassing memory.
+                // This avoids polluting the memory cache with data that is not immediately needed.
+                futures.push(self.block_manager.prefetch_to_disk(
                     prefix_path,
                     block_id,
                     StorageRequestPriority::P1,
@@ -147,13 +149,21 @@ impl ArrowBlockfileProvider {
         }
         let count = futures.len();
 
-        tracing::info!("Prefetching {} blocks for blockfile ID: {:?}", count, id);
+        tracing::info!(
+            "Prefetching {} blocks to disk for blockfile ID: {:?}",
+            count,
+            id
+        );
 
         while let Some(result) = futures.next().await {
             result?;
         }
 
-        tracing::info!("Prefetched {} blocks for blockfile ID: {:?}", count, id);
+        tracing::info!(
+            "Prefetched {} blocks to disk for blockfile ID: {:?}",
+            count,
+            id
+        );
         Ok(count)
     }
 
@@ -474,6 +484,29 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
+        self.get_inner(prefix_path, id, priority, false).await
+    }
+
+    /// Prefetch a block to disk cache only, bypassing memory cache.
+    /// This is useful for prefetching data that is not immediately needed
+    /// but may be accessed later. By writing to disk only, we avoid polluting
+    /// the memory cache with data that is not immediately needed.
+    pub(super) async fn prefetch_to_disk(
+        &self,
+        prefix_path: &str,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<Block>, GetError> {
+        self.get_inner(prefix_path, id, priority, true).await
+    }
+
+    async fn get_inner(
+        &self,
+        prefix_path: &str,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+        disk_only: bool,
+    ) -> Result<Option<Block>, GetError> {
         let block = self.block_cache.obtain(*id).await.ok().flatten();
         if let Some(block) = block {
             return Ok(Some(block));
@@ -509,7 +542,15 @@ impl BlockManager {
                     let block = Block::from_bytes(&bytes, id_clone);
                     match block {
                         Ok(block) => {
-                            block_cache_clone.insert(id_clone, block.clone()).await;
+                            if disk_only {
+                                // Write to disk cache only, bypassing memory
+                                block_cache_clone
+                                    .insert_disk_only(id_clone, block.clone())
+                                    .await;
+                            } else {
+                                // Write to both memory and disk cache
+                                block_cache_clone.insert(id_clone, block.clone()).await;
+                            }
                             Ok(block)
                         }
                         Err(e) => {
