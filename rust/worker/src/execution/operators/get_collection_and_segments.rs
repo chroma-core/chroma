@@ -73,6 +73,7 @@ impl Operator<GetCollectionAndSegmentsInput, GetCollectionAndSegmentsOutput>
             self.get_name(),
             self.collection_id.0
         );
+        // TODO(Sanket): Add database name to the sysdb call.
         Ok(self
             .sysdb
             .clone()

@@ -522,6 +522,11 @@ impl SysDb {
         }
     }
 
+    // Database name is optional because it is not used for local chroma.
+    // Also for distributed chroma, if database name is not provided,
+    // it will be routed to the non-mcmr sysdb by default.
+    // If database name is provided, it will be routed to either the mcmr
+    // or non-mcmr sysdb depending on the prefix.
     pub async fn get_collection_with_segments(
         &mut self,
         database: Option<DatabaseName>,
