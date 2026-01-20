@@ -371,6 +371,11 @@ impl MetadataProvider<'_> {
                             "Inequality filter should be handled above the metadata provider level"
                         ),
                     }
+<<<<<<< HEAD
+=======
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Filter by metadata"))
+                    .await
+>>>>>>> 4c26135b3 ([CLN] Don't log MD key (#6200))
                 } else {
                     Ok(RoaringBitmap::new())
                 }
