@@ -328,6 +328,19 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         self.fragment_consumer.read_bytes(&fragment.path).await
     }
 
+    /// Parse parquet previously returned by read_bytes.
+    #[tracing::instrument(skip(self, parquet))]
+    #[allow(clippy::type_complexity)]
+    pub async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        self.fragment_consumer
+            .parse_parquet(parquet, starting_log_position)
+            .await
+    }
+
     #[tracing::instrument(skip(self), ret)]
     pub async fn scrub(&self, limits: Limits) -> Result<ScrubSuccess, Vec<Error>> {
         let Some((manifest, _)) = self
