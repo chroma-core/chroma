@@ -8,28 +8,29 @@ use std::collections::HashMap;
 
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::client::{Client, ClientConfig};
 use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::row::Row;
 use google_cloud_spanner::statement::Statement;
+use google_cloud_spanner::transaction_rw::ReadWriteTransaction;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
 use crate::types::{
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
-    UpdateCollectionRequest, UpdateCollectionResponse,
+    CollectionFilter, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
+    FlushCompactionResponse, GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse,
+    GetCollectionsRequest, GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse,
+    GetTenantsRequest, GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
+    UpdateCollectionRequest, UpdateCollectionResponse, UpdateSegmentRequest, UpdateTenantRequest,
 };
 
 use chroma_types::{
-    Collection, Database, DatabaseUuid, InternalCollectionConfiguration, RegionName, Segment,
-    Tenant,
+    Collection, Database, InternalCollectionConfiguration, RegionName, Segment, Tenant,
 };
 
 #[derive(Error, Debug)]
@@ -168,6 +169,85 @@ impl SpannerBackend {
         } else {
             Ok(GetTenantsResponse { tenants })
         }
+    }
+
+    async fn update_tenant(
+        &self,
+        tx: &mut ReadWriteTransaction,
+        req: UpdateTenantRequest,
+    ) -> Result<(), SysDbError> {
+        let mut update_stmt = Statement::new(
+            "UPDATE tenants SET last_compaction_time = TIMESTAMP_SECONDS(@timestamp), updated_at = PENDING_COMMIT_TIMESTAMP() WHERE id = @tenant_id AND is_deleted = FALSE"
+        );
+        update_stmt.add_param("tenant_id", &req.tenant_id);
+        update_stmt.add_param("timestamp", &req.last_compaction_time);
+
+        let rows_affected = tx.update(update_stmt).await?;
+        if rows_affected == 0 {
+            return Err(SysDbError::NotFound(format!(
+                "tenant '{}' not found",
+                req.tenant_id
+            )));
+        }
+
+        Ok(())
+    }
+
+    /// Update file paths for segments after compaction.
+    ///
+    /// This mimics the Go RegisterFilePaths function which updates the file_paths
+    /// column for each segment with the new file paths from compaction.
+    async fn update_segments(
+        &self,
+        tx: &mut ReadWriteTransaction,
+        req: UpdateSegmentRequest,
+    ) -> Result<(), SysDbError> {
+        for flush_segment_compaction in &req.flush_segment_compactions {
+            // Convert protobuf file_paths to HashMap<String, Vec<String>>
+            let file_paths: std::collections::HashMap<String, Vec<String>> =
+                flush_segment_compaction
+                    .file_paths
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.paths.clone()))
+                    .collect();
+
+            // Serialize file_paths to JSON string
+            let file_paths_json: String = serde_json::to_string(&file_paths).map_err(|e| {
+                tracing::error!(
+                    segment_id = %flush_segment_compaction.segment_id,
+                    error = %e,
+                    "Failed to serialize file paths to JSON"
+                );
+                SysDbError::InvalidSchemaJson(e)
+            })?;
+
+            // Update the segment's file_paths using PARSE_JSON function
+            let mut update_stmt = Statement::new(
+                "UPDATE collection_segments SET file_paths = PARSE_JSON(@file_paths), updated_at = PENDING_COMMIT_TIMESTAMP() WHERE id = @segment_id AND collection_id = @collection_id AND region = @region",
+            );
+            update_stmt.add_param(
+                "segment_id",
+                &flush_segment_compaction.segment_id.to_string(),
+            );
+            update_stmt.add_param("collection_id", &req.collection_id.to_string());
+            update_stmt.add_param("region", &self.local_region().as_str());
+            update_stmt.add_param("file_paths", &file_paths_json);
+
+            let rows_affected = tx.update(update_stmt).await?;
+            if rows_affected == 0 {
+                return Err(SysDbError::NotFound(format!(
+                    "segment '{}' not found",
+                    flush_segment_compaction.segment_id
+                )));
+            }
+
+            tracing::info!(
+                segment_id = %flush_segment_compaction.segment_id,
+                "Successfully updated segment file paths"
+            );
+        }
+
+        Ok(())
     }
 
     // ============================================================
@@ -486,6 +566,12 @@ impl SpannerBackend {
                                 "index_schema",
                                 "created_at",
                                 "updated_at",
+                                "version",
+                                "last_compacted_offset",
+                                "total_records_post_compaction",
+                                "size_bytes_post_compaction",
+                                "num_versions",
+                                "compaction_failure_count",
                             ],
                             &[
                                 &collection_id,
@@ -493,6 +579,12 @@ impl SpannerBackend {
                                 &index_schema_json,
                                 &commit_ts,
                                 &commit_ts,
+                                &(0i64),  // initial version
+                                &(0i64),  // initial last_compacted_offset
+                                &(0i64),  // initial total_records_post_compaction
+                                &(0i64),  // initial size_bytes_post_compaction
+                                &(0i64),  // initial num_versions
+                                &(0i64),  // initial compaction_failure_count
                             ],
                         ));
                     }
@@ -644,7 +736,7 @@ impl SpannerBackend {
         let filter = req.filter;
 
         // Use local region for reads
-        let region = self.local_region.as_str();
+        let region = self.local_region();
 
         // Build dynamic query based on which filters are provided
         let mut where_clauses: Vec<String> = Vec::new();
@@ -743,7 +835,7 @@ impl SpannerBackend {
         );
 
         let mut stmt = Statement::new(&query);
-        stmt.add_param("region", &region);
+        stmt.add_param("region", &region.to_string());
 
         // Bind parameters based on which filters are set
         if let Some(ref ids) = ids_str {
@@ -1204,9 +1296,211 @@ impl SpannerBackend {
         }
     }
 
-    // ============================================================
-    // Lifecycle
-    // ============================================================
+    /// Flush collection compaction results to the database.
+    /// This mimics the logic in go/pkg/sysdb/coordinator/table_catalog.go::FlushCollectionCompactionForVersionedCollection
+    pub async fn flush_collection_compaction(
+        &self,
+        req: FlushCompactionRequest,
+    ) -> Result<FlushCompactionResponse, SysDbError> {
+        let flush_segment_compaction_infos = req.flush_segment_compaction_infos.clone();
+        let collection_id_uuid = req.collection_id;
+        let collection_id = collection_id_uuid.0.to_string();
+        let tenant_id = req.tenant_id.clone();
+        let new_version_file = req.new_version_file.clone();
+        let version_file_path = req.version_file_path.clone();
+        let new_version = req.new_version;
+
+        tracing::info!(
+            "FlushCollectionCompaction called for collection_id: {}, log_position: {}, collection_version: {}",
+            collection_id,
+            req.log_position,
+            req.current_collection_version
+        );
+
+        // Execute the flush compaction operation once - no retries needed since
+        // CollectionVersionStale errors cannot be recovered from due to immutable request version
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id_uuid]),
+        };
+
+        let collection_response = self.get_collections(get_collection_req).await?;
+
+        let collection = collection_response
+            .collections
+            .first()
+            .ok_or(SysDbError::NotFound(format!(
+                "collection {} not found",
+                collection_id
+            )))?;
+
+        let existing_version = collection.version;
+        let old_version_file_name = collection.version_file_path.clone().unwrap_or_default();
+        let version_at_compaction_start = req.current_collection_version;
+
+        if existing_version > version_at_compaction_start {
+            tracing::info!(
+            "Compactor is trying to flush a stale version. existing_version: {}, current_collection_version: {}",
+            existing_version,
+            version_at_compaction_start
+        );
+            return Err(SysDbError::CollectionVersionStale {
+                current_version: existing_version,
+                compaction_version: version_at_compaction_start,
+            });
+        }
+
+        if existing_version < version_at_compaction_start {
+            // This should never happen
+            tracing::error!(
+            "Compactor is trying to flush a version that is somehow greater than the current version. existing_version: {}, current_collection_version: {}",
+            existing_version,
+                    version_at_compaction_start
+        );
+            return Err(SysDbError::Internal(
+                "Collection version is invalid".to_string(),
+            ));
+        }
+
+        // Perform the database operations in a transaction - mimics Go's executeOperations function
+        // Use the version file data created in the server layer (already cloned above)
+
+        let latest_version_ts = match new_version_file
+            .version_history
+            .as_ref()
+            .and_then(|vh| vh.versions.last())
+        {
+            Some(v) => v.created_at_secs,
+            None => {
+                tracing::error!("Version history is empty");
+                return Err(SysDbError::Internal("Version history is empty".to_string()));
+            }
+        };
+
+        let region = self.local_region();
+
+        let result = self
+        .client
+        .read_write_transaction::<(), SysDbError, _>(|tx| {
+            let collection_id = collection_id.clone();
+            let tenant_id = tenant_id.clone();
+            let total_records_post_compaction = req.total_records_post_compaction;
+            let size_bytes_post_compaction = req.size_bytes_post_compaction;
+            let schema_str = req.schema_str.clone();
+            let region = region.clone();
+            let log_position = req.log_position;
+            let num_active_versions = new_version_file
+                .version_history
+                .as_ref()
+                .map_or(0, |vh| vh.versions.len() as i32);
+            let version_file_path = version_file_path.clone();
+            let db = self.clone();
+            let flush_segment_compaction_infos = flush_segment_compaction_infos.clone();
+
+            let old_version_file_name = old_version_file_name.clone();
+            Box::pin({
+                async move {
+                    // Update tenant's last compaction time first (before collection update)
+                    // This mimics Go's UpdateTenantLastCompactionTime
+                    let update_tenant_req = UpdateTenantRequest {
+                        tenant_id: tenant_id.clone(),
+                        last_compaction_time: latest_version_ts,
+                    };
+                    db.update_tenant(tx, update_tenant_req).await?;
+
+                    let update_segment_req = UpdateSegmentRequest {
+                        collection_id: collection_id_uuid,
+                        flush_segment_compactions: flush_segment_compaction_infos.clone(),
+                    };
+                    db.update_segments(tx, update_segment_req).await?;
+
+                    // Update collection with compaction results using CAS operation
+                    // This mimics Go's UpdateLogPositionAndVersionInfo with CAS semantics
+                    // TODO Need to see if updated_at time should be the commit timestamp o the versionfile updated_at timestamp
+                    // In go they're the same
+                    let mut update_stmt = Statement::new(
+                        "UPDATE collection_compaction_cursors SET
+                            last_compacted_offset = @log_position,
+                            version = @new_version,
+                            version_file_name = @version_file_name,
+                            total_records_post_compaction = @total_records_post_compaction,
+                            size_bytes_post_compaction = @size_bytes_post_compaction,
+                            last_compaction_time_secs = TIMESTAMP_SECONDS(@last_compaction_time_ts),
+                            updated_at = PENDING_COMMIT_TIMESTAMP(),
+                            num_versions = @num_active_versions,
+                            compaction_failure_count = 0,
+                            index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
+                            WHERE collection_id = @collection_id AND version = @current_version AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
+                    );
+                    update_stmt.add_param("collection_id", &collection_id);
+                    update_stmt.add_param("new_version", &(new_version as i64));
+                    update_stmt.add_param("log_position", &log_position);
+                    update_stmt.add_param(
+                        "total_records_post_compaction",
+                        &(total_records_post_compaction as i64),
+                    );
+                    update_stmt.add_param(
+                        "size_bytes_post_compaction",
+                        &(size_bytes_post_compaction as i64),
+                    );
+                    update_stmt.add_param("last_compaction_time_ts", &latest_version_ts);
+                    update_stmt.add_param("current_version", &(existing_version as i64));
+                    update_stmt
+                        .add_param("num_active_versions", &(num_active_versions as i64));
+                    update_stmt.add_param("version_file_name", &version_file_path);
+                    update_stmt.add_param("schema_str", &schema_str);
+                    update_stmt.add_param("region", &region.to_string());
+                    update_stmt.add_param("old_version_file_name", &old_version_file_name);
+                    let rows_affected = tx.update(update_stmt).await?;
+
+                    if rows_affected == 0 {
+                        // CAS operation failed - collection was updated by another transaction
+                        // This invokes a retry if this transaction in the Go code but that's
+                        // unnecessary here. If you failed to update the collection cursor
+                        // at the right version, your compaction should fail.
+                        return Err(SysDbError::CollectionEntryIsStale);
+                    }
+
+                    Ok(())
+                }
+            })
+        })
+        .await;
+
+        match result {
+            Ok(_) => {
+                let response = FlushCompactionResponse {
+                    collection_id: collection_id.clone(),
+                    collection_version: new_version,
+                    last_compaction_time: latest_version_ts,
+                };
+
+                tracing::info!(
+                    "Successfully flushed collection compaction for collection_id: {}, new_version: {}",
+                    collection_id,
+                    new_version
+                );
+
+                Ok(response)
+            }
+            Err(e) => {
+                // Check if this is a CAS failure (stale entry) - no point retrying since
+                // req.current_collection_version is immutable and subsequent retries will fail
+                // at the existing_version > version_at_compaction_start check anyway
+                // Value in sysdb is inaccessible here. It is just know that that value is
+                // greater than req.current_collection_version.
+                if let SysDbError::CollectionVersionStale { .. } = e {
+                    tracing::info!(
+                        "Collection entry is stale during flush compaction. collection_id: {}, compaction_version: {}",
+                        collection_id,
+                        req.current_collection_version,
+                    );
+                }
+
+                // For all errors, don't retry
+                Err(e)
+            }
+        }
+    }
 
     pub async fn close(self) {
         self.client.close().await;
@@ -1268,7 +1562,7 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use super::*;
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
@@ -1284,13 +1578,18 @@ mod tests {
     // They will be skipped if the Spanner emulator is not reachable.
     // To run: cargo test --package rust-sysdb --lib spanner::tests
 
-    async fn setup_test_backend() -> Option<SpannerBackend> {
+    pub async fn setup_test_backend() -> Option<SpannerBackend> {
+        setup_test_backend_with_region("us").await
+    }
+
+    pub async fn setup_test_backend_with_region(region: &str) -> Option<SpannerBackend> {
         use crate::config::SpannerBackendConfig;
         use chroma_config::registry::Registry;
         use chroma_config::spanner::SpannerEmulatorConfig;
         use chroma_config::Configurable;
 
         // Use the same config as Tilt (localhost:9010 when port-forwarded)
+        // But use different databases for different regions to simulate isolation
         let emulator = SpannerEmulatorConfig {
             host: "localhost".to_string(),
             grpc_port: 9010,
@@ -1309,7 +1608,7 @@ mod tests {
             RegionName::new("asia").unwrap(),
             RegionName::new("europe").unwrap(),
         ];
-        let local_region = RegionName::new("us").unwrap();
+        let local_region = RegionName::new(region).unwrap();
 
         let config = SpannerBackendConfig {
             spanner: &spanner_config,
@@ -1321,8 +1620,8 @@ mod tests {
             Ok(backend) => Some(backend),
             Err(e) => {
                 eprintln!(
-                    "Failed to connect to Spanner emulator: {:?}. Is Tilt running?",
-                    e
+                    "Failed to connect to Spanner emulator for region {}: {:?}. Is Tilt running?",
+                    region, e
                 );
                 None
             }

@@ -6,6 +6,7 @@
 //! - Backend-specific optimizations without affecting the API
 //! - Cleaner internal APIs that aren't tied to protobuf conventions
 
+use chroma_segment::version_file::VersionFileError;
 use chroma_types::{
     chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseName,
     DatabaseUuid, InternalCollectionConfiguration, Metadata, MetadataValue,
@@ -33,7 +34,7 @@ use tonic::Status;
 // ============================================================================
 
 /// Validates that a string is a valid UUID.
-fn validate_uuid(id: &str) -> Result<Uuid, SysDbError> {
+pub fn validate_uuid(id: &str) -> Result<Uuid, SysDbError> {
     Uuid::parse_str(id).map_err(SysDbError::InvalidUuid)
 }
 
@@ -743,11 +744,6 @@ pub struct GetTenantsResponse {
     pub tenants: Vec<Tenant>,
 }
 
-/// Internal response for updating a tenant.
-#[derive(Debug, Clone)]
-pub struct UpdateTenantResponse {
-    pub updated_tenant: Tenant,
-}
 impl TryFrom<GetTenantsResponse> for chroma_proto::GetTenantResponse {
     type Error = SysDbError;
 
@@ -1149,6 +1145,21 @@ pub enum SysDbError {
     /// Schema error
     #[error("Schema error: {0}")]
     Schema(#[from] chroma_types::SchemaError),
+
+    /// Collection version is stale - compaction version is older than current version
+    #[error("Collection version is stale: current version is {current_version}, but compaction attempted with version {compaction_version}")]
+    CollectionVersionStale {
+        current_version: i32,
+        compaction_version: i32,
+    },
+
+    #[error(
+        "Collection entry is stale - one of version, version_file_name, or log_position is stale"
+    )]
+    CollectionEntryIsStale,
+
+    #[error("Versionfile error: {0}")]
+    VersionFile(#[from] VersionFileError),
 }
 
 impl ChromaError for SysDbError {
@@ -1169,6 +1180,9 @@ impl ChromaError for SysDbError {
             SysDbError::InvalidDimension(_) => ErrorCodes::Internal,
             SysDbError::CollectionToProtoError(e) => e.code(),
             SysDbError::Schema(e) => e.code(),
+            SysDbError::CollectionVersionStale { .. } => ErrorCodes::Internal,
+            SysDbError::CollectionEntryIsStale => ErrorCodes::Internal,
+            SysDbError::VersionFile(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -1262,5 +1276,113 @@ impl TryFrom<GetCollectionWithSegmentsResponse>
             collection: Some(r.collection.try_into()?),
             segments,
         })
+    }
+}
+
+/// Internal request for updating tenant's last compaction time.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub last_compaction_time: i64,
+}
+
+/// Internal response for updating tenant's last compaction time.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantResponse {}
+
+/// Internal request for updating segments after compaction.
+#[derive(Debug, Clone)]
+pub struct UpdateSegmentRequest {
+    pub collection_id: CollectionUuid,
+    pub flush_segment_compactions: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
+}
+
+/// Internal response for updating segments after compaction.
+#[derive(Debug, Clone)]
+pub struct UpdateSegmentResponse {}
+
+/// Internal request for flushing collection compaction.
+#[derive(Debug, Clone)]
+pub struct FlushCompactionRequest {
+    pub collection_id: CollectionUuid,
+    pub database_name: String,
+    pub tenant_id: String,
+    pub log_position: i64,
+    pub current_collection_version: i32,
+    pub flush_segment_compaction_infos: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
+    pub total_records_post_compaction: u64,
+    pub size_bytes_post_compaction: u64,
+    pub schema_str: Option<String>,
+
+    pub new_version_file: chroma_types::chroma_proto::CollectionVersionFile,
+    pub version_file_path: String,
+    pub old_version_file_path: String,
+    pub new_version: i32,
+}
+
+// Note: TryFrom removed since FlushCompactionRequest now requires version file data
+// that is created in the server layer, not from the protobuf request
+
+/// Internal response for flushing collection compaction.
+#[derive(Debug, Clone)]
+pub struct FlushCompactionResponse {
+    pub collection_id: String,
+    pub collection_version: i32,
+    pub last_compaction_time: i64,
+}
+
+impl TryFrom<FlushCompactionResponse> for chroma_proto::FlushCollectionCompactionResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: FlushCompactionResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::FlushCollectionCompactionResponse {
+            collection_id: r.collection_id,
+            collection_version: r.collection_version,
+            last_compaction_time: r.last_compaction_time,
+        })
+    }
+}
+
+impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        request: chroma_proto::FlushCollectionCompactionRequest,
+    ) -> Result<Self, Self::Error> {
+        let collection_id = CollectionUuid(validate_uuid(&request.collection_id)?);
+        let database_name =
+            DatabaseName::new(request.database_name.ok_or_else(|| {
+                SysDbError::InvalidArgument("database_name is required".to_string())
+            })?)
+            .ok_or_else(|| {
+                SysDbError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?;
+        let filter = CollectionFilter::default()
+            .ids(vec![collection_id])
+            .database_name(database_name);
+        Ok(GetCollectionsRequest { filter })
+    }
+}
+
+impl Assignable for FlushCompactionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Single collection operation - no database context available, use default
+        Backend::Spanner(factory.one_spanner().clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for FlushCompactionRequest {
+    type Response = FlushCompactionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        match backend {
+            Backend::Spanner(s) => s.flush_collection_compaction(self).await,
+        }
     }
 }
