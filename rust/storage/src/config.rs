@@ -35,6 +35,18 @@ pub enum S3CredentialsConfig {
     Minio,
     Localhost,
     AWS,
+    /// Explicit credentials for customer buckets or S3-compatible services.
+    /// Use this when you need to connect to arbitrary S3 buckets with specific
+    /// credentials, rather than using the default AWS credential chain.
+    Explicit {
+        access_key_id: String,
+        secret_access_key: String,
+        #[serde(default)]
+        session_token: Option<String>,
+        #[serde(default)]
+        custom_endpoint: Option<String>,
+        region: String,
+    },
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]

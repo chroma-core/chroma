@@ -18,7 +18,11 @@ use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
 
-pub use s3::{s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name};
+pub use config::{S3CredentialsConfig, S3StorageConfig};
+pub use s3::{
+    s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name, S3Storage,
+    S3StorageOptions,
+};
 
 /// A StorageError captures all kinds of errors that can come from storage.
 //
@@ -570,3 +574,20 @@ impl DeleteOptions {
 
 #[derive(Clone, Eq, PartialEq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ETag(pub String);
+
+/// Metadata about an S3 object, returned alongside the object content.
+/// This is useful when you need both the content and metadata (like content_length)
+/// in a single request.
+#[derive(Clone, Debug)]
+pub struct S3ObjectMetadata {
+    /// The object key in the bucket.
+    pub object_key: String,
+    /// The ETag of the object, if available.
+    pub etag: Option<ETag>,
+    /// The size of the object in bytes.
+    pub content_length: i64,
+    /// The content type (MIME type) of the object, if available.
+    pub content_type: Option<String>,
+    /// The last modified timestamp of the object, if available.
+    pub last_modified: Option<aws_smithy_types::DateTime>,
+}
