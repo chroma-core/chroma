@@ -1559,6 +1559,7 @@ dependencies = [
  "arrow",
  "async-trait",
  "bincode",
+ "bytes",
  "chroma-cache",
  "chroma-config",
  "chroma-error",
@@ -1578,6 +1579,7 @@ dependencies = [
  "rand 0.8.5",
  "roaring",
  "serde",
+ "serde_bytes",
  "shuttle",
  "tempfile",
  "thiserror 1.0.69",
@@ -7649,6 +7651,16 @@ checksum = "f3a1a3341211875ef120e117ea7fd5228530ae7e7036a779fdc9117be6b3282c"
 dependencies = [
  "ordered-float",
  "serde",
+]
+
+[[package]]
+name = "serde_bytes"
+version = "0.11.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
+dependencies = [
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

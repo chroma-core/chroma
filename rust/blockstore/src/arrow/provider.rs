@@ -512,7 +512,10 @@ impl BlockManager {
                         }
                     };
                     num_get_requests_metric_clone.record(1, &[]);
-                    let block = Block::from_bytes(&bytes, id_clone);
+                    let block = match Arc::try_unwrap(bytes) {
+                        Ok(vec) => Block::from_bytes_owned(vec, id_clone),
+                        Err(arc) => Block::from_bytes(&arc, id_clone),
+                    };
                     match block {
                         Ok(block) => {
                             block_cache_clone.insert(id_clone, block.clone()).await;

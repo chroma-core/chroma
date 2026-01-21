@@ -15,6 +15,7 @@ use arrow::{
     array::{Array, StringArray},
     record_batch::RecordBatch,
 };
+use bytes::Bytes;
 use chroma_cache::foyer::MIB;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::de::Error as DeError;
@@ -59,7 +60,7 @@ impl Serialize for RecordBatchWrapper {
         S: serde::Serializer,
     {
         let data = Block::record_batch_to_bytes(self).map_err(S::Error::custom)?;
-        serializer.serialize_bytes(&data)
+        serde_bytes::serialize(&data, serializer)
     }
 }
 
@@ -68,8 +69,10 @@ impl<'de> Deserialize<'de> for RecordBatchWrapper {
     where
         D: serde::Deserializer<'de>,
     {
-        let data = Vec::<u8>::deserialize(deserializer)?;
-        let rb = Block::load_record_batch(&data, false).map_err(D::Error::custom)?;
+        let data: serde_bytes::ByteBuf = serde_bytes::deserialize(deserializer)?;
+        // Convert to Bytes (zero-copy ownership transfer from Vec)
+        let bytes = Bytes::from(data.into_vec());
+        let rb = Block::load_record_batch(bytes, false).map_err(D::Error::custom)?;
         Ok(RecordBatchWrapper(rb))
     }
 }
@@ -544,9 +547,19 @@ impl Block {
         Ok(bytes)
     }
 
-    /// Load a block from bytes in Arrow IPC format with the given id
+    /// Load a block from bytes in Arrow IPC format with the given id.
+    /// ### Notes
+    /// - This copies the input bytes. If you have owned bytes (Vec<u8> or Bytes),
+    ///   use `from_bytes_owned` for zero-copy loading.
     pub fn from_bytes(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        Self::load_from_bytes(bytes, id, false)
+        // Copy borrowed bytes to owned Bytes
+        Self::load_from_bytes(Bytes::copy_from_slice(bytes), id, false)
+    }
+
+    /// Load a block from owned bytes in Arrow IPC format with the given id.
+    /// This is zero-copy - the bytes are not copied, just wrapped.
+    pub fn from_bytes_owned(bytes: impl Into<Bytes>, id: Uuid) -> Result<Self, BlockLoadError> {
+        Self::load_from_bytes(bytes.into(), id, false)
     }
 
     /// Load a block from bytes in Arrow IPC format with the given id and validate the layout
@@ -554,7 +567,8 @@ impl Block {
     /// - This method should be used in tests to ensure that the layout of the IPC file is as expected
     /// - The validation is not performant and should not be used in production code
     pub fn from_bytes_with_validation(bytes: &[u8], id: Uuid) -> Result<Self, BlockLoadError> {
-        Self::load_from_bytes(bytes, id, true)
+        // Copy borrowed bytes to owned Bytes
+        Self::load_from_bytes(Bytes::copy_from_slice(bytes), id, true)
     }
 
     /// Load a block from the given path with the given id and validate the layout
@@ -581,21 +595,26 @@ impl Block {
         let mut reader = std::io::BufReader::new(file);
         let mut target_buffer = Vec::with_capacity(reader.get_ref().metadata()?.len() as usize);
         reader.read_to_end(&mut target_buffer)?;
-        Self::load_from_bytes(&target_buffer, id, validate)
+        // Convert Vec to Bytes (zero-copy ownership transfer)
+        let bytes = Bytes::from(target_buffer);
+        Self::load_from_bytes(bytes, id, validate)
     }
 
-    fn load_from_bytes(bytes: &[u8], id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
+    fn load_from_bytes(bytes: Bytes, id: Uuid, validate: bool) -> Result<Self, BlockLoadError> {
         let batch = Self::load_record_batch(bytes, validate)?;
         Ok(Self::from_record_batch(id, batch))
     }
 
-    fn load_record_batch(bytes: &[u8], validate: bool) -> Result<RecordBatch, BlockLoadError> {
+    /// Load a record batch from owned bytes.
+    /// When given owned `Bytes`, this is zero-copy: the `Bytes` is sliced (ref-counted, no copy)
+    /// and converted directly to an Arrow Buffer without copying.
+    fn load_record_batch(bytes: Bytes, validate: bool) -> Result<RecordBatch, BlockLoadError> {
         if validate {
-            verify_buffers_layout(bytes).map_err(BlockLoadError::ArrowLayoutVerificationError)?;
+            verify_buffers_layout(&bytes).map_err(BlockLoadError::ArrowLayoutVerificationError)?;
         }
 
         let footer =
-            read_arrow_footer(bytes).map_err(BlockLoadError::ArrowLayoutVerificationError)?;
+            read_arrow_footer(&bytes).map_err(BlockLoadError::ArrowLayoutVerificationError)?;
         let schema = footer
             .schema()
             .ok_or(BlockLoadError::ArrowLayoutVerificationError(
@@ -608,14 +627,10 @@ impl Block {
             FileDecoder::new(Arc::new(schema), footer.version()).with_require_alignment(true);
         let (block, record_batch_offset, _, record_batch_len) = read_record_batch_range(footer)?;
 
-        // This incurs a copy of the buffer we should be able to avoid this
-        // but as is foyer hands a reference to the [u8]. So the end to end
-        // path involves up to two copies, kernel to user space copy when reading from disk cache
-        // and then a copy into this buffer. We could avoid the second copy by changing foyer to
-        // hand over ownership of the buffer, but that would be a larger change.
-        // This is something we can optimize later if it becomes a bottleneck.
+        // Zero-copy: slice the Bytes (ref-counted, no copy) and convert to Arrow Buffer.
+        // Arrow's Buffer::from(Bytes) takes ownership without copying the underlying data.
         let buffer =
-            Buffer::from(&bytes[record_batch_offset..record_batch_offset + record_batch_len]);
+            Buffer::from(bytes.slice(record_batch_offset..record_batch_offset + record_batch_len));
         decoder
             .read_record_batch(block, &buffer)?
             .ok_or(BlockLoadError::NoRecordBatches)
