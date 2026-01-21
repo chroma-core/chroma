@@ -575,9 +575,7 @@ impl DeleteOptions {
 #[derive(Clone, Eq, PartialEq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ETag(pub String);
 
-/// Metadata about an S3 object, returned alongside the object content.
-/// This is useful when you need both the content and metadata (like content_length)
-/// in a single request.
+/// Metadata about an S3 object returned by `head_object()`.
 #[derive(Clone, Debug)]
 pub struct S3ObjectMetadata {
     /// The object key in the bucket.
