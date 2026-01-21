@@ -913,9 +913,8 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
                 Ok(())
             }
         };
-        let storages = self.batch_manager.storages().await;
-        let prefix = &storages[0].prefix;
-        for path in garbage.prefixed_paths_to_delete(prefix) {
+        let prefix = self.batch_manager.preferred_prefix().await;
+        for path in garbage.prefixed_paths_to_delete(&prefix) {
             batch.push(path);
             if batch.len() >= 100 {
                 let batch = std::mem::take(&mut batch);

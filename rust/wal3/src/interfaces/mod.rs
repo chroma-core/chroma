@@ -181,6 +181,9 @@ pub trait FragmentPublisher: Send + Sync + 'static {
     /// Returns the preferred storage for this fragment publisher.
     async fn preferred_storage(&self) -> Storage;
 
+    /// Returns the preferred storage's prefix for this fragment publisher.
+    async fn preferred_prefix(&self) -> String;
+
     /// Returns all storages for this fragment publisher.
     async fn storages(&self) -> Vec<repl::StorageWrapper>;
 

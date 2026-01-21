@@ -997,6 +997,16 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
         fragment: &Fragment,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
+    /// Read bytes from the fragment.
+    async fn read_bytes(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error>;
+
+    /// Parse parquet previously returned by read_bytes.
+    async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
+
     /// Scrub the log to verify its integrity.
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>>;
 }
@@ -1051,6 +1061,18 @@ impl<
         fragment: &Fragment,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         LogReader::read_parquet(self, fragment).await
+    }
+
+    async fn read_bytes(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
+        LogReader::read_bytes(self, fragment).await
+    }
+
+    async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        LogReader::parse_parquet(self, parquet, starting_log_position).await
     }
 
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>> {

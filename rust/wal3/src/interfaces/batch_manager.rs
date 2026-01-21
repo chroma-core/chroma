@@ -290,6 +290,10 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         self.fragment_uploader.preferred_storage().await
     }
 
+    async fn preferred_prefix(&self) -> String {
+        self.fragment_uploader.preferred_prefix().await
+    }
+
     async fn storages(&self) -> Vec<crate::StorageWrapper> {
         self.fragment_uploader.storages().await.to_vec()
     }

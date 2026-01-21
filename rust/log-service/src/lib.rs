@@ -2028,28 +2028,31 @@ impl LogServer {
         let futures = fragments
             .iter()
             .map(|fragment| {
-                async {
-                    let log_reader = self
-                        .make_log_reader(database_name.clone(), collection_id)
-                        .await?;
-                    /*
-                    if let Some(cache) = self.cache.as_ref() {
+                let this = self;
+                let database_name = database_name.clone();
+                let fragment = fragment.clone();
+                async move {
+                    let log_reader = this.make_log_reader(database_name, collection_id).await?;
+                    if let Some(cache) = this.cache.as_ref() {
                         let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
                         if let Ok(Some(answer)) = cache.get(&cache_key).await {
-                            let (_, records, _, _) =
-                                parquet_to_records(answer.log_offset, answer.bytes)?;
-                            return Ok(vec![answer.bytes]);
+                            if answer.version == Some(1) {
+                                let (_, records, _, _) = log_reader
+                                    .parse_parquet(&answer.bytes, fragment.start)
+                                    .await?;
+                                return Ok(records);
+                            }
                         }
+                        let bytes = log_reader.read_bytes(&fragment).await?;
+                        let cache_value = CachedBytes::new((*bytes).clone());
                         let (_, answer, _, _) =
-                            puller.read_parquet(&fragment.path, fragment.start).await?;
-                        let cache_value = CachedBytes::new((*answer).clone());
+                            log_reader.parse_parquet(&bytes, fragment.start).await?;
                         cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
+                        let (_, answer, _, _) = log_reader.read_parquet(&fragment.clone()).await?;
+                        Ok(answer)
                     }
-                    */
-                    let (_, answer, _, _) = log_reader.read_parquet(&fragment.clone()).await?;
-                    Ok(answer)
                 }
             })
             .collect::<Vec<_>>();

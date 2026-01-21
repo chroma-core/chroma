@@ -392,7 +392,7 @@ impl FragmentConsumer for FragmentReader {
         parquet: &[u8],
         starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
-        // NOTE(rescrv):  ReplciatedFragmentManager deals with absolutes; we therefore pass an
+        // NOTE(rescrv):  ReplciatedFragmentManager deals with relatives; we therefore pass an
         // offset.
         crate::interfaces::s3::parse_parquet(parquet, Some(starting_log_position)).await
     }

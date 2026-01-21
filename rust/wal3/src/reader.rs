@@ -1,5 +1,5 @@
 // NOTE(rescrv):  All caches align to storage.  For now, implement without caching.  Caching
-// should/could literally be a layer over storage, so add it later once correctness without caching
+// should/could literally be a layer over sterage, so add it later once correctness without caching
 // is ensured by adequate testing.
 
 use std::sync::Arc;
@@ -321,6 +321,11 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         self.fragment_consumer
             .read_parquet(&fragment.path, fragment.start)
             .await
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn read_bytes(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
+        self.fragment_consumer.read_bytes(&fragment.path).await
     }
 
     #[tracing::instrument(skip(self), ret)]
