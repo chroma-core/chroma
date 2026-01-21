@@ -62,15 +62,10 @@ pub struct S3StorageOptions {
     pub secret_access_key: String,
     pub session_token: Option<String>,
     pub custom_endpoint: Option<String>,
-    pub connect_timeout_ms: u64,
-    pub request_timeout_ms: u64,
-    pub upload_part_size_bytes: usize,
-    pub download_part_size_bytes: usize,
 }
 
 impl S3StorageOptions {
     /// Create a new S3StorageOptions with required fields.
-    /// Uses sensible defaults for timeouts and part sizes.
     pub fn new(
         bucket_name: impl Into<String>,
         region: impl Into<String>,
@@ -84,10 +79,6 @@ impl S3StorageOptions {
             secret_access_key: secret_access_key.into(),
             session_token: None,
             custom_endpoint: None,
-            connect_timeout_ms: 5000,
-            request_timeout_ms: 60000,
-            upload_part_size_bytes: 5 * 1024 * 1024,
-            download_part_size_bytes: 8 * 1024 * 1024,
         }
     }
 
@@ -100,30 +91,6 @@ impl S3StorageOptions {
     /// Set a custom endpoint URL for S3-compatible services (e.g., LocalStack, MinIO).
     pub fn with_custom_endpoint(mut self, custom_endpoint: impl Into<String>) -> Self {
         self.custom_endpoint = Some(custom_endpoint.into());
-        self
-    }
-
-    /// Set the connection timeout in milliseconds.
-    pub fn with_connect_timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.connect_timeout_ms = timeout_ms;
-        self
-    }
-
-    /// Set the request timeout in milliseconds.
-    pub fn with_request_timeout_ms(mut self, timeout_ms: u64) -> Self {
-        self.request_timeout_ms = timeout_ms;
-        self
-    }
-
-    /// Set the upload part size in bytes for multipart uploads.
-    pub fn with_upload_part_size_bytes(mut self, size: usize) -> Self {
-        self.upload_part_size_bytes = size;
-        self
-    }
-
-    /// Set the download part size in bytes for parallel downloads.
-    pub fn with_download_part_size_bytes(mut self, size: usize) -> Self {
-        self.download_part_size_bytes = size;
         self
     }
 }
@@ -157,24 +124,7 @@ impl S3Storage {
     /// This is useful for connecting to customer S3 buckets or S3-compatible services
     /// where credentials are provided dynamically.
     pub async fn from_options(options: S3StorageOptions) -> Result<Self, StorageConfigError> {
-        // Use same defaults as S3StorageConfig
-        const REQUEST_RETRY_COUNT: u32 = 3;
-        const STALL_PROTECTION_MS: u64 = 15000;
-
-        let timeout_config = TimeoutConfigBuilder::default()
-            .connect_timeout(Duration::from_millis(options.connect_timeout_ms))
-            .operation_timeout(Duration::from_millis(options.request_timeout_ms))
-            .operation_attempt_timeout(Duration::from_millis(
-                (options.request_timeout_ms / REQUEST_RETRY_COUNT.max(1) as u64).max(1),
-            ))
-            .build();
-
-        let stalled_config = StalledStreamProtectionConfig::enabled()
-            .upload_enabled(true)
-            .grace_period(Duration::from_millis(STALL_PROTECTION_MS))
-            .build();
-
-        let retry_config = RetryConfig::standard().with_max_attempts(REQUEST_RETRY_COUNT);
+        use super::config::S3StorageConfig;
 
         let cred = aws_sdk_s3::config::Credentials::new(
             &options.access_key_id,
@@ -187,10 +137,7 @@ impl S3Storage {
         let mut config_builder = aws_sdk_s3::config::Builder::new()
             .credentials_provider(cred)
             .behavior_version_latest()
-            .region(aws_sdk_s3::config::Region::new(options.region.clone()))
-            .timeout_config(timeout_config)
-            .stalled_stream_protection(stalled_config)
-            .retry_config(retry_config);
+            .region(aws_sdk_s3::config::Region::new(options.region.clone()));
 
         // If a custom endpoint URL is provided, use path-style addressing
         // (required for most S3-compatible services like LocalStack, MinIO)
@@ -205,8 +152,8 @@ impl S3Storage {
         Ok(S3Storage::new(
             &options.bucket_name,
             client,
-            options.upload_part_size_bytes,
-            options.download_part_size_bytes,
+            S3StorageConfig::default_upload_part_size_bytes(),
+            S3StorageConfig::default_download_part_size_bytes(),
         ))
     }
 
@@ -1818,17 +1765,14 @@ mod tests {
         let options =
             S3StorageOptions::new("custom-bucket", "us-west-2", "access-key", "secret-key")
                 .with_custom_endpoint("http://127.0.0.1:9000")
-                .with_session_token("session-token")
-                .with_connect_timeout_ms(10000)
-                .with_request_timeout_ms(120000)
-                .with_upload_part_size_bytes(10 * 1024 * 1024)
-                .with_download_part_size_bytes(16 * 1024 * 1024);
+                .with_session_token("session-token");
 
         let storage = S3Storage::from_options(options).await.unwrap();
 
         assert_eq!(storage.bucket, "custom-bucket");
-        assert_eq!(storage.upload_part_size_bytes, 10 * 1024 * 1024);
-        assert_eq!(storage.download_part_size_bytes, 16 * 1024 * 1024);
+        // Uses hardcoded defaults
+        assert_eq!(storage.upload_part_size_bytes, 5 * 1024 * 1024);
+        assert_eq!(storage.download_part_size_bytes, 8 * 1024 * 1024);
     }
 
     #[test]

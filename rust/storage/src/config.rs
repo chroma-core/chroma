@@ -77,27 +77,27 @@ impl S3StorageConfig {
         "chroma-storage".to_string()
     }
 
-    fn default_connect_timeout_ms() -> u64 {
+    pub fn default_connect_timeout_ms() -> u64 {
         5000
     }
 
-    fn default_request_timeout_ms() -> u64 {
+    pub fn default_request_timeout_ms() -> u64 {
         60000
     }
 
-    fn default_request_retry_count() -> u32 {
+    pub fn default_request_retry_count() -> u32 {
         3
     }
 
-    fn default_stall_protection_ms() -> u64 {
+    pub fn default_stall_protection_ms() -> u64 {
         15000
     }
 
-    fn default_upload_part_size_bytes() -> usize {
+    pub fn default_upload_part_size_bytes() -> usize {
         5 * 1024 * 1024
     }
 
-    fn default_download_part_size_bytes() -> usize {
+    pub fn default_download_part_size_bytes() -> usize {
         8 * 1024 * 1024
     }
 }
