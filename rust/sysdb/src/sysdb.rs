@@ -1805,6 +1805,8 @@ impl GrpcSysDb {
             total_records_post_compaction,
             size_bytes_post_compaction,
             schema_str,
+            // TODO(tanujnay112): Add database name later
+            database_name: None,
         };
 
         let res = self.client.flush_collection_compaction(req).await;

@@ -5,7 +5,10 @@ edition = "2021"
 
 [dependencies]
 async-trait = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
 futures = { workspace = true }
+prost = { workspace = true }
 regex = { workspace = true }
 roaring = { workspace = true }
 sea-query = { workspace = true }
@@ -22,7 +25,6 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 rayon = { workspace = true }
 opentelemetry = { workspace = true }
-prost = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
