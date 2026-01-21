@@ -1,12 +1,16 @@
-use crate::types as internal;
-use crate::types::SysDbError;
+use crate::types::{self as internal, validate_uuid};
+use crate::types::{FlushCompactionRequest, SysDbError};
 use crate::{
     backend::{Assignable, BackendFactory, Runnable},
     config::RootConfig,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_segment::version_file::{VersionFileManager, VersionFileType};
 use chroma_storage::Storage;
+use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
+use chroma_types::chroma_proto::FinishDatabaseDeletionResponse;
+use chroma_types::chroma_proto::{self, DeleteDatabaseResponse};
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
     AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
@@ -18,12 +22,11 @@ use chroma_types::chroma_proto::{
     CreateDatabaseResponse, CreateSegmentRequest, CreateSegmentResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRequest, DeleteCollectionResponse,
     DeleteCollectionVersionRequest, DeleteCollectionVersionResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest,
-    DetachFunctionResponse, FinishAttachedFunctionDeletionRequest,
-    FinishAttachedFunctionDeletionResponse, FinishCollectionDeletionRequest,
-    FinishCollectionDeletionResponse, FinishCreateAttachedFunctionRequest,
-    FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
-    FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
+    DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest, DetachFunctionResponse,
+    FinishAttachedFunctionDeletionRequest, FinishAttachedFunctionDeletionResponse,
+    FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
+    FinishCreateAttachedFunctionRequest, FinishCreateAttachedFunctionResponse,
+    FinishDatabaseDeletionRequest, FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
     FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
     GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
@@ -42,6 +45,9 @@ use chroma_types::chroma_proto::{
     SetTenantResourceNameResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
+use chroma_types::Collection;
+use chroma_types::CollectionConversionError;
+use chroma_types::CollectionUuid;
 use thiserror::Error;
 use tokio::{
     select,
@@ -487,11 +493,123 @@ impl SysDb for SysdbService {
         todo!()
     }
 
+    async fn cleanup_expired_partial_attached_functions(
+        &self,
+        _request: Request<CleanupExpiredPartialAttachedFunctionsRequest>,
+    ) -> Result<Response<CleanupExpiredPartialAttachedFunctionsResponse>, Status> {
+        todo!()
+    }
+
+    async fn get_functions(
+        &self,
+        _request: Request<GetFunctionsRequest>,
+    ) -> Result<Response<GetFunctionsResponse>, Status> {
+        todo!()
+    }
+
+    async fn get_attached_functions_to_gc(
+        &self,
+        _request: Request<GetAttachedFunctionsToGcRequest>,
+    ) -> Result<Response<GetAttachedFunctionsToGcResponse>, Status> {
+        todo!()
+    }
+
+    async fn finish_attached_function_deletion(
+        &self,
+        _request: Request<FinishAttachedFunctionDeletionRequest>,
+    ) -> Result<Response<FinishAttachedFunctionDeletionResponse>, Status> {
+        todo!()
+    }
+
     async fn flush_collection_compaction(
         &self,
-        _request: Request<FlushCollectionCompactionRequest>,
+        request: Request<FlushCollectionCompactionRequest>,
     ) -> Result<Response<FlushCollectionCompactionResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+
+        // Validate and extract collection_id
+        let collection_id = validate_uuid(&proto_req.collection_id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid collection_id: {}", e)))?;
+        let collection_id = CollectionUuid(collection_id);
+
+        let collection_response = self
+            .get_collections(Request::new(chroma_proto::GetCollectionsRequest {
+                id: Some(collection_id.to_string()),
+                ..Default::default()
+            }))
+            .await?;
+
+        let collection: Collection = collection_response
+            .get_ref()
+            .collections
+            .first()
+            .ok_or_else(|| SysDbError::NotFound(format!("Collection {} not found", collection_id)))?
+            .clone()
+            .try_into()
+            .map_err(|e: CollectionConversionError| {
+                Status::invalid_argument(format!("Invalid collection: {}", e))
+            })?;
+        let old_version_file_path = collection.version_file_path.clone().unwrap_or_default();
+        let existing_version = proto_req.collection_version;
+        let new_version = existing_version + 1;
+
+        // Create the version file in object storage
+        let num_retries = 10;
+        for _ in 0..num_retries {
+            let (new_version_file, version_file_path) = self
+                .create_new_version_file(
+                    &self.local_region_object_storage,
+                    &collection,
+                    proto_req.segment_compaction_info.clone(),
+                    new_version as i64,
+                    VersionFileType::Compaction,
+                )
+                .await
+                .map_err(|e: SysDbError| {
+                    tracing::error!("Failed to create new version file: {}", e);
+                    Status::from(e)
+                })?;
+
+            // Construct the internal request with version file data
+            let internal_req = FlushCompactionRequest {
+                collection_id,
+                tenant_id: proto_req.tenant_id.clone(),
+                log_position: proto_req.log_position,
+                current_collection_version: proto_req.collection_version,
+                flush_segment_compaction_infos: proto_req.segment_compaction_info.clone(),
+                total_records_post_compaction: proto_req.total_records_post_compaction,
+                size_bytes_post_compaction: proto_req.size_bytes_post_compaction,
+                schema_str: proto_req.schema_str.clone(),
+                old_version_file_path: old_version_file_path.clone(),
+                new_version_file,
+                version_file_path,
+                new_version,
+            };
+
+            // Execute the compaction flush
+            let backend = internal_req.assign(&self.backends);
+            match internal_req.run(backend).await {
+                Ok(internal_resp) => {
+                    return Ok(Response::new(
+                        internal_resp
+                            .try_into()
+                            .map_err(|e: SysDbError| Status::from(e))?,
+                    ));
+                }
+                Err(SysDbError::CollectionEntryIsStale) => {
+                    tracing::info!(
+                        "Collection entry is stale, retrying flush collection compaction for collection_id: {}",
+                        collection_id
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    return Err(Status::from(e));
+                }
+            }
+        }
+
+        Err(Status::internal("Failed to flush collection compaction"))
     }
 
     async fn attach_function(
@@ -522,34 +640,6 @@ impl SysDb for SysdbService {
         todo!()
     }
 
-    async fn cleanup_expired_partial_attached_functions(
-        &self,
-        _request: Request<CleanupExpiredPartialAttachedFunctionsRequest>,
-    ) -> Result<Response<CleanupExpiredPartialAttachedFunctionsResponse>, Status> {
-        todo!()
-    }
-
-    async fn get_functions(
-        &self,
-        _request: Request<GetFunctionsRequest>,
-    ) -> Result<Response<GetFunctionsResponse>, Status> {
-        todo!()
-    }
-
-    async fn get_attached_functions_to_gc(
-        &self,
-        _request: Request<GetAttachedFunctionsToGcRequest>,
-    ) -> Result<Response<GetAttachedFunctionsToGcResponse>, Status> {
-        todo!()
-    }
-
-    async fn finish_attached_function_deletion(
-        &self,
-        _request: Request<FinishAttachedFunctionDeletionRequest>,
-    ) -> Result<Response<FinishAttachedFunctionDeletionResponse>, Status> {
-        todo!()
-    }
-
     async fn flush_collection_compaction_and_attached_function(
         &self,
         _request: Request<FlushCollectionCompactionAndAttachedFunctionRequest>,
@@ -562,5 +652,749 @@ impl SysDb for SysdbService {
         _request: Request<IncrementCompactionFailureCountRequest>,
     ) -> Result<Response<IncrementCompactionFailureCountResponse>, Status> {
         todo!()
+    }
+}
+
+impl SysdbService {
+    /// Create a new version file in object storage
+    async fn create_new_version_file(
+        &self,
+        storage: &Storage,
+        collection: &Collection,
+        segments: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
+        new_version: i64,
+        version_file_type: VersionFileType,
+    ) -> Result<(chroma_types::chroma_proto::CollectionVersionFile, String), SysDbError> {
+        let version_file_manager = VersionFileManager::new(storage.clone());
+
+        let mut version_file_pb = match &collection.version_file_path {
+            Some(_) => {
+                // Load existing version file and update it
+                version_file_manager.fetch(collection).await?
+            }
+            None => chroma_types::chroma_proto::CollectionVersionFile {
+                collection_info_immutable: Some(
+                    chroma_types::chroma_proto::CollectionInfoImmutable {
+                        tenant_id: collection.tenant.clone(),
+                        database_id: collection.database.clone(),
+                        collection_id: collection.collection_id.to_string(),
+                        collection_name: collection.name.clone(),
+                        collection_creation_secs: chrono::Utc::now().timestamp(),
+                        ..Default::default()
+                    },
+                ),
+                version_history: Some(chroma_types::chroma_proto::CollectionVersionHistory {
+                    versions: vec![],
+                }),
+            },
+        };
+
+        let new_version_info = chroma_types::chroma_proto::CollectionVersionInfo {
+            version: new_version,
+            created_at_secs: chrono::Utc::now().timestamp(),
+            marked_for_deletion: false,
+            segment_info: Some(chroma_types::chroma_proto::CollectionSegmentInfo {
+                segment_compaction_info: segments.clone(),
+            }),
+            version_change_reason: VersionChangeReason::DataCompaction as i32,
+            ..Default::default()
+        };
+
+        if let Some(ref mut version_history) = version_file_pb.version_history {
+            version_history.versions.push(new_version_info);
+        } else {
+            version_file_pb.version_history =
+                Some(chroma_types::chroma_proto::CollectionVersionHistory {
+                    versions: vec![new_version_info],
+                });
+        }
+
+        let generated_file_path = version_file_manager
+            .upload(&version_file_pb, collection, version_file_type, new_version)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to upload version file: {}", e);
+                e
+            })?;
+
+        Ok((version_file_pb, generated_file_path))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::BackendFactory;
+    use crate::spanner::SpannerBackend;
+    use crate::types::{
+        CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
+        GetCollectionsRequest,
+    };
+    use chroma_config::Configurable;
+    use chroma_storage::config::{LocalStorageConfig, StorageConfig};
+    use chroma_storage::Storage;
+    use chroma_types::chroma_proto::{
+        sys_db_server::SysDb, FilePaths, FlushCollectionCompactionRequest,
+        FlushSegmentCompactionInfo,
+    };
+    use chroma_types::{
+        CollectionUuid, DatabaseName, Schema, Segment, SegmentScope, SegmentType, SegmentUuid,
+        TopologyName,
+    };
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+    use tonic::{Request, Response};
+    use uuid::Uuid;
+
+    async fn setup_test_backend() -> Option<SpannerBackend> {
+        crate::spanner::tests::setup_test_backend().await
+    }
+
+    async fn setup_test_backend_with_region(region: &str) -> Option<SpannerBackend> {
+        crate::spanner::tests::setup_test_backend_with_region(region).await
+    }
+
+    async fn setup_tenant_and_database(backend: &SpannerBackend) -> (String, DatabaseName) {
+        let tenant_id = Uuid::new_v4().to_string();
+        let create_tenant_req = CreateTenantRequest {
+            id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateTenantResponse = backend
+            .create_tenant(create_tenant_req)
+            .await
+            .expect("Failed to create tenant");
+
+        let database_name = DatabaseName::new("test_database").expect("Invalid database name");
+        let create_db_req = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: database_name.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_db_req)
+            .await
+            .expect("Failed to create database");
+
+        (tenant_id, database_name)
+    }
+
+    fn create_test_segment_compaction_info() -> Vec<FlushSegmentCompactionInfo> {
+        let mut file_paths = HashMap::new();
+        file_paths.insert(
+            "data".to_string(),
+            FilePaths {
+                paths: vec!["new/path1.bin".to_string()],
+            },
+        );
+
+        // Create segment info for segments that will actually exist
+        // Create all three required segments (metadata, record, vector)
+        let segment_uuid = Uuid::new_v4();
+        vec![FlushSegmentCompactionInfo {
+            segment_id: segment_uuid.to_string(),
+            file_paths,
+        }]
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Set up test infrastructure
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let storage_config = StorageConfig::Local(LocalStorageConfig {
+            root: temp_dir.path().to_string_lossy().to_string(),
+        });
+        let registry = chroma_config::registry::Registry::new();
+        let storage: Storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .expect("Failed to create local storage");
+
+        // Create BackendFactory with topology mapping
+        let mut topology_to_backend = std::collections::HashMap::new();
+        topology_to_backend.insert(TopologyName::new("us").unwrap(), backend.clone());
+        let backends = BackendFactory::new(topology_to_backend);
+        let service = SysdbService::new(50051, storage.clone(), backends);
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        // Create collection with segments
+        let segment_compaction_info = create_test_segment_compaction_info();
+        let segment_uuid =
+            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![
+                Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileRecord,
+                    scope: SegmentScope::RECORD,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: segment_uuid,
+                    r#type: SegmentType::HnswDistributed,
+                    scope: SegmentScope::VECTOR,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+            ],
+            get_or_create: false,
+            index_schema: Schema::default(),
+        };
+        let create_resp: crate::types::CreateCollectionResponse = backend
+            .create_collection(create_collection_req)
+            .await
+            .expect("Failed to create collection");
+
+        let collection_id = create_resp.collection.collection_id;
+
+        // Get the current collection version
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+        let get_resp: crate::types::GetCollectionsResponse = backend
+            .get_collections(get_collection_req)
+            .await
+            .expect("Failed to get collection");
+
+        let current_version = get_resp.collections.first().unwrap().version;
+
+        // Prepare flush compaction request
+        let proto_req = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info,
+            total_records_post_compaction: 500,
+            size_bytes_post_compaction: 512000,
+            schema_str: Some("{\"defaults\": {\"test\": \"schema\"}, \"keys\": {}}".to_string()),
+            collection_version: current_version,
+            log_position: 0,
+        };
+
+        // Execute the flush
+        let request = Request::new(proto_req);
+        let response: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request).await;
+
+        // Verify success
+        assert!(
+            response.is_ok(),
+            "Failed to flush collection compaction: {:?}",
+            response.err()
+        );
+
+        let proto_resp = response.unwrap().into_inner();
+        assert_eq!(proto_resp.collection_id, collection_id.0.to_string());
+        assert!(proto_resp.collection_version > 0);
+
+        // Verify collection version was incremented
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+        let get_resp: crate::types::GetCollectionsResponse = backend
+            .get_collections(get_collection_req)
+            .await
+            .expect("Failed to get collection");
+
+        let collection = get_resp.collections.first().expect("Collection not found");
+        assert_eq!(collection.version, 1); // Should be incremented from 0 to 1
+
+        // Verify version file path was set (this was the main issue before the fix)
+        let version_file_path = collection
+            .version_file_path
+            .as_ref()
+            .expect("Collection should have a version file path after flush");
+
+        // Verify the version file path format is correct
+        assert!(version_file_path.contains("versionfiles/"));
+        assert!(version_file_path.contains(&format!("/{:06}", collection.version)));
+        assert!(version_file_path.contains("_flush"));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_invalid_collection_id() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Set up test infrastructure
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let storage_config = StorageConfig::Local(LocalStorageConfig {
+            root: temp_dir.path().to_string_lossy().to_string(),
+        });
+        let registry = chroma_config::registry::Registry::new();
+        let storage: Storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .expect("Failed to create local storage");
+
+        // Create BackendFactory with topology mapping
+        let mut topology_to_backend = std::collections::HashMap::new();
+        topology_to_backend.insert(TopologyName::new("us").unwrap(), backend.clone());
+        let backends = BackendFactory::new(topology_to_backend);
+        let service = SysdbService::new(50051, storage.clone(), backends);
+
+        // Test with invalid UUID
+        let invalid_collection_id = "invalid-uuid";
+        let segment_compaction_info = create_test_segment_compaction_info();
+        let proto_req = FlushCollectionCompactionRequest {
+            tenant_id: "test_tenant".to_string(),
+            collection_id: invalid_collection_id.to_string(),
+            segment_compaction_info,
+            total_records_post_compaction: 100,
+            size_bytes_post_compaction: 1024,
+            schema_str: None,
+            collection_version: 0,
+            log_position: 0,
+        };
+
+        let request = Request::new(proto_req);
+        let response: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request).await;
+
+        // Should fail with InvalidArgument
+        assert!(response.is_err());
+        let status = response.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::InvalidArgument);
+        assert!(status.message().contains("Invalid collection_id"));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_nonexistent_collection() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Set up test infrastructure
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let storage_config = StorageConfig::Local(LocalStorageConfig {
+            root: temp_dir.path().to_string_lossy().to_string(),
+        });
+        let registry = chroma_config::registry::Registry::new();
+        let storage: Storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .expect("Failed to create local storage");
+
+        // Create BackendFactory with topology mapping
+        let mut topology_to_backend = std::collections::HashMap::new();
+        topology_to_backend.insert(TopologyName::new("us").unwrap(), backend.clone());
+        let backends = BackendFactory::new(topology_to_backend);
+        let service = SysdbService::new(50051, storage.clone(), backends);
+
+        // Test with non-existent collection (valid UUID but doesn't exist)
+        let nonexistent_collection_id = CollectionUuid(Uuid::new_v4());
+        let segment_compaction_info = create_test_segment_compaction_info();
+        let proto_req = FlushCollectionCompactionRequest {
+            tenant_id: "test_tenant".to_string(),
+            collection_id: nonexistent_collection_id.0.to_string(),
+            segment_compaction_info,
+            total_records_post_compaction: 100,
+            size_bytes_post_compaction: 1024,
+            schema_str: None,
+            collection_version: 0,
+            log_position: 0,
+        };
+
+        let request = Request::new(proto_req);
+        let response: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request).await;
+
+        // Should fail with NotFound
+        assert!(response.is_err());
+        let status = response.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        assert!(status.message().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_cross_region_version_consistency(
+    ) {
+        // Create three separate backends to simulate independent regions
+        let Some(backend_us): Option<SpannerBackend> = setup_test_backend_with_region("us").await
+        else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+        let Some(backend_eu): Option<SpannerBackend> =
+            setup_test_backend_with_region("europe").await
+        else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+        let Some(backend_ap): Option<SpannerBackend> = setup_test_backend_with_region("asia").await
+        else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Set up test infrastructure for each region
+        let temp_dir = TempDir::new().expect("Failed to create temp dir");
+        let storage_config = StorageConfig::Local(LocalStorageConfig {
+            root: temp_dir.path().to_string_lossy().to_string(),
+        });
+        let registry = chroma_config::registry::Registry::new();
+        let storage: Storage = Storage::try_from_config(&storage_config, &registry)
+            .await
+            .expect("Failed to create local storage");
+
+        // Create separate BackendFactories for each region to simulate independent regions
+        let mut topology_to_backend_us = std::collections::HashMap::new();
+        topology_to_backend_us.insert(TopologyName::new("us").unwrap(), backend_us.clone());
+        let backends_us = BackendFactory::new(topology_to_backend_us);
+        let service_us = SysdbService::new(50051, storage.clone(), backends_us);
+
+        let mut topology_to_backend_eu = std::collections::HashMap::new();
+        topology_to_backend_eu.insert(TopologyName::new("europe").unwrap(), backend_eu.clone());
+        let backends_eu = BackendFactory::new(topology_to_backend_eu);
+        let service_eu = SysdbService::new(50052, storage.clone(), backends_eu);
+
+        let mut topology_to_backend_ap = std::collections::HashMap::new();
+        topology_to_backend_ap.insert(TopologyName::new("asia").unwrap(), backend_ap.clone());
+        let backends_ap = BackendFactory::new(topology_to_backend_ap);
+        let _service_ap = SysdbService::new(50053, storage.clone(), backends_ap);
+
+        // Create test data in US region
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend_us).await;
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        // Create collection with segments in US region
+        let segment_compaction_info = create_test_segment_compaction_info();
+        let segment_uuid =
+            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![
+                Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileRecord,
+                    scope: SegmentScope::RECORD,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: segment_uuid,
+                    r#type: SegmentType::HnswDistributed,
+                    scope: SegmentScope::VECTOR,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+            ],
+            get_or_create: false,
+            index_schema: Schema::default(),
+        };
+        let create_resp: crate::types::CreateCollectionResponse = backend_us
+            .create_collection(create_collection_req)
+            .await
+            .expect("Failed to create collection");
+
+        let collection_id = create_resp.collection.collection_id;
+
+        // Get the current collection version from US region
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter::default().ids(vec![collection_id]),
+        };
+        let get_resp_initial_us: crate::types::GetCollectionsResponse = backend_us
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from US region");
+
+        let initial_version_us = get_resp_initial_us.collections.first().unwrap().version;
+        assert_eq!(
+            initial_version_us, 0,
+            "Initial collection version should be 0 in US region"
+        );
+
+        // Check that EU and AP regions see the same collection (shared database)
+        let get_resp_eu: crate::types::GetCollectionsResponse = backend_eu
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from EU region");
+
+        let get_resp_ap: crate::types::GetCollectionsResponse = backend_ap
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from AP region");
+
+        // EU and AP should see the collection since they share the same database
+        assert!(
+            !get_resp_eu.collections.is_empty(),
+            "EU region should see the collection (shared database)"
+        );
+        assert!(
+            !get_resp_ap.collections.is_empty(),
+            "AP region should see the collection (shared database)"
+        );
+
+        // All regions should see the same initial version
+        let eu_version_initial = get_resp_eu.collections.first().unwrap().version;
+        let ap_version_initial = get_resp_ap.collections.first().unwrap().version;
+        assert_eq!(eu_version_initial, 0, "EU region should see version 0");
+        assert_eq!(ap_version_initial, 0, "AP region should see version 0");
+
+        // Prepare flush compaction request for US region
+        let proto_req_us = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: segment_compaction_info.clone(),
+            total_records_post_compaction: 500,
+            size_bytes_post_compaction: 512000,
+            schema_str: Some("{\"defaults\": {\"test\": \"schema\"}, \"keys\": {}}".to_string()),
+            collection_version: initial_version_us,
+            log_position: 0,
+        };
+
+        // Execute the flush in US region
+        let request_us = Request::new(proto_req_us);
+        let response_us: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service_us.flush_collection_compaction(request_us).await;
+
+        // Verify success
+        assert!(
+            response_us.is_ok(),
+            "Failed to flush collection compaction in US region: {:?}",
+            response_us.err()
+        );
+
+        let proto_resp_us = response_us.unwrap().into_inner();
+        assert_eq!(proto_resp_us.collection_id, collection_id.0.to_string());
+        assert!(proto_resp_us.collection_version > 0);
+
+        // Verify US region now has version 1 and version file path
+        let get_resp_after_flush_us: crate::types::GetCollectionsResponse = backend_us
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from US region after flush");
+
+        let us_version_after_flush = get_resp_after_flush_us.collections.first().unwrap().version;
+        let us_version_file_path_after = get_resp_after_flush_us
+            .collections
+            .first()
+            .unwrap()
+            .version_file_path
+            .as_ref();
+
+        assert_eq!(
+            us_version_after_flush, 1,
+            "US region should see version 1 after flush"
+        );
+        assert!(
+            us_version_file_path_after.is_some(),
+            "US region should have version file path after flush"
+        );
+
+        // EU and AP regions should still see version 0 since they are isolated from US region
+        let get_resp_eu_after: crate::types::GetCollectionsResponse = backend_eu
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from EU region after US flush");
+
+        let get_resp_ap_after: crate::types::GetCollectionsResponse = backend_ap
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from AP region after US flush");
+
+        let eu_version_after_flush = get_resp_eu_after.collections.first().unwrap().version;
+        let ap_version_after_flush = get_resp_ap_after.collections.first().unwrap().version;
+
+        assert_eq!(
+            eu_version_after_flush, 0,
+            "EU region should still see version 0 (isolated from US flush)"
+        );
+        assert_eq!(
+            ap_version_after_flush, 0,
+            "AP region should still see version 0 (isolated from US flush)"
+        );
+
+        // Only US region should have version file path after its flush
+        assert!(
+            us_version_file_path_after.is_some(),
+            "US region should have version file path after flush"
+        );
+        assert!(
+            get_resp_eu_after
+                .collections
+                .first()
+                .unwrap()
+                .version_file_path
+                .is_none(),
+            "EU region should not have version file path (didn't flush)"
+        );
+        assert!(
+            get_resp_ap_after
+                .collections
+                .first()
+                .unwrap()
+                .version_file_path
+                .is_none(),
+            "AP region should not have version file path (didn't flush)"
+        );
+
+        // Now flush the collection in EU region (independent operation)
+        let proto_req_eu = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: segment_compaction_info.clone(),
+            total_records_post_compaction: 600,
+            size_bytes_post_compaction: 614400,
+            schema_str: Some("{\"defaults\": {\"test\": \"schema_eu\"}, \"keys\": {}}".to_string()),
+            collection_version: eu_version_after_flush, // Version 0 (EU didn't see US flush)
+            log_position: 0,
+        };
+
+        let request_eu = Request::new(proto_req_eu);
+        let response_eu: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service_eu.flush_collection_compaction(request_eu).await;
+
+        // Verify EU flush success
+        assert!(
+            response_eu.is_ok(),
+            "Failed to flush collection compaction in EU region: {:?}",
+            response_eu.err()
+        );
+
+        let proto_resp_eu = response_eu.unwrap().into_inner();
+        assert_eq!(proto_resp_eu.collection_id, collection_id.0.to_string());
+        assert!(proto_resp_eu.collection_version > 0);
+
+        // After EU flush, verify that regions remain isolated:
+        // - US should still see version 1 (unchanged by EU flush)
+        // - EU should see version 1 (its own flush)
+        // - AP should still see version 0 (no flush in AP region)
+        let get_resp_after_eu_flush_us: crate::types::GetCollectionsResponse = backend_us
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from US region after EU flush");
+
+        let get_resp_after_eu_flush_eu: crate::types::GetCollectionsResponse = backend_eu
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from EU region after EU flush");
+
+        let get_resp_after_eu_flush_ap: crate::types::GetCollectionsResponse = backend_ap
+            .get_collections(get_collection_req.clone())
+            .await
+            .expect("Failed to get collection from AP region after EU flush");
+
+        let us_version_final = get_resp_after_eu_flush_us
+            .collections
+            .first()
+            .unwrap()
+            .version;
+        let eu_version_final = get_resp_after_eu_flush_eu
+            .collections
+            .first()
+            .unwrap()
+            .version;
+        let ap_version_final = get_resp_after_eu_flush_ap
+            .collections
+            .first()
+            .unwrap()
+            .version;
+
+        assert_eq!(
+            us_version_final, 1,
+            "US region should still see version 1 (unchanged by EU flush)"
+        );
+        assert_eq!(
+            eu_version_final, 1,
+            "EU region should see version 1 after its own flush"
+        );
+        assert_eq!(
+            ap_version_final, 0,
+            "AP region should still see version 0 (no flush in AP region)"
+        );
+
+        // Verify version file paths are isolated per region
+        let us_version_file_path_final = get_resp_after_eu_flush_us
+            .collections
+            .first()
+            .unwrap()
+            .version_file_path
+            .as_ref()
+            .unwrap();
+
+        let eu_version_file_path_final = get_resp_after_eu_flush_eu
+            .collections
+            .first()
+            .unwrap()
+            .version_file_path
+            .as_ref()
+            .unwrap();
+
+        assert!(
+            get_resp_after_eu_flush_ap
+                .collections
+                .first()
+                .unwrap()
+                .version_file_path
+                .is_none(),
+            "AP region should not have version file path (no flush)"
+        );
+
+        // US and EU should have the same version number in their paths (shared database)
+        // Extract version number from the filename part (e.g., "000001_..._flush")
+        let us_filename = us_version_file_path_final.split('/').next_back().unwrap();
+        let eu_filename = eu_version_file_path_final.split('/').next_back().unwrap();
+
+        let us_version = us_filename.split('_').next().unwrap();
+        let eu_version = eu_filename.split('_').next().unwrap();
+
+        assert_eq!(
+            us_version, eu_version,
+            "US and EU should have the same version number (shared database)"
+        );
+
+        // Verify the version file path formats are correct
+        assert!(us_version_file_path_final.contains("versionfiles/"));
+        assert!(us_version_file_path_final.contains(&format!("/{:06}", us_version_final)));
+        assert!(us_version_file_path_final.contains("_flush"));
+
+        assert!(eu_version_file_path_final.contains("versionfiles/"));
+        assert!(eu_version_file_path_final.contains(&format!("/{:06}", eu_version_final)));
+        assert!(eu_version_file_path_final.contains("_flush"));
     }
 }
