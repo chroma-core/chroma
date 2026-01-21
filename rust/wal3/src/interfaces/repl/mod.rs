@@ -138,7 +138,6 @@ impl ManifestManagerFactory for ReplicatedManifestManagerFactory {
     async fn open_publisher(&self) -> Result<Self::Publisher, Error> {
         Ok(ManifestManager::new(
             Arc::clone(&self.spanner),
-            self.regions.clone(),
             self.local_region.clone(),
             self.log_id,
         ))
@@ -147,7 +146,6 @@ impl ManifestManagerFactory for ReplicatedManifestManagerFactory {
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
         Ok(ManifestManager::new(
             Arc::clone(&self.spanner),
-            self.regions.clone(),
             self.local_region.clone(),
             self.log_id,
         ))
@@ -415,7 +413,14 @@ mod tests {
             .expect("open_publisher failed");
         let pointer = FragmentUuid::generate();
         let result = publisher
-            .publish_fragment(&pointer, "test/path.parquet", 10, 100, Setsum::default())
+            .publish_fragment(
+                &pointer,
+                "test/path.parquet",
+                10,
+                100,
+                Setsum::default(),
+                &["test-region".to_string()],
+            )
             .await;
 
         assert!(

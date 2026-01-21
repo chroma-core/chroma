@@ -557,6 +557,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
                         .saturating_sub(fragment.start.offset()),
                     fragment.num_bytes,
                     fragment.setsum,
+                    &[],
                 )
                 .await
             {
@@ -603,6 +604,9 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
     }
 
     /// Given a fragment, add it to the manifest, batch its application and wait for it to apply.
+    ///
+    /// The `_successful_regions` parameter is ignored for single-region S3 deployments since
+    /// there is only one region and it must have succeeded for the upload to complete.
     #[tracing::instrument(skip(self))]
     async fn publish_fragment(
         &self,
@@ -611,6 +615,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
         num_records: u64,
         num_bytes: u64,
         setsum: Setsum,
+        _successful_regions: &[String],
     ) -> Result<LogPosition, Error> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let fragment = Fragment {

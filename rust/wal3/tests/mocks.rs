@@ -43,6 +43,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
         _messages_len: u64,
         _num_bytes: u64,
         _setsum: Setsum,
+        _successful_regions: &[String],
     ) -> Result<LogPosition, wal3::Error> {
         Err(wal3::Error::UninitializedLog)
     }

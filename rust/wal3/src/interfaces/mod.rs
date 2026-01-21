@@ -84,6 +84,29 @@ pub trait FragmentManagerFactory {
 
 ///////////////////////////////////////// FragmentUploader /////////////////////////////////////////
 
+/// The result of a successful parquet upload.
+///
+/// Contains:
+/// - `path`: The path where the fragment was stored.
+/// - `setsum`: The setsum of the fragment contents.
+/// - `num_bytes`: The size of the fragment in bytes.
+/// - `successful_regions`: The regions that successfully received the fragment.
+///   For single-region deployments, this is empty (all regions are implied).
+///   For multi-region deployments, this contains only the regions that actually
+///   stored the fragment successfully.
+#[derive(Clone, Debug)]
+pub struct UploadResult {
+    /// The path where the fragment was stored.
+    pub path: String,
+    /// The setsum of the fragment contents.
+    pub setsum: Setsum,
+    /// The size of the fragment in bytes.
+    pub num_bytes: usize,
+    /// The regions that successfully received the fragment.
+    /// Empty for single-region deployments (all regions are implied).
+    pub successful_regions: Vec<String>,
+}
+
 #[async_trait::async_trait]
 pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
     /// upload a parquet fragment
@@ -93,7 +116,7 @@ pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error>;
+    ) -> Result<UploadResult, Error>;
 
     /// The preferred region for this cluster.
     async fn preferred_storage(&self) -> Storage;
@@ -151,7 +174,7 @@ pub trait FragmentPublisher: Send + Sync + 'static {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error>;
+    ) -> Result<UploadResult, Error>;
 
     async fn read_json_file(&self, path: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), Error>;
 
@@ -290,6 +313,11 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Assign a timestamp for the next fragment that's going to be published on this manifest.
     fn assign_timestamp(&self, record_count: usize) -> Option<FP>;
     /// Publish a fragment previously assigned a timestamp using assign_timestamp.
+    ///
+    /// The `successful_regions` parameter contains the list of regions that successfully stored
+    /// the fragment during upload. For single-region deployments, this is empty (all regions
+    /// are implied). For multi-region deployments, only these regions should be recorded as
+    /// having the fragment.
     async fn publish_fragment(
         &self,
         pointer: &FP,
@@ -297,6 +325,7 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
         messages_len: u64,
         num_bytes: u64,
         setsum: Setsum,
+        successful_regions: &[String],
     ) -> Result<LogPosition, Error>;
     /// Check if the garbge will apply "cleanly", that is without violating invariants.
     async fn garbage_applies_cleanly(&self, garbage: &Garbage) -> Result<bool, Error>;

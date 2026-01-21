@@ -1,12 +1,10 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
-use setsum::Setsum;
-
 use chroma_storage::Storage;
 use chroma_types::Cmek;
 
-use crate::interfaces::FragmentUploader;
+use crate::interfaces::{FragmentUploader, UploadResult};
 use crate::{Error, FragmentSeqNo, LogPosition, LogWriterOptions, MarkDirty, StorageWrapper};
 
 /// Uploads fragments to S3 storage.
@@ -49,7 +47,7 @@ impl FragmentUploader<(FragmentSeqNo, LogPosition)> for S3FragmentUploader {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error> {
+    ) -> Result<UploadResult, Error> {
         let messages_len = messages.len();
         let storage = &self.storages[self.preferred];
         let fut1 = crate::interfaces::batch_manager::upload_parquet(
@@ -74,7 +72,14 @@ impl FragmentUploader<(FragmentSeqNo, LogPosition)> for S3FragmentUploader {
             return Err(e.clone());
         }
         res2?;
-        res1
+        let (path, setsum, num_bytes) = res1?;
+        // S3 single-region deployment: successful_regions is empty to indicate all regions.
+        Ok(UploadResult {
+            path,
+            setsum,
+            num_bytes,
+            successful_regions: vec![],
+        })
     }
 
     async fn preferred_storage(&self) -> Storage {

@@ -194,17 +194,17 @@ impl<
             let fragment_publisher = new_fragment_publisher.make_publisher().await?;
             let pointer = P::bootstrap(first_record_offset);
             let epoch_micros = now_micros();
-            let (path, setsum, num_bytes) = fragment_publisher
+            let upload_result = fragment_publisher
                 .upload_parquet(&pointer, messages, cmek, epoch_micros)
                 .await?;
-            let num_bytes = num_bytes as u64;
+            let num_bytes = upload_result.num_bytes as u64;
             let frag = Fragment {
-                path,
+                path: upload_result.path,
                 seq_no: pointer.identifier(),
                 start,
                 limit,
                 num_bytes,
-                setsum,
+                setsum: upload_result.setsum,
             };
             let empty_manifest = Manifest::new_empty(writer);
             let mut new_manifest = empty_manifest.clone();
@@ -695,21 +695,22 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
         assert!(!messages.is_empty());
         let messages_len = messages.len();
         let epoch_micros = now_micros();
-        let res = self
+        let upload_result = self
             .batch_manager
             .upload_parquet(&pointer, messages, self.cmek.clone(), epoch_micros)
-            .await;
-        let (path, setsum, num_bytes) = res.inspect_err(|_| {
-            self.shutdown();
-        })?;
+            .await
+            .inspect_err(|_| {
+                self.shutdown();
+            })?;
         let log_position = self
             .manifest_manager
             .publish_fragment(
                 &pointer,
-                &path,
+                &upload_result.path,
                 messages_len as u64,
-                num_bytes as u64,
-                setsum,
+                upload_result.num_bytes as u64,
+                upload_result.setsum,
+                &upload_result.successful_regions,
             )
             .await
             .inspect_err(|_| {

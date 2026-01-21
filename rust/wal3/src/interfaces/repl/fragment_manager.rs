@@ -9,7 +9,7 @@ use chroma_storage::{Storage, StorageError};
 use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
-use crate::interfaces::{FragmentConsumer, FragmentUploader};
+use crate::interfaces::{FragmentConsumer, FragmentUploader, UploadResult};
 use crate::{
     CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentUuid,
     LogPosition, LogWriterOptions,
@@ -250,7 +250,7 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error> {
+    ) -> Result<UploadResult, Error> {
         let mask = self.compute_mask()?;
         assert_eq!(mask.len(), self.storages.len());
         let mut futures = vec![];
@@ -288,17 +288,31 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
         .await;
         assert_eq!(indices.len(), results.len());
 
-        // Increment error counters and collect errors for logging.
+        // Increment error counters, collect errors for logging, and track successful regions.
         let mut errors = vec![];
+        let mut successful_regions = vec![];
         for (idx, r) in std::iter::zip(indices.iter().cloned(), results.iter()) {
-            if let Some(Err(err)) = r {
-                self.storages[idx].counter.fetch_add(1, Ordering::Relaxed);
-                errors.push(err);
+            match r {
+                Some(Ok(_)) => {
+                    successful_regions.push(self.storages[idx].region.clone());
+                }
+                Some(Err(err)) => {
+                    self.storages[idx].counter.fetch_add(1, Ordering::Relaxed);
+                    errors.push(err);
+                }
+                None => {
+                    // Slow writer that was cancelled - don't count as error but also not successful.
+                }
             }
         }
 
         match process_quorum_results(&results, self.options.minimum_allowed_replication_factor) {
-            QuorumOutcome::Success(result) => Ok(result),
+            QuorumOutcome::Success((path, setsum, num_bytes)) => Ok(UploadResult {
+                path,
+                setsum,
+                num_bytes,
+                successful_regions,
+            }),
             QuorumOutcome::ConsistencyError(msg) => Err(Error::ReplicationConsistencyError(msg)),
             QuorumOutcome::InsufficientQuorum => {
                 for err in errors.iter() {
@@ -1259,13 +1273,17 @@ mod tests {
             .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
             .await;
         assert!(result.is_ok(), "upload should succeed: {:?}", result);
-        let (path, setsum, _size) = result.unwrap();
-        assert!(!path.is_empty(), "path should not be empty");
-        assert_ne!(setsum, Setsum::default(), "setsum should be computed");
+        let upload_result = result.unwrap();
+        assert!(!upload_result.path.is_empty(), "path should not be empty");
+        assert_ne!(
+            upload_result.setsum,
+            Setsum::default(),
+            "setsum should be computed"
+        );
         println!(
             "replicated_uploader_single_replica_success: path={}, setsum={}",
-            path,
-            setsum.hexdigest()
+            upload_result.path,
+            upload_result.setsum.hexdigest()
         );
     }
 
@@ -1289,13 +1307,17 @@ mod tests {
             .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
             .await;
         assert!(result.is_ok(), "upload should succeed: {:?}", result);
-        let (path, setsum, _size) = result.unwrap();
-        assert!(!path.is_empty(), "path should not be empty");
-        assert_ne!(setsum, Setsum::default(), "setsum should be computed");
+        let upload_result = result.unwrap();
+        assert!(!upload_result.path.is_empty(), "path should not be empty");
+        assert_ne!(
+            upload_result.setsum,
+            Setsum::default(),
+            "setsum should be computed"
+        );
         println!(
             "replicated_uploader_two_replicas_both_succeed: path={}, setsum={}",
-            path,
-            setsum.hexdigest()
+            upload_result.path,
+            upload_result.setsum.hexdigest()
         );
     }
 
@@ -1476,16 +1498,16 @@ mod tests {
             .upload_parquet(&pointer2, messages2, None, TEST_EPOCH_MICROS)
             .await;
         assert!(result1.is_ok() && result2.is_ok());
-        let (_, setsum1, _) = result1.unwrap();
-        let (_, setsum2, _) = result2.unwrap();
+        let upload_result1 = result1.unwrap();
+        let upload_result2 = result2.unwrap();
         assert_ne!(
-            setsum1, setsum2,
+            upload_result1.setsum, upload_result2.setsum,
             "different messages should produce different setsums"
         );
         println!(
             "replicated_uploader_different_messages_different_setsums: {} != {}",
-            setsum1.hexdigest(),
-            setsum2.hexdigest()
+            upload_result1.setsum.hexdigest(),
+            upload_result2.setsum.hexdigest()
         );
     }
 

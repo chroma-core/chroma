@@ -10,7 +10,7 @@ use chroma_storage::{
 use chroma_types::Cmek;
 
 use crate::backoff::ExponentialBackoff;
-use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher};
+use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher, UploadResult};
 use crate::{
     CursorStore, CursorStoreOptions, Error, FragmentIdentifier, Garbage, LogPosition,
     LogWriterOptions, ThrottleOptions,
@@ -272,7 +272,7 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error> {
+    ) -> Result<UploadResult, Error> {
         self.fragment_uploader
             .upload_parquet(pointer, messages, cmek, epoch_micros)
             .await
