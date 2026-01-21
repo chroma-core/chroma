@@ -22,6 +22,7 @@ tracing = { workspace = true }
 uuid = { workspace = true }
 rayon = { workspace = true }
 opentelemetry = { workspace = true }
+prost = { workspace = true }
 
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }

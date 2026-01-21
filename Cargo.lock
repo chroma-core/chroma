@@ -1961,6 +1961,7 @@ dependencies = [
  "futures",
  "opentelemetry",
  "proptest",
+ "prost 0.14.1",
  "rayon",
  "regex",
  "roaring",
