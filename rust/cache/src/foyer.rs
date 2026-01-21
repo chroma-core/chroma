@@ -309,6 +309,7 @@ where
     get_latency: opentelemetry::metrics::Histogram<u64>,
     obtain_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
+    insert_to_disk_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
     hostname: KeyValue,
@@ -427,6 +428,7 @@ where
         let get_latency = meter.u64_histogram("get_latency").build();
         let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
+        let insert_to_disk_latency = meter.u64_histogram("insert_to_disk_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
         let hostname = std::env::var("HOSTNAME").unwrap_or("unknown".to_string());
@@ -438,6 +440,7 @@ where
             get_latency,
             obtain_latency,
             insert_latency,
+            insert_to_disk_latency,
             remove_latency,
             clear_latency,
             hostname: hostname_kv,
@@ -506,7 +509,11 @@ where
 {
     async fn insert_to_disk(&self, key: K, value: V) {
         let hostname = std::slice::from_ref(&self.hostname);
-        let _stopwatch = Stopwatch::new(&self.insert_latency, hostname, StopWatchUnit::Millis);
+        let _stopwatch = Stopwatch::new(
+            &self.insert_to_disk_latency,
+            hostname,
+            StopWatchUnit::Millis,
+        );
         // Write directly to disk storage, bypassing the memory cache.
         // This is useful for prefetching data that is not immediately needed.
         self.cache.storage_writer(key).insert(value);
