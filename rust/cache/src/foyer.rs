@@ -309,6 +309,7 @@ where
     get_latency: opentelemetry::metrics::Histogram<u64>,
     obtain_latency: opentelemetry::metrics::Histogram<u64>,
     insert_latency: opentelemetry::metrics::Histogram<u64>,
+    insert_to_disk_latency: opentelemetry::metrics::Histogram<u64>,
     remove_latency: opentelemetry::metrics::Histogram<u64>,
     clear_latency: opentelemetry::metrics::Histogram<u64>,
     hostname: KeyValue,
@@ -427,6 +428,7 @@ where
         let get_latency = meter.u64_histogram("get_latency").build();
         let obtain_latency = meter.u64_histogram("obtain_latency").build();
         let insert_latency = meter.u64_histogram("insert_latency").build();
+        let insert_to_disk_latency = meter.u64_histogram("insert_to_disk_latency").build();
         let remove_latency = meter.u64_histogram("remove_latency").build();
         let clear_latency = meter.u64_histogram("clear_latency").build();
         let hostname = std::env::var("HOSTNAME").unwrap_or("unknown".to_string());
@@ -438,15 +440,11 @@ where
             get_latency,
             obtain_latency,
             insert_latency,
+            insert_to_disk_latency,
             remove_latency,
             clear_latency,
             hostname: hostname_kv,
         })
-    }
-
-    #[allow(dead_code)]
-    fn insert_to_disk(&self, key: K, value: V) {
-        self.cache.storage_writer(key).insert(value);
     }
 }
 
@@ -509,6 +507,18 @@ where
     K: Clone + Send + Sync + StorageKey + Eq + PartialEq + Hash + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
+    async fn insert_to_disk(&self, key: K, value: V) {
+        let hostname = std::slice::from_ref(&self.hostname);
+        let _stopwatch = Stopwatch::new(
+            &self.insert_to_disk_latency,
+            hostname,
+            StopWatchUnit::Millis,
+        );
+        // Write directly to disk storage, bypassing the memory cache.
+        // This is useful for prefetching data that is not immediately needed.
+        self.cache.storage_writer(key).insert(value);
+    }
+
     async fn close(&self) -> Result<(), CacheError> {
         self.cache
             .close()
@@ -696,6 +706,7 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
+    // Uses default implementation which falls back to regular insert (no disk tier for FoyerPlainCache)
 }
 
 #[cfg(test)]
@@ -813,7 +824,9 @@ mod test {
         .unwrap();
         // Insert a 512KB string value generated at random by passing memory.
         let large_value = "val1".repeat(512 * 1024);
-        cache.insert_to_disk("key1".to_string(), large_value.clone());
+        let _ = cache
+            .insert_to_disk("key1".to_string(), large_value.clone())
+            .await;
         // Sleep for 2 secs.
         // This should give the cache enough time to flush the data to disk.
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;

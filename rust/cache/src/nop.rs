@@ -40,4 +40,5 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + Weighted + StorageValue + 'static,
 {
+    // Uses default implementation which falls back to regular insert (no-op for NopCache)
 }

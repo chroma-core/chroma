@@ -86,6 +86,18 @@ where
     K: Clone + Send + Sync + Eq + PartialEq + Hash + StorageKey + 'static,
     V: Clone + Send + Sync + StorageValue + Weighted + 'static,
 {
+    /// Insert a key-value pair directly to disk cache, bypassing memory.
+    /// This is useful for prefetching data that is not immediately needed
+    /// but may be accessed later. By writing to disk only, we avoid polluting
+    /// the memory cache with data that is not immediately needed.
+    ///
+    /// The default implementation falls back to regular insert (memory + disk).
+    /// Implementations should override this if they have a true disk tier.
+    async fn insert_to_disk(&self, key: K, value: V) {
+        // Default: fall back to regular insert
+        self.insert(key, value).await;
+    }
+
     /// Close the cache, flushing any in-memory entries to disk.
     /// This should be called before dropping the cache to ensure all data is persisted.
     /// The default implementation is a no-op for caches that don't need flushing.
