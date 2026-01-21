@@ -182,7 +182,7 @@ impl Dispatcher {
                     }
                 }
                 let counter = Arc::clone(&self.active_io_tasks);
-                let counter = DecrementOnDrop(counter);
+                let counter = IncrementOnDrop(counter);
                 tokio::spawn(async move {
                     task.run().instrument(child_span).await;
                     drop(counter);
@@ -336,9 +336,9 @@ impl Handler<TaskRequestMessage> for Dispatcher {
     }
 }
 
-struct DecrementOnDrop(Arc<AtomicU64>);
+struct IncrementOnDrop(Arc<AtomicU64>);
 
-impl Drop for DecrementOnDrop {
+impl Drop for IncrementOnDrop {
     fn drop(&mut self) {
         self.0.fetch_add(1, Ordering::Relaxed);
     }
