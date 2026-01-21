@@ -24,8 +24,8 @@ async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -40,7 +40,7 @@ async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -73,8 +73,8 @@ async fn test_k8s_mcmr_integration_repl_copy_immediately_after_initialization() 
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -109,8 +109,8 @@ async fn test_k8s_mcmr_integration_repl_copy_preserves_fragment_boundaries() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -131,7 +131,7 @@ async fn test_k8s_mcmr_integration_repl_copy_preserves_fragment_boundaries() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -177,8 +177,8 @@ async fn test_k8s_mcmr_integration_repl_copy_multiple_times_creates_independent_
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -193,7 +193,7 @@ async fn test_k8s_mcmr_integration_repl_copy_multiple_times_creates_independent_
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -236,7 +236,7 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -278,8 +278,8 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     let consumer = init_factory.make_consumer().await.unwrap();

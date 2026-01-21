@@ -140,8 +140,8 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
     // Initialize the log.
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -160,7 +160,7 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
     let writer1 = Arc::new(
@@ -190,7 +190,7 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
     let writer2 = Arc::new(

@@ -15,8 +15,8 @@ async fn test_k8s_mcmr_integration_repl_02_initialized_init_again() {
 
     let first_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
 
@@ -42,8 +42,8 @@ async fn test_k8s_mcmr_integration_repl_02_initialized_init_again() {
     // Second initialization with same log_id should fail.
     let second_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     let result = second_factory

@@ -36,7 +36,7 @@ async fn test_k8s_mcmr_integration_repl_90_garbage_collect() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 

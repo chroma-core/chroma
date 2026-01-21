@@ -39,7 +39,7 @@ async fn test_k8s_mcmr_integration_repl_84_bootstrap_empty() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -65,7 +65,7 @@ async fn test_k8s_mcmr_integration_repl_84_bootstrap_empty() {
         0,
         reader_storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory
@@ -113,7 +113,7 @@ async fn test_k8s_mcmr_integration_repl_84_bootstrap_empty() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 

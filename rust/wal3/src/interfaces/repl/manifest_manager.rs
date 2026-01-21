@@ -61,11 +61,19 @@ impl ManifestManager {
                 &(enum_offset.offset() as i64),
             ],
         )];
+        let initial_offset = manifest
+            .initial_offset
+            .unwrap_or(LogPosition::from_offset(1));
         for region in regions.iter() {
             mutations.push(insert(
                 "manifest_regions",
-                &["log_id", "region", "collected"],
-                &[&log_id.to_string(), region, &manifest.collected.hexdigest()],
+                &["log_id", "region", "collected", "initial_offset"],
+                &[
+                    &log_id.to_string(),
+                    region,
+                    &manifest.collected.hexdigest(),
+                    &(initial_offset.offset() as i64),
+                ],
             ));
         }
         // Also insert any fragments from the manifest.
@@ -171,7 +179,7 @@ impl ManifestManager {
         let local_region = local_region.to_string();
         let mut stmt1 = Statement::new(
             "
-            SELECT setsum, manifest_regions.collected, acc_bytes, writer, enumeration_offset
+            SELECT setsum, manifest_regions.collected, acc_bytes, writer, enumeration_offset, manifest_regions.initial_offset
             FROM manifests INNER JOIN manifest_regions on manifests.log_id = manifest_regions.log_id
             WHERE manifests.log_id = @log_id
                 AND manifest_regions.region = @local_region
@@ -208,6 +216,7 @@ impl ManifestManager {
         let acc_bytes = manifest_row.column_by_name::<i64>("acc_bytes")?;
         let writer = manifest_row.column_by_name::<String>("writer")?;
         let enumeration_offset = manifest_row.column_by_name::<i64>("enumeration_offset")?;
+        let stored_initial_offset = manifest_row.column_by_name::<Option<i64>>("initial_offset")?;
         let Some(setsum) = Setsum::from_hexdigest(&setsum) else {
             return Err(Error::CorruptManifest(format!(
                 "invalid setsum {setsum} for manifest {log_id}"
@@ -281,10 +290,15 @@ impl ManifestManager {
         }
         // Sort fragments by position_start for sequential ordering expected by scrub.
         fragments.sort_by_key(|f| f.start);
+        // Compute initial_offset:
+        // 1. If fragments exist, use the minimum fragment start
+        // 2. If no fragments but stored_initial_offset is set (after GC), use it
+        // 3. Otherwise fall back to enumeration_offset (backward compatibility)
         let initial_offset = fragments
             .iter()
             .map(|f| f.start)
             .min()
+            .or_else(|| stored_initial_offset.map(|o| LogPosition::from_offset(o as u64)))
             .unwrap_or(LogPosition::from_offset(enumeration_offset));
         // Construct the manifest and witness.
         let manifest = Manifest {
@@ -633,6 +647,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 stmt3.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
                 stmt3.add_param("local_region", &self.local_region);
                 let local_region = self.local_region.clone();
+                let new_initial_offset = garbage.first_to_keep.offset() as i64;
                 Box::pin(async move {
                     let mut query = tx.query(stmt2).await?;
                     let Some(row) = query.next().await? else {
@@ -661,8 +676,13 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     let collected = collected + acc;
                     mutations.push(update(
                         "manifest_regions",
-                        &["log_id", "region", "collected"],
-                        &[&log_id, &local_region, &collected.hexdigest()],
+                        &["log_id", "region", "collected", "initial_offset"],
+                        &[
+                            &log_id,
+                            &local_region,
+                            &collected.hexdigest(),
+                            &new_initial_offset,
+                        ],
                     ));
                     let mut query = tx.query(stmt3).await?;
                     while let Some(row) = query.next().await? {

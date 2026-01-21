@@ -26,8 +26,8 @@ async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -48,7 +48,7 @@ async fn test_k8s_mcmr_integration_repl_copy_with_deep_snapshots() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -92,8 +92,8 @@ async fn test_k8s_mcmr_integration_repl_copy_at_specific_offset() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -114,7 +114,7 @@ async fn test_k8s_mcmr_integration_repl_copy_at_specific_offset() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -165,8 +165,8 @@ async fn test_k8s_mcmr_integration_repl_copy_verifies_manifest_consistency() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -181,7 +181,7 @@ async fn test_k8s_mcmr_integration_repl_copy_verifies_manifest_consistency() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -235,7 +235,7 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
         0,
         Arc::clone(&storages),
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -272,8 +272,8 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     let consumer = init_factory.make_consumer().await.unwrap();
@@ -299,8 +299,8 @@ async fn test_k8s_mcmr_integration_repl_copy_with_large_fragments() {
 
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -321,7 +321,7 @@ async fn test_k8s_mcmr_integration_repl_copy_with_large_fragments() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 

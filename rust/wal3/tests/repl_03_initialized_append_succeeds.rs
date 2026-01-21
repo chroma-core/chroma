@@ -25,8 +25,8 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
     // Initialize the manifest.
     let init_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     init_factory
@@ -42,7 +42,7 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
         0,
         storages,
         Arc::clone(&client),
-        vec!["dummy".to_string()],
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -65,8 +65,8 @@ async fn test_k8s_mcmr_integration_repl_03_initialized_append_succeeds() {
     // Verify the manifest was updated with the fragment.
     let consumer_factory = ReplicatedManifestManagerFactory::new(
         Arc::clone(&client),
-        vec!["dummy".to_string()],
-        "dummy".to_string(),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
         log_id,
     );
     let consumer = consumer_factory
