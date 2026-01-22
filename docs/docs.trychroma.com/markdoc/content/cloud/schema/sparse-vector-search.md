@@ -96,12 +96,12 @@ collection = client.create_collection(
 
 {% Tab label="typescript" %}
 ```typescript
-import { ChromaClient } from 'chromadb';
+import { CloudClient } from 'chromadb';
 
-const client = new ChromaClient({
+const client = new CloudClient({
   tenant: "your-tenant",
   database: "your-database",
-  auth: { provider: "token", credentials: "your-api-key" }
+  apiKey: "your-api-key"
 });
 
 const collection = await client.createCollection({
