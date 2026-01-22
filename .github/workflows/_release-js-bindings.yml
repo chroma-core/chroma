@@ -1,4 +1,4 @@
-name: JS Bindings CI
+name: Release JS Bindings
 env:
   DEBUG: napi:*
   APP_NAME: "chromadb-js-bindings"
@@ -245,12 +245,14 @@ jobs:
         shell: bash
       - name: Publish
         run: |
-          set -e
+          set -euo pipefail
           npm config set provenance true
           echo "//registry.npmjs.org/:_authToken=$NPM_TOKEN" >> ~/.npmrc
           for dir in npm/*; do
             if [ -d "$dir" ]; then
-              cd "$dir" && npm publish --access public && cd -
+              echo "Publishing $dir..."
+              (cd "$dir" && npm publish --access public)
+              echo "Successfully published $dir"
             fi
           done
         env:

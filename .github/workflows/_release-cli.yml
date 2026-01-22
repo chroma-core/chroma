@@ -2,21 +2,36 @@ name: Release CLI
 
 on:
   workflow_dispatch:
-    inputs:
-      release_name:
-        description: "Release name to use (e.g. cli-1.2.3) when dispatching manually"
-        required: false
-  push:
-    tags:
-      - 'cli_release_[0-9]*.[0-9]*.[0-9]*'
+  workflow_call:
 
 jobs:
+  get-version:
+    name: Get CLI version
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    outputs:
+      release_name: ${{ steps.version.outputs.release_name }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Determine release name
+        id: version
+        run: |
+          VERSION=$(grep '^version' rust/cli/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+
+          # Validate semver format (x.y.z)
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Invalid version format '$VERSION'. Expected semver (e.g., 1.2.3)"
+            exit 1
+          fi
+
+          echo "release_name=cli-${VERSION}" >> $GITHUB_OUTPUT
+
   build-linux:
     name: Build Linux binary
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Protoc
         uses: arduino/setup-protoc@v3
@@ -46,7 +61,7 @@ jobs:
     runs-on: 8core-32gb-windows-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Protocol Buffers Compiler
         run: choco install protoc -y
@@ -78,7 +93,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Install Protocol Buffers Compiler
         run: brew install protobuf
@@ -123,10 +138,10 @@ jobs:
   release:
     name: Create GitHub Release and Attach Assets
     runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [ build-linux, build-windows, build-macos ]
+    needs: [ get-version, build-linux, build-windows, build-macos ]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -136,32 +151,14 @@ jobs:
       - name: Ensure all binaries are executable
         run: chmod +x artifacts/* || true
 
-      - name: Determine release info
-        id: release_info
-        run: |
-          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
-            # The tag is available as refs/tags/cli_release_a.b.c.
-            TAG=${GITHUB_REF#refs/tags/}
-            VERSION=${TAG#cli_release_}
-            echo "release_name=cli-${VERSION}" >> $GITHUB_OUTPUT
-            echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
-          else
-            if [ -z "${{ github.event.inputs.release_name }}" ]; then
-              echo "::error::Manual dispatch requires a release_name input."
-              exit 1
-            fi
-            echo "release_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
-            echo "tag_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Create GitHub Release
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.release_info.outputs.tag_name }}
-          release_name: ${{ steps.release_info.outputs.release_name }}
+          tag_name: ${{ needs.get-version.outputs.release_name }}
+          release_name: ${{ needs.get-version.outputs.release_name }}
           body: "CLI release."
           draft: false
           prerelease: false
