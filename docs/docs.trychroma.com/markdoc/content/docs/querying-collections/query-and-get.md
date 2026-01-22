@@ -250,4 +250,109 @@ await collection.query({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+You can query a Chroma collection to run a similarity search using the `.Query` method:
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("thus spake zarathustra", "the oracle speaks"),
+)
+```
+
+Chroma will use the collection's [embedding function](../embeddings/embedding-functions) to embed your text queries, and use the output to run a vector similarity search against your collection.
+
+Instead of providing `query_texts`, you can provide query embeddings directly:
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryEmbeddings(
+        []float32{11.1, 12.1, 13.1},
+        []float32{1.1, 2.3, 3.2},
+    ),
+)
+```
+
+By default, Chroma will return 10 results per input query. You can modify this using `WithNResults`:
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("search query"),
+    chroma.WithNResults(5),
+)
+```
+
+The `WithIDsQuery` option lets you constrain the search only to records with the IDs from the provided list:
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("search query"),
+    chroma.WithNResults(5),
+    chroma.WithIDsQuery("id1", "id2"),
+)
+```
+
+You can also retrieve records from a collection by using the `.Get` method:
+
+```go
+results, err := collection.Get(ctx, chroma.WithIDsGet("id1", "id2"))
+```
+
+Both `Query` and `Get` have the `where` argument for [metadata filtering](./metadata-filtering) and `where_document` for [full-text search and regex](./full-text-search):
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("search query"),
+    chroma.WithNResults(5),
+    chroma.WithWhereQuery(chroma.EqInt("page", 10)),
+    chroma.WithWhereDocumentQuery(chroma.Contains("search string")),
+)
+```
+
+## Results Shape
+
+Chroma returns `.Query` and `.Get` results in columnar form. Query results are grouped by input query.
+
+```go
+// QueryResult methods:
+results.GetIDsGroups()         // [][]string - IDs grouped by query
+results.GetDocumentsGroups()   // [][]string - Documents grouped by query
+results.GetMetadatasGroups()   // Metadata grouped by query
+results.GetDistancesGroups()   // [][]float32 - Distances grouped by query
+
+// GetResult methods:
+results.GetIDs()        // []string - List of IDs
+results.GetDocuments()  // []string - List of documents
+results.GetMetadatas()  // List of metadata
+```
+
+`.Query` results are indexed by each of your input queries. For example, `results.GetIDsGroups()[0]` contains the list of record IDs for the results of the first input query.
+
+Use `.Rows()` for easy iteration over results:
+
+```go
+for _, row := range results.Rows() {
+    fmt.Printf("ID: %s, Document: %s, Score: %f\n", row.ID, row.Document, row.Score)
+}
+```
+
+## Choosing Which Data is Returned
+
+By default, `.Query` and `.Get` always return the `documents` and `metadatas`. You can use the `include` options to modify what gets returned:
+
+```go
+// Default query - returns ids, documents, metadatas
+results, _ := collection.Query(ctx, chroma.WithQueryTexts("my query"))
+
+// Get with only documents
+results, _ := collection.Get(ctx, chroma.WithIncludeGet(chroma.IncludeDocuments))
+
+// Query with specific includes
+results, _ := collection.Query(ctx,
+    chroma.WithQueryTexts("my query"),
+    chroma.WithIncludeQuery(chroma.IncludeDocuments, chroma.IncludeMetadatas, chroma.IncludeEmbeddings),
+)
+```
+
+{% /Tab %}
+
 {% /Tabs %}

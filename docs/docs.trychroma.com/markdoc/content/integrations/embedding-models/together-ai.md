@@ -43,6 +43,34 @@ embedder.generate(['This is my first text to embed', 'This is my second document
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/together"
+)
+
+// Create Together AI embedding function
+ef, err := together.NewTogetherEmbeddingFunction(
+    os.Getenv("TOGETHER_AI_API_KEY"),
+    together.WithModel("togethercomputer/m2-bert-80M-32k-retrieval"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 You must pass in a `model_name` to the embedding function. It is recommended to set the `CHROMA_TOGETHER_AI_API_KEY` environment variable for the API key, but the embedding function also optionally takes in an `api_key` parameter directly.

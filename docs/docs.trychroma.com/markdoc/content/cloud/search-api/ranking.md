@@ -134,6 +134,43 @@ Knn({ query: "machine learning", key: "sparse_embedding" });
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Basic search on default embedding field
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("What is machine learning?")),
+        chroma.WithPage(chroma.WithLimit(10)),
+    ),
+)
+
+// Search with custom parameters
+result, err = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(
+            chroma.KnnQueryText("What is machine learning?"),
+            chroma.WithKnnLimit(100),     // Max candidates
+            chroma.WithKnnReturnRank(),   // Return rank position
+        ),
+        chroma.WithPage(chroma.WithLimit(10)),
+    ),
+)
+
+// Search with sparse embedding field
+result, err = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(
+            chroma.KnnQueryText("machine learning"),
+            chroma.WithKnnKey(chroma.K("sparse_embedding")),
+        ),
+        chroma.WithPage(chroma.WithLimit(10)),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Knn Parameters
@@ -846,6 +883,45 @@ for (const [i, row] of rows.entries()) {
   console.log(`   Category: ${row.metadata?.category}`);
   console.log(`   Preview: ${row.document?.substring(0, 100)}...`);
   console.log();
+}
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Complex ranking with filtering and weighted KNN queries
+knn1, _ := chroma.NewKnnRank(chroma.KnnQueryText("latest AI research developments"))
+knn2, _ := chroma.NewKnnRank(chroma.KnnQueryText("artificial intelligence breakthroughs"))
+
+// Combine: (knn1 * 0.7 + knn2 * 0.3).exp().min(0.0)
+combinedRank := knn1.Multiply(chroma.FloatOperand(0.7)).
+    Add(knn2.Multiply(chroma.FloatOperand(0.3))).
+    Exp().
+    Min(chroma.Val(0.0))
+
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(
+            chroma.And(
+                chroma.EqString("status", "published"),
+                chroma.InString("category", "tech", "science"),
+            ),
+        ),
+        chroma.WithRank(combinedRank),
+        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("title"), chroma.K("category")),
+    ),
+)
+
+// Process results using Rows()
+for i, row := range result.Rows() {
+    fmt.Printf("%d. %v\n", i+1, row.Metadata.Get("title"))
+    fmt.Printf("   Score: %.3f\n", row.Score)
+    fmt.Printf("   Category: %v\n", row.Metadata.Get("category"))
+    fmt.Printf("   Preview: %.100s...\n", row.Document)
+    fmt.Println()
 }
 ```
 {% /Tab %}

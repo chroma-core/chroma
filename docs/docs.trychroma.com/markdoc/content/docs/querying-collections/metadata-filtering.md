@@ -31,6 +31,17 @@ await collection.query({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhereQuery(chroma.EqInt("page", 10)),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
@@ -57,6 +68,18 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
         <Operator>: <Value>
     }
 }
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+// Go uses type-safe filter functions
+chroma.EqString("field", "value")   // $eq for strings
+chroma.EqInt("field", 10)           // $eq for integers
+chroma.GtInt("field", 10)           // $gt
+chroma.LtFloat("field", 5.5)        // $lt
 ```
 
 {% /Tab %}
@@ -103,6 +126,15 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+// In Go, use explicit equality functions
+chroma.EqString("metadata_field", "search_string")
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 For example, here we query all records whose `page` metadata field is greater than 10:
@@ -127,6 +159,17 @@ await collection.query({
   queryTexts: ["first query", "second query"],
   where: { page: { $gt: 10 } },
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhereQuery(chroma.GtInt("page", 10)),
+)
 ```
 
 {% /Tab %}
@@ -179,6 +222,17 @@ An `$and` operator will return results that match all the filters in the list.
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+chroma.And(
+    chroma.GteInt("field", 5),
+    chroma.LteInt("field", 10),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 For example, here we query all records whose `page` metadata field is between 5 and 10:
@@ -210,6 +264,22 @@ await collection.query({
     $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
   },
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhereQuery(
+        chroma.And(
+            chroma.GteInt("page", 5),
+            chroma.LteInt("page", 10),
+        ),
+    ),
+)
 ```
 
 {% /Tab %}
@@ -258,6 +328,17 @@ An `$or` operator will return results that match any of the filters in the list.
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+chroma.Or(
+    chroma.EqString("color", "red"),
+    chroma.EqString("color", "blue"),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 For example, here we get all records whose `color` metadata field is `red` or `blue`:
@@ -287,6 +368,21 @@ await collection.get({
     or: [{ color: "red" }, { color: "blue" }],
   },
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+results, err := collection.Get(ctx,
+    chroma.WithWhereGet(
+        chroma.Or(
+            chroma.EqString("color", "red"),
+            chroma.EqString("color", "blue"),
+        ),
+    ),
+)
 ```
 
 {% /Tab %}
@@ -328,6 +424,14 @@ An `$in` operator will return results where the metadata attribute is part of a 
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+chroma.InString("metadata_field", "value1", "value2", "value3")
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
@@ -354,6 +458,14 @@ An `$nin` operator will return results where the metadata attribute is not part 
         "$nin": ["value1", "value2", "value3"]
     }
 }
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+chroma.NinString("metadata_field", "value1", "value2", "value3")
 ```
 
 {% /Tab %}
@@ -388,6 +500,18 @@ await collection.get({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+results, err := collection.Get(ctx,
+    chroma.WithWhereGet(
+        chroma.InString("author", "Rowling", "Fitzgerald", "Herbert"),
+    ),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Combining with Document Search
@@ -418,6 +542,19 @@ await collection.query({
     where: { metadata_field: "is_equal_to_this" },
     whereDocument: { "$contains": "search_string" }
 })
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("doc10", "thus spake zarathustra"),
+    chroma.WithNResults(10),
+    chroma.WithWhereQuery(chroma.EqString("metadata_field", "is_equal_to_this")),
+    chroma.WithWhereDocumentQuery(chroma.Contains("search_string")),
+)
 ```
 
 {% /Tab %}

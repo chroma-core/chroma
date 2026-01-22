@@ -57,14 +57,14 @@ const searches = [
     .rank(Knn({ query: "machine learning applications" }))
     .limit(5)
     .select(K.DOCUMENT, K.SCORE, "title"),
-  
+
   // Search 2: Papers by specific authors
   new Search()
     .where(K("author").isIn(["Smith", "Jones"]))
     .rank(Knn({ query: "neural network research" }))
     .limit(10)
     .select(K.DOCUMENT, K.SCORE, "title", "author"),
-  
+
   // Search 3: Featured content (no ranking)
   new Search()
     .where(K("status").eq("featured"))
@@ -74,6 +74,42 @@ const searches = [
 
 // Execute all searches in one request
 const results = await collection.search(searches);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Execute multiple searches in one call
+searches := []*chroma.SearchRequest{
+    // Search 1: Recent articles
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.And(
+            chroma.EqString("type", "article"),
+            chroma.GteInt("year", 2024),
+        )),
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning applications")),
+        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, "title"),
+    ),
+    // Search 2: Papers by specific authors
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.InStrings("author", "Smith", "Jones")),
+        chroma.WithKnnRank(chroma.KnnQueryText("neural network research")),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, "title", "author"),
+    ),
+    // Search 3: Featured content (no ranking)
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("status", "featured")),
+        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.WithSelect("title", "date"),
+    ),
+}
+
+// Execute all searches in one request
+results, err := collection.SearchBatch(ctx, searches)
 ```
 {% /Tab %}
 
@@ -151,6 +187,32 @@ for (const [searchIndex, rows] of allRows.entries()) {
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Batch search returns multiple result sets
+results, err := collection.SearchBatch(ctx, []*chroma.SearchRequest{search1, search2, search3})
+
+// Results is a slice - each element corresponds to a search
+// results[0] = result from search1
+// results[1] = result from search2
+// results[2] = result from search3
+
+// Process each search's results
+for searchIndex, result := range results {
+    fmt.Printf("Results from search %d:\n", searchIndex+1)
+    for _, row := range result.Rows() {
+        title := "N/A"
+        if row.Metadata != nil {
+            if t, ok := row.Metadata["title"].(string); ok {
+                title = t
+            }
+        }
+        fmt.Printf("  - %s: %s\n", row.ID, title)
+    }
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 
@@ -214,6 +276,37 @@ const results = await collection.search(searches);
     console.log(`  Score: ${results.scores[i][0].toFixed(3)}`);
   }
 });
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Compare different query variations
+queryVariations := []string{
+    "machine learning",
+    "machine learning algorithms and applications",
+    "modern machine learning techniques",
+}
+
+searches := make([]*chroma.SearchRequest, len(queryVariations))
+for i, q := range queryVariations {
+    searches[i] = chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText(q)),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, "title"),
+    )
+}
+
+results, err := collection.SearchBatch(ctx, searches)
+
+// Compare top results from each variation
+queryNames := []string{"Original", "Expanded", "Refined"}
+for i, queryName := range queryNames {
+    fmt.Printf("%s Query Top Result:\n", queryName)
+    if len(results[i].Rows()) > 0 {
+        fmt.Printf("  Score: %.3f\n", results[i].Rows()[0].Score)
+    }
+}
 ```
 {% /Tab %}
 
@@ -328,6 +421,25 @@ const results = await collection.search(searches);
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Different category filters
+categories := []string{"technology", "science", "business"}
+
+searches := make([]*chroma.SearchRequest, len(categories))
+for i, category := range categories {
+    searches[i] = chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("category", category)),
+        chroma.WithKnnRank(chroma.KnnQueryText("artificial intelligence")),
+        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.WithSelect("title", "category", chroma.KScore),
+    )
+}
+
+results, err := collection.SearchBatch(ctx, searches)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Performance Benefits
@@ -360,6 +472,20 @@ for (const search of searches) {
 
 // ✅ Batch execution (fast)
 const results2 = await collection.search(searches);  // Single API call for all
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// ❌ Sequential execution (slow)
+var results []*chroma.SearchResult
+for _, search := range searches {
+    result, _ := collection.Search(ctx, search)  // Separate API call each time
+    results = append(results, result)
+}
+
+// ✅ Batch execution (fast)
+results, err := collection.SearchBatch(ctx, searches)  // Single API call for all
 ```
 {% /Tab %}
 
@@ -407,6 +533,25 @@ const results = await collection.search(searches);
 // results.documents[0] will have values
 // results.documents[1] will be null (not selected)
 // results.documents[2] will have values
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+searches := []*chroma.SearchRequest{
+    chroma.NewSearchRequest(
+        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.WithSelect(chroma.KDocument),       // Only documents
+    ),
+    chroma.NewSearchRequest(
+        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.WithSelect(chroma.KScore, "title"), // Scores and title
+    ),
+}
+
+results, err := collection.SearchBatch(ctx, searches)
+// results[0] will have documents
+// results[1] will have scores and title metadata
 ```
 {% /Tab %}
 

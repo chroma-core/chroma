@@ -45,6 +45,21 @@ K.ID.isIn(["doc1", "doc2", "doc3"]);
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Filter by metadata field
+chroma.EqString("status", "active")
+
+// Filter by document content
+chroma.DocumentContains("machine learning")
+
+// Filter by document IDs
+chroma.IDIn("doc1", "doc2", "doc3")
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Filterable Fields
@@ -94,6 +109,21 @@ K("price").gt(100);              // Greater than
 K("rating").gte(4.5);            // Greater than or equal
 K("stock").lt(10);               // Less than
 K("discount").lte(0.25);         // Less than or equal
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Equality and inequality (all types)
+chroma.EqString("status", "published")   // String equality
+chroma.NeInt("views", 0)                  // Numeric inequality
+chroma.EqBool("featured", true)           // Boolean equality
+
+// Numeric comparisons (numbers only)
+chroma.GtFloat("price", 100)              // Greater than
+chroma.GteFloat("rating", 4.5)            // Greater than or equal
+chroma.LtInt("stock", 10)                 // Less than
+chroma.LteFloat("discount", 0.25)         // Less than or equal
 ```
 {% /Tab %}
 
@@ -206,6 +236,38 @@ K("status").eq("published")
     K("category").eq("tech").or(K("category").eq("science"))
   )
   .and(K("rating").gte(4.0));
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// AND operator - all conditions must match
+chroma.And(
+    chroma.EqString("status", "published"),
+    chroma.GteInt("year", 2020),
+)
+
+// OR operator - any condition can match
+chroma.Or(
+    chroma.EqString("category", "tech"),
+    chroma.EqString("category", "science"),
+)
+
+// Combining with document and ID filters
+chroma.And(
+    chroma.DocumentContains("AI"),
+    chroma.EqString("author", "Smith"),
+)
+
+// Complex nesting
+chroma.And(
+    chroma.EqString("status", "published"),
+    chroma.Or(
+        chroma.EqString("category", "tech"),
+        chroma.EqString("category", "science"),
+    ),
+    chroma.GteFloat("rating", 4.0),
+)
 ```
 {% /Tab %}
 
@@ -597,10 +659,10 @@ const search = new Search()
   .where(
     // Exclude specific documents
     K.ID.notIn(["excluded_001", "excluded_002"])
-      
+
       // Must contain specific content
       .and(K.DOCUMENT.contains("artificial intelligence"))
-      
+
       // Metadata conditions
       .and(K("status").eq("published"))
       .and(K("quality_score").gte(0.75))
@@ -615,6 +677,34 @@ const search = new Search()
   .select(K.DOCUMENT, "title", "author", "year");
 
 const results = await collection.search(search);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Complex filter combining IDs, document content, and metadata
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(
+            chroma.And(
+                chroma.IDNotIn("excluded_001", "excluded_002"),
+                chroma.DocumentContains("artificial intelligence"),
+                chroma.EqString("status", "published"),
+                chroma.GteFloat("quality_score", 0.75),
+                chroma.Or(
+                    chroma.EqString("category", "research"),
+                    chroma.EqString("category", "tutorial"),
+                ),
+                chroma.GteInt("year", 2023),
+            ),
+        ),
+        chroma.WithKnnRank(chroma.KnnQueryText("latest AI research developments")),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.K("title"), chroma.K("author"), chroma.K("year")),
+    ),
+)
 ```
 {% /Tab %}
 
