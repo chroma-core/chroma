@@ -7,7 +7,7 @@ name: Reference
 
 ## Client APIs
 
-Chroma currently maintains 1st party clients for Python and Javascript. For other clients in other languages, use their repos for documentation.
+Chroma currently maintains 1st party clients for Python, Javascript, and Go. For other clients in other languages, use their repos for documentation.
 
 `Client` - is the object that wraps a connection to a backing Chroma DB
 
@@ -20,6 +20,7 @@ Chroma currently maintains 1st party clients for Python and Javascript. For othe
 | ---------- | ------------------------- | --------------------------------- |
 | Python     | [Client](./python/client) | [Collection](./python/collection) |
 | Javascript | [Client](./js/client)     | [Collection](./js/collection)     |
+| Go         | [Client](./go/client)     | [Collection](./go/collection)     |
 
 ---
 
