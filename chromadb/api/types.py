@@ -2072,14 +2072,21 @@ class Schema:
                 "Cannot enable all index types globally. Must specify either config or key."
             )
 
-        # Disallow using special internal keys (#embedding, #document)
-        if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
+        # Disallow using special internal key #embedding
+        if key is not None and key == EMBEDDING_KEY:
             raise ValueError(
-                f"Cannot create index on special key '{key}'. These keys are managed automatically by the system. Invoke create_index(VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
+                f"Cannot create index on special key '{key}'. This key is managed automatically by the system. Invoke create_index(VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
             )
 
-        # Disallow any key starting with #
-        if key is not None and key.startswith("#"):
+        # Only allow #document with FtsIndexConfig
+        if key == DOCUMENT_KEY and not isinstance(config, FtsIndexConfig):
+            raise ValueError(
+                f"Cannot create index on special key '{key}' with this config. "
+                "Only FtsIndexConfig is allowed for #document."
+            )
+
+        # Disallow any key starting with # (except #document which allows FTS)
+        if key is not None and key.startswith("#") and key != DOCUMENT_KEY:
             raise ValueError(
                 "key cannot begin with '#'. "
                 "Keys starting with '#' are reserved for system use."
@@ -2098,18 +2105,12 @@ class Schema:
                     "Vector index cannot be enabled on specific keys. Use create_index(config=VectorIndexConfig(...)) without specifying a key to configure the vector index globally."
                 )
 
-        # Special handling for FTS index
-        if isinstance(config, FtsIndexConfig):
-            if key is None:
-                # Allow setting FTS config globally - it applies to defaults and #document
-                # but doesn't change enabled state (FTS is always enabled on #document)
-                self._set_fts_index_config(config)
-                return self
-            else:
-                # Disallow FTS index on any custom key
-                raise ValueError(
-                    "FTS index cannot be enabled on specific keys. Use create_index(config=FtsIndexConfig(...)) without specifying a key to configure the FTS index globally."
-                )
+        # FTS index is only allowed on #document key
+        if isinstance(config, FtsIndexConfig) and key != DOCUMENT_KEY:
+            raise ValueError(
+                "FTS index can only be enabled on #document key. "
+                "Use create_index(config=FtsIndexConfig(), key='#document')"
+            )
 
         # Disallow sparse vector index without a specific key
         if isinstance(config, SparseVectorIndexConfig) and key is None:
@@ -2157,31 +2158,38 @@ class Schema:
                 "Cannot disable all indexes. Must specify either config or key."
             )
 
-        # Disallow using special internal keys (#embedding, #document)
-        if key is not None and key in (EMBEDDING_KEY, DOCUMENT_KEY):
+        # Disallow using special internal key #embedding
+        if key is not None and key == EMBEDDING_KEY:
             raise ValueError(
-                f"Cannot delete index on special key '{key}'. These keys are managed automatically by the system."
+                "Cannot modify #embedding. Currently not supported"
             )
 
-        # Disallow any key starting with #
-        if key is not None and key.startswith("#"):
+        # Only allow #document with FtsIndexConfig (to disable FTS)
+        if key == DOCUMENT_KEY and not isinstance(config, FtsIndexConfig):
+            raise ValueError(
+                f"Cannot delete index on special key '{key}' with this config. "
+                "Only FtsIndexConfig is allowed for #document."
+            )
+
+        # Disallow any key starting with # (except #document which allows FTS deletion)
+        if key is not None and key.startswith("#") and key != DOCUMENT_KEY:
             raise ValueError(
                 "key cannot begin with '#'. "
                 "Keys starting with '#' are reserved for system use."
             )
 
-        # TODO: Consider removing these checks in the future to allow disabling vector, FTS, and sparse vector indexes
+        # TODO: Consider removing these checks in the future to allow disabling vector and sparse vector indexes
         # Temporarily disallow deleting vector index (both globally and per-key)
         if isinstance(config, VectorIndexConfig):
             raise ValueError("Deleting vector index is not currently supported.")
 
-        # Temporarily disallow deleting FTS index (both globally and per-key)
-        if isinstance(config, FtsIndexConfig):
-            raise ValueError("Deleting FTS index is not currently supported.")
-
         # Temporarily disallow deleting sparse vector index (both globally and per-key)
         if isinstance(config, SparseVectorIndexConfig):
             raise ValueError("Deleting sparse vector index is not currently supported.")
+
+        # FTS deletion is only allowed on #document key
+        if isinstance(config, FtsIndexConfig) and key != DOCUMENT_KEY:
+            raise ValueError("Deleting FTS index is only supported on #document key.")
 
         # TODO: Consider removing this check in the future to allow disabling all indexes for a key
         # Disallow disabling all index types for a key (config=None, key="some_key")
@@ -2256,23 +2264,7 @@ class Schema:
             enabled=current_enabled, config=embedding_config
         )  # type: ignore[union-attr]
 
-    def _set_fts_index_config(self, config: FtsIndexConfig) -> None:
-        """
-        Set FTS index config globally and on #document key.
-        This updates the config but preserves the enabled state.
-        FTS index is always enabled on #document, disabled in defaults.
-        """
-        # Update the config in defaults (preserve enabled=False)
-        current_enabled = self.defaults.string.fts_index.enabled  # type: ignore[union-attr]
-        self.defaults.string.fts_index = FtsIndexType(
-            enabled=current_enabled, config=config
-        )  # type: ignore[union-attr]
 
-        # Update the config on #document key (preserve enabled=True)
-        current_enabled = self.keys[DOCUMENT_KEY].string.fts_index.enabled  # type: ignore[union-attr]
-        self.keys[DOCUMENT_KEY].string.fts_index = FtsIndexType(
-            enabled=current_enabled, config=config
-        )  # type: ignore[union-attr]
 
     def _set_index_in_defaults(self, config: IndexConfig, enabled: bool) -> None:
         """Set an index configuration in the defaults."""

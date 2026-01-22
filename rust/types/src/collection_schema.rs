@@ -79,9 +79,7 @@ pub enum SchemaError {
 pub enum SchemaBuilderError {
     #[error("Vector index must be configured globally using create_index(None, config), not on specific key '{key}'")]
     VectorIndexMustBeGlobal { key: String },
-    #[error("FTS index must be configured globally using create_index(None, config), not on specific key '{key}'")]
-    FtsIndexMustBeGlobal { key: String },
-    #[error("Cannot modify special key '{key}' - it is managed automatically by the system. To customize vector search, modify the global vector config instead.")]
+    #[error("Cannot modify special key '{key}' - it is managed automatically by the system.")]
     SpecialKeyModificationNotAllowed { key: String },
     #[error("Sparse vector index requires a specific key. Use create_index(Some(\"key_name\"), config) instead of create_index(None, config)")]
     SparseVectorRequiresKey,
@@ -89,10 +87,16 @@ pub enum SchemaBuilderError {
     MultipleSparseVectorIndexes { existing_key: String },
     #[error("Vector index deletion not supported. The vector index is always enabled on #embedding. To disable vector search, disable the collection instead.")]
     VectorIndexDeletionNotSupported,
-    #[error("FTS index deletion not supported. The FTS index is always enabled on #document. To disable full-text search, use a different collection without FTS.")]
-    FtsIndexDeletionNotSupported,
     #[error("Sparse vector index deletion not supported yet. Sparse vector indexes cannot be removed once created.")]
     SparseVectorIndexDeletionNotSupported,
+    #[error(
+        "Key '{key}' cannot begin with '#'. Keys starting with '#' are reserved for system use."
+    )]
+    ReservedKeyPrefix { key: String },
+    #[error("FTS index deletion is only supported on #document key.")]
+    FtsIndexDeletionOnlyOnDocument,
+    #[error("FTS index can only be enabled on #document key. Use create_index(Some(\"#document\"), FtsIndexConfig) to enable FTS.")]
+    FtsIndexOnlyOnDocument,
 }
 
 #[derive(Debug, Error)]
@@ -104,6 +108,8 @@ pub enum FilterValidationError {
         key: String,
         value_type: MetadataValueType,
     },
+    #[error("Cannot filter using full-text search because FTS indexing is disabled")]
+    FtsDisabled,
     #[error(transparent)]
     Schema(#[from] SchemaError),
 }
@@ -118,6 +124,7 @@ impl ChromaError for FilterValidationError {
     fn code(&self) -> ErrorCodes {
         match self {
             FilterValidationError::IndexingDisabled { .. } => ErrorCodes::InvalidArgument,
+            FilterValidationError::FtsDisabled => ErrorCodes::InvalidArgument,
             FilterValidationError::Schema(_) => ErrorCodes::Internal,
         }
     }
@@ -414,6 +421,21 @@ impl Schema {
                 .is_some_and(|idx| idx.enabled)
         });
         defaults_enabled || key_enabled
+    }
+
+    pub fn is_fts_enabled(&self) -> bool {
+        // Check key-specific override first, then fall back to global defaults
+        self.keys
+            .get(DOCUMENT_KEY)
+            .and_then(|vt| vt.string.as_ref())
+            .and_then(|s| s.fts_index.as_ref())
+            .or_else(|| {
+                self.defaults
+                    .string
+                    .as_ref()
+                    .and_then(|s| s.fts_index.as_ref())
+            })
+            .is_none_or(|idx| idx.enabled)
     }
 }
 
@@ -2036,7 +2058,12 @@ impl Schema {
                 }
                 Ok(())
             }
-            Where::Document(_) => Ok(()),
+            Where::Document(_) => {
+                if !self.is_fts_enabled() {
+                    return Err(FilterValidationError::FtsDisabled);
+                }
+                Ok(())
+            }
             Where::Metadata(expression) => {
                 let value_type = match &expression.comparison {
                     MetadataComparison::Primitive(_, value) => value.value_type(),
@@ -2166,40 +2193,51 @@ impl Schema {
         key: Option<&str>,
         config: IndexConfig,
     ) -> Result<Self, SchemaBuilderError> {
-        // Handle special cases: Vector and FTS (global configs only)
-        match (&key, &config) {
-            (None, IndexConfig::Vector(cfg)) => {
+        // 1. Handle special index types: Vector, FTS, SparseVector
+        match &config {
+            IndexConfig::Vector(cfg) => {
+                // Vector is global only (no key allowed)
+                if let Some(k) = key {
+                    return Err(SchemaBuilderError::VectorIndexMustBeGlobal { key: k.to_string() });
+                }
                 self._set_vector_index_config_builder(cfg.clone());
                 return Ok(self);
             }
-            (None, IndexConfig::Fts(cfg)) => {
-                self._set_fts_index_config_builder(cfg.clone());
-                return Ok(self);
+            IndexConfig::Fts(_) => {
+                // FTS is only allowed on #document key
+                if key != Some(DOCUMENT_KEY) {
+                    return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
+                }
+                // Falls through to dispatch
             }
-            (Some(k), IndexConfig::Vector(_)) => {
-                return Err(SchemaBuilderError::VectorIndexMustBeGlobal { key: k.to_string() });
-            }
-            (Some(k), IndexConfig::Fts(_)) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal { key: k.to_string() });
+            IndexConfig::SparseVector(_) => {
+                // SparseVector requires a specific key
+                if key.is_none() {
+                    return Err(SchemaBuilderError::SparseVectorRequiresKey);
+                }
+                // Falls through to dispatch
             }
             _ => {}
         }
 
-        // Validate special keys
+        // 2. Validate special keys
         if let Some(k) = key {
-            if k == DOCUMENT_KEY || k == EMBEDDING_KEY {
+            if k == EMBEDDING_KEY {
                 return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
                     key: k.to_string(),
                 });
             }
+            if k == DOCUMENT_KEY && !matches!(config, IndexConfig::Fts(_)) {
+                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
+                    key: k.to_string(),
+                });
+            }
+            if k.starts_with('#') && k != DOCUMENT_KEY {
+                return Err(SchemaBuilderError::ReservedKeyPrefix { key: k.to_string() });
+            }
         }
 
-        // Validate sparse vector requires key
-        if key.is_none() && matches!(config, IndexConfig::SparseVector(_)) {
-            return Err(SchemaBuilderError::SparseVectorRequiresKey);
-        }
-
-        // Dispatch to appropriate helper
+        // 3. Dispatch to appropriate helper
         match key {
             Some(k) => self._set_index_for_key_builder(k, config, true)?,
             None => self._set_index_in_defaults_builder(config, true)?,
@@ -2240,30 +2278,44 @@ impl Schema {
         key: Option<&str>,
         config: IndexConfig,
     ) -> Result<Self, SchemaBuilderError> {
-        // Validate special keys
-        if let Some(k) = key {
-            if k == DOCUMENT_KEY || k == EMBEDDING_KEY {
-                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
-                    key: k.to_string(),
-                });
-            }
-        }
-
-        // Disallow deleting vector, FTS, and sparse vector indexes (match Python restrictions)
+        // 1. Handle special index types: Vector, FTS, SparseVector
         match &config {
             IndexConfig::Vector(_) => {
+                // Vector deletion not supported
                 return Err(SchemaBuilderError::VectorIndexDeletionNotSupported);
             }
             IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexDeletionNotSupported);
+                // FTS deletion is only allowed on #document key
+                if key != Some(DOCUMENT_KEY) {
+                    return Err(SchemaBuilderError::FtsIndexDeletionOnlyOnDocument);
+                }
+                // Falls through to dispatch
             }
             IndexConfig::SparseVector(_) => {
+                // SparseVector deletion not supported
                 return Err(SchemaBuilderError::SparseVectorIndexDeletionNotSupported);
             }
             _ => {}
         }
 
-        // Dispatch to appropriate helper (enabled=false)
+        // 2. Validate special keys
+        if let Some(k) = key {
+            if k == EMBEDDING_KEY {
+                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
+                    key: k.to_string(),
+                });
+            }
+            if k == DOCUMENT_KEY && !matches!(config, IndexConfig::Fts(_)) {
+                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
+                    key: k.to_string(),
+                });
+            }
+            if k.starts_with('#') && k != DOCUMENT_KEY {
+                return Err(SchemaBuilderError::ReservedKeyPrefix { key: k.to_string() });
+            }
+        }
+
+        // 3. Dispatch to appropriate helper
         match key {
             Some(k) => self._set_index_for_key_builder(k, config, false)?,
             None => self._set_index_in_defaults_builder(config, false)?,
@@ -2373,10 +2425,14 @@ impl Schema {
                     key: key.to_string(),
                 });
             }
-            IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal {
-                    key: key.to_string(),
-                });
+            IndexConfig::Fts(cfg) => {
+                // FTS is validated in create_index/delete_index to only allow #document
+                if let Some(string) = value_types.string.as_mut() {
+                    if let Some(fts_index) = string.fts_index.as_mut() {
+                        fts_index.enabled = enabled;
+                        fts_index.config = cfg;
+                    }
+                }
             }
             IndexConfig::SparseVector(cfg) => {
                 value_types.sparse_vector = Some(SparseVectorValueType {
@@ -2442,9 +2498,8 @@ impl Schema {
                 });
             }
             IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal {
-                    key: "defaults".to_string(),
-                });
+                // FTS is only allowed on #document, not globally
+                return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
             }
             IndexConfig::SparseVector(cfg) => {
                 self.defaults.sparse_vector = Some(SparseVectorValueType {
@@ -5449,14 +5504,20 @@ mod tests {
             SchemaBuilderError::VectorIndexMustBeGlobal { key } if key == "my_vectors"
         ));
 
-        // Error: FTS index on specific key (must be global)
+        // Error: FTS index on non-#document key
         let result = Schema::new_default(KnnIndex::Hnsw)
             .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            SchemaBuilderError::FtsIndexMustBeGlobal { key } if key == "my_text"
+            SchemaBuilderError::FtsIndexOnlyOnDocument
         ));
+
+        // Success: FTS index on #document key
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS on #document should succeed");
+        assert!(schema.is_fts_enabled());
 
         // Error: Cannot create index on special key #document
         let result = Schema::new_default(KnnIndex::Hnsw).create_index(
@@ -5566,14 +5627,11 @@ mod tests {
             SchemaBuilderError::VectorIndexDeletionNotSupported
         ));
 
-        // Error: Delete FTS index (not currently supported)
-        let result = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SchemaBuilderError::FtsIndexDeletionNotSupported
-        ));
+        // FTS index deletion is now supported (disables FTS)
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+        assert!(!schema.is_fts_enabled());
 
         // Error: Delete sparse vector index (not currently supported)
         let result = Schema::new_default(KnnIndex::Hnsw)
