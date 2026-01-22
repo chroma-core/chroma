@@ -12,7 +12,7 @@ use super::config::{S3CredentialsConfig, StorageConfig};
 use super::metrics::StorageMetrics;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
-use crate::{ETag, GetOptions, PutMode, StorageError};
+use crate::{ETag, GetOptions, PutMode, S3ObjectMetadata, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -355,6 +355,59 @@ impl S3Storage {
         })?;
 
         Ok((Arc::new(buf), e_tag))
+    }
+
+    /// Get object metadata without downloading the content.
+    /// Use this when you only need metadata (etag, content_length, content_type, last_modified).
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn head_object(&self, key: &str) -> Result<S3ObjectMetadata, StorageError> {
+        let head_res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+
+        match head_res {
+            Ok(res) => Ok(S3ObjectMetadata {
+                object_key: key.to_string(),
+                etag: res.e_tag.map(ETag),
+                content_length: res.content_length.unwrap_or(0),
+                content_type: res.content_type,
+                last_modified: res.last_modified,
+            }),
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    if inner.is_not_found() {
+                        Err(StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        })
+                    } else {
+                        Err(StorageError::Generic {
+                            source: Arc::new(inner),
+                        })
+                    }
+                }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
+        }
+    }
+
+    /// Check if an object exists at the given key.
+    /// Returns Ok(true) if the object exists, Ok(false) if not found,
+    /// or an error for other failures.
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn object_exists(&self, key: &str) -> Result<bool, StorageError> {
+        match self.head_object(key).await {
+            Ok(_) => Ok(true),
+            Err(StorageError::NotFound { .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     pub(super) fn is_oneshot_upload(&self, total_size_bytes: usize) -> bool {
@@ -937,6 +990,36 @@ impl Configurable<StorageConfig> for S3Storage {
                             .build();
                         aws_sdk_s3::Client::new(&config)
                     }
+                    super::config::S3CredentialsConfig::Explicit {
+                        access_key_id,
+                        secret_access_key,
+                        session_token,
+                        custom_endpoint,
+                        region,
+                    } => {
+                        let cred = aws_sdk_s3::config::Credentials::new(
+                            access_key_id,
+                            secret_access_key,
+                            session_token.clone(),
+                            None,
+                            "explicit-credentials",
+                        );
+
+                        let mut config_builder = aws_sdk_s3::config::Builder::new()
+                            .credentials_provider(cred)
+                            .behavior_version_latest()
+                            .region(aws_sdk_s3::config::Region::new(region.clone()))
+                            .timeout_config(timeout_config)
+                            .stalled_stream_protection(stalled_config)
+                            .retry_config(retry_config);
+
+                        if let Some(url) = custom_endpoint {
+                            config_builder =
+                                config_builder.endpoint_url(url).force_path_style(true);
+                        }
+
+                        aws_sdk_s3::Client::from_conf(config_builder.build())
+                    }
                 };
                 let storage = S3Storage::new(
                     &s3_config.bucket,
@@ -1453,6 +1536,181 @@ mod tests {
                 // This is expected - the head operation will fail on nonexistent file
             }
             other => panic!("Expected Generic error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_object() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for head object";
+        let key = "test-head-object";
+
+        storage
+            .put_bytes(key, test_data.as_bytes().to_vec(), PutOptions::default())
+            .await
+            .unwrap();
+
+        let metadata = storage.head_object(key).await.unwrap();
+
+        assert_eq!(metadata.object_key, key);
+        assert_eq!(metadata.content_length, test_data.len() as i64);
+        assert!(metadata.etag.is_some(), "etag should be present");
+        assert!(
+            metadata.last_modified.is_some(),
+            "last_modified should be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_object_not_found() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let result = storage.head_object("nonexistent-key").await;
+
+        assert!(
+            result.is_err(),
+            "head_object should return error for non-existent key"
+        );
+        match result.unwrap_err() {
+            StorageError::NotFound { path, .. } => {
+                assert_eq!(path, "nonexistent-key");
+            }
+            other => panic!("Expected NotFound error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_object_exists() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for object exists";
+        let key = "test-object-exists";
+
+        storage
+            .put_bytes(key, test_data.as_bytes().to_vec(), PutOptions::default())
+            .await
+            .unwrap();
+
+        let exists = storage.object_exists(key).await.unwrap();
+        assert!(
+            exists,
+            "object_exists should return true for existing object"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_object_exists_not_found() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let exists = storage.object_exists("nonexistent-key").await.unwrap();
+        assert!(
+            !exists,
+            "object_exists should return false for non-existent object"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_explicit_credentials() {
+        use chroma_config::Configurable;
+
+        let config = StorageConfig::S3(crate::config::S3StorageConfig {
+            bucket: "test-explicit-creds".to_string(),
+            credentials: S3CredentialsConfig::Explicit {
+                access_key_id: "minio".to_string(),
+                secret_access_key: "minio123".to_string(),
+                session_token: None,
+                custom_endpoint: Some("http://127.0.0.1:9000".to_string()),
+                region: "us-east-1".to_string(),
+            },
+            ..Default::default()
+        });
+
+        let storage =
+            S3Storage::try_from_config(&config, &chroma_config::registry::Registry::default())
+                .await
+                .unwrap();
+
+        assert_eq!(storage.bucket, "test-explicit-creds");
+        storage.create_bucket().await.unwrap();
+
+        // Verify we can actually use the storage
+        let test_data = "test with explicit credentials";
+        storage
+            .put_bytes(
+                "explicit-test-key",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let result = storage
+            .get("explicit-test-key", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(result.as_ref(), test_data.as_bytes());
+    }
+
+    #[test]
+    fn test_explicit_credentials_config_deserialization() {
+        let json = r#"{
+            "Explicit": {
+                "access_key_id": "test-access-key",
+                "secret_access_key": "test-secret-key",
+                "session_token": "test-session-token",
+                "custom_endpoint": "http://localhost:9000",
+                "region": "us-east-1"
+            }
+        }"#;
+
+        let config: S3CredentialsConfig = serde_json::from_str(json).unwrap();
+
+        match config {
+            S3CredentialsConfig::Explicit {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                custom_endpoint,
+                region,
+            } => {
+                assert_eq!(access_key_id, "test-access-key");
+                assert_eq!(secret_access_key, "test-secret-key");
+                assert_eq!(session_token, Some("test-session-token".to_string()));
+                assert_eq!(custom_endpoint, Some("http://localhost:9000".to_string()));
+                assert_eq!(region, "us-east-1");
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_explicit_credentials_config_deserialization_minimal() {
+        let json = r#"{
+            "Explicit": {
+                "access_key_id": "test-access-key",
+                "secret_access_key": "test-secret-key",
+                "region": "us-west-2"
+            }
+        }"#;
+
+        let config: S3CredentialsConfig = serde_json::from_str(json).unwrap();
+
+        match config {
+            S3CredentialsConfig::Explicit {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                custom_endpoint,
+                region,
+            } => {
+                assert_eq!(access_key_id, "test-access-key");
+                assert_eq!(secret_access_key, "test-secret-key");
+                assert_eq!(session_token, None);
+                assert_eq!(custom_endpoint, None);
+                assert_eq!(region, "us-west-2");
+            }
+            _ => panic!("Expected Explicit variant"),
         }
     }
 }
