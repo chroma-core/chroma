@@ -69,6 +69,22 @@ const result2 = await collection.search(search.rank(Knn({ query: queryText })));
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Search with filtering and ranking
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("category", "science")),
+        chroma.WithKnnRank(chroma.KnnQueryText("What are the latest advances in quantum computing?")),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
@@ -113,6 +129,24 @@ import { Search, K, Knn } from 'chromadb';
 
 // Optional: For advanced features
 import { Rrf } from 'chromadb';  // For hybrid search
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Create cloud client
+client, err := chroma.NewCloudClient(
+    chroma.WithCloudAPIKey("your-api-key"),
+    chroma.WithDatabaseAndTenant("your-database", "your-tenant"),
+)
+
+// Search API components are available in the chroma package:
+// - chroma.NewSearchRequest() - Create search requests
+// - chroma.WithFilter() - Metadata filtering
+// - chroma.WithKnnRank() - KNN ranking
+// - chroma.NewRrfRank() - Hybrid search with RRF
 ```
 {% /Tab %}
 
@@ -206,6 +240,51 @@ for (const row of rows) {
   console.log(`Distance: ${row.score?.toFixed(3)}`);
   console.log(`Document: ${row.document?.substring(0, 100)}...`);
   console.log("---");
+}
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Connect to Chroma Cloud
+client, err := chroma.NewCloudClient(
+    chroma.WithCloudAPIKey("your-api-key"),
+    chroma.WithDatabaseAndTenant("your-database", "your-tenant"),
+)
+if err != nil {
+    log.Fatalf("Error: %v", err)
+}
+defer client.Close()
+
+collection, err := client.GetCollection(ctx, "articles")
+
+// Search with filter and ranking
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(
+            chroma.And(
+                chroma.EqString("category", "science"),
+                chroma.GteInt("year", 2020),
+            ),
+        ),
+        chroma.WithKnnRank(chroma.KnnQueryText("recent quantum computing breakthroughs")),
+        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("title"), chroma.K("author")),
+    ),
+)
+
+// Iterate over results using Rows()
+for i, row := range result.Rows() {
+    fmt.Printf("ID: %s\n", row.ID)
+    if title, ok := row.Metadata.Get("title"); ok {
+        fmt.Printf("Title: %v\n", title)
+    }
+    fmt.Printf("Distance: %.3f\n", row.Score)
+    fmt.Printf("Document: %.100s...\n", row.Document)
+    fmt.Println("---")
 }
 ```
 

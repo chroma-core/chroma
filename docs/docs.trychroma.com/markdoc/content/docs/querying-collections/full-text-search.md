@@ -148,4 +148,73 @@ await collection.query({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+The `WithWhereDocumentGet` and `WithWhereDocumentQuery` options filter records based on their document content.
+
+We support full-text search with `Contains` and `NotContains`. We also support regex pattern matching with `Regex` and `NotRegex`.
+
+For example, here we get all records whose document contains a search string:
+
+```go
+results, err := collection.Get(ctx,
+    chroma.WithWhereDocumentGet(chroma.Contains("search string")),
+)
+```
+
+Here we get all records whose documents match a regex pattern:
+
+```go
+results, err := collection.Get(ctx,
+    chroma.WithWhereDocumentGet(chroma.Regex(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$`)),
+)
+```
+
+## Using Logical Operators
+
+You can use `AndDocument` and `OrDocument` to combine multiple filters.
+
+An `AndDocument` operator returns results that match all the filters:
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("query1", "query2"),
+    chroma.WithWhereDocumentQuery(
+        chroma.AndDocument(
+            chroma.Contains("search_string_1"),
+            chroma.Regex("[a-z]+"),
+        ),
+    ),
+)
+```
+
+An `OrDocument` operator returns results that match any of the filters:
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("query1", "query2"),
+    chroma.WithWhereDocumentQuery(
+        chroma.OrDocument(
+            chroma.Contains("search_string_1"),
+            chroma.NotContains("search_string_2"),
+        ),
+    ),
+)
+```
+
+## Combining with Metadata Filtering
+
+`.Get` and `.Query` can handle `where_document` search combined with [metadata filtering](./metadata-filtering):
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("doc10", "thus spake zarathustra"),
+    chroma.WithNResults(10),
+    chroma.WithWhereQuery(chroma.EqString("metadata_field", "is_equal_to_this")),
+    chroma.WithWhereDocumentQuery(chroma.Contains("search_string")),
+)
+```
+
+{% /Tab %}
+
 {% /Tabs %}

@@ -56,6 +56,30 @@ const collection = await client.createCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/chromacloudsplade"
+)
+
+// Create Chroma Cloud Splade embedding function
+ef, err := chromacloudsplade.NewChromaCloudSpladeEmbeddingFunction(
+    os.Getenv("CHROMA_API_KEY"),
+)
+
+// Use directly
+sparseEmbeddings, err := ef.EmbedDocuments(ctx, []string{"Hello, world!", "How are you?"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 {% Banner type="tip" %}

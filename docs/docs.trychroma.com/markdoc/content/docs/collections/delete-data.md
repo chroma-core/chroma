@@ -33,6 +33,14 @@ await collection.delete({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+err := collection.Delete(ctx, chroma.WithIDsDelete("id1", "id2", "id3"))
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 `.delete` also supports the `where` filter. If no `ids` are supplied, it will delete all items in the collection that match the `where` filter.
@@ -57,6 +65,17 @@ await collection.delete({
     ids: ["id1", "id2", "id3",...], //ids
     where: {"chapter": "20"} //where
 })
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+err := collection.Delete(ctx,
+    chroma.WithIDsDelete("id1", "id2", "id3"),
+    chroma.WithWhereDelete(chroma.EqString("chapter", "20")),
+)
 ```
 
 {% /Tab %}

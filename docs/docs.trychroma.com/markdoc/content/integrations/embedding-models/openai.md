@@ -80,4 +80,34 @@ collection = await client.getCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+// Create OpenAI embedding function
+ef, err := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+Available models: `openai.TextEmbeddingAda002`, `openai.TextEmbedding3Small`, `openai.TextEmbedding3Large`
+
+{% /Tab %}
+
 {% /Tabs %}

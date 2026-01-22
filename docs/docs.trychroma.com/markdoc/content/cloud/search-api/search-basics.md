@@ -50,6 +50,22 @@ const search2 = new Search({
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Create a search request with options
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("status", "active")),
+        chroma.WithKnnRank(chroma.KnnQueryVector([]float32{0.1, 0.2})),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Constructor Parameters
@@ -133,6 +149,30 @@ search2 = search2.where(K("status").eq("active"));
 search2 = search2.rank(Knn({ query: "recent advances in quantum computing" }));
 search2 = search2.limit(20);
 search2 = search2.select(K.DOCUMENT, K.METADATA);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Go uses functional options pattern
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("status", "published")),
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning applications")),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+
+// Build options separately if needed
+filter := chroma.EqString("category", "science")
+limit5 := chroma.WithPage(chroma.WithLimit(5))
+limit10 := chroma.WithPage(chroma.WithLimit(10))
+
+result1, _ := collection.Search(ctx, chroma.NewSearchRequest(chroma.WithFilter(filter), limit5))
+result2, _ := collection.Search(ctx, chroma.NewSearchRequest(chroma.WithFilter(filter), limit10))
 ```
 {% /Tab %}
 
@@ -442,6 +482,20 @@ const result2 = await collection.search(search2);
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Empty search - returns all documents with IDs only
+result, _ := collection.Search(ctx, chroma.NewSearchRequest())
+
+// Add selection to get more fields
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithSelect(chroma.KDocument, chroma.KMetadata),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
@@ -519,6 +573,57 @@ function searchRecentScience(query: string) {
     .limit(10)
     .select(K.DOCUMENT, K.SCORE);
 }
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Pattern 1: Baseline - no filter, no rank (natural storage order)
+result, _ := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithSelect(chroma.KDocument, chroma.KMetadata),
+    ),
+)
+
+// Pattern 2: Filter only - no ranking
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(
+            chroma.And(
+                chroma.EqString("category", "science"),
+                chroma.GteInt("year", 2023),
+            ),
+        ),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KMetadata),
+    ),
+)
+
+// Pattern 3: Rank only - no filtering
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText(query)),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+
+// Pattern 4: Both filter and rank
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(
+            chroma.And(
+                chroma.EqString("category", "science"),
+                chroma.GteInt("year", 2023),
+            ),
+        ),
+        chroma.WithKnnRank(chroma.KnnQueryText(query)),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
 ```
 {% /Tab %}
 

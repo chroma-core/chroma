@@ -33,6 +33,22 @@ await collection.add({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithTexts("lorem ipsum...", "doc2", "doc3"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 If you add a record with an ID that already exists in the collection, it will be ignored and no exception will be raised. This means that if a batch add operation fails, you can safely run it again.
@@ -68,6 +84,27 @@ await collection.add({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithEmbeddings(
+        []float32{1.1, 2.3, 3.2},
+        []float32{4.5, 6.9, 4.4},
+        []float32{1.1, 2.3, 3.2},
+    ),
+    chroma.WithTexts("lorem ipsum...", "doc2", "doc3"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 If the supplied `embeddings` are not the same dimension as the embeddings already indexed in the collection, an exception will be raised.
@@ -96,6 +133,26 @@ await collection.add({
     embeddings: [[1.1, 2.3, 3.2], [4.5, 6.9, 4.4], [1.1, 2.3, 3.2], ...],
     metadatas: [{"chapter": 3, "verse": 16}, {"chapter": 3, "verse": 5}, {"chapter": 29, "verse": 11}, ...],
 })
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithEmbeddings(
+        []float32{1.1, 2.3, 3.2},
+        []float32{4.5, 6.9, 4.4},
+        []float32{1.1, 2.3, 3.2},
+    ),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+)
 ```
 
 {% /Tab %}

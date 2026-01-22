@@ -57,4 +57,35 @@ collection = await client.getCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/ollama"
+)
+
+// Create Ollama embedding function
+ef, err := ollama.NewOllamaEmbeddingFunction(
+    ollama.WithBaseURL("http://localhost:11434"),
+    ollama.WithModel("llama2"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}

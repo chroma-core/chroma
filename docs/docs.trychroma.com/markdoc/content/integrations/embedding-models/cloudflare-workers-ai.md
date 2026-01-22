@@ -47,6 +47,35 @@ embedder.generate(['This is my first text to embed', 'This is my second document
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/cloudflare"
+)
+
+// Create Cloudflare Workers AI embedding function
+ef, err := cloudflare.NewCloudflareEmbeddingFunction(
+    os.Getenv("CLOUDFLARE_API_KEY"),
+    "<INSERT ACCOUNT ID HERE>",
+    cloudflare.WithModel("@cf/baai/bge-m3"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 You must pass in an `account_id` and `model_name` to the embedding function. It is recommended to set the `CHROMA_CLOUDFLARE_API_KEY` for the api key, but the embedding function also optionally takes in an `api_key` variable.

@@ -64,6 +64,33 @@ collection = await client.getCollection({
 ```
 
 {% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/hf"
+)
+
+// Create HuggingFace embedding function
+ef, err := hf.NewHuggingFaceEmbeddingFunction(
+    hf.WithBaseURL("http://localhost:8001/embed"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+{% /Tab %}
 {% /TabbedCodeBlock %}
 
 The embedding model is configured on the server side. Check the docker-compose file in `examples/server_side_embeddings/huggingface/docker-compose.yml` for an example of how to configure the server.
@@ -92,6 +119,19 @@ const embedder = new HuggingFaceEmbeddingServerFunction({
   url: "http://localhost:8001/embed",
   apiKey: "your secret key",
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+import "github.com/chroma-core/chroma/clients/go/pkg/embeddings/hf"
+
+ef, err := hf.NewHuggingFaceEmbeddingFunction(
+    hf.WithBaseURL("http://localhost:8001/embed"),
+    hf.WithAPIKey("your secret key"),
+)
 ```
 
 {% /Tab %}

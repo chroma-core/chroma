@@ -55,6 +55,22 @@ const results = await collection.search(search);
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Get top 3 results per category, ordered by score
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning research")),
+        chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 3)),
+        chroma.WithPage(chroma.WithLimit(30)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, "category"),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## The GroupBy Class
@@ -99,6 +115,18 @@ new GroupBy(
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Single grouping key
+chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 3))
+
+// Multiple grouping keys
+chroma.WithGroupBy("category", "year", chroma.WithMinK(chroma.KScore, 1))
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## GroupBy Parameters
@@ -140,6 +168,18 @@ new MinK([K("priority"), K.SCORE], 2);
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Keep 3 records with lowest scores per group
+chroma.WithMinK(chroma.KScore, 3)
+
+// Keep 2 records with lowest priority, then lowest score as tiebreaker
+chroma.WithMinK("priority", chroma.KScore, 2)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 | Parameter | Type | Description |
@@ -174,6 +214,18 @@ new MaxK([K("rating")], 3);
 
 // Keep 2 records with highest year, then highest rating as tiebreaker
 new MaxK([K("year"), K("rating")], 2);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Keep 3 records with highest ratings per group
+chroma.WithMaxK("rating", 3)
+
+// Keep 2 records with highest year, then highest rating as tiebreaker
+chroma.WithMaxK("year", "rating", 2)
 ```
 {% /Tab %}
 
@@ -218,6 +270,20 @@ K("year");       // References the "year" metadata field
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Built-in score key
+chroma.KScore  // References "#score" - the search/ranking score
+
+// Metadata field keys are passed as strings
+"category"   // References the "category" metadata field
+"priority"   // References the "priority" metadata field
+"year"       // References the "year" metadata field
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Common Patterns
@@ -251,6 +317,19 @@ const search = new Search()
     new MinK([K.SCORE], 2)
   ))
   .limit(20);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Top 2 articles per category by relevance
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("climate change impacts")),
+        chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 2)),
+        chroma.WithPage(chroma.WithLimit(20)),
+    ),
+)
 ```
 {% /Tab %}
 
@@ -288,6 +367,19 @@ const search = new Search()
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Top 1 article per (category, year) combination
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("renewable energy")),
+        chroma.WithGroupBy("category", "year", chroma.WithMinK(chroma.KScore, 1)),
+        chroma.WithPage(chroma.WithLimit(30)),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ### Multiple Ranking Keys with Tiebreakers
@@ -319,6 +411,19 @@ const search = new Search()
     new MinK([K("priority"), K.SCORE], 2)
   ))
   .limit(20);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Top 2 per category: sort by priority first, then by score
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("artificial intelligence")),
+        chroma.WithGroupBy("category", chroma.WithMinK("priority", chroma.KScore, 2)),
+        chroma.WithPage(chroma.WithLimit(20)),
+    ),
+)
 ```
 {% /Tab %}
 
@@ -407,6 +512,20 @@ const search = new Search()
   .rank(Knn({ query: "search query" }))
   .groupBy(new GroupBy([K("category")], new MinK([K.SCORE], 5)))
   .limit(50);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Request top 5 per category, but "rare_category" only has 2 documents
+// Result: "rare_category" returns 2, other categories return up to 5
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("search query")),
+        chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 5)),
+        chroma.WithPage(chroma.WithLimit(50)),
+    ),
+)
 ```
 {% /Tab %}
 

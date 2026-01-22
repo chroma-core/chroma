@@ -73,4 +73,34 @@ const client = new ChromaClient({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+Then use the Go client to connect to the server:
+
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewHTTPClient()
+if err != nil {
+    log.Fatalf("Error creating client: %v", err)
+}
+defer client.Close()
+```
+
+If you run your Chroma server using a different configuration, or [deploy](../../guides/deploy/client-server-mode) your Chroma server, you can specify the base URL:
+
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewHTTPClient(
+    chroma.WithBaseURL("https://my-chroma-server.com:8080"),
+)
+if err != nil {
+    log.Fatalf("Error creating client: %v", err)
+}
+defer client.Close()
+```
+
+{% /Tab %}
+
 {% /Tabs %}

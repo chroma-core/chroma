@@ -36,6 +36,14 @@ const collection = await client.createCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+collection, err := client.CreateCollection(ctx, "my_collection")
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 Note that collection names must be **unique** inside a Chroma database. If you try to create a collection with a name of an existing one, you will see an exception.
@@ -211,6 +219,21 @@ let collection = await client.createCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithCollectionMetadataCreate(
+        chroma.NewMetadata(
+            chroma.NewStringAttribute("description", "my first Chroma collection"),
+            chroma.NewStringAttribute("created", time.Now().String()),
+        ),
+    ),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Getting Collections
@@ -320,6 +343,41 @@ const [col1, col2] = client.getCollections([
 
 {% /Tab %}
 
+{% Tab label="go" %}
+There are several ways to get a collection after it was created.
+
+The `GetCollection` function will get a collection from Chroma by name:
+
+```go
+collection, err := client.GetCollection(ctx, "my-collection")
+```
+
+The `GetOrCreateCollection` function behaves similarly, but will create the collection if it doesn't exist:
+
+```go
+collection, err := client.GetOrCreateCollection(ctx, "my-collection",
+    chroma.WithCollectionMetadataCreate(
+        chroma.NewMetadata(chroma.NewStringAttribute("description", "...")),
+    ),
+)
+```
+
+The `ListCollections` function returns the collections you have in your Chroma database:
+
+```go
+collections, err := client.ListCollections(ctx)
+```
+
+By default, `ListCollections` returns up to 100 collections. You can use `limit` and `offset` options:
+
+```go
+firstBatch, err := client.ListCollections(ctx, chroma.ListWithLimit(100))
+secondBatch, err := client.ListCollections(ctx, chroma.ListWithLimit(100), chroma.ListWithOffset(100))
+subset, err := client.ListCollections(ctx, chroma.ListWithLimit(20), chroma.ListWithOffset(50))
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 ## Modifying Collections
@@ -346,6 +404,17 @@ await collection.modify({
   name: "new-name",
   metadata: { description: "new description" },
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+err = collection.ModifyName(ctx, "new-name")
+err = collection.ModifyMetadata(ctx, chroma.NewMetadata(
+    chroma.NewStringAttribute("description", "new description"),
+))
 ```
 
 {% /Tab %}
@@ -378,6 +447,14 @@ await client.deleteCollection({ name: "my-collection" });
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+err = client.DeleteCollection(ctx, "my-collection")
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Convenience Methods
@@ -403,6 +480,15 @@ collection.peek()
 ```typescript
 await collection.count();
 await collection.peek();
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+count, err := collection.Count(ctx)
+results, err := collection.Get(ctx, chroma.WithLimitGet(10)) // peek equivalent
 ```
 
 {% /Tab %}

@@ -37,6 +37,20 @@ const client = new CloudClient({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewCloudClient(
+    chroma.WithCloudAPIKey("Chroma Cloud API key"),
+    chroma.WithDatabaseAndTenant("Database name", "Tenant ID"),
+)
+defer client.Close()
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 The `CloudClient` can be instantiated just with the API key argument. In which case, we will resolve the tenant and DB from Chroma Cloud. Note our auto-resolution will work only if the provided API key is scoped to a single DB.
@@ -57,6 +71,15 @@ client = chromadb.CloudClient()
 
 ```typescript
 const client = new CloudClient();
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+client, err := chroma.NewCloudClient()
+defer client.Close()
 ```
 
 {% /Tab %}
@@ -144,6 +167,44 @@ const client = new ChromaClient({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+To connect with the Go client, you must connect to a Chroma server.
+
+You can run a Chroma server locally using the CLI or Docker:
+
+```terminal
+npx chroma run --path ./getting-started
+```
+
+Or with Docker:
+
+```terminal
+docker pull chromadb/chroma
+docker run -p 8000:8000 chromadb/chroma
+```
+
+With a Chroma server running, connect using `NewHTTPClient`:
+
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewHTTPClient()
+defer client.Close()
+```
+
+By default, the client connects to `http://localhost:8000`. For custom settings:
+
+```go
+client, err := chroma.NewHTTPClient(
+    chroma.WithBaseURL("http://localhost:9000"),
+    chroma.WithDatabaseAndTenant("my-db", "default_tenant"),
+)
+defer client.Close()
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 The client object has a few useful convenience methods.
@@ -167,6 +228,16 @@ client.reset()
 ```typescript
 await client.heartbeat();
 await client.reset();
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+ctx := context.Background()
+client.Heartbeat(ctx)
+client.Reset(ctx)
 ```
 
 {% /Tab %}

@@ -44,6 +44,34 @@ const collectionGet = await client.getCollection({name:"name", embeddingFunction
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/jina"
+)
+
+// Create Jina embedding function
+ef, err := jina.NewJinaEmbeddingFunction(
+    os.Getenv("JINA_API_KEY"),
+    jina.WithModel("jina-embeddings-v2-base-en"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 You can pass in an optional `model_name` argument, which lets you choose which Jina model to use. By default, Chroma uses `jina-embedding-v2-base-en`.

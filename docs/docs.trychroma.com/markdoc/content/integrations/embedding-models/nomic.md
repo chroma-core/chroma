@@ -38,6 +38,31 @@ The `query_config` parameter allows you to specify a different task type for que
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/nomic"
+)
+
+// Create Nomic embedding function
+ef, err := nomic.NewNomicEmbeddingFunction(
+    os.Getenv("NOMIC_API_KEY"),
+    nomic.WithModel("nomic-embed-text-v1"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"Hello, world!", "How are you?"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 {% Banner type="tip" %}

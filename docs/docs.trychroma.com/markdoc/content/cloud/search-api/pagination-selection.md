@@ -43,6 +43,26 @@ const search3 = new Search();  // Be careful with large collections!
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Limit results
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithPage(chroma.WithLimit(10)),  // Return top 10 results
+    ),
+)
+
+// Pagination with offset
+result, err = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithPage(chroma.WithLimit(10), chroma.WithOffset(20)),  // Skip first 20, return next 10
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Limit Parameters
@@ -88,7 +108,7 @@ const pageSize = 10;
 // Page 0: Results 1-10
 const page0 = new Search().limit(pageSize, 0);
 
-// Page 1: Results 11-20  
+// Page 1: Results 11-20
 const page1 = new Search().limit(pageSize, 10);
 
 // Page 2: Results 21-30
@@ -97,6 +117,30 @@ const page2 = new Search().limit(pageSize, 20);
 // General formula
 function getPage(pageNumber: number, pageSize = 10) {
   return new Search().limit(pageSize, pageNumber * pageSize);
+}
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Page through results (0-indexed)
+pageSize := 10
+
+// Page 0: Results 1-10
+result, _ := collection.Search(ctx,
+    chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(pageSize), chroma.WithOffset(0))),
+)
+
+// Page 1: Results 11-20
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(pageSize), chroma.WithOffset(10))),
+)
+
+// General formula
+func getPage(collection *chroma.Collection, ctx context.Context, pageNumber, pageSize int) (*chroma.SearchResult, error) {
+    return collection.Search(ctx,
+        chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(pageSize), chroma.WithOffset(pageNumber*pageSize))),
+    )
 }
 ```
 {% /Tab %}
@@ -154,6 +198,33 @@ const search4 = new Search().select(K.DOCUMENT, K.SCORE, "title", "author");
 // Select all available fields
 const search5 = new Search().selectAll();
 // Returns: IDs, documents, embeddings, metadata, scores
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Select specific fields
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+
+// Select metadata fields
+result, err = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithSelect("title", "author", "date"),
+    ),
+)
+
+// Mix predefined and metadata fields
+result, err = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, "title", "author"),
+    ),
+)
 ```
 {% /Tab %}
 
@@ -219,6 +290,31 @@ const search4 = new Search().limit(100).selectAll();
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Fast - minimal data
+result, _ := collection.Search(ctx,
+    chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(100))),
+)
+
+// Moderate - just what you need
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithPage(chroma.WithLimit(100)),
+        chroma.WithSelect(chroma.KScore, "title", "date"),
+    ),
+)
+
+// Slower - large fields
+result, _ = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithPage(chroma.WithLimit(100)),
+        chroma.WithSelect(chroma.KDocument, chroma.KEmbedding),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Edge Cases
@@ -240,6 +336,18 @@ search = Search().where(K("status") == "active")  # No limit()
 ```typescript
 // Attempts to return ALL matching documents
 const search = new Search().where(K("status").eq("active"));  // No limit()
+// Chroma Cloud: Results capped by quota
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Attempts to return ALL matching documents
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("status", "active")),
+    ),
+)
 // Chroma Cloud: Results capped by quota
 ```
 {% /Tab %}
@@ -271,6 +379,19 @@ const search = new Search().select("title", "non_existent_field");
 
 // Result metadata will only contain "title" if it exists
 // "non_existent_field" will not appear in the metadata object at all
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// If "non_existent_field" doesn't exist
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithSelect("title", "non_existent_field"),
+    ),
+)
+// Result metadata will only contain "title" if it exists
+// "non_existent_field" will not appear in the metadata at all
 ```
 {% /Tab %}
 
