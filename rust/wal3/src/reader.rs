@@ -1,5 +1,5 @@
 // NOTE(rescrv):  All caches align to storage.  For now, implement without caching.  Caching
-// should/could literally be a layer over sterage, so add it later once correctness without caching
+// should/could literally be a layer over storage, so add it later once correctness without caching
 // is ensured by adequate testing.
 
 use std::sync::Arc;
