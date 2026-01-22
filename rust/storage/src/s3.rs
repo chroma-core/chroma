@@ -51,50 +51,6 @@ pub struct DeletedObjects {
     pub errors: Vec<StorageError>,
 }
 
-/// Options for creating an S3Storage instance at runtime with explicit credentials.
-/// This is useful for connecting to customer S3 buckets or S3-compatible services
-/// where credentials are provided dynamically rather than via config files.
-#[derive(Clone, Debug)]
-pub struct S3StorageOptions {
-    pub bucket_name: String,
-    pub region: String,
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub session_token: Option<String>,
-    pub custom_endpoint: Option<String>,
-}
-
-impl S3StorageOptions {
-    /// Create a new S3StorageOptions with required fields.
-    pub fn new(
-        bucket_name: impl Into<String>,
-        region: impl Into<String>,
-        access_key_id: impl Into<String>,
-        secret_access_key: impl Into<String>,
-    ) -> Self {
-        Self {
-            bucket_name: bucket_name.into(),
-            region: region.into(),
-            access_key_id: access_key_id.into(),
-            secret_access_key: secret_access_key.into(),
-            session_token: None,
-            custom_endpoint: None,
-        }
-    }
-
-    /// Set the session token for temporary credentials (e.g., from STS AssumeRole).
-    pub fn with_session_token(mut self, session_token: impl Into<String>) -> Self {
-        self.session_token = Some(session_token.into());
-        self
-    }
-
-    /// Set a custom endpoint URL for S3-compatible services (e.g., LocalStack, MinIO).
-    pub fn with_custom_endpoint(mut self, custom_endpoint: impl Into<String>) -> Self {
-        self.custom_endpoint = Some(custom_endpoint.into());
-        self
-    }
-}
-
 #[derive(Clone)]
 pub struct S3Storage {
     pub(crate) bucket: String,
@@ -118,63 +74,6 @@ impl S3Storage {
             download_part_size_bytes,
             metrics: StorageMetrics::default(),
         }
-    }
-
-    /// Create an S3Storage instance from runtime options with explicit credentials.
-    /// This is useful for connecting to customer S3 buckets or S3-compatible services
-    /// where credentials are provided dynamically.
-    pub async fn from_options(options: S3StorageOptions) -> Result<Self, StorageConfigError> {
-        use super::config::S3StorageConfig;
-
-        // Use same timeout/retry/stall defaults as try_from_config() to ensure
-        // consistent resilience guarantees across both construction paths
-        let defaults = S3StorageConfig::default();
-        let attempt_divisor = u64::from(defaults.request_retry_count.max(1));
-        let timeout_config = TimeoutConfigBuilder::default()
-            .connect_timeout(Duration::from_millis(defaults.connect_timeout_ms))
-            .operation_timeout(Duration::from_millis(defaults.request_timeout_ms))
-            .operation_attempt_timeout(Duration::from_millis(
-                (defaults.request_timeout_ms / attempt_divisor).max(1),
-            ))
-            .build();
-        let stalled_config = StalledStreamProtectionConfig::enabled()
-            .upload_enabled(true)
-            .grace_period(Duration::from_millis(defaults.stall_protection_ms))
-            .build();
-        let retry_config = RetryConfig::standard().with_max_attempts(defaults.request_retry_count);
-
-        let cred = aws_sdk_s3::config::Credentials::new(
-            &options.access_key_id,
-            &options.secret_access_key,
-            options.session_token.clone(),
-            None,
-            "explicit-credentials",
-        );
-
-        let mut config_builder = aws_sdk_s3::config::Builder::new()
-            .credentials_provider(cred)
-            .behavior_version_latest()
-            .region(aws_sdk_s3::config::Region::new(options.region.clone()))
-            .timeout_config(timeout_config)
-            .stalled_stream_protection(stalled_config)
-            .retry_config(retry_config);
-
-        // If a custom endpoint URL is provided, use path-style addressing
-        // (required for most S3-compatible services like LocalStack, MinIO)
-        if let Some(custom_endpoint) = &options.custom_endpoint {
-            config_builder = config_builder
-                .endpoint_url(custom_endpoint)
-                .force_path_style(true);
-        }
-
-        let client = aws_sdk_s3::Client::from_conf(config_builder.build());
-
-        Ok(S3Storage::new(
-            &options.bucket_name,
-            client,
-            defaults.upload_part_size_bytes,
-            defaults.download_part_size_bytes,
-        ))
     }
 
     pub(super) async fn create_bucket(&self) -> Result<(), String> {
@@ -1769,30 +1668,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_from_options_basic() {
-        let options = S3StorageOptions::new("test-bucket", "us-east-1", "minio", "minio123")
-            .with_custom_endpoint("http://127.0.0.1:9000");
+    async fn test_k8s_integration_explicit_credentials() {
+        use chroma_config::Configurable;
 
-        let storage = S3Storage::from_options(options).await.unwrap();
+        let config = StorageConfig::S3(crate::config::S3StorageConfig {
+            bucket: "test-explicit-creds".to_string(),
+            credentials: S3CredentialsConfig::Explicit {
+                access_key_id: "minio".to_string(),
+                secret_access_key: "minio123".to_string(),
+                session_token: None,
+                custom_endpoint: Some("http://127.0.0.1:9000".to_string()),
+                region: "us-east-1".to_string(),
+            },
+            ..Default::default()
+        });
 
-        assert_eq!(storage.bucket, "test-bucket");
-        assert_eq!(storage.upload_part_size_bytes, 5 * 1024 * 1024);
-        assert_eq!(storage.download_part_size_bytes, 8 * 1024 * 1024);
-    }
+        let storage =
+            S3Storage::try_from_config(&config, &chroma_config::registry::Registry::default())
+                .await
+                .unwrap();
 
-    #[tokio::test]
-    async fn test_from_options_with_custom_settings() {
-        let options =
-            S3StorageOptions::new("custom-bucket", "us-west-2", "access-key", "secret-key")
-                .with_custom_endpoint("http://127.0.0.1:9000")
-                .with_session_token("session-token");
+        assert_eq!(storage.bucket, "test-explicit-creds");
+        storage.create_bucket().await.unwrap();
 
-        let storage = S3Storage::from_options(options).await.unwrap();
+        // Verify we can actually use the storage
+        let test_data = "test with explicit credentials";
+        storage
+            .put_bytes(
+                "explicit-test-key",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap();
 
-        assert_eq!(storage.bucket, "custom-bucket");
-        // Uses hardcoded defaults
-        assert_eq!(storage.upload_part_size_bytes, 5 * 1024 * 1024);
-        assert_eq!(storage.download_part_size_bytes, 8 * 1024 * 1024);
+        let result = storage
+            .get("explicit-test-key", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(result.as_ref(), test_data.as_bytes());
     }
 
     #[test]

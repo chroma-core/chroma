@@ -21,7 +21,6 @@ use thiserror::Error;
 pub use config::{S3CredentialsConfig, S3StorageConfig};
 pub use s3::{
     s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name, S3Storage,
-    S3StorageOptions,
 };
 
 /// A StorageError captures all kinds of errors that can come from storage.
