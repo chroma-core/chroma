@@ -667,6 +667,7 @@ message FinishAttachedFunctionDeletionResponse {}
 
 message IncrementCompactionFailureCountRequest {
   string collection_id = 1;
+  optional string database_name = 2;
 }
 
 message IncrementCompactionFailureCountResponse {}

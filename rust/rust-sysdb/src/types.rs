@@ -496,6 +496,11 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdateCollectionCursor {
+    pub compaction_failure_count_increment: Option<u32>,
+}
+
 /// Internal request for updating a collection.
 #[derive(Debug, Clone)]
 pub struct UpdateCollectionRequest {
@@ -513,6 +518,8 @@ pub struct UpdateCollectionRequest {
     pub reset_metadata: bool,
     // New configuration to set (optional - None means don't change)
     pub new_configuration: Option<UpdateCollectionConfiguration>,
+    // Cursor updates (optional - None means don't change)
+    pub cursor_updates: Option<UpdateCollectionCursor>,
 }
 
 impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
@@ -573,6 +580,7 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             metadata,
             reset_metadata,
             new_configuration,
+            cursor_updates: None,
         })
     }
 }

@@ -8,11 +8,12 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments, CollectionFlushInfo,
-    CollectionFlushInfoConversionError, CollectionMetadataUpdate, CountCollectionsError,
-    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DatabaseName, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    chroma_proto, chroma_proto::CollectionVersionInfo,
+    chroma_proto::IncrementCompactionFailureCountRequest, CollectionAndSegments,
+    CollectionFlushInfo, CollectionFlushInfoConversionError, CollectionMetadataUpdate,
+    CountCollectionsError, CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantResponse, Database, DatabaseName, DeleteCollectionError,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
     GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListAttachedFunctionsError, ListCollectionVersionsError,
@@ -717,9 +718,13 @@ impl SysDb {
     pub async fn increment_compaction_failure_count(
         &mut self,
         collection_id: CollectionUuid,
+        database_name: &DatabaseName,
     ) -> Result<(), IncrementCompactionFailureCountError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.increment_compaction_failure_count(collection_id).await,
+            SysDb::Grpc(grpc) => {
+                grpc.increment_compaction_failure_count(collection_id, database_name)
+                    .await
+            }
             SysDb::Test(test) => {
                 test.increment_compaction_failure_count(collection_id);
                 Ok(())
@@ -2027,12 +2032,17 @@ impl GrpcSysDb {
     async fn increment_compaction_failure_count(
         &mut self,
         collection_id: CollectionUuid,
+        database_name: &DatabaseName,
     ) -> Result<(), IncrementCompactionFailureCountError> {
-        let req = chroma_proto::IncrementCompactionFailureCountRequest {
+        let req = IncrementCompactionFailureCountRequest {
             collection_id: collection_id.0.to_string(),
+            database_name: Some(database_name.clone().into_string()),
         };
 
-        self.client.increment_compaction_failure_count(req).await?;
+        let _res = self
+            .client(database_name)?
+            .increment_compaction_failure_count(req)
+            .await?;
         Ok(())
     }
 
@@ -2500,6 +2510,8 @@ pub enum IncrementCompactionFailureCountError {
     FailedToIncrement(#[from] tonic::Status),
     #[error("SQLite error: {0}")]
     Sqlite(#[from] sqlx::Error),
+    #[error("Client resolution error: {0}")]
+    ClientResolution(#[from] ClientResolutionError),
     #[error("Unimplemented: increment_compaction_failure_count is not supported for SqliteSysDb")]
     Unimplemented,
 }
@@ -2509,6 +2521,7 @@ impl ChromaError for IncrementCompactionFailureCountError {
         match self {
             IncrementCompactionFailureCountError::FailedToIncrement(_) => ErrorCodes::Internal,
             IncrementCompactionFailureCountError::Sqlite(_) => ErrorCodes::Internal,
+            IncrementCompactionFailureCountError::ClientResolution(_) => ErrorCodes::Internal,
             IncrementCompactionFailureCountError::Unimplemented => ErrorCodes::Internal,
         }
     }

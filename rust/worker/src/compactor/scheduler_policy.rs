@@ -81,8 +81,8 @@ mod tests {
         let collections = vec![
             CollectionRecord {
                 collection_id: collection_uuid_1,
-                tenant_id: "test".to_string(),
                 database_name: "test_db".to_string(),
+                tenant_id: "test".to_string(),
                 last_compaction_time: 1,
                 first_record_time: 1,
                 offset: 0,
@@ -91,8 +91,8 @@ mod tests {
             },
             CollectionRecord {
                 collection_id: collection_uuid_2,
-                tenant_id: "test".to_string(),
                 database_name: "test_db".to_string(),
+                tenant_id: "test".to_string(),
                 last_compaction_time: 0,
                 first_record_time: 0,
                 offset: 0,
