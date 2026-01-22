@@ -58,6 +58,7 @@ impl std::fmt::Debug for S3CredentialsConfig {
             Self::AWS => write!(f, "AWS"),
             Self::Explicit {
                 access_key_id,
+                session_token,
                 custom_endpoint,
                 region,
                 ..
@@ -65,7 +66,13 @@ impl std::fmt::Debug for S3CredentialsConfig {
                 .debug_struct("Explicit")
                 .field("access_key_id", access_key_id)
                 .field("secret_access_key", &"[REDACTED]")
-                .field("session_token", &"[REDACTED]")
+                .field(
+                    "session_token",
+                    &session_token.as_ref().map(|_| "[REDACTED]"),
+                )
+                .field("custom_endpoint", custom_endpoint)
+                .field("region", region)
+                .finish(),
                 .field("custom_endpoint", custom_endpoint)
                 .field("region", region)
                 .finish(),
