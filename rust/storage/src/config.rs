@@ -49,6 +49,33 @@ pub enum S3CredentialsConfig {
     },
 }
 
+impl std::fmt::Debug for S3CredentialsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Minio => write!(f, "Minio"),
+            Self::Localhost => write!(f, "Localhost"),
+            Self::AWS => write!(f, "AWS"),
+            Self::Explicit {
+                access_key_id: _,
+                secret_access_key: _,
+                session_token,
+                custom_endpoint,
+                region,
+            } => f
+                .debug_struct("Explicit")
+                .field("access_key_id", &"[REDACTED]")
+                .field("secret_access_key", &"[REDACTED]")
+                .field(
+                    "session_token",
+                    &session_token.as_ref().map(|_| "[REDACTED]"),
+                )
+                .field("custom_endpoint", custom_endpoint)
+                .field("region", region)
+                .finish(),
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Clone, Serialize)]
 /// The configuration for the s3 storage type
 /// # Fields
@@ -77,27 +104,27 @@ impl S3StorageConfig {
         "chroma-storage".to_string()
     }
 
-    pub fn default_connect_timeout_ms() -> u64 {
+    fn default_connect_timeout_ms() -> u64 {
         5000
     }
 
-    pub fn default_request_timeout_ms() -> u64 {
+    fn default_request_timeout_ms() -> u64 {
         60000
     }
 
-    pub fn default_request_retry_count() -> u32 {
+    fn default_request_retry_count() -> u32 {
         3
     }
 
-    pub fn default_stall_protection_ms() -> u64 {
+    fn default_stall_protection_ms() -> u64 {
         15000
     }
 
-    pub fn default_upload_part_size_bytes() -> usize {
+    fn default_upload_part_size_bytes() -> usize {
         5 * 1024 * 1024
     }
 
-    pub fn default_download_part_size_bytes() -> usize {
+    fn default_download_part_size_bytes() -> usize {
         8 * 1024 * 1024
     }
 }
