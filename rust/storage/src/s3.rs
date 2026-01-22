@@ -358,7 +358,6 @@ impl S3Storage {
     }
 
     /// Get object metadata without downloading the content.
-    /// Use this when you only need metadata (etag, content_length, content_type, last_modified).
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn head_object(&self, key: &str) -> Result<S3ObjectMetadata, StorageError> {
         let head_res = self
@@ -370,13 +369,19 @@ impl S3Storage {
             .await;
 
         match head_res {
-            Ok(res) => Ok(S3ObjectMetadata {
-                object_key: key.to_string(),
-                etag: res.e_tag.map(ETag),
-                content_length: res.content_length.unwrap_or(0),
-                content_type: res.content_type,
-                last_modified: res.last_modified,
-            }),
+            Ok(res) => {
+                let last_modified = res.last_modified.map(|dt| {
+                    std::time::UNIX_EPOCH
+                        + Duration::from_secs_f64(dt.secs() as f64 + dt.subsec_nanos() as f64 / 1e9)
+                });
+                Ok(S3ObjectMetadata {
+                    object_key: key.to_string(),
+                    etag: res.e_tag.map(ETag),
+                    content_length: res.content_length.unwrap_or(0),
+                    content_type: res.content_type,
+                    last_modified,
+                })
+            }
             Err(e) => match e {
                 SdkError::ServiceError(err) => {
                     let inner = err.into_err();
@@ -386,27 +391,23 @@ impl S3Storage {
                             source: Arc::new(inner),
                         })
                     } else {
-                        Err(StorageError::Generic {
-                            source: Arc::new(inner),
-                        })
+                        let code = inner.code().map(|code| code.to_string());
+                        match code.as_deref() {
+                            Some("SlowDown") => Err(StorageError::Backoff),
+                            Some("AccessDenied") => Err(StorageError::PermissionDenied {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            }),
+                            _ => Err(StorageError::Generic {
+                                source: Arc::new(inner),
+                            }),
+                        }
                     }
                 }
                 _ => Err(StorageError::Generic {
                     source: Arc::new(e),
                 }),
             },
-        }
-    }
-
-    /// Check if an object exists at the given key.
-    /// Returns Ok(true) if the object exists, Ok(false) if not found,
-    /// or an error for other failures.
-    #[tracing::instrument(skip(self), level = "trace")]
-    pub async fn object_exists(&self, key: &str) -> Result<bool, StorageError> {
-        match self.head_object(key).await {
-            Ok(_) => Ok(true),
-            Err(StorageError::NotFound { .. }) => Ok(false),
-            Err(e) => Err(e),
         }
     }
 
@@ -1578,36 +1579,6 @@ mod tests {
             }
             other => panic!("Expected NotFound error, got: {:?}", other),
         }
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_object_exists() {
-        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
-
-        let test_data = "test data for object exists";
-        let key = "test-object-exists";
-
-        storage
-            .put_bytes(key, test_data.as_bytes().to_vec(), PutOptions::default())
-            .await
-            .unwrap();
-
-        let exists = storage.object_exists(key).await.unwrap();
-        assert!(
-            exists,
-            "object_exists should return true for existing object"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_object_exists_not_found() {
-        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
-
-        let exists = storage.object_exists("nonexistent-key").await.unwrap();
-        assert!(
-            !exists,
-            "object_exists should return false for non-existent object"
-        );
     }
 
     #[tokio::test]
