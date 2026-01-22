@@ -40,8 +40,9 @@ pub enum S3CredentialsConfig {
     /// credentials, rather than using the default AWS credential chain.
     Explicit {
         access_key_id: String,
+        #[serde(skip_serializing)]
         secret_access_key: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing)]
         session_token: Option<String>,
         #[serde(default)]
         custom_endpoint: Option<String>,
