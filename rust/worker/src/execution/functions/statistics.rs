@@ -1257,6 +1257,7 @@ mod tests {
         sysdb
             .flush_compaction(
                 tenant.clone(),
+                DatabaseName::new(db.clone()).expect("database name should be valid"),
                 collection_id,
                 -1,
                 0,

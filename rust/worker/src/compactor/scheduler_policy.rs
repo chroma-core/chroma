@@ -1,4 +1,5 @@
 use chroma_log::CollectionRecord;
+use chroma_types::DatabaseName;
 
 use crate::compactor::types::CompactionJob;
 
@@ -37,6 +38,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
     ) -> Vec<CompactionJob> {
         let mut collections = collections;
         collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
+        tracing::info!("Collections: {collections:?}, number_jobs: {number_jobs}");
         let number_tasks = if number_jobs > collections.len() as i32 {
             collections.len() as i32
         } else {
@@ -44,8 +46,20 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         };
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
+            let database_name = match DatabaseName::new(collection.database_name.clone()) {
+                Some(db_name) => db_name,
+                None => {
+                    tracing::warn!(
+                        "Invalid database name for collection {}: {}",
+                        collection.collection_id,
+                        collection.database_name
+                    );
+                    continue;
+                }
+            };
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
+                database_name,
             });
         }
         tasks

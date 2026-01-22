@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime};
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
 use chroma_memberlist::memberlist_provider::Memberlist;
-use chroma_sysdb::{GetCollectionsOptions, SysDb};
+use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_types::{CollectionUuid, DatabaseName, JobId};
 use figment::providers::Env;
 use figment::Figment;
@@ -184,7 +184,12 @@ impl Scheduler {
             let result = self
                 .sysdb
                 .get_collections(GetCollectionsOptions {
-                    collection_id: Some(collection_info.collection_id),
+                    collection_ids: Some(vec![collection_info.collection_id]),
+                    database_or_topology: collection_info
+                        .topology_name
+                        .map(DatabaseOrTopology::Topology),
+                    limit: Some(1),
+                    offset: 0,
                     ..Default::default()
                 })
                 .await;
@@ -210,32 +215,40 @@ impl Scheduler {
 
                     // TODO: make querying the last compaction time in batch
                     let log_position_in_collection = collection[0].log_position;
-                    let tenant_ids = vec![collection[0].tenant.clone()];
-                    let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
+                    // let tenant_ids = vec![collection[0].tenant.clone()];
+                    // let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
 
-                    let last_compaction_time = match tenant {
-                        Ok(tenant) => {
-                            if tenant.is_empty() {
-                                tracing::info!(
-                                    "Ignoring collection: {:?}",
-                                    collection_info.collection_id
-                                );
-                                continue;
-                            }
-                            tenant[0].last_compaction_time
-                        }
-                        Err(e) => {
-                            tracing::error!("Error: {:?}", e);
-                            // Ignore this collection id for this compaction iteration
-                            tracing::info!(
-                                "Ignoring collection: {:?}",
-                                collection_info.collection_id
-                            );
-                            continue;
-                        }
+                    // let last_compaction_time = match tenant {
+                    //     Ok(tenant) => {
+                    //         if tenant.is_empty() {
+                    //             tracing::info!(
+                    //                 "Ignoring collection: {:?}",
+                    //                 collection_info.collection_id
+                    //             );
+                    //             continue;
+                    //         }
+                    //         tenant[0].last_compaction_time
+                    //     }
+                    //     Err(e) => {
+                    //         tracing::error!("Error: {:?}", e);
+                    //         // Ignore this collection id for this compaction iteration
+                    //         tracing::info!(
+                    //             "Ignoring collection: {:?}",
+                    //             collection_info.collection_id
+                    //         );
+                    //         continue;
+                    //     }
+                    // };
+                    use chroma_types::Tenant;
+                    let tenant = Tenant {
+                        id: collection[0].tenant.clone(),
+                        resource_name: None,
+                        last_compaction_time: collection[0].last_compaction_time_secs.clone()
+                            as i64,
                     };
 
-                    let mut offset = collection_info.first_log_offset;
+                    let mut offset = log_position_in_collection + 1;
+                    // let mut offset = collection[0].log_position + 1;
                     // offset in log is the first offset in the log that has not been compacted. Note that
                     // since the offset is the first offset of log we get from the log service, we should
                     // use this offset to pull data from the log service.
@@ -255,7 +268,8 @@ impl Scheduler {
                     collection_records.push(CollectionRecord {
                         collection_id: collection[0].collection_id,
                         tenant_id: collection[0].tenant.clone(),
-                        last_compaction_time,
+                        database_name: collection[0].database.clone(),
+                        last_compaction_time: tenant.last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
                         offset,
                         collection_version: collection[0].version,
@@ -304,7 +318,28 @@ impl Scheduler {
         self.job_queue.clear();
         let mut scheduled_collections = Vec::new();
         for record in collection_records {
-            if self.is_job_in_progress(&record.collection_id).await {
+            tracing::info!("Processing collection: {}", record.collection_id);
+            tracing::info!(
+                "in progress jobs: {} jobs - {:?}",
+                self.in_progress_jobs.len(),
+                self.in_progress_jobs.keys().collect::<Vec<_>>()
+            );
+            let database_name = match DatabaseName::new(record.database_name.clone()) {
+                Some(db_name) => db_name,
+                None => {
+                    tracing::warn!(
+                        "Invalid database name for collection {}: {}",
+                        record.collection_id,
+                        record.database_name
+                    );
+                    continue;
+                }
+            };
+
+            if self
+                .is_job_in_progress(&record.collection_id, &database_name)
+                .await
+            {
                 tracing::info!(
                     "Compaction for {} is already in progress, skipping",
                     record.collection_id
@@ -318,6 +353,7 @@ impl Scheduler {
                 );
                 self.job_queue.push(CompactionJob {
                     collection_id: record.collection_id,
+                    database_name,
                 });
                 self.oneoff_collections.remove(&record.collection_id);
                 if self.job_queue.len() == self.max_concurrent_jobs {
@@ -346,20 +382,26 @@ impl Scheduler {
         // At this point, nobody should modify the job queue and every collection
         // in the job queue will definitely be compacted. It is now safe to add
         // them to the in-progress set.
-        let job_ids: Vec<_> = self.job_queue.iter().map(|j| j.collection_id).collect();
-        for collection_id in job_ids {
+        let collection_ids: Vec<_> = self.job_queue.iter().map(|job| job.collection_id).collect();
+        for collection_id in collection_ids {
+            tracing::info!("Adding collection {} to in-progress set", collection_id);
             self.add_in_progress(collection_id);
         }
     }
 
-    async fn is_job_in_progress(&mut self, collection_id: &CollectionUuid) -> bool {
-        match self.in_progress_jobs.get(&(*collection_id).into()) {
+    async fn is_job_in_progress(
+        &mut self,
+        collection_id: &CollectionUuid,
+        _database_name: &DatabaseName,
+    ) -> bool {
+        let job_id = (*collection_id).into();
+        match self.in_progress_jobs.get(&job_id) {
             Some(job) if job.is_expired() => {
                 tracing::info!(
                     "Compaction for {} is expired, removing from dedup set.",
                     collection_id
                 );
-                self.fail_job((*collection_id).into()).await;
+                self.fail_job(job_id).await;
                 false
             }
             Some(_) => true,
@@ -372,9 +414,16 @@ impl Scheduler {
             collection_id.into(),
             InProgressJob::new(self.job_expiry_seconds),
         );
+        // print the jobs set contents
+        tracing::info!(
+            "in progress jobs: {} jobs - {:?}",
+            self.in_progress_jobs.len(),
+            self.in_progress_jobs.keys().collect::<Vec<_>>()
+        );
     }
 
     pub(crate) fn succeed_job(&mut self, job_id: JobId) {
+        tracing::info!("Compaction for {} just successfully finished!!!", job_id);
         if self.in_progress_jobs.remove(&job_id).is_none() {
             tracing::warn!(
                 "Expired compaction for {} just successfully finished.",
@@ -385,6 +434,7 @@ impl Scheduler {
 
     /// Marks a job as failed and persists the failure count to sysdb.
     pub(crate) async fn fail_job(&mut self, job_id: JobId) {
+        tracing::info!("FAILING compaction for {}!!!", job_id);
         if self.in_progress_jobs.remove(&job_id).is_none() {
             tracing::warn!(
                 "Expired compaction for {} just unsuccessfully finished.",

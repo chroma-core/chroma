@@ -360,6 +360,7 @@ impl CompactionContext {
     pub(crate) async fn run_get_logs(
         &mut self,
         collection_id: CollectionUuid,
+        database_name: chroma_types::DatabaseName,
         system: System,
         is_getting_compacted_logs: bool,
     ) -> Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError> {
@@ -368,6 +369,7 @@ impl CompactionContext {
         self.collection_info = OnceCell::new();
         let log_fetch_orchestrator = LogFetchOrchestrator::new(
             collection_id,
+            database_name,
             self.is_rebuild || is_getting_compacted_logs,
             self.fetch_log_batch_size,
             self.max_compaction_size,
@@ -613,6 +615,7 @@ impl CompactionContext {
 
     async fn run_backfill_attached_function_workflow(
         &mut self,
+        database_name: chroma_types::DatabaseName,
         system: System,
     ) -> Result<BackfillResult, CompactionError> {
         // See if we need backfill
@@ -626,6 +629,7 @@ impl CompactionContext {
         let log_fetch_records = match self
             .run_get_logs(
                 self.get_collection_info().map_err(CompactionError::CompactionContextError)?.collection_id,
+                database_name,
                 system.clone(),
                 true,
             )
@@ -730,10 +734,11 @@ impl CompactionContext {
     pub(crate) async fn run_compaction(
         &mut self,
         collection_id: CollectionUuid,
+        _database_name: chroma_types::DatabaseName,
         system: System,
     ) -> Result<CompactionResponse, CompactionError> {
         let result = self
-            .run_get_logs(collection_id, system.clone(), false)
+            .run_get_logs(collection_id, _database_name.clone(), system.clone(), false)
             .await?;
 
         let (log_fetch_records, _) = match result {
@@ -757,9 +762,11 @@ impl CompactionContext {
                     (backfill.materialized, backfill.collection_info)
                 } else {
                     // Try to run backfill workflow
-                    let fn_result =
-                        Box::pin(self.run_backfill_attached_function_workflow(system.clone()))
-                            .await?;
+                    let fn_result = Box::pin(self.run_backfill_attached_function_workflow(
+                        _database_name.clone(),
+                        system.clone(),
+                    ))
+                    .await?;
 
                     match fn_result {
                         BackfillResult::BackfillCompleted {
@@ -893,6 +900,7 @@ pub enum CompactionResponse {
 pub async fn compact(
     system: System,
     collection_id: CollectionUuid,
+    database_name: chroma_types::DatabaseName,
     is_rebuild: bool,
     fetch_log_batch_size: u32,
     max_compaction_size: usize,
@@ -925,7 +933,8 @@ pub async fn compact(
         compaction_context.set_poison_offset(poison_offset);
     }
 
-    let result = Box::pin(compaction_context.run_compaction(collection_id, system)).await;
+    let result =
+        Box::pin(compaction_context.run_compaction(collection_id, database_name, system)).await;
     Box::pin(compaction_context.cleanup()).await;
     result
 }
@@ -2844,6 +2853,7 @@ mod tests {
         sysdb
             .flush_compaction(
                 tenant.clone(),
+                DatabaseName::new(db.clone()).expect("database name should be valid"),
                 collection_id,
                 -1,
                 0,
