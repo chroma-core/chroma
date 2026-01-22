@@ -195,6 +195,153 @@ for (const [i, product] of products.entries()) {
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+type Product struct {
+    ID             string
+    Name           string
+    Description    string
+    Price          float32
+    Category       string
+    Rating         float32
+    ImageURL       string
+    RelevanceScore float64
+}
+
+func searchProducts(
+    ctx context.Context,
+    col chroma.Collection,
+    userQuery string,
+    minPrice *float32,
+    maxPrice *float32,
+    category *string,
+    inStockOnly bool,
+    page int,
+    pageSize int,
+) ([]Product, error) {
+    // Build filter conditions
+    var filters []chroma.WhereClause
+
+    if inStockOnly {
+        filters = append(filters, chroma.EqBool(chroma.K("in_stock"), true))
+    }
+
+    if category != nil {
+        filters = append(filters, chroma.EqString(chroma.K("category"), *category))
+    }
+
+    if minPrice != nil {
+        filters = append(filters, chroma.GteFloat(chroma.K("price"), *minPrice))
+    }
+
+    if maxPrice != nil {
+        filters = append(filters, chroma.LteFloat(chroma.K("price"), *maxPrice))
+    }
+
+    // Build search request
+    opts := []chroma.SearchOption{
+        chroma.WithKnnRank(
+            chroma.KnnQueryText(userQuery),
+            chroma.WithKnnLimit(100),
+        ),
+        chroma.WithPage(
+            chroma.WithLimit(pageSize),
+            chroma.WithOffset(page*pageSize),
+        ),
+        chroma.WithSelect(
+            chroma.KDocument, chroma.KScore,
+            chroma.K("name"), chroma.K("price"), chroma.K("category"),
+            chroma.K("rating"), chroma.K("image_url"),
+        ),
+    }
+
+    if len(filters) > 0 {
+        opts = append(opts, chroma.WithFilter(chroma.And(filters...)))
+    }
+
+    // Execute search
+    result, err := col.Search(ctx, chroma.NewSearchRequest(opts...))
+    if err != nil {
+        return nil, err
+    }
+
+    // Format results
+    sr := result.(*chroma.SearchResultImpl)
+    if len(sr.IDs) == 0 || len(sr.IDs[0]) == 0 {
+        return []Product{}, nil
+    }
+
+    products := make([]Product, 0, len(sr.IDs[0]))
+    for i, id := range sr.IDs[0] {
+        desc := ""
+        if len(sr.Documents[0]) > i {
+            if len(sr.Documents[0][i]) > 200 {
+                desc = sr.Documents[0][i][:200] + "..."
+            } else {
+                desc = sr.Documents[0][i]
+            }
+        }
+
+        meta := sr.Metadatas[0][i]
+        products = append(products, Product{
+            ID:             string(id),
+            Name:           meta["name"].(string),
+            Description:    desc,
+            Price:          float32(meta["price"].(float64)),
+            Category:       meta["category"].(string),
+            Rating:         float32(meta["rating"].(float64)),
+            ImageURL:       meta["image_url"].(string),
+            RelevanceScore: sr.Scores[0][i],
+        })
+    }
+
+    return products, nil
+}
+
+// Example usage
+func main() {
+    ctx := context.Background()
+    // ... client and collection setup ...
+
+    minPrice := float32(50)
+    maxPrice := float32(300)
+    category := "electronics"
+
+    products, err := searchProducts(
+        ctx,
+        collection,
+        "noise cancelling headphones for travel",
+        &minPrice,
+        &maxPrice,
+        &category,
+        true,  // inStockOnly
+        0,     // page
+        20,    // pageSize
+    )
+    if err != nil {
+        fmt.Printf("Search error: %v\n", err)
+        return
+    }
+
+    for i, product := range products {
+        fmt.Printf("%d. %s\n", i+1, product.Name)
+        fmt.Printf("   Price: $%.2f | Rating: %.1f/5\n", product.Price, product.Rating)
+        fmt.Printf("   %s\n", product.Description)
+        fmt.Printf("   Relevance: %.3f\n\n", product.RelevanceScore)
+    }
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 Example output:
@@ -434,6 +581,212 @@ for (const [i, rec] of recommendations.entries()) {
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "strings"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+type UserPreferences struct {
+    Interests      []string
+    FavoriteTopics []string
+    Categories     []string
+    Language       string
+    MinRating      float32
+}
+
+type Recommendation struct {
+    ID             string
+    Title          string
+    Description    string
+    Category       string
+    Author         string
+    Rating         float32
+    PublishedDate  string
+    ThumbnailURL   string
+    RelevanceScore float64
+}
+
+func getRecommendations(
+    ctx context.Context,
+    col chroma.Collection,
+    userID string,
+    prefs UserPreferences,
+    seenContentIDs []string,
+    numRecommendations int,
+) ([]Recommendation, error) {
+    // Build filter to exclude seen content and match preferences
+    var filters []chroma.WhereClause
+
+    // Exclude already seen content
+    if len(seenContentIDs) > 0 {
+        ids := make([]chroma.DocumentID, len(seenContentIDs))
+        for i, id := range seenContentIDs {
+            ids[i] = chroma.DocumentID(id)
+        }
+        filters = append(filters, chroma.IDNotIn(ids...))
+    }
+
+    // Filter by preferred categories
+    if len(prefs.Categories) > 0 {
+        filters = append(filters, chroma.InString(chroma.K("category"), prefs.Categories...))
+    }
+
+    // Filter by language preference
+    if prefs.Language != "" {
+        filters = append(filters, chroma.EqString(chroma.K("language"), prefs.Language))
+    }
+
+    // Filter by minimum rating (default 3.5)
+    minRating := prefs.MinRating
+    if minRating == 0 {
+        minRating = 3.5
+    }
+    filters = append(filters, chroma.GteFloat(chroma.K("rating"), minRating))
+
+    // Only show published content
+    filters = append(filters, chroma.EqString(chroma.K("status"), "published"))
+
+    // Create hybrid search combining multiple signals
+    interests := prefs.Interests
+    if len(interests) == 0 {
+        interests = []string{"general"}
+    }
+    userInterestQuery := strings.Join(interests, " ")
+    favoriteTopicsQuery := strings.Join(prefs.FavoriteTopics, " ")
+
+    // Build KNN ranks for RRF
+    knn1, err := chroma.NewKnnRank(
+        chroma.KnnQueryText(userInterestQuery),
+        chroma.WithKnnReturnRank(),
+        chroma.WithKnnLimit(200),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    knn2, err := chroma.NewKnnRank(
+        chroma.KnnQueryText(favoriteTopicsQuery),
+        chroma.WithKnnReturnRank(),
+        chroma.WithKnnLimit(200),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    // Use RRF to combine both signals (user interests weighted higher)
+    rrf, err := chroma.NewRrfRank(
+        chroma.WithRffRanks(
+            knn1.WithWeight(0.6),
+            knn2.WithWeight(0.4),
+        ),
+        chroma.WithRffK(60),
+    )
+    if err != nil {
+        return nil, err
+    }
+
+    // Build search request
+    opts := []chroma.SearchOption{
+        chroma.WithRank(rrf),
+        chroma.WithPage(chroma.WithLimit(numRecommendations)),
+        chroma.WithSelect(
+            chroma.KDocument, chroma.KScore,
+            chroma.K("title"), chroma.K("category"), chroma.K("author"),
+            chroma.K("rating"), chroma.K("published_date"), chroma.K("thumbnail_url"),
+        ),
+    }
+
+    if len(filters) > 0 {
+        opts = append(opts, chroma.WithFilter(chroma.And(filters...)))
+    }
+
+    // Execute search
+    result, err := col.Search(ctx, chroma.NewSearchRequest(opts...))
+    if err != nil {
+        return nil, err
+    }
+
+    // Format recommendations
+    sr := result.(*chroma.SearchResultImpl)
+    if len(sr.IDs) == 0 || len(sr.IDs[0]) == 0 {
+        return []Recommendation{}, nil
+    }
+
+    recommendations := make([]Recommendation, 0, len(sr.IDs[0]))
+    for i, id := range sr.IDs[0] {
+        desc := ""
+        if len(sr.Documents[0]) > i {
+            if len(sr.Documents[0][i]) > 150 {
+                desc = sr.Documents[0][i][:150] + "..."
+            } else {
+                desc = sr.Documents[0][i]
+            }
+        }
+
+        meta := sr.Metadatas[0][i]
+        recommendations = append(recommendations, Recommendation{
+            ID:             string(id),
+            Title:          meta["title"].(string),
+            Description:    desc,
+            Category:       meta["category"].(string),
+            Author:         meta["author"].(string),
+            Rating:         float32(meta["rating"].(float64)),
+            PublishedDate:  meta["published_date"].(string),
+            ThumbnailURL:   meta["thumbnail_url"].(string),
+            RelevanceScore: sr.Scores[0][i],
+        })
+    }
+
+    return recommendations, nil
+}
+
+// Example usage
+func main() {
+    ctx := context.Background()
+    // ... client and collection setup ...
+
+    prefs := UserPreferences{
+        Interests:      []string{"machine learning", "artificial intelligence", "data science"},
+        FavoriteTopics: []string{"neural networks", "deep learning", "transformers"},
+        Categories:     []string{"technology", "science", "research"},
+        Language:       "en",
+        MinRating:      4.0,
+    }
+
+    seenContent := []string{"content_001", "content_045", "content_123"}
+
+    recommendations, err := getRecommendations(
+        ctx,
+        collection,
+        "user_42",
+        prefs,
+        seenContent,
+        10,
+    )
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+
+    fmt.Println("Personalized Recommendations:")
+    for i, rec := range recommendations {
+        fmt.Printf("\n%d. %s\n", i+1, rec.Title)
+        fmt.Printf("   Category: %s | Author: %s\n", rec.Category, rec.Author)
+        fmt.Printf("   Rating: %.1f/5 | Published: %s\n", rec.Rating, rec.PublishedDate)
+        fmt.Printf("   %s\n", rec.Description)
+        fmt.Printf("   Match Score: %.3f\n", rec.RelevanceScore)
+    }
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 Example output:
@@ -600,6 +953,133 @@ for (const [category, results] of Object.entries(resultsByCategory)) {
     console.log(`     ${result.description}`);
     console.log(`     Relevance: ${result.score.toFixed(3)}`);
   }
+}
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "strings"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+type CategoryResult struct {
+    ID          string
+    Title       string
+    Description string
+    Date        string
+    Score       float64
+}
+
+func searchAcrossCategories(
+    ctx context.Context,
+    col chroma.Collection,
+    userQuery string,
+    categories []string,
+    resultsPerCategory int,
+) (map[string][]CategoryResult, error) {
+    // Build a search request for each category
+    var searches []chroma.SearchCollectionOption
+    for _, category := range categories {
+        search := chroma.NewSearchRequest(
+            chroma.WithKnnRank(
+                chroma.KnnQueryText(userQuery),
+                chroma.WithKnnLimit(50),
+            ),
+            chroma.WithFilter(chroma.EqString(chroma.K("category"), category)),
+            chroma.WithPage(chroma.WithLimit(resultsPerCategory)),
+            chroma.WithSelect(
+                chroma.KDocument, chroma.KScore,
+                chroma.K("title"), chroma.K("category"), chroma.K("date"),
+            ),
+        )
+        searches = append(searches, search)
+    }
+
+    // Execute all searches in one batch
+    results, err := col.Search(ctx, searches...)
+    if err != nil {
+        return nil, err
+    }
+
+    // Process results by category
+    categoryResults := make(map[string][]CategoryResult)
+    sr := results.(*chroma.SearchResultImpl)
+
+    for i, category := range categories {
+        var items []CategoryResult
+        if i < len(sr.IDs) {
+            for j, id := range sr.IDs[i] {
+                desc := ""
+                if j < len(sr.Documents[i]) {
+                    if len(sr.Documents[i][j]) > 100 {
+                        desc = sr.Documents[i][j][:100] + "..."
+                    } else {
+                        desc = sr.Documents[i][j]
+                    }
+                }
+
+                meta := sr.Metadatas[i][j]
+                items = append(items, CategoryResult{
+                    ID:          string(id),
+                    Title:       meta["title"].(string),
+                    Description: desc,
+                    Date:        meta["date"].(string),
+                    Score:       sr.Scores[i][j],
+                })
+            }
+        }
+        categoryResults[category] = items
+    }
+
+    return categoryResults, nil
+}
+
+// Example usage
+func main() {
+    ctx := context.Background()
+    // ... client and collection setup ...
+
+    query := "latest developments in renewable energy"
+    categories := []string{"technology", "science", "news", "research"}
+
+    resultsByCategory, err := searchAcrossCategories(
+        ctx,
+        collection,
+        query,
+        categories,
+        3,
+    )
+    if err != nil {
+        fmt.Printf("Error: %v\n", err)
+        return
+    }
+
+    // Display results
+    for _, category := range categories {
+        results := resultsByCategory[category]
+        fmt.Printf("\n%s\n", strings.Repeat("=", 60))
+        fmt.Printf("Category: %s\n", strings.ToUpper(category))
+        fmt.Println(strings.Repeat("=", 60))
+
+        if len(results) == 0 {
+            fmt.Println("  No results found")
+            continue
+        }
+
+        for i, result := range results {
+            fmt.Printf("\n  %d. %s\n", i+1, result.Title)
+            fmt.Printf("     Date: %s\n", result.Date)
+            fmt.Printf("     %s\n", result.Description)
+            fmt.Printf("     Relevance: %.3f\n", result.Score)
+        }
+    }
 }
 ```
 {% /Tab %}
