@@ -73,9 +73,6 @@ impl std::fmt::Debug for S3CredentialsConfig {
                 .field("custom_endpoint", custom_endpoint)
                 .field("region", region)
                 .finish(),
-                .field("custom_endpoint", custom_endpoint)
-                .field("region", region)
-                .finish(),
         }
     }
 }

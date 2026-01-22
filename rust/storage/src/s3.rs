@@ -371,7 +371,8 @@ impl S3Storage {
         match head_res {
             Ok(res) => {
                 let last_modified = res.last_modified.map(|dt| {
-                    std::time::UNIX_EPOCH + Duration::new(dt.secs().try_into().unwrap_or(0), dt.subsec_nanos())
+                    std::time::UNIX_EPOCH
+                        + Duration::new(dt.secs().try_into().unwrap_or(0), dt.subsec_nanos())
                 });
                 Ok(S3ObjectMetadata {
                     object_key: key.to_string(),
