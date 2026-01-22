@@ -202,7 +202,7 @@ impl CompactionManager {
             let future = self
                 .context
                 .clone()
-                .compact(job.collection_id, false)
+                .compact(job.collection_id, job.database_name.clone(), false)
                 .instrument(instrumented_span);
             if let Err(e) = compact_awaiter_channel
                 .send(CompactionTask {
@@ -222,9 +222,14 @@ impl CompactionManager {
 
     #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
     pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
+        // TODO(tanujnay112): Implement this for MCMR by accepting a database/topo name on this method.
         let _ = collection_ids
             .iter()
-            .map(|id| self.context.clone().compact(*id, true))
+            .map(|id| {
+                let database_name =
+                    chroma_types::DatabaseName::new("default").expect("default should be valid");
+                self.context.clone().compact(*id, database_name, true)
+            })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
@@ -339,8 +344,11 @@ impl CompactionManager {
                         }
                     }
                 },
-                Err(_) => {
-                    self.scheduler.fail_job(resp.job_id).await;
+                Err(ref e) => {
+                    let job_id = resp.job_id;
+                    let error_msg = e.to_string();
+                    self.scheduler.fail_job(job_id).await;
+                    tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
                 }
             }
             completed_collections.push(resp);
@@ -360,6 +368,7 @@ impl CompactionManagerContext {
     async fn compact(
         self,
         collection_id: CollectionUuid,
+        database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         tracing::info!("Compacting collection: {}", collection_id);
@@ -374,9 +383,11 @@ impl CompactionManagerContext {
         // fetch data to compact -> execute_task/compact -> register
         // Use the compact function to handle the entire orchestration process
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
+
         let compact_result = Box::pin(compact(
             self.system.clone(),
             collection_id,
+            database_name,
             is_rebuild,
             self.fetch_log_batch_size,
             self.max_compaction_size,

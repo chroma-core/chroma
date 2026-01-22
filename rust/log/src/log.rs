@@ -14,6 +14,7 @@ use std::fmt::Debug;
 pub struct CollectionRecord {
     pub collection_id: CollectionUuid,
     pub tenant_id: String,
+    pub database_name: String,
     pub last_compaction_time: i64,
     #[allow(dead_code)]
     pub first_record_time: i64,
