@@ -46,6 +46,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         for collection in &collections[0..number_tasks as usize] {
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
+                database_name: collection.database_name.clone(),
             });
         }
         tasks
@@ -55,7 +56,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chroma_types::CollectionUuid;
+    use chroma_types::{CollectionUuid, DatabaseName};
     use std::str::FromStr;
 
     #[test]
@@ -68,6 +69,7 @@ mod tests {
         let collections = vec![
             CollectionRecord {
                 collection_id: collection_uuid_1,
+                database_name: DatabaseName::new("test_db").unwrap(),
                 tenant_id: "test".to_string(),
                 last_compaction_time: 1,
                 first_record_time: 1,
@@ -77,6 +79,7 @@ mod tests {
             },
             CollectionRecord {
                 collection_id: collection_uuid_2,
+                database_name: DatabaseName::new("test_db").unwrap(),
                 tenant_id: "test".to_string(),
                 last_compaction_time: 0,
                 first_record_time: 0,
