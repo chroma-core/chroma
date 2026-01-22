@@ -161,14 +161,14 @@ schema.create_index(config=VectorIndexConfig(
 {% Tab label="typescript" %}
 ```typescript
 import { Schema, VectorIndexConfig } from 'chromadb';
-import { OpenAIEmbeddingFunction } from 'chromadb';
+import { OpenAIEmbeddingFunction } from '@chroma-core/openai';
 
 const schema = new Schema();
 
 // Configure vector index with custom embedding function
 const embeddingFunction = new OpenAIEmbeddingFunction({
   apiKey: "your-api-key",
-  model: "text-embedding-3-small"
+  modelName: "text-embedding-3-small"
 });
 
 schema.createIndex(new VectorIndexConfig({
@@ -216,6 +216,7 @@ const schema = new Schema();
 const sparseEf = new ChromaCloudSpladeEmbeddingFunction({
   apiKeyEnvVar: "CHROMA_API_KEY"
 });
+
 schema.createIndex(
   new SparseVectorIndexConfig({
     sourceKey: K.DOCUMENT,

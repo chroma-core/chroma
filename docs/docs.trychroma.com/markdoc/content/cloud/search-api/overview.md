@@ -171,14 +171,15 @@ for row in rows:
 
 {% Tab label="typescript" %}
 ```typescript
-import { ChromaClient, Search, K, Knn } from 'chromadb';
+import { CloudClient, Search, K, Knn } from 'chromadb';
 
 // Connect to Chroma Cloud
-const client = new ChromaClient({
+const client = new CloudClient({
   tenant: "your-tenant",
   database: "your-database",
-  auth: { provider: "token", credentials: "your-api-key" }
+  apiKey: "your-api-key"
 });
+
 const collection = await client.getCollection({ name: "articles" });
 
 // Build the base search query
