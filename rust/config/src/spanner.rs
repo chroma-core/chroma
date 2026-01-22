@@ -71,7 +71,7 @@ impl SpannerEmulatorConfig {
         format!("http://{}:{}", self.host, self.rest_port)
     }
 
-    /// Returns the database path in the format required by the Spanner client
+    /// Returns the spanner config in the format required by the Spanner client
     pub fn spanner_config(&self) -> SpannerClientConfig {
         SpannerClientConfig {
             environment: Environment::Emulator(self.grpc_endpoint()),
@@ -112,7 +112,7 @@ impl SpannerGcpConfig {
         )
     }
 
-    /// Returns the database path in the format required by the Spanner client
+    /// Returns the spanner config path in the format required by the Spanner client
     pub fn spanner_config(&self) -> SpannerClientConfig {
         SpannerClientConfig::default()
     }
