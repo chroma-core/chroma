@@ -65,10 +65,41 @@ schema.createIndex(
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/chromacloudsplade"
+)
+
+// Create sparse embedding function
+sparseEF, err := chromacloudsplade.NewEmbeddingFunction(
+    chromacloudsplade.WithAPIKeyFromEnvVar("CHROMA_API_KEY"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create schema with sparse vector index for keyword-based search
+// "sparse_embedding" is just a metadata key name - use any name you prefer
+schema, err := chroma.NewSchema(
+    chroma.WithSparseVectorIndex("sparse_embedding",
+        chroma.NewSparseVectorIndexConfig(
+            chroma.WithSparseSourceKey(chroma.DocumentKey),
+            chroma.WithSparseEmbeddingFunction(sparseEF),
+        ),
+    ),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
-The `source_key` specifies which field to generate sparse embeddings from (typically `K.DOCUMENT` for document text), and `embedding_function` specifies the function to generate the sparse embeddings. This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can also use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction`. The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
+The `source_key` specifies which field to generate sparse embeddings from (typically `K.DOCUMENT` or `chroma.DocumentKey` in Go), and `embedding_function` specifies the function to generate the sparse embeddings. This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can also use other sparse embedding functions. In Python/TypeScript, alternatives include `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction`. In Go, use `chromacloudsplade.NewEmbeddingFunction()` or `bm25.NewEmbeddingFunction()`. The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
 {% /Note %}
 
 ## Create Collection and Add Data
@@ -108,6 +139,33 @@ const collection = await client.createCollection({
   name: "hybrid_search_collection",
   schema: schema
 });
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import (
+    "context"
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+ctx := context.Background()
+
+client, err := chroma.NewCloudClient(
+    chroma.WithCloudTenant("your-tenant"),
+    chroma.WithCloudDatabase("your-database"),
+    chroma.WithCloudAPIKey("your-api-key"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+collection, err := client.CreateCollection(ctx, "hybrid_search_collection",
+    chroma.WithSchemaCreate(schema),
+)
+if err != nil {
+    log.Fatal(err)
+}
 ```
 {% /Tab %}
 
@@ -158,6 +216,30 @@ await collection.add({
 
 // Sparse embeddings for "sparse_embedding" are generated automatically
 // from the documents (source_key=K.DOCUMENT)
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+_, err = collection.Add(ctx,
+    chroma.WithIDs("doc1", "doc2", "doc3"),
+    chroma.WithDocuments(
+        "The quick brown fox jumps over the lazy dog",
+        "A fast auburn fox leaps over a sleepy canine",
+        "Machine learning is a subset of artificial intelligence",
+    ),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata().SetString("category", "animals"),
+        chroma.NewDocumentMetadata().SetString("category", "animals"),
+        chroma.NewDocumentMetadata().SetString("category", "technology"),
+    ),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Sparse embeddings for "sparse_embedding" are generated automatically
+// from the documents (source_key=chroma.DocumentKey)
 ```
 {% /Tab %}
 
@@ -212,6 +294,37 @@ const results = await collection.search(search);
 // Process results
 for (const row of results.rows()[0]) {
   console.log(`Score: ${row.score.toFixed(3)} - ${row.document}`);
+}
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Create KNN rank for sparse embeddings
+sparseRank, err := chroma.NewKnnRank(
+    chroma.KnnQueryText("fox animal"),
+    chroma.WithKnnKey("sparse_embedding"),
+    chroma.WithKnnLimit(10),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Execute search
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithRank(sparseRank),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Process results
+for _, row := range results.Rows() {
+    fmt.Printf("Score: %.3f - %s\n", row.Score, row.Document)
 }
 ```
 {% /Tab %}
@@ -287,6 +400,57 @@ const results = await collection.search(search);
 // Process results
 for (const row of results.rows()[0]) {
   console.log(`Score: ${row.score.toFixed(3)} - ${row.document}`);
+}
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Create KNN ranks for dense and sparse embeddings
+denseRank, err := chroma.NewKnnRank(
+    chroma.KnnQueryText("fox animal"),
+    chroma.WithKnnReturnRank(),  // Required for RRF
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+sparseRank, err := chroma.NewKnnRank(
+    chroma.KnnQueryText("fox animal"),
+    chroma.WithKnnKey("sparse_embedding"),
+    chroma.WithKnnReturnRank(),  // Required for RRF
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create RRF ranking combining dense and sparse embeddings
+rrfRank, err := chroma.NewRrfRank(
+    chroma.WithRffRanks(
+        denseRank.WithWeight(0.7),   // 70% semantic
+        sparseRank.WithWeight(0.3),  // 30% keyword
+    ),
+    chroma.WithRffK(60),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Execute hybrid search
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithRank(rrfRank),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore),
+    ),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Process results
+for _, row := range results.Rows() {
+    fmt.Printf("Score: %.3f - %s\n", row.Score, row.Document)
 }
 ```
 {% /Tab %}

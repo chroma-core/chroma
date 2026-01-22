@@ -11,15 +11,15 @@ Comprehensive reference for all index types and their configuration parameters.
 
 Schema recognizes six value types, each with associated index types. Without providing a Schema, collections use these built-in defaults:
 
-| Config Class | Value Type | Default Behavior | Use Case |
-|-------------|-----------|------------------|----------|
-| `StringInvertedIndexConfig` | `string` | Enabled for all metadata | Filter on string values |
-| `FtsIndexConfig` | `string` | Enabled for `K.DOCUMENT` only | Full-text search on documents |
-| `VectorIndexConfig` | `float_list` | Enabled for `K.EMBEDDING` only | Similarity search on embeddings |
-| `SparseVectorIndexConfig` | `sparse_vector` | Disabled (requires config) | Keyword-based search |
-| `IntInvertedIndexConfig` | `int_value` | Enabled for all metadata | Filter on integer values |
-| `FloatInvertedIndexConfig` | `float_value` | Enabled for all metadata | Filter on float values |
-| `BoolInvertedIndexConfig` | `boolean` | Enabled for all metadata | Filter on boolean values |
+| Config Class (Python/TS) | Go Schema Option | Value Type | Default Behavior | Use Case |
+|--------------------------|------------------|-----------|------------------|----------|
+| `StringInvertedIndexConfig` | `WithStringIndex()`, `DisableDefaultStringIndex()` | `string` | Enabled for all metadata | Filter on string values |
+| `FtsIndexConfig` | `WithFtsIndex()` | `string` | Enabled for `K.DOCUMENT` only | Full-text search on documents |
+| `VectorIndexConfig` | `WithDefaultVectorIndex()`, `WithVectorIndex()` | `float_list` | Enabled for `K.EMBEDDING` only | Similarity search on embeddings |
+| `SparseVectorIndexConfig` | `WithSparseVectorIndex()` | `sparse_vector` | Disabled (requires config) | Keyword-based search |
+| `IntInvertedIndexConfig` | `WithIntIndex()`, `DisableDefaultIntIndex()` | `int_value` | Enabled for all metadata | Filter on integer values |
+| `FloatInvertedIndexConfig` | `WithFloatIndex()`, `DisableDefaultFloatIndex()` | `float_value` | Enabled for all metadata | Filter on float values |
+| `BoolInvertedIndexConfig` | `WithBoolIndex()`, `DisableDefaultBoolIndex()` | `boolean` | Enabled for all metadata | Filter on boolean values |
 
 ## Simple Index Configs
 
@@ -68,6 +68,22 @@ These index types have no configuration parameters.
 {% Banner type="tip" %}
 **Advanced tuning:** HNSW and SPANN parameters control index build and search behavior. They are pre-optimized for most use cases. Only adjust if you have specific performance requirements and understand the tradeoffs between recall, speed, and resource usage. Incorrect tuning can degrade performance.
 {% /Banner %}
+
+{% Note type="info" %}
+**Go HNSW/SPANN Tuning:** In Go, use `NewHnswConfig()` with options like `WithEfConstruction()`, `WithMaxNeighbors()`, `WithEfSearch()`, etc. For SPANN, use `NewSpannConfig()` with options like `WithSpannSearchNprobe()`, `WithSpannWriteRngFactor()`, etc. Example:
+
+```go
+schema, _ := chroma.NewSchema(
+    chroma.WithDefaultVectorIndex(chroma.NewVectorIndexConfig(
+        chroma.WithSpace(chroma.SpaceCosine),
+        chroma.WithHnsw(chroma.NewHnswConfig(
+            chroma.WithEfConstruction(200),
+            chroma.WithMaxNeighbors(32),
+        )),
+    )),
+)
+```
+{% /Note %}
 
 ## SparseVectorIndexConfig
 
