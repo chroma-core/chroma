@@ -99,6 +99,23 @@ const results2 = await collection.search(
 );
 ```
 {% /Tab %}
+{% Tab label="go" %}
+```go
+// Legacy API
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("machine learning"),
+    chroma.WithNResults(10),
+)
+
+// Search API - with text query
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning")),
+        chroma.WithPage(chroma.WithLimit(10)),
+    ),
+)
+```
+{% /Tab %}
 {% /TabbedCodeBlock %}
 
 ### Document Filtering
@@ -140,6 +157,25 @@ const results2 = await collection.search(
     limit: 5
   })
 );
+```
+{% /Tab %}
+{% Tab label="go" %}
+```go
+// Legacy API
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("quantum computing"),
+    chroma.WithNResults(5),
+    chroma.WithWhereDocumentQuery(chroma.Contains("quantum")),
+)
+
+// Search API
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("quantum computing")),
+        chroma.WithFilter(chroma.DocumentContains("quantum")),
+        chroma.WithPage(chroma.WithLimit(5)),
+    ),
+)
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -195,6 +231,31 @@ const results2 = await collection.search(
 );
 ```
 {% /Tab %}
+{% Tab label="go" %}
+```go
+// Legacy API
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("quantum physics"),
+    chroma.WithNResults(10),
+    chroma.WithWhereQuery(chroma.EqString(chroma.K("category"), "science")),
+    chroma.WithWhereDocumentQuery(chroma.Contains("quantum")),
+)
+
+// Search API - combine filters with $and
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(
+            chroma.And(
+                chroma.EqString(chroma.K("category"), "science"),
+                chroma.DocumentContains("quantum"),
+            ),
+        ),
+        chroma.WithKnnRank(chroma.KnnQueryText("quantum physics")),
+        chroma.WithPage(chroma.WithLimit(10)),
+    ),
+)
+```
+{% /Tab %}
 {% /TabbedCodeBlock %}
 
 ### Get by IDs
@@ -228,6 +289,19 @@ const results2 = await collection.search(
     where: { "#id": { $in: ["id1", "id2", "id3"] } }
   })
 );
+```
+{% /Tab %}
+{% Tab label="go" %}
+```go
+// Legacy API
+results, err := collection.Get(ctx, chroma.WithIDsGet("id1", "id2", "id3"))
+
+// Search API
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilterIDs("id1", "id2", "id3"),
+    ),
+)
 ```
 {% /Tab %}
 {% /TabbedCodeBlock %}
@@ -271,6 +345,24 @@ const results2 = await collection.search(
 );
 ```
 {% /Tab %}
+{% Tab label="go" %}
+```go
+// Legacy API
+results, err := collection.Get(ctx,
+    chroma.WithWhereGet(chroma.EqString(chroma.K("status"), "active")),
+    chroma.WithLimitGet(100),
+    chroma.WithOffsetGet(50),
+)
+
+// Search API
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString(chroma.K("status"), "active")),
+        chroma.WithPage(chroma.WithLimit(100), chroma.WithOffset(50)),
+    ),
+)
+```
+{% /Tab %}
 {% /TabbedCodeBlock %}
 
 ## Key Differences
@@ -300,6 +392,20 @@ await collection.query({ queryTexts: ["search text"] });
 await collection.search(
   new Search({ rank: { $knn: { query: "search text" } } })
 );
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Legacy API
+collection.Query(ctx, chroma.WithQueryTexts("search text"))
+
+// Search API - direct text query
+collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("search text")),
+    ),
+)
 ```
 {% /Tab %}
 
@@ -354,6 +460,35 @@ const searches = [
   new Search({ rank: { $knn: { query: "artificial intelligence" } }, limit: 20 })  // No filter
 ];
 const results2 = await collection.search(searches);
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Legacy - same parameters for all queries
+results, err := collection.Query(ctx,
+    chroma.WithQueryEmbeddings(emb1, emb2, emb3),
+    chroma.WithNResults(10),
+    chroma.WithWhereQuery(chroma.EqString(chroma.K("category"), "science")),
+)
+
+// Search API - different parameters per search
+results, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning")),
+        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.WithFilter(chroma.EqString(chroma.K("category"), "science")),
+    ),
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("neural networks")),
+        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.WithFilter(chroma.EqString(chroma.K("category"), "tech")),
+    ),
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("artificial intelligence")),
+        chroma.WithPage(chroma.WithLimit(20)),
+    ),
+)
 ```
 {% /Tab %}
 
