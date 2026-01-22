@@ -1,3 +1,8 @@
+---
+id: metadata-filtering
+name: Metadata Filtering
+---
+
 # Metadata Filtering
 
 The `where` argument in `get` and `query` is used to filter records by their metadata. For example, in this `query` operation, Chroma will only query records that have the `page` metadata field with the value `10`:
@@ -15,9 +20,9 @@ collection.query(
 
 ```typescript
 await collection.query({
-    queryTexts: ["first query", "second query"],
-    where: { page: 10 }
-})
+  queryTexts: ["first query", "second query"],
+  where: { page: 10 },
+});
 ```
 
 In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
@@ -91,9 +96,9 @@ collection.query(
 
 ```typescript
 await collection.query({
-    queryTexts: ["first query", "second query"],
-    where: { page: { "$gt": 10 } }
-})
+  queryTexts: ["first query", "second query"],
+  where: { page: { $gt: 10 } },
+});
 ```
 
 ## Using Logical Operators
@@ -156,14 +161,11 @@ collection.query(
 
 ```typescript
 await collection.query({
-    queryTexts: ["first query", "second query"],
-    where: {
-        "$and": [
-            { page: {"$gte": 5 } },
-            { page: {"$lte": 10 } },
-        ]
-    }
-})
+  queryTexts: ["first query", "second query"],
+  where: {
+    $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
+  },
+});
 ```
 
 An `$or` operator will return results that match any of the filters in the list.
@@ -172,7 +174,7 @@ An `$or` operator will return results that match any of the filters in the list.
 
 ```python
 {
-    "or": [
+    "$or": [
         {
             "metadata_field": {
                 <Operator>: <Value>
@@ -191,7 +193,7 @@ An `$or` operator will return results that match any of the filters in the list.
 
 ```typescript
 {
-    "or": [
+    "$or": [
         {
             metadata_field: { <Operator>: <Value> }
         },
@@ -221,13 +223,10 @@ collection.get(
 
 ```typescript
 await collection.get({
-    where: {
-        "or": [
-            { color: "red" },
-            { color: "blue" },
-        ]
-    }
-})
+  where: {
+    or: [{ color: "red" }, { color: "blue" }],
+  },
+});
 ```
 
 ## Using Inclusion Operators
@@ -297,10 +296,10 @@ collection.get(
 
 ```typescript
 await collection.get({
-    where: {
-        author: {"$in": ["Rowling", "Fitzgerald", "Herbert"]}
-    }
-})
+  where: {
+    author: { $in: ["Rowling", "Fitzgerald", "Herbert"] },
+  },
+});
 ```
 
 ## Combining with Document Search

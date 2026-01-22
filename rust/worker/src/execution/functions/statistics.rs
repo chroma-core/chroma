@@ -1383,7 +1383,7 @@ mod tests {
 
         // Read statistics from output collection
         let output_info = sysdb
-            .get_collection_with_segments(output_collection_id)
+            .get_collection_with_segments(None, output_collection_id)
             .await
             .expect("Should get output collection");
         let reader = Box::pin(RecordSegmentReader::from_segment(

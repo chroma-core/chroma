@@ -10,8 +10,6 @@
 
 use super::config::{S3CredentialsConfig, StorageConfig};
 use super::metrics::StorageMetrics;
-use super::stream::ByteStreamItem;
-use super::stream::S3ByteStream;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
 use crate::{ETag, GetOptions, PutMode, StorageError};
@@ -35,7 +33,6 @@ use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
-use futures::Stream;
 use futures::StreamExt;
 use rand::Rng;
 use std::clone::Clone;
@@ -115,6 +112,58 @@ impl S3Storage {
     }
 
     #[allow(clippy::type_complexity)]
+    /// Convert a GetObject SDK error into a StorageError.
+    fn get_object_error_to_storage_error(
+        &self,
+        key: &str,
+        e: SdkError<aws_sdk_s3::operation::get_object::GetObjectError>,
+    ) -> StorageError {
+        match e {
+            SdkError::ServiceError(err) => {
+                let inner = err.into_err();
+                match &inner {
+                    aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
+                        StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        }
+                    }
+                    aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
+                        tracing::error!("invalid object state: {}", msg);
+                        StorageError::Generic {
+                            source: Arc::new(inner),
+                        }
+                    }
+                    _ => match inner.code() {
+                        Some("SlowDown") => StorageError::Backoff,
+                        Some("AccessDenied") => {
+                            tracing::error!(
+                                bucket = %self.bucket,
+                                key = %key,
+                                error_code = "AccessDenied",
+                                error_message = %inner,
+                                "S3 access denied error"
+                            );
+                            StorageError::PermissionDenied {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            }
+                        }
+                        _ => {
+                            tracing::error!("error: {}", inner.to_string());
+                            StorageError::Generic {
+                                source: Arc::new(inner),
+                            }
+                        }
+                    },
+                }
+            }
+            _ => StorageError::Generic {
+                source: Arc::new(e),
+            },
+        }
+    }
+
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
         let res = self
             .client
@@ -131,85 +180,6 @@ impl S3Storage {
                     Err(StorageError::Generic {
                         source: Arc::new(inner),
                     })
-                }
-                _ => Err(StorageError::Generic {
-                    source: Arc::new(e),
-                }),
-            },
-        }
-    }
-
-    #[allow(clippy::type_complexity)]
-    async fn get_stream_and_e_tag(
-        &self,
-        key: &str,
-    ) -> Result<
-        (
-            Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
-            Option<ETag>,
-        ),
-        StorageError,
-    > {
-        let res = self
-            .client
-            .get_object()
-            .bucket(self.bucket.clone())
-            .key(key)
-            .send()
-            .instrument(tracing::trace_span!("cold S3 get"))
-            .await;
-        match res {
-            Ok(res) => {
-                let byte_stream = res.body;
-                Ok((
-                    Box::new(S3ByteStream::new(byte_stream)),
-                    res.e_tag.map(ETag),
-                ))
-            }
-            Err(e) => match e {
-                SdkError::ServiceError(err) => {
-                    let inner = err.into_err();
-                    match &inner {
-                        aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
-                            Err(StorageError::NotFound {
-                                path: key.to_string(),
-                                source: Arc::new(inner),
-                            })
-                        }
-                        aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(
-                            msg,
-                        ) => {
-                            tracing::error!("invalid object state: {}", msg);
-                            Err(StorageError::Generic {
-                                source: Arc::new(inner),
-                            })
-                        }
-                        _ => {
-                            match inner.code() {
-                                Some("SlowDown") => Err(StorageError::Backoff),
-                                Some("AccessDenied") => {
-                                    // Log all the details we need for debugging
-                                    tracing::error!(
-                                        bucket = %self.bucket,
-                                        key = %key,
-                                        error_code = "AccessDenied",
-                                        error_message = %inner,
-                                        "S3 access denied error"
-                                    );
-                                    Err(StorageError::PermissionDenied {
-                                        path: key.to_string(),
-                                        source: Arc::new(inner),
-                                    })
-                                }
-                                _ => {
-                                    tracing::error!("error: {}", inner.to_string());
-                                    Err(StorageError::Generic {
-                                        source: Arc::new(inner),
-                                    })
-                                }
-                            }
-                        }
-                    }
                 }
                 _ => Err(StorageError::Generic {
                     source: Arc::new(e),
@@ -268,51 +238,15 @@ impl S3Storage {
         key: String,
         range_str: String,
     ) -> Result<GetObjectOutput, StorageError> {
-        let res = self
-            .client
+        self.client
             .get_object()
             .bucket(self.bucket.clone())
             .key(&key)
             .range(range_str)
             .send()
             .instrument(tracing::trace_span!("cold S3 get"))
-            .await;
-        match res {
-            Ok(output) => Ok(output),
-            Err(e) => {
-                tracing::error!("Error fetching range: {:?}", e);
-                match e {
-                    SdkError::ServiceError(err) => {
-                        let inner = err.into_err();
-                        match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
-                                Err(StorageError::NotFound {
-                                    path: key.to_string(),
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(_) => {
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            _ => {
-                                if inner.code() == Some("SlowDown") {
-                                    Err(StorageError::Backoff)
-                                } else {
-                                    Err(StorageError::Generic {
-                                        source: Arc::new(inner),
-                                    })
-                                }
-                            }
-                        }
-                    }
-                    _ => Err(StorageError::Generic {
-                        source: Arc::new(e),
-                    }),
-                }
-            }
-        }
+            .await
+            .map_err(|e| self.get_object_error_to_storage_error(&key, e))
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -377,6 +311,8 @@ impl S3Storage {
     }
 
     /// Perform a strongly consistent get and return the e_tag.
+    /// This method preallocates the buffer based on content_length to avoid
+    /// repeated reallocations during streaming.
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_with_e_tag(
         &self,
@@ -388,30 +324,37 @@ impl S3Storage {
             &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
-        let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
-        let buf = async {
-            let mut buf: Vec<u8> = Vec::new();
-            while let Some(res) = stream.next().await {
-                match res {
-                    Ok(chunk) => {
-                        buf.extend(chunk);
-                    }
-                    Err(e) => {
-                        tracing::error!("Error reading from S3: {}", e);
-                        return Err(e);
-                    }
-                }
-            }
-            Ok(Some(buf))
+
+        let res = self
+            .client
+            .get_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .instrument(tracing::trace_span!("cold S3 get"))
+            .await;
+
+        let output = res.map_err(|e| self.get_object_error_to_storage_error(key, e))?;
+
+        let e_tag = output.e_tag.map(ETag);
+        // We can trust this to be non-negative - https://github.com/awslabs/aws-sdk-rust/discussions/916
+        let content_length = output.content_length.unwrap_or(0) as usize;
+
+        if content_length == 0 {
+            return Ok((Arc::new(Vec::new()), e_tag));
         }
-        .await?;
-        match buf {
-            Some(buf) => Ok((Arc::new(buf), e_tag)),
-            None => {
-                // Buffer is empty. Nothing interesting to do.
-                Ok((Arc::new(vec![]), None))
+
+        let mut buf = vec![0u8; content_length];
+        let mut reader = output.body.into_async_read();
+
+        reader.read_exact(&mut buf).await.map_err(|e| {
+            tracing::error!("Error reading from S3: {}", e);
+            StorageError::Generic {
+                source: Arc::new(e),
             }
-        }
+        })?;
+
+        Ok((Arc::new(buf), e_tag))
     }
 
     pub(super) fn is_oneshot_upload(&self, total_size_bytes: usize) -> bool {

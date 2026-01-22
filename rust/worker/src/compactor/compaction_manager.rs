@@ -613,6 +613,15 @@ impl Component for CompactionManager {
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
     }
+
+    async fn on_stop(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        tracing::info!("Closing blockfile provider caches");
+        self.context
+            .blockfile_provider
+            .close()
+            .await
+            .map_err(|e| e.boxed())
+    }
 }
 
 impl Debug for CompactionManager {

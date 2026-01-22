@@ -173,11 +173,12 @@ impl ServiceBasedFrontend {
 
     pub async fn get_cached_collection(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<Collection, GetCollectionError> {
         Ok(self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(Some(database_name), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?
             .collection)
@@ -185,11 +186,19 @@ impl ServiceBasedFrontend {
 
     async fn set_collection_dimension(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         dimension: u32,
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
-            .update_collection(collection_id, None, None, Some(dimension), None)
+            .update_collection(
+                Some(database_name),
+                collection_id,
+                None,
+                None,
+                Some(dimension),
+                None,
+            )
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         // Invalidate the cache.
@@ -202,6 +211,7 @@ impl ServiceBasedFrontend {
 
     async fn validate_embedding<Embedding, F>(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         option_embeddings: Option<&Vec<Embedding>>,
         update_if_not_present: bool,
@@ -210,7 +220,9 @@ impl ServiceBasedFrontend {
     where
         F: Fn(&Embedding) -> Option<usize>,
     {
-        let collection = self.get_cached_collection(collection_id).await?;
+        let collection = self
+            .get_cached_collection(database_name.clone(), collection_id)
+            .await?;
         if let Some(embeddings) = option_embeddings {
             let emb_dims = embeddings
                 .iter()
@@ -235,7 +247,13 @@ impl ServiceBasedFrontend {
                 }
                 None => {
                     if update_if_not_present {
-                        self.set_collection_dimension(collection_id, emb_dim)
+                        let database_name =
+                            DatabaseName::new(&collection.database).ok_or_else(|| {
+                                ValidationError::InvalidArgument(
+                                    "database name must be at least 3 characters".to_string(),
+                                )
+                            })?;
+                        self.set_collection_dimension(database_name, collection_id, emb_dim)
                             .await?;
                     }
                 }
@@ -623,6 +641,7 @@ impl ServiceBasedFrontend {
     pub async fn update_collection(
         &mut self,
         UpdateCollectionRequest {
+            database_name,
             collection_id,
             new_name,
             new_metadata,
@@ -632,6 +651,7 @@ impl ServiceBasedFrontend {
     ) -> Result<UpdateCollectionResponse, UpdateCollectionError> {
         self.sysdb_client
             .update_collection(
+                database_name,
                 collection_id,
                 new_name,
                 new_metadata,
@@ -829,6 +849,7 @@ impl ServiceBasedFrontend {
             .ok_or(AddCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
+                database_name.clone(),
                 collection_id,
                 Some(&embeddings),
                 true,
@@ -930,9 +951,13 @@ impl ServiceBasedFrontend {
         let database_name = DatabaseName::new(database_name)
             .ok_or(UpdateCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
-            .validate_embedding(collection_id, embeddings.as_ref(), true, |embedding| {
-                embedding.as_ref().map(|emb| emb.len())
-            })
+            .validate_embedding(
+                database_name.clone(),
+                collection_id,
+                embeddings.as_ref(),
+                true,
+                |embedding| embedding.as_ref().map(|emb| emb.len()),
+            )
             .await
             .map_err(|err| err.boxed())?;
 
@@ -1034,6 +1059,7 @@ impl ServiceBasedFrontend {
             .ok_or(UpsertCollectionRecordsError::InvalidDatabaseName)?;
         let collection = self
             .validate_embedding(
+                database_name.clone(),
                 collection_id,
                 Some(&embeddings),
                 true,
@@ -1142,7 +1168,7 @@ impl ServiceBasedFrontend {
         let read_event = if let Some(where_clause) = r#where {
             let collection_and_segments = self
                 .collections_with_segments_provider
-                .get_collection_with_segments(collection_id)
+                .get_collection_with_segments(Some(database_name_typed.clone()), collection_id)
                 .await
                 .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
             if self.enable_schema {
@@ -1256,7 +1282,7 @@ impl ServiceBasedFrontend {
             let log_size_bytes = records.iter().map(OperationRecord::size_bytes).sum();
 
             let cmek = self
-                .get_cached_collection(collection_id)
+                .get_cached_collection(database_name_typed.clone(), collection_id)
                 .await
                 .map_err(|err| DeleteCollectionRecordsError::Internal(err.boxed()))?
                 .schema
@@ -1361,11 +1387,20 @@ impl ServiceBasedFrontend {
 
     pub async fn retryable_count(
         &mut self,
-        CountRequest { collection_id, .. }: CountRequest,
+        CountRequest {
+            database_name,
+            collection_id,
+            ..
+        }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
+        let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(Some(database_name_typed), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let latest_collection_logical_size_bytes = collection_and_segments
@@ -1471,7 +1506,9 @@ impl ServiceBasedFrontend {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<IndexStatusResponse, IndexStatusError> {
-        let collection = self.get_cached_collection(collection_id).await?;
+        let collection = self
+            .get_cached_collection(database_name.clone(), collection_id)
+            .await?;
 
         let num_indexed_ops = collection.log_position.try_into().map_err(|_| {
             IndexStatusError::Internal(Box::new(chroma_error::TonicError(tonic::Status::internal(
@@ -1515,6 +1552,7 @@ impl ServiceBasedFrontend {
     async fn retryable_get(
         &mut self,
         GetRequest {
+            database_name,
             collection_id,
             ids,
             r#where,
@@ -1524,9 +1562,14 @@ impl ServiceBasedFrontend {
             ..
         }: GetRequest,
     ) -> Result<GetResponse, QueryError> {
+        let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(Some(database_name_typed), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1662,6 +1705,7 @@ impl ServiceBasedFrontend {
     async fn retryable_query(
         &mut self,
         QueryRequest {
+            database_name,
             collection_id,
             ids,
             r#where,
@@ -1671,9 +1715,14 @@ impl ServiceBasedFrontend {
             ..
         }: QueryRequest,
     ) -> Result<QueryResponse, QueryError> {
+        let database_name_typed = DatabaseName::new(&database_name).ok_or_else(|| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(collection_id)
+            .get_collection_with_segments(Some(database_name_typed), collection_id)
             .await
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         if self.enable_schema {
@@ -1766,7 +1815,13 @@ impl ServiceBasedFrontend {
     }
 
     pub async fn query(&mut self, request: QueryRequest) -> Result<QueryResponse, QueryError> {
+        let database_name_typed = DatabaseName::new(&request.database_name).ok_or_else(|| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         self.validate_embedding(
+            database_name_typed,
             request.collection_id,
             Some(&request.embeddings),
             false,
@@ -1828,9 +1883,14 @@ impl ServiceBasedFrontend {
     ) -> Result<SearchResponse, QueryError> {
         // TODO: The dispatch logic is mostly the same for count/get/query/search, we should consider unifying them
         // Get collection and segments once for all queries
+        let database_name_typed = DatabaseName::new(&request.database_name).ok_or_else(|| {
+            QueryError::Other(Box::new(ValidationError::InvalidArgument(
+                "database name must be at least 3 characters".to_string(),
+            )))
+        })?;
         let collection_and_segments = self
             .collections_with_segments_provider
-            .get_collection_with_segments(request.collection_id)
+            .get_collection_with_segments(Some(database_name_typed), request.collection_id)
             .await
             .map_err(|err| QueryError::Other(Box::new(err) as Box<dyn ChromaError>))?;
         if self.enable_schema {
@@ -2093,7 +2153,9 @@ impl ServiceBasedFrontend {
         collection_id: CollectionUuid,
         _attached_function_id: chroma_types::AttachedFunctionUuid,
     ) -> Result<(), chroma_types::AttachFunctionError> {
-        let collection = self.get_cached_collection(collection_id).await?;
+        let collection = self
+            .get_cached_collection(database_name.clone(), collection_id)
+            .await?;
         let embedding_dim = collection.dimension.unwrap_or(1);
         let fake_embedding = vec![0.0; embedding_dim as usize];
         // TODO(tanujnay112): Make this either a configurable or better yet a separate

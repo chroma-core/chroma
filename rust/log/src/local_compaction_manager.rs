@@ -139,7 +139,7 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
     ) -> Self::Result {
         let mut collection_and_segments = self
             .sysdb
-            .get_collection_with_segments(message.collection_id)
+            .get_collection_with_segments(None, message.collection_id)
             .await?;
         let schema_previously_persisted = collection_and_segments.collection.schema.is_some();
         if !schema_previously_persisted {
@@ -272,7 +272,7 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
     ) -> Self::Result {
         let collection_segments = self
             .sysdb
-            .get_collection_with_segments(message.collection_id)
+            .get_collection_with_segments(None, message.collection_id)
             .await?;
         let mut collection = collection_segments.collection.clone();
         if collection.schema.is_none() {

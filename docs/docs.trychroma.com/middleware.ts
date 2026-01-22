@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const config = {
+  matcher: [
+    // Match all paths except static files and Next.js internals
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|css|js)$).*)",
+  ],
+};
+
 const legacyPathsMapping: Record<string, string> = {
   "/getting-started": "/docs/overview/getting-started",
   "/guides": "/docs/run-chroma/ephemeral-client",
@@ -75,6 +82,15 @@ const legacyPathsMapping: Record<string, string> = {
   "/production/administration/performance": "/guides/deploy/performance",
   "/production/administration/observability": "/guides/deploy/observability",
   "/cloud/collection-forking": "/cloud/features/collection-forking",
+  "/docs/overview/data-model": "/docs/overview/architecture#chroma-data-model",
+  "/docs/run-chroma/cloud-client": "/docs/run-chroma/clients#cloud-client",
+  "/docs/run-chroma/ephemeral-client":
+    "/docs/run-chroma/clients#in-memory-client",
+  "/docs/run-chroma/persistent-client":
+    "/docs/run-chroma/clients#persistent-client",
+  "/docs/overview/introduction": "/docs/overview/getting-started",
+  "/docs/overview/contributing": "/docs/overview/oss#contributing",
+  "/docs/overview/telemetry": "/docs/overview/oss#telemetry",
 };
 
 export const middleware = (request: NextRequest) => {

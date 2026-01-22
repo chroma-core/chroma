@@ -1,10 +1,15 @@
+---
+id: cli-login
+name: Login
+---
+
 # Authenticating with Chroma Cloud
 
 The Chroma CLI allows you to perform various operations with your Chroma Cloud account. These include [DB management](./db), [collection copying](./copy) and [browsing](./browse), and many more to come in the future.
 
 Use the `login` command, to authenticate the CLI with your Chroma Cloud account, to enable these features.
 
-First, in your browser [create](https://trychroma.com/signup) a Chroma Cloud account or [login](https:trychroma.com/login) into your existing account.
+First, in your browser [create](https://trychroma.com/signup?utm_source=docs-cli-login) a Chroma Cloud account or [login](https:trychroma.com/login) into your existing account.
 
 Then, in your terminal, run
 

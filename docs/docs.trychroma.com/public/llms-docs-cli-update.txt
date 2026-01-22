@@ -1,3 +1,8 @@
+---
+id: cli-update
+name: Update the CLI
+---
+
 # Update
 
 The `chroma update` command wil inform you if you should update your CLI installation.

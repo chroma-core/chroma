@@ -206,6 +206,7 @@ impl MetadataProvider<'_> {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
+                        .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains"))
                         .await
                         .map_err(MetadataIndexError::FullTextError)?)
                 } else {
@@ -238,6 +239,7 @@ impl MetadataProvider<'_> {
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
                     let approximate_matching_offset_ids = fti_reader
                         .match_literal_expression(&literal_expr)
+                        .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document regex"))
                         .await
                         .map_err(MetadataIndexError::from)?;
                     let is_exact_match = chroma_regex.properties().look_set().is_empty()
@@ -347,30 +349,34 @@ impl MetadataProvider<'_> {
                     }
                 };
                 if let Some(reader) = metadata_index_reader {
-                    match op {
-                        PrimitiveOperator::Equal => {
-                            if key == "#id" {
-                                if let KeyWrapper::String(user_id) = kw {
-                                    return Ok(match record_segment_reader {
-                                        Some(reader) => reader
-                                            .get_offset_id_for_user_id(user_id)
-                                            .await?
-                                            .iter()
-                                            .collect(),
-                                        None => RoaringBitmap::new(),
-                                    });
+                    async {
+                        match op {
+                            PrimitiveOperator::Equal => {
+                                if key == "#id" {
+                                    if let KeyWrapper::String(user_id) = kw {
+                                        return Ok(match record_segment_reader {
+                                            Some(reader) => reader
+                                                .get_offset_id_for_user_id(user_id)
+                                                .await?
+                                                .iter()
+                                                .collect(),
+                                            None => RoaringBitmap::new(),
+                                        });
+                                    }
                                 }
+                                Ok(reader.get(key, kw).await?)
                             }
-                            Ok(reader.get(key, kw).await?)
+                            PrimitiveOperator::GreaterThan => Ok(reader.gt(key, kw).await?),
+                            PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
+                            PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
+                            PrimitiveOperator::LessThanOrEqual => Ok(reader.lte(key, kw).await?),
+                            PrimitiveOperator::NotEqual => unreachable!(
+                                "Inequality filter should be handled above the metadata provider level"
+                            ),
                         }
-                        PrimitiveOperator::GreaterThan => Ok(reader.gt(key, kw).await?),
-                        PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
-                        PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
-                        PrimitiveOperator::LessThanOrEqual => Ok(reader.lte(key, kw).await?),
-                        PrimitiveOperator::NotEqual => unreachable!(
-                            "Inequality filter should be handled above the metadata provider level"
-                        ),
                     }
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Filter by metadata"))
+                    .await
                 } else {
                     Ok(RoaringBitmap::new())
                 }
@@ -539,6 +545,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             &input.record_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
@@ -554,6 +561,9 @@ impl Operator<FilterInput, FilterOutput> for Filter {
                 .await?;
         let metadata_log_reader =
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .instrument(
+                    tracing::trace_span!(parent: Span::current(), "Create metadata log reader"),
+                )
                 .await
                 .map_err(FilterError::LogMaterializer)?;
 
@@ -572,6 +582,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             &input.metadata_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create metadata segment reader"))
         .await?;
         let compact_metadata_provider =
             MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
@@ -615,7 +626,13 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         // Filter the offset ids in the log if the where clause is provided
         let log_offset_ids = if let Some(clause) = self.where_clause.as_ref() {
-            clause.eval(&log_metadata_provider).await? & user_allowed_log_offset_ids
+            clause
+                .eval(&log_metadata_provider)
+                .instrument(
+                    tracing::trace_span!(parent: Span::current(), "Evaluate where clause on logs"),
+                )
+                .await?
+                & user_allowed_log_offset_ids
         } else {
             user_allowed_log_offset_ids
         };
@@ -623,7 +640,10 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         // Filter the offset ids in the metadata segment if the where clause is provided
         // This always exclude all offsets that is present in the materialized log
         let compact_offset_ids = if let Some(clause) = self.where_clause.as_ref() {
-            clause.eval(&compact_metadata_provider).await?
+            clause
+                .eval(&compact_metadata_provider)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Evaluate where clause on compact"))
+                .await?
                 & user_allowed_compact_offset_ids
                 & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids)
         } else {

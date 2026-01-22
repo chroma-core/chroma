@@ -217,6 +217,7 @@ message CountCollectionsResponse {
 
 message GetCollectionWithSegmentsRequest {
   string id = 1;
+  optional string database = 2;
 }
 
 message GetCollectionWithSegmentsResponse {
@@ -235,6 +236,7 @@ message CheckCollectionsResponse {
 
 message UpdateCollectionRequest {
   string id = 1;
+  optional string database = 2;
   optional string name = 3;
   optional int32 dimension = 4;
   oneof metadata_update {
