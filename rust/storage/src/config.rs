@@ -29,7 +29,7 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Default, Deserialize, PartialEq, Debug, Clone, Serialize)]
+#[derive(Default, Deserialize, PartialEq, Clone, Serialize)]
 pub enum S3CredentialsConfig {
     #[default]
     Minio,
@@ -40,13 +40,41 @@ pub enum S3CredentialsConfig {
     /// credentials, rather than using the default AWS credential chain.
     Explicit {
         access_key_id: String,
+        #[serde(skip_serializing)]
         secret_access_key: String,
-        #[serde(default)]
+        #[serde(default, skip_serializing)]
         session_token: Option<String>,
         #[serde(default)]
         custom_endpoint: Option<String>,
         region: String,
     },
+}
+
+impl std::fmt::Debug for S3CredentialsConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Minio => write!(f, "Minio"),
+            Self::Localhost => write!(f, "Localhost"),
+            Self::AWS => write!(f, "AWS"),
+            Self::Explicit {
+                access_key_id,
+                session_token,
+                custom_endpoint,
+                region,
+                ..
+            } => f
+                .debug_struct("Explicit")
+                .field("access_key_id", access_key_id)
+                .field("secret_access_key", &"[REDACTED]")
+                .field(
+                    "session_token",
+                    &session_token.as_ref().map(|_| "[REDACTED]"),
+                )
+                .field("custom_endpoint", custom_endpoint)
+                .field("region", region)
+                .finish(),
+        }
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]

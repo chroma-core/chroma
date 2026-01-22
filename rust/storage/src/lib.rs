@@ -576,14 +576,9 @@ pub struct ETag(pub String);
 /// Metadata about an S3 object returned by `head_object()`.
 #[derive(Clone, Debug)]
 pub struct S3ObjectMetadata {
-    /// The object key in the bucket.
     pub object_key: String,
-    /// The ETag of the object, if available.
     pub etag: Option<ETag>,
-    /// The size of the object in bytes.
     pub content_length: i64,
-    /// The content type (MIME type) of the object, if available.
     pub content_type: Option<String>,
-    /// The last modified timestamp of the object, if available.
-    pub last_modified: Option<aws_smithy_types::DateTime>,
+    pub last_modified: Option<std::time::SystemTime>,
 }
