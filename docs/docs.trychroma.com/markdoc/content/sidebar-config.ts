@@ -234,6 +234,14 @@ const sidebarConfig: AppSection[] = [
           { id: "collection", name: "Collection" },
         ],
       },
+      {
+        id: "go",
+        name: "Go",
+        pages: [
+          { id: "client", name: "Client" },
+          { id: "collection", name: "Collection" },
+        ],
+      },
     ],
   },
 ];
