@@ -195,26 +195,45 @@ impl MigrationRunner {
 
     async fn execute_ddl(&self, sql: &str) -> Result<(), MigrationError> {
         let sql = sql.trim().trim_end_matches(';');
-        tracing::info!("Executing DDL: {}", sql);
+        if let Some(dml) = sql.strip_prefix("DML:") {
+            tracing::info!("Executing DML: {}", dml);
+            let dml = dml.to_string();
+            self.client
+                .read_write_transaction(|tx| {
+                    let dml = dml.clone();
+                    Box::pin(async move {
+                        let stmt = Statement::new(&dml);
+                        tx.update(stmt).await?;
+                        Ok(())
+                    })
+                })
+                .await
+                .map_err(|err: google_cloud_spanner::client::Error| {
+                    MigrationError::ClientError(err.to_string())
+                })?;
+            tracing::info!("DML executed successfully");
+        } else {
+            tracing::info!("Executing DDL: {}", sql);
 
-        let request = UpdateDatabaseDdlRequest {
-            database: self.database_path.clone(),
-            statements: vec![sql.to_string()],
-            operation_id: String::new(),
-            proto_descriptors: Vec::new(),
-            throughput_mode: false,
-        };
+            let request = UpdateDatabaseDdlRequest {
+                database: self.database_path.clone(),
+                statements: vec![sql.to_string()],
+                operation_id: String::new(),
+                proto_descriptors: Vec::new(),
+                throughput_mode: false,
+            };
 
-        let mut operation = self
-            .admin_client
-            .database()
-            .update_database_ddl(request, None)
-            .await?;
+            let mut operation = self
+                .admin_client
+                .database()
+                .update_database_ddl(request, None)
+                .await?;
 
-        // Poll until the DDL operation completes
-        operation.wait(None).await?;
+            // Poll until the DDL operation completes
+            operation.wait(None).await?;
 
-        tracing::info!("DDL executed successfully");
+            tracing::info!("DDL executed successfully");
+        }
         Ok(())
     }
 
