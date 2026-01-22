@@ -101,9 +101,9 @@ impl ReplicatedFragmentUploader {
     ) -> Self {
         assert!(preferred < storages.len());
         let bookkeeping = Arc::new(Mutex::new(BookKeeping {
-            // NOTE(rescrv):  We set it into the future to require that the process be healthy for
-            // at least decimation interval before it starts decimating.
-            last_decimation: Instant::now() + options.decimation_interval(),
+            // NOTE(rescrv):  elapsed() will start at 0 and the condition `elapsed() >= interval`
+            // will effectively wait for the interval to pass before decimating.
+            last_decimation: Instant::now(),
         }));
         Self {
             options,
