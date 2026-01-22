@@ -189,6 +189,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
             &input.record_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
@@ -251,6 +252,7 @@ impl Operator<LimitInput, LimitOutput> for Limit {
                     };
                     seek_scanner
                         .seek_and_scan(truncated_offset, truncated_limit)
+                        .instrument(tracing::trace_span!(parent: Span::current(), "Seek and scan", offset = truncated_offset, limit = truncated_limit))
                         .await?
                 } else {
                     materialized_log_offset_ids.remove_smallest(self.offset as u64);
