@@ -46,7 +46,7 @@ Chroma uses two reserved key names:
 **`K.EMBEDDING`** (`#embedding`) stores dense vector embeddings with Vector Index enabled, sourcing from `K.DOCUMENT`. This enables semantic similarity search.
 
 {% Note type="info" %}
-Use `K.DOCUMENT` and `K.EMBEDDING` in your code (they correspond to internal keys `#document` and `#embedding`). These special keys are automatically configured and cannot be manually modified. See the [Search API field reference](../search-api/pagination-selection#available-fields) for more details.
+Use `K.DOCUMENT` and `K.EMBEDDING` in your code (they correspond to internal keys `#document` and `#embedding`). In Go, use the constants `chroma.DocumentKey` and `chroma.EmbeddingKey`. These special keys are automatically configured and cannot be manually modified. See the [Search API field reference](../search-api/pagination-selection#available-fields) for more details.
 {% /Note %}
 
 ### Example: Using Defaults
@@ -90,6 +90,29 @@ await collection.add({
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Without Schema - uses defaults from table above
+collection, err := client.CreateCollection(ctx, "my_collection")
+if err != nil {
+    log.Fatal(err)
+}
+
+_, err = collection.Add(ctx,
+    chroma.WithIDs("id1"),
+    chroma.WithDocuments("Some text"),     // FTS index
+    chroma.WithEmbeddings([]float32{1.0, 2.0}), // Vector index
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata().
+            SetString("category", "science"). // String inverted index
+            SetInt("year", 2024).             // Int inverted index
+            SetFloat("score", 0.95).          // Float inverted index
+            SetBool("published", true),       // Bool inverted index
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Creating Schema Objects
@@ -120,7 +143,29 @@ const schema = new Schema();
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Create an empty schema (starts with defaults)
+schema, err := chroma.NewSchema()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Or create a schema with L2 vector index preset
+schemaWithDefaults, err := chroma.NewSchemaWithDefaults()
+if err != nil {
+    log.Fatal(err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
+
+{% Note type="info" %}
+**Go Pattern:** The Go client uses a functional options pattern. Schema configuration is declared at creation time via `NewSchema(options...)` rather than via method chaining.
+{% /Note %}
 
 ## Creating Indexes
 
@@ -178,6 +223,35 @@ schema.createIndex(new VectorIndexConfig({
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+// Create embedding function
+ef, err := openai.NewEmbeddingFunction(
+    openai.WithAPIKey("your-api-key"),
+    openai.WithModel("text-embedding-3-small"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create schema with vector index configuration
+schema, err := chroma.NewSchema(
+    chroma.WithDefaultVectorIndex(chroma.NewVectorIndexConfig(
+        chroma.WithSpace(chroma.SpaceCosine),
+        chroma.WithVectorEmbeddingFunction(ef),
+    )),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ### Creating Key-Specific Indexes
@@ -227,10 +301,40 @@ schema.createIndex(
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/chromacloudsplade"
+)
+
+// Create sparse embedding function
+sparseEF, err := chromacloudsplade.NewEmbeddingFunction(
+    chromacloudsplade.WithAPIKeyFromEnvVar("CHROMA_API_KEY"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create schema with sparse vector index for a specific key
+schema, err := chroma.NewSchema(
+    chroma.WithSparseVectorIndex("sparse_embedding",
+        chroma.NewSparseVectorIndexConfig(
+            chroma.WithSparseSourceKey(chroma.DocumentKey),
+            chroma.WithSparseEmbeddingFunction(sparseEF),
+        ),
+    ),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% Note type="info" %}
-This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction` depending on your needs.
+This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction` depending on your needs. In Go, use `chromacloudsplade.NewEmbeddingFunction()` or `bm25.NewEmbeddingFunction()`.
 {% /Note %}
 
 ## Disabling Indexes
@@ -281,6 +385,27 @@ schema.deleteIndex(undefined, "temporary_field");
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Create schema with various indexes disabled
+schema, err := chroma.NewSchema(
+    // Disable string inverted index globally
+    chroma.DisableDefaultStringIndex(),
+
+    // Disable int inverted index for a specific key
+    chroma.DisableIntIndex("unimportant_count"),
+
+    // Disable string index for a specific key
+    chroma.DisableStringIndex("temporary_field"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% Banner type="tip" %}
@@ -317,7 +442,29 @@ const schema = new Schema()
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Go uses functional options instead of method chaining
+// All configuration is provided at schema creation time
+schema, err := chroma.NewSchema(
+    chroma.DisableDefaultStringIndex(),      // Disable globally
+    chroma.WithStringIndex("category"),      // Enable for category
+    chroma.WithStringIndex("tags"),          // Enable for tags
+    chroma.DisableDefaultIntIndex(),         // Disable int indexing globally
+)
+if err != nil {
+    log.Fatal(err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
+
+{% Note type="info" %}
+**Go Pattern:** The Go client uses functional options instead of method chaining. All schema configuration must be provided at creation time via `NewSchema(options...)`.
+{% /Note %}
 
 ## Using Schema with Collections
 
@@ -354,6 +501,26 @@ const collection = await client.getOrCreateCollection({
   name: "my_collection",
   schema: schema
 });
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Create collection with schema
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithSchemaCreate(schema),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Or use GetOrCreateCollection
+collection, err = client.GetOrCreateCollection(ctx, "my_collection",
+    chroma.WithSchemaCreate(schema),
+)
+if err != nil {
+    log.Fatal(err)
+}
 ```
 {% /Tab %}
 

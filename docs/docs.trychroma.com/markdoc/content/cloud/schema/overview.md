@@ -109,11 +109,76 @@ try {
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import (
+    "context"
+    "log"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+ctx := context.Background()
+
+// Connect to Chroma Cloud
+client, err := chroma.NewCloudClient(
+    chroma.WithCloudTenant("your-tenant"),
+    chroma.WithCloudDatabase("your-database"),
+    chroma.WithCloudAPIKey("your-api-key"),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create a schema with string indexing disabled globally
+schema, err := chroma.NewSchema(
+    chroma.DisableDefaultStringIndex(),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create collection with the schema
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithSchemaCreate(schema),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Add data - string metadata won't be indexed
+_, err = collection.Add(ctx,
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithDocuments("Document 1", "Document 2"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata().SetString("category", "science").SetInt("year", 2024),
+        chroma.NewDocumentMetadata().SetString("category", "tech").SetInt("year", 2023),
+    ),
+)
+if err != nil {
+    log.Fatal(err)
+}
+
+// Querying on disabled index will raise an error
+_, err = collection.Query(ctx,
+    chroma.WithQueryTexts("query"),
+    chroma.WithWhere(chroma.EqString("category", "science")), // Error: string index is disabled
+)
+if err != nil {
+    log.Printf("Error: %v", err)
+}
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% Banner type="tip" %}
 **Important:** Schema is only configurable in `create_collection`. We are working on supporting schema update via collection `modify`
 {% /Banner %}
+
+{% Note type="info" %}
+**Go Client Pattern:** The Go client uses a declarative functional options pattern rather than method chaining. All schema configuration is provided at creation time via `NewSchema()` with options like `DisableDefaultStringIndex()`, `WithDefaultVectorIndex()`, etc.
+{% /Note %}
 
 ## Feature Highlights
 
