@@ -78,14 +78,23 @@ impl DispatcherConfig {
     }
 
     fn default_active_io_tasks() -> usize {
-        // By default, we allow the dispatcher to run as many concurrent I/O
-        // tasks as the number of tasks that can be enqueued onto the task
-        // queue. This is arbitrary, and may change in the future.
+        // By default, we allow the dispatcher to run a relatively large number
+        // of concurrent I/O tasks. This value is somewhat "experimental" and
+        // is based on examining previous production workloads. It is subject
+        // to change as we gather more data, and we may want to adjust how we
+        // determine this default value in the future.
         //
-        // This value should be set to a value that is large enough to handle
-        // a burst of I/O tasks, but not so large that it will overwhelm the
-        // system.
-        DispatcherConfig::default_task_queue_limit()
+        // The main risk with setting this value too high is that allowing too
+        // many concurrent I/O tasks will potentially allow the system to hit
+        // the process limit on the number of open file descriptors
+        // (RLIMIT_NOFILE). Unfortunately, this is difficult to reason about
+        // because it's not obvious how many file descriptors each I/O task
+        // will actually open.
+        //
+        // The risk with setting this value too low is that the dispatcher will
+        // not be able to process all of the I/O tasks that are enqueued, which
+        // will result in failed tasks.
+        10000
     }
 }
 
