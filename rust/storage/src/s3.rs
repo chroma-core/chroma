@@ -126,6 +126,23 @@ impl S3Storage {
     pub async fn from_options(options: S3StorageOptions) -> Result<Self, StorageConfigError> {
         use super::config::S3StorageConfig;
 
+        // Use same timeout/retry/stall defaults as try_from_config() to ensure
+        // consistent resilience guarantees across both construction paths
+        let defaults = S3StorageConfig::default();
+        let attempt_divisor = u64::from(defaults.request_retry_count.max(1));
+        let timeout_config = TimeoutConfigBuilder::default()
+            .connect_timeout(Duration::from_millis(defaults.connect_timeout_ms))
+            .operation_timeout(Duration::from_millis(defaults.request_timeout_ms))
+            .operation_attempt_timeout(Duration::from_millis(
+                (defaults.request_timeout_ms / attempt_divisor).max(1),
+            ))
+            .build();
+        let stalled_config = StalledStreamProtectionConfig::enabled()
+            .upload_enabled(true)
+            .grace_period(Duration::from_millis(defaults.stall_protection_ms))
+            .build();
+        let retry_config = RetryConfig::standard().with_max_attempts(defaults.request_retry_count);
+
         let cred = aws_sdk_s3::config::Credentials::new(
             &options.access_key_id,
             &options.secret_access_key,
@@ -137,7 +154,10 @@ impl S3Storage {
         let mut config_builder = aws_sdk_s3::config::Builder::new()
             .credentials_provider(cred)
             .behavior_version_latest()
-            .region(aws_sdk_s3::config::Region::new(options.region.clone()));
+            .region(aws_sdk_s3::config::Region::new(options.region.clone()))
+            .timeout_config(timeout_config)
+            .stalled_stream_protection(stalled_config)
+            .retry_config(retry_config);
 
         // If a custom endpoint URL is provided, use path-style addressing
         // (required for most S3-compatible services like LocalStack, MinIO)
@@ -152,8 +172,8 @@ impl S3Storage {
         Ok(S3Storage::new(
             &options.bucket_name,
             client,
-            S3StorageConfig::default_upload_part_size_bytes(),
-            S3StorageConfig::default_download_part_size_bytes(),
+            defaults.upload_part_size_bytes,
+            defaults.download_part_size_bytes,
         ))
     }
 
