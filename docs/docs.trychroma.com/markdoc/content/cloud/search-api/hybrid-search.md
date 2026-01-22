@@ -63,6 +63,19 @@ The score is negative because Chroma uses ascending order (lower scores = better
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+// Example: How RRF calculates scores
+// Document A: rank 0 in first Knn, rank 2 in second Knn
+// Document B: rank 1 in first Knn, rank 0 in second Knn
+
+// With equal weights (1.0, 1.0) and k=60:
+// Document A score = -(1.0/(60+0) + 1.0/(60+2)) = -(0.0167 + 0.0161) = -0.0328
+// Document B score = -(1.0/(60+1) + 1.0/(60+0)) = -(0.0164 + 0.0167) = -0.0331
+// Document A ranks higher (smaller negative score)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Rrf Parameters
@@ -109,6 +122,32 @@ const rrf = Rrf({
 // Linear combination - better when scales are similar
 const linear = Knn({ query: "machine learning" }).multiply(0.7)
   .add(Knn({ query: "deep learning" }).multiply(0.3));
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// RRF - works well with different scales
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithRrfRank(
+            chroma.KnnQueryText("machine learning", chroma.WithReturnRank(true)),
+            chroma.KnnQueryTextKey("machine learning", "sparse_embedding", chroma.WithReturnRank(true)),
+        ),
+    ),
+)
+
+// Linear combination - better when scales are similar
+result, err = collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithLinearRank(
+            chroma.KnnQueryText("machine learning", chroma.WithWeight(0.7)),
+            chroma.KnnQueryText("deep learning", chroma.WithWeight(0.3)),
+        ),
+    ),
+)
 ```
 {% /Tab %}
 
@@ -358,6 +397,34 @@ const results = await collection.search(search);
 ```
 {% /Tab %}
 
+{% Tab label="go" %}
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+// Combine dense and sparse with RRF
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithFilter(chroma.EqString("status", "published")),
+        chroma.WithRrfRank(
+            chroma.KnnQueryText("machine learning research",
+                chroma.WithReturnRank(true),
+                chroma.WithKnnLimit(200),
+                chroma.WithWeight(0.7),
+            ),
+            chroma.KnnQueryTextKey("machine learning research", "sparse_embedding",
+                chroma.WithReturnRank(true),
+                chroma.WithKnnLimit(200),
+                chroma.WithWeight(0.3),
+            ),
+            chroma.WithRrfK(60),
+        ),
+        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, "title"),
+    ),
+)
+```
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ## Edge Cases and Important Behavior
@@ -388,6 +455,23 @@ const rrf = Rrf({
     Knn({ query: "quantum computing", key: "sparse_embedding", returnRank: true, limit: 100 })
   ]
 });
+```
+{% /Tab %}
+
+{% Tab label="go" %}
+```go
+// Each Knn operates on filtered documents
+// Results per Knn = min(limit, number of documents passing filter)
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithRrfRank(
+            chroma.KnnQueryText("quantum computing",
+                chroma.WithReturnRank(true), chroma.WithKnnLimit(100)),
+            chroma.KnnQueryTextKey("quantum computing", "sparse_embedding",
+                chroma.WithReturnRank(true), chroma.WithKnnLimit(100)),
+        ),
+    ),
+)
 ```
 {% /Tab %}
 

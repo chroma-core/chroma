@@ -91,6 +91,28 @@ collection = await client.createCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+ef, _ := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+collection, err := client.CreateCollection(ctx, "my-collection",
+    chroma.WithEmbeddingFunctionCreate(ef),
+    chroma.WithHNSWSpaceCreate(chroma.Cosine),
+    chroma.WithHNSWConstructionEfCreate(200),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 ### Fine-Tuning HNSW Parameters
@@ -329,6 +351,44 @@ cohere_ef = CohereEmbeddingFunction({
   truncate: "NONE",
 });
 ```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+Creating collections with embedding function and custom configuration:
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/cohere"
+)
+
+// Using the embedding function argument
+openaiEF, _ := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+openaiCollection, err := client.CreateCollection(ctx, "my_openai_collection",
+    chroma.WithEmbeddingFunctionCreate(openaiEF),
+    chroma.WithHNSWSpaceCreate(chroma.Cosine),
+)
+
+// Using Cohere embedding function
+cohereEF, _ := cohere.NewCohereEmbeddingFunction(
+    os.Getenv("COHERE_API_KEY"),
+    cohere.WithModel("embed-english-light-v2.0"),
+)
+
+cohereCollection, err := client.GetOrCreateCollection(ctx, "my_cohere_collection",
+    chroma.WithEmbeddingFunctionCreate(cohereEF),
+    chroma.WithHNSWSpaceCreate(chroma.Cosine),
+)
+```
+
+**Note:** Go embedding functions read API keys from standard environment variables (e.g., `OPENAI_API_KEY`, `COHERE_API_KEY`).
 
 {% /Tab %}
 

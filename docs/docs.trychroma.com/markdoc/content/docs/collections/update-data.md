@@ -35,6 +35,27 @@ await collection.update({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+err := collection.Update(ctx,
+    chroma.WithIDsUpdate("id1", "id2", "id3"),
+    chroma.WithEmbeddingsUpdate(
+        []float32{1.1, 2.3, 3.2},
+        []float32{4.5, 6.9, 4.4},
+        []float32{1.1, 2.3, 3.2},
+    ),
+    chroma.WithMetadatasUpdate(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+    chroma.WithTextsUpdate("doc1", "doc2", "doc3"),
+)
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 If an `id` is not found in the collection, an error will be logged and the update will be ignored. If `documents` are supplied without corresponding `embeddings`, the embeddings will be recomputed with the collection's embedding function.
@@ -75,6 +96,27 @@ await collection.upsert({
   ],
   documents: ["doc1", "doc2", "doc3"],
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+err := collection.Upsert(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithEmbeddings(
+        []float32{1.1, 2.3, 3.2},
+        []float32{4.5, 6.9, 4.4},
+        []float32{1.1, 2.3, 3.2},
+    ),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewStringAttribute("chapter", "3"), chroma.NewStringAttribute("verse", "16")),
+        chroma.NewDocumentMetadata(chroma.NewStringAttribute("chapter", "3"), chroma.NewStringAttribute("verse", "5")),
+        chroma.NewDocumentMetadata(chroma.NewStringAttribute("chapter", "29"), chroma.NewStringAttribute("verse", "11")),
+    ),
+    chroma.WithTexts("doc1", "doc2", "doc3"),
+)
 ```
 
 {% /Tab %}
