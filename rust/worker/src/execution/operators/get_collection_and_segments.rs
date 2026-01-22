@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use chroma_error::ChromaError;
 use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{CollectionAndSegments, CollectionUuid, GetCollectionWithSegmentsError};
+use chroma_types::{
+    CollectionAndSegments, CollectionUuid, DatabaseName, GetCollectionWithSegmentsError,
+};
 use thiserror::Error;
 
 /// The `GetCollectionAndSegmentsOperator` fetches a consistent snapshot of collection and segment information
@@ -20,13 +22,15 @@ use thiserror::Error;
 pub struct GetCollectionAndSegmentsOperator {
     pub sysdb: SysDb,
     pub collection_id: CollectionUuid,
+    pub database_name: DatabaseName,
 }
 
 impl GetCollectionAndSegmentsOperator {
-    pub fn new(sysdb: SysDb, collection_id: CollectionUuid) -> Self {
+    pub fn new(sysdb: SysDb, collection_id: CollectionUuid, database_name: DatabaseName) -> Self {
         Self {
             sysdb,
             collection_id,
+            database_name,
         }
     }
 }
@@ -73,11 +77,10 @@ impl Operator<GetCollectionAndSegmentsInput, GetCollectionAndSegmentsOutput>
             self.get_name(),
             self.collection_id.0
         );
-        // TODO(Sanket): Add database name to the sysdb call.
         Ok(self
             .sysdb
             .clone()
-            .get_collection_with_segments(None, self.collection_id)
+            .get_collection_with_segments(Some(self.database_name.clone()), self.collection_id)
             .await?)
     }
 }

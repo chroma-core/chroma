@@ -16,7 +16,7 @@ use chroma_segment::{
     spann_provider::SpannProvider,
     types::VectorSegmentWriter,
 };
-use chroma_sysdb::SysDb;
+use chroma_sysdb::sysdb::SysDb;
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
@@ -232,6 +232,7 @@ impl From<RequireFunctionBackfill> for LogFetchOrchestratorResponse {
 #[derive(Debug)]
 pub(crate) struct LogFetchOrchestrator {
     collection_id: CollectionUuid,
+    database_name: chroma_types::DatabaseName,
     context: CompactionContext,
     dispatcher: ComponentHandle<Dispatcher>,
     result_channel: Option<Sender<Result<LogFetchOrchestratorResponse, LogFetchOrchestratorError>>>,
@@ -271,6 +272,7 @@ impl Orchestrator for LogFetchOrchestrator {
                 Box::new(GetCollectionAndSegmentsOperator {
                     sysdb: self.context.sysdb.clone(),
                     collection_id: self.collection_id,
+                    database_name: self.database_name.clone(),
                 }),
                 (),
                 ctx.receiver(),
@@ -288,6 +290,7 @@ impl LogFetchOrchestrator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         collection_id: CollectionUuid,
+        database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
         fetch_log_batch_size: u32,
         max_compaction_size: usize,
@@ -314,6 +317,7 @@ impl LogFetchOrchestrator {
         );
         LogFetchOrchestrator {
             collection_id,
+            database_name,
             context,
             dispatcher,
             result_channel: None,

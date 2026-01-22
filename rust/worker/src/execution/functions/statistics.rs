@@ -493,7 +493,7 @@ mod tests {
         types::{materialize_logs, MaterializeLogsResult},
     };
     use chroma_types::{
-        Chunk, LogRecord, Operation, OperationRecord, SparseVector, UpdateMetadata,
+        Chunk, DatabaseName, LogRecord, Operation, OperationRecord, SparseVector, UpdateMetadata,
         UpdateMetadataValue,
     };
 
@@ -1257,6 +1257,7 @@ mod tests {
         sysdb
             .flush_compaction(
                 tenant.clone(),
+                DatabaseName::new(db.clone()).expect("database name should be valid"),
                 collection_id,
                 -1,
                 0,
@@ -1339,9 +1340,12 @@ mod tests {
             .await
             .unwrap();
 
+        let database_name = DatabaseName::new(test_segments.collection.database.clone())
+            .expect("database name should be valid");
         Box::pin(compact::compact(
             system.clone(),
             collection_id,
+            database_name,
             false,
             50,
             1000,

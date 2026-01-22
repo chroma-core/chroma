@@ -547,9 +547,30 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                 };
 
                 // Next step: get the output collection segments using the existing GetCollectionAndSegmentsOperator
+                let database_name = match chroma_types::DatabaseName::new(
+                    self.input_collection_info.collection.database.clone(),
+                ) {
+                    Some(name) => name,
+                    None => {
+                        tracing::error!(
+                            "Invalid database name in input collection: {}",
+                            self.input_collection_info.collection.database
+                        );
+                        self.terminate_with_result(
+                            Err(AttachedFunctionOrchestratorError::InvariantViolation(
+                                "Invalid database name".to_string(),
+                            )),
+                            ctx,
+                        )
+                        .await;
+                        return;
+                    }
+                };
+
                 let operator = Box::new(GetCollectionAndSegmentsOperator::new(
                     self.output_context.sysdb.clone(),
                     output_collection_id,
+                    database_name,
                 ));
                 let input = ();
                 let task = wrap(
