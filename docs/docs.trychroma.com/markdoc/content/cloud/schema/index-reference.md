@@ -69,22 +69,6 @@ These index types have no configuration parameters.
 **Advanced tuning:** HNSW and SPANN parameters control index build and search behavior. They are pre-optimized for most use cases. Only adjust if you have specific performance requirements and understand the tradeoffs between recall, speed, and resource usage. Incorrect tuning can degrade performance.
 {% /Banner %}
 
-{% Note type="info" %}
-**Go HNSW/SPANN Tuning:** In Go, use `NewHnswConfig()` with options like `WithEfConstruction()`, `WithMaxNeighbors()`, `WithEfSearch()`, etc. For SPANN, use `NewSpannConfig()` with options like `WithSpannSearchNprobe()`, `WithSpannWriteRngFactor()`, etc. Example:
-
-```go
-schema, _ := chroma.NewSchema(
-    chroma.WithDefaultVectorIndex(chroma.NewVectorIndexConfig(
-        chroma.WithSpace(chroma.SpaceCosine),
-        chroma.WithHnsw(chroma.NewHnswConfig(
-            chroma.WithEfConstruction(200),
-            chroma.WithMaxNeighbors(32),
-        )),
-    )),
-)
-```
-{% /Note %}
-
 ## SparseVectorIndexConfig
 
 **Use Case**: Keyword-based search for exact term matching, domain-specific terminology, and technical terms. Ideal for hybrid search when combined with dense embeddings.
