@@ -29,7 +29,7 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Default, Deserialize, PartialEq, Clone, Serialize)]
+#[derive(Default, Deserialize, PartialEq, Debug, Clone, Serialize)]
 pub enum S3CredentialsConfig {
     #[default]
     Minio,
