@@ -18,8 +18,10 @@ use crate::{
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ReplicatedFragmentOptions {
     /// The minimum number of replicas that must be written to before considering a write successful.
+    #[serde(default = "ReplicatedFragmentOptions::default_minimum_allowed_replication_factor")]
     pub minimum_allowed_replication_factor: usize,
     /// The minimum number of failures before a replica is excluded from the write set.
+    #[serde(default = "ReplicatedFragmentOptions::default_minimum_failures_to_exclude_replica")]
     pub minimum_failures_to_exclude_replica: usize,
     /// The interval at which to decimate the write set (in seconds).
     #[serde(default = "ReplicatedFragmentOptions::default_decimation_interval_secs")]
@@ -30,6 +32,16 @@ pub struct ReplicatedFragmentOptions {
 }
 
 impl ReplicatedFragmentOptions {
+    /// Returns the minimum allowed replication factor.
+    pub fn default_minimum_allowed_replication_factor() -> usize {
+        1
+    }
+
+    /// Returns the minimum failures to exclude a replica.
+    pub fn default_minimum_failures_to_exclude_replica() -> usize {
+        1000
+    }
+
     /// Returns the decimation interval as a Duration.
     pub fn decimation_interval(&self) -> Duration {
         Duration::from_secs(self.decimation_interval_secs)
