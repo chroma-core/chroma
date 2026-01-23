@@ -44,7 +44,7 @@ pub fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
     let name_str = name.as_ref();
 
     // A topology is a valid name.  A database name prefixed with a topology is a valid name.  The
-    // conjuntion must be separated by a single `+` and not exceed the database name limits.
+    // conjunction must be separated by a single `+` and not exceed the database name limits.
     // Thus, we recurse after validating no more plusses.
     if let Some((topo, name)) = name_str.split_once('+') {
         if name_str.len() > 512 {
