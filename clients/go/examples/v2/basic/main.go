@@ -60,7 +60,7 @@ func main() {
 
 	qr, err := col.Query(context.Background(),
 		chroma.WithQueryTexts("say hello"),
-		chroma.WithIncludeQuery(chroma.IncludeDocuments, chroma.IncludeMetadatas),
+		chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeMetadatas),
 	)
 	if err != nil {
 		log.Fatalf("Error querying collection: %s \n", err)
@@ -68,7 +68,7 @@ func main() {
 	}
 	fmt.Printf("Query result: %v\n", qr.GetDocumentsGroups()[0][0])
 
-	err = col.Delete(context.Background(), chroma.WithIDsDelete("1", "2"))
+	err = col.Delete(context.Background(), chroma.WithIDs("1", "2"))
 	if err != nil {
 		log.Fatalf("Error deleting collection: %s \n", err)
 		return
