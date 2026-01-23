@@ -188,30 +188,15 @@ impl MigrationRunner {
     }
 
     async fn apply_migration(&self, migration: &Migration) -> Result<(), MigrationError> {
-        self.execute_ddl(&migration.sql).await?;
+        self.execute_migration_statement(&migration.sql).await?;
         self.record_migration(migration).await?;
         Ok(())
     }
 
-    async fn execute_ddl(&self, sql: &str) -> Result<(), MigrationError> {
+    async fn execute_migration_statement(&self, sql: &str) -> Result<(), MigrationError> {
         let sql = sql.trim().trim_end_matches(';');
         if let Some(dml) = sql.strip_prefix("DML:") {
-            tracing::info!("Executing DML: {}", dml);
-            let dml = dml.to_string();
-            self.client
-                .read_write_transaction(|tx| {
-                    let dml = dml.clone();
-                    Box::pin(async move {
-                        let stmt = Statement::new(&dml);
-                        tx.update(stmt).await?;
-                        Ok(())
-                    })
-                })
-                .await
-                .map_err(|err: google_cloud_spanner::client::Error| {
-                    MigrationError::ClientError(err.to_string())
-                })?;
-            tracing::info!("DML executed successfully");
+            self.execute_dml(dml).await?;
         } else {
             tracing::info!("Executing DDL: {}", sql);
 
@@ -234,6 +219,26 @@ impl MigrationRunner {
 
             tracing::info!("DDL executed successfully");
         }
+        Ok(())
+    }
+
+    async fn execute_dml(&self, dml: &str) -> Result<(), MigrationError> {
+        tracing::info!("Executing DML: {}", dml);
+        let dml = dml.to_string();
+        self.client
+            .read_write_transaction(|tx| {
+                let dml = dml.clone();
+                Box::pin(async move {
+                    let stmt = Statement::new(&dml);
+                    tx.update(stmt).await?;
+                    Ok(())
+                })
+            })
+            .await
+            .map_err(|err: google_cloud_spanner::client::Error| {
+                MigrationError::ClientError(err.to_string())
+            })?;
+        tracing::info!("DML executed successfully");
         Ok(())
     }
 
@@ -288,7 +293,7 @@ impl MigrationRunner {
     pub async fn initialize_migrations_table(&self) -> Result<(), MigrationError> {
         let ddl = "CREATE TABLE IF NOT EXISTS migrations (dir STRING(255) NOT NULL, version INT64 NOT NULL, filename STRING(512) NOT NULL, sql STRING(MAX) NOT NULL, checksum STRING(64) NOT NULL) PRIMARY KEY (dir, version)";
 
-        match self.execute_ddl(ddl).await {
+        match self.execute_migration_statement(ddl).await {
             Ok(_) => {
                 tracing::info!("Migrations table created");
                 Ok(())
