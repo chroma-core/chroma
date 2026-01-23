@@ -39,18 +39,18 @@ await collection.update({
 
 ```go
 err := collection.Update(ctx,
-    chroma.WithIDsUpdate("id1", "id2", "id3"),
-    chroma.WithEmbeddingsUpdate(
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithEmbeddings(
         []float32{1.1, 2.3, 3.2},
         []float32{4.5, 6.9, 4.4},
         []float32{1.1, 2.3, 3.2},
     ),
-    chroma.WithMetadatasUpdate(
+    chroma.WithMetadatas(
         chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
         chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
         chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
     ),
-    chroma.WithTextsUpdate("doc1", "doc2", "doc3"),
+    chroma.WithTexts("doc1", "doc2", "doc3"),
 )
 ```
 

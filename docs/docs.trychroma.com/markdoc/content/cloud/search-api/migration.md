@@ -111,7 +111,7 @@ results, err := collection.Query(ctx,
 results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("machine learning")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
     ),
 )
 ```
@@ -165,7 +165,7 @@ const results2 = await collection.search(
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("quantum computing"),
     chroma.WithNResults(5),
-    chroma.WithWhereDocumentQuery(chroma.Contains("quantum")),
+    chroma.WithWhereDocument(chroma.Contains("quantum")),
 )
 
 // Search API
@@ -173,7 +173,7 @@ results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("quantum computing")),
         chroma.WithFilter(chroma.DocumentContains("quantum")),
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
     ),
 )
 ```
@@ -237,8 +237,8 @@ const results2 = await collection.search(
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("quantum physics"),
     chroma.WithNResults(10),
-    chroma.WithWhereQuery(chroma.EqString(chroma.K("category"), "science")),
-    chroma.WithWhereDocumentQuery(chroma.Contains("quantum")),
+    chroma.WithWhere(chroma.EqString(chroma.K("category"), "science")),
+    chroma.WithWhereDocument(chroma.Contains("quantum")),
 )
 
 // Search API - combine filters with $and
@@ -251,7 +251,7 @@ results, err := collection.Search(ctx,
             ),
         ),
         chroma.WithKnnRank(chroma.KnnQueryText("quantum physics")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
     ),
 )
 ```
@@ -294,12 +294,12 @@ const results2 = await collection.search(
 {% Tab label="go" %}
 ```go
 // Legacy API
-results, err := collection.Get(ctx, chroma.WithIDsGet("id1", "id2", "id3"))
+results, err := collection.Get(ctx, chroma.WithIDs("id1", "id2", "id3"))
 
 // Search API
 results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
-        chroma.WithFilterIDs("id1", "id2", "id3"),
+        chroma.WithIDs("id1", "id2", "id3"),
     ),
 )
 ```
@@ -349,16 +349,16 @@ const results2 = await collection.search(
 ```go
 // Legacy API
 results, err := collection.Get(ctx,
-    chroma.WithWhereGet(chroma.EqString(chroma.K("status"), "active")),
-    chroma.WithLimitGet(100),
-    chroma.WithOffsetGet(50),
+    chroma.WithWhere(chroma.EqString(chroma.K("status"), "active")),
+    chroma.WithLimit(100),
+    chroma.WithOffset(50),
 )
 
 // Search API
 results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithFilter(chroma.EqString(chroma.K("status"), "active")),
-        chroma.WithPage(chroma.WithLimit(100), chroma.WithOffset(50)),
+        chroma.NewPage(chroma.Limit(100), chroma.Offset(50)),
     ),
 )
 ```
@@ -469,24 +469,24 @@ const results2 = await collection.search(searches);
 results, err := collection.Query(ctx,
     chroma.WithQueryEmbeddings(emb1, emb2, emb3),
     chroma.WithNResults(10),
-    chroma.WithWhereQuery(chroma.EqString(chroma.K("category"), "science")),
+    chroma.WithWhere(chroma.EqString(chroma.K("category"), "science")),
 )
 
 // Search API - different parameters per search
 results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("machine learning")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithFilter(chroma.EqString(chroma.K("category"), "science")),
     ),
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("neural networks")),
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
         chroma.WithFilter(chroma.EqString(chroma.K("category"), "tech")),
     ),
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("artificial intelligence")),
-        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.NewPage(chroma.Limit(20)),
     ),
 )
 ```

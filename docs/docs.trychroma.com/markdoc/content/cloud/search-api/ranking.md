@@ -142,7 +142,7 @@ import chroma "github.com/chroma-core/chroma/clients/go"
 result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("What is machine learning?")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
     ),
 )
 
@@ -154,7 +154,7 @@ result, err = collection.Search(ctx,
             chroma.WithKnnLimit(100),     // Max candidates
             chroma.WithKnnReturnRank(),   // Return rank position
         ),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
     ),
 )
 
@@ -165,7 +165,7 @@ result, err = collection.Search(ctx,
             chroma.KnnQueryText("machine learning"),
             chroma.WithKnnKey(chroma.K("sparse_embedding")),
         ),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
     ),
 )
 ```
@@ -910,7 +910,7 @@ result, err := collection.Search(ctx,
             ),
         ),
         chroma.WithRank(combinedRank),
-        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.NewPage(chroma.Limit(20)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("title"), chroma.K("category")),
     ),
 )

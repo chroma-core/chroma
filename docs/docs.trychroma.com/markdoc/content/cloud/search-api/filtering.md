@@ -701,7 +701,7 @@ result, err := collection.Search(ctx,
             ),
         ),
         chroma.WithKnnRank(chroma.KnnQueryText("latest AI research developments")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.K("title"), chroma.K("author"), chroma.K("year")),
     ),
 )

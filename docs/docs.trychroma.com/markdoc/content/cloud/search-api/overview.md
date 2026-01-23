@@ -78,7 +78,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithFilter(chroma.EqString("category", "science")),
         chroma.WithKnnRank(chroma.KnnQueryText("What are the latest advances in quantum computing?")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )
@@ -271,7 +271,7 @@ result, err := collection.Search(ctx,
             ),
         ),
         chroma.WithKnnRank(chroma.KnnQueryText("recent quantum computing breakthroughs")),
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("title"), chroma.K("author")),
     ),
 )

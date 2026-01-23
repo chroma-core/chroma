@@ -20,7 +20,7 @@ type GroupBy struct {
 //	    NewSearchRequest(
 //	        WithKnnRank(KnnQueryText("query"), WithKnnLimit(100)),
 //	        WithGroupBy(NewGroupBy(NewMinK(3, KScore), K("category"))),
-//	        WithPage(WithLimit(30)),
+//	        NewPage(Limit(30)),
 //	    ),
 //	)
 func NewGroupBy(aggregate Aggregate, keys ...Key) *GroupBy {

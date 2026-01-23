@@ -314,7 +314,7 @@ if err != nil {
 results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithRank(sparseRank),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )
@@ -440,7 +440,7 @@ if err != nil {
 results, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithRank(rrfRank),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )

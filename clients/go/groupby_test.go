@@ -184,7 +184,7 @@ func TestWithGroupBy(t *testing.T) {
 		groupBy := NewGroupBy(NewMinK(3, KScore), K("category"))
 
 		req := &SearchRequest{}
-		err := WithGroupBy(groupBy)(req)
+		err := WithGroupBy(groupBy).ApplyToSearchRequest(req)
 		require.NoError(t, err)
 		require.NotNil(t, req.GroupBy)
 		require.Equal(t, groupBy, req.GroupBy)
@@ -192,7 +192,7 @@ func TestWithGroupBy(t *testing.T) {
 
 	t.Run("nil groupby", func(t *testing.T) {
 		req := &SearchRequest{}
-		err := WithGroupBy(nil)(req)
+		err := WithGroupBy(nil).ApplyToSearchRequest(req)
 		require.NoError(t, err)
 		require.Nil(t, req.GroupBy)
 	})
@@ -201,7 +201,7 @@ func TestWithGroupBy(t *testing.T) {
 		groupBy := NewGroupBy(NewMinK(0, KScore), K("category"))
 
 		req := &SearchRequest{}
-		err := WithGroupBy(groupBy)(req)
+		err := WithGroupBy(groupBy).ApplyToSearchRequest(req)
 		require.Error(t, err)
 		require.Nil(t, req.GroupBy)
 	})
@@ -210,7 +210,7 @@ func TestWithGroupBy(t *testing.T) {
 		groupBy := NewGroupBy(NewMinK(3, KScore))
 
 		req := &SearchRequest{}
-		err := WithGroupBy(groupBy)(req)
+		err := WithGroupBy(groupBy).ApplyToSearchRequest(req)
 		require.Error(t, err)
 	})
 }
@@ -243,7 +243,7 @@ func TestSearchRequestWithGroupBy(t *testing.T) {
 		opt := NewSearchRequest(
 			WithKnnRank(KnnQueryText("machine learning"), WithKnnLimit(100)),
 			WithGroupBy(NewGroupBy(NewMinK(3, KScore), K("category"))),
-			WithPage(WithLimit(30)),
+			WithLimit(30),
 			WithSelect(KDocument, KScore, K("category")),
 		)
 

@@ -1246,17 +1246,17 @@ func operandToRank(operand Operand) Rank {
 //
 //	search := NewSearchRequest(
 //	    WithKnnRank(KnnQueryText("machine learning"), WithKnnLimit(50)),
-//	    WithPage(WithLimit(10)),
+//	    NewPage(Limit(10)),
 //	)
 func WithKnnRank(query KnnQueryOption, knnOptions ...KnnOption) SearchOption {
-	return func(req *SearchRequest) error {
+	return SearchRequestOptionFunc(func(req *SearchRequest) error {
 		knn, err := NewKnnRank(query, knnOptions...)
 		if err != nil {
 			return err
 		}
 		req.Rank = knn
 		return nil
-	}
+	})
 }
 
 // WithRffRank adds an RRF ranking expression to a search request.
@@ -1272,12 +1272,12 @@ func WithKnnRank(query KnnQueryOption, knnOptions ...KnnOption) SearchOption {
 //	    ),
 //	)
 func WithRffRank(opts ...RffOption) SearchOption {
-	return func(req *SearchRequest) error {
+	return SearchRequestOptionFunc(func(req *SearchRequest) error {
 		rrf, err := NewRrfRank(opts...)
 		if err != nil {
 			return err
 		}
 		req.Rank = rrf
 		return nil
-	}
+	})
 }
