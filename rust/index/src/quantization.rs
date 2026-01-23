@@ -333,6 +333,9 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
 
 #[cfg(test)]
 mod tests {
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
+
     use super::*;
 
     #[test]
@@ -393,5 +396,144 @@ mod tests {
         let code = Code::<Vec<u8>>::quantize(&embedding, &centroid);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
+    }
+
+    /// BITS=3: P95 relative error bound 2.0%, observed ~1.2%
+    #[test]
+    fn test_error_bound_bits_3() {
+        for k in [1.0, 2.0, 4.0] {
+            assert_error_bound::<3>(1024, k, 128);
+        }
+    }
+
+    /// BITS=4: P95 relative error bound 1.0%, observed ~0.7%
+    #[test]
+    fn test_error_bound_bits_4() {
+        for k in [1.0, 2.0, 4.0] {
+            assert_error_bound::<4>(1024, k, 128);
+        }
+    }
+
+    /// BITS=5: P95 relative error bound 0.5%, observed ~0.4%
+    #[test]
+    fn test_error_bound_bits_5() {
+        for k in [1.0, 2.0, 4.0] {
+            assert_error_bound::<5>(1024, k, 128);
+        }
+    }
+
+    /// BITS=6: P95 relative error bound 0.25%, observed ~0.2%
+    #[test]
+    fn test_error_bound_bits_6() {
+        for k in [1.0, 2.0, 4.0] {
+            assert_error_bound::<6>(1024, k, 128);
+        }
+    }
+
+    /// Asserts that quantization error is within expected bounds.
+    ///
+    /// Tests both `distance_code` and `distance_query` across all distance functions,
+    /// verifying P95 relative error is below `0.16 / 2^BITS`.
+    fn assert_error_bound<const BITS: u8>(dim: usize, k: f32, n_vectors: usize) {
+        let mut rng = StdRng::seed_from_u64(42);
+
+        // Generate centroid
+        let centroid = (0..dim).map(|_| rng.gen_range(-k..k)).collect::<Vec<_>>();
+        let c_norm = (f32::dot(&centroid, &centroid).unwrap_or(0.0) as f32).sqrt();
+
+        // Generate vectors shifted by centroid
+        let vectors = (0..n_vectors)
+            .map(|_| {
+                centroid
+                    .iter()
+                    .map(|c| c + rng.gen_range(-k..k))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
+        // Quantize all vectors
+        let codes = vectors
+            .iter()
+            .map(|v| Code::<Vec<u8>, BITS>::quantize(v, &centroid))
+            .collect::<Vec<_>>();
+
+        // Error bound: 0.16 / 2^BITS
+        // BITS=2: 4.0%, BITS=3: 2.0%, BITS=4: 1.0%, BITS=5: 0.5%, BITS=6: 0.25%
+        let max_p95_rel_error = 0.16 / (1 << BITS) as f32;
+
+        // Test all distance functions
+        for distance_fn in [
+            DistanceFunction::Cosine,
+            DistanceFunction::Euclidean,
+            DistanceFunction::InnerProduct,
+        ] {
+            let mut rel_errors_code = Vec::new();
+            let mut rel_errors_query = Vec::new();
+
+            // For each pair of vectors
+            for i in 0..n_vectors {
+                for j in (i + 1)..n_vectors {
+                    // Exact distance using simsimd
+                    let exact = match distance_fn {
+                        DistanceFunction::Cosine => {
+                            SpatialSimilarity::cos(&vectors[i], &vectors[j]).unwrap_or(0.0) as f32
+                        }
+                        DistanceFunction::Euclidean => {
+                            SpatialSimilarity::l2sq(&vectors[i], &vectors[j]).unwrap_or(0.0) as f32
+                        }
+                        DistanceFunction::InnerProduct => {
+                            1.0 - SpatialSimilarity::dot(&vectors[i], &vectors[j]).unwrap_or(0.0)
+                                as f32
+                        }
+                    };
+
+                    // distance_code estimation
+                    let estimated_code =
+                        codes[i].distance_code(&distance_fn, &codes[j], c_norm, dim);
+                    let abs_err_code = (exact - estimated_code).abs();
+                    rel_errors_code.push(abs_err_code / exact.abs().max(f32::EPSILON));
+
+                    // distance_query estimation (treat vectors[j] as query)
+                    let q = &vectors[j];
+                    let q_norm = (f32::dot(q, q).unwrap_or(0.0) as f32).sqrt();
+                    let c_dot_q = f32::dot(&centroid, q).unwrap_or(0.0) as f32;
+                    let r_q = centroid
+                        .iter()
+                        .zip(q)
+                        .map(|(c, q)| q - c)
+                        .collect::<Vec<_>>();
+                    let estimated_query =
+                        codes[i].distance_query(&distance_fn, &r_q, c_norm, c_dot_q, q_norm);
+                    let abs_err_query = (exact - estimated_query).abs();
+                    rel_errors_query.push(abs_err_query / exact.abs().max(f32::EPSILON));
+                }
+            }
+
+            // Calculate P95
+            rel_errors_code.sort_by(|a, b| a.total_cmp(b));
+            rel_errors_query.sort_by(|a, b| a.total_cmp(b));
+            let p95_code = rel_errors_code[rel_errors_code.len() * 95 / 100];
+            let p95_query = rel_errors_query[rel_errors_query.len() * 95 / 100];
+
+            // Assert error bounds
+            assert!(
+                p95_code < max_p95_rel_error,
+                "BITS={}, k={}, {:?}: distance_code P95 rel error {:.4} exceeds bound {:.4}",
+                BITS,
+                k,
+                distance_fn,
+                p95_code,
+                max_p95_rel_error
+            );
+            assert!(
+                p95_query < max_p95_rel_error,
+                "BITS={}, k={}, {:?}: distance_query P95 rel error {:.4} exceeds bound {:.4}",
+                BITS,
+                k,
+                distance_fn,
+                p95_query,
+                max_p95_rel_error
+            );
+        }
     }
 }
