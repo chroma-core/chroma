@@ -725,9 +725,9 @@ async fn create_database(
     State(mut server): State<FrontendServer>,
     Json(CreateDatabasePayload { name }): Json<CreateDatabasePayload>,
 ) -> Result<Json<CreateDatabaseResponse>, ServerError> {
-    // if let Err(err) = validate_name(&name) {
-    //     return Err(InvalidDatabaseError::from(err).into());
-    // }
+    if let Err(err) = validate_name(&name) {
+        return Err(InvalidDatabaseError::from(err).into());
+    }
     server.metrics.create_database.add(1, &[]);
     tracing::info!(name: "create_database", tenant_name = %tenant, database_name = %name);
     server

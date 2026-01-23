@@ -42,6 +42,30 @@ pub(crate) fn validate_non_empty_metadata<V>(
 
 pub fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
     let name_str = name.as_ref();
+
+    if let Some((topo, name)) = name_str.split_once('+') {
+        if name_str.len() > 512 {
+            return Err(ValidationError::new("name").with_message(
+                format!(
+                    "Expected a name containing 3-512 characters. Got: {}",
+                    name_str.len()
+                )
+                .into(),
+            ));
+        }
+        if name.chars().any(|c| c == '+') {
+            return Err(ValidationError::new("name").with_message(
+                "Expected a name to contain at most one topology:  Got two `+` characters.".into(),
+            ));
+        }
+        assert!(
+            !topo.chars().any(|c| c == '+'),
+            "split once should not bypass the split character"
+        );
+        validate_name(topo)?;
+        validate_name(name)?;
+    }
+
     if !ALNUM_RE.is_match(name_str) {
         return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-512 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str}").into()));
     }
