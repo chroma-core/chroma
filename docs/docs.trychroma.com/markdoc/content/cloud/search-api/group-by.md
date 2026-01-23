@@ -64,7 +64,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("machine learning research")),
         chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 3)),
-        chroma.WithPage(chroma.WithLimit(30)),
+        chroma.NewPage(chroma.Limit(30)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, "category"),
     ),
 )
@@ -327,7 +327,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("climate change impacts")),
         chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 2)),
-        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.NewPage(chroma.Limit(20)),
     ),
 )
 ```
@@ -374,7 +374,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("renewable energy")),
         chroma.WithGroupBy("category", "year", chroma.WithMinK(chroma.KScore, 1)),
-        chroma.WithPage(chroma.WithLimit(30)),
+        chroma.NewPage(chroma.Limit(30)),
     ),
 )
 ```
@@ -421,7 +421,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("artificial intelligence")),
         chroma.WithGroupBy("category", chroma.WithMinK("priority", chroma.KScore, 2)),
-        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.NewPage(chroma.Limit(20)),
     ),
 )
 ```
@@ -523,7 +523,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText("search query")),
         chroma.WithGroupBy("category", chroma.WithMinK(chroma.KScore, 5)),
-        chroma.WithPage(chroma.WithLimit(50)),
+        chroma.NewPage(chroma.Limit(50)),
     ),
 )
 ```

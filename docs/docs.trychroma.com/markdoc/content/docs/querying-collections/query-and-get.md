@@ -281,20 +281,20 @@ results, err := collection.Query(ctx,
 )
 ```
 
-The `WithIDsQuery` option lets you constrain the search only to records with the IDs from the provided list:
+The `WithIDs` option lets you constrain the search only to records with the IDs from the provided list:
 
 ```go
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("search query"),
     chroma.WithNResults(5),
-    chroma.WithIDsQuery("id1", "id2"),
+    chroma.WithIDs("id1", "id2"),
 )
 ```
 
 You can also retrieve records from a collection by using the `.Get` method:
 
 ```go
-results, err := collection.Get(ctx, chroma.WithIDsGet("id1", "id2"))
+results, err := collection.Get(ctx, chroma.WithIDs("id1", "id2"))
 ```
 
 Both `Query` and `Get` have the `where` argument for [metadata filtering](./metadata-filtering) and `where_document` for [full-text search and regex](./full-text-search):
@@ -303,8 +303,8 @@ Both `Query` and `Get` have the `where` argument for [metadata filtering](./meta
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("search query"),
     chroma.WithNResults(5),
-    chroma.WithWhereQuery(chroma.EqInt("page", 10)),
-    chroma.WithWhereDocumentQuery(chroma.Contains("search string")),
+    chroma.WithWhere(chroma.EqInt("page", 10)),
+    chroma.WithWhereDocument(chroma.Contains("search string")),
 )
 ```
 
@@ -344,12 +344,12 @@ By default, `.Query` and `.Get` always return the `documents` and `metadatas`. Y
 results, _ := collection.Query(ctx, chroma.WithQueryTexts("my query"))
 
 // Get with only documents
-results, _ := collection.Get(ctx, chroma.WithIncludeGet(chroma.IncludeDocuments))
+results, _ := collection.Get(ctx, chroma.WithInclude(chroma.IncludeDocuments))
 
 // Query with specific includes
 results, _ := collection.Query(ctx,
     chroma.WithQueryTexts("my query"),
-    chroma.WithIncludeQuery(chroma.IncludeDocuments, chroma.IncludeMetadatas, chroma.IncludeEmbeddings),
+    chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeMetadatas, chroma.IncludeEmbeddings),
 )
 ```
 

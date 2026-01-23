@@ -253,8 +253,8 @@ func searchProducts(
             chroma.KnnQueryText(userQuery),
             chroma.WithKnnLimit(100),
         ),
-        chroma.WithPage(
-            chroma.WithLimit(pageSize),
+        chroma.NewPage(
+            chroma.Limit(pageSize),
             chroma.WithOffset(page*pageSize),
         ),
         chroma.WithSelect(
@@ -695,7 +695,7 @@ func getRecommendations(
     // Build search request
     opts := []chroma.SearchOption{
         chroma.WithRank(rrf),
-        chroma.WithPage(chroma.WithLimit(numRecommendations)),
+        chroma.NewPage(chroma.Limit(numRecommendations)),
         chroma.WithSelect(
             chroma.KDocument, chroma.KScore,
             chroma.K("title"), chroma.K("category"), chroma.K("author"),
@@ -993,7 +993,7 @@ func searchAcrossCategories(
                 chroma.WithKnnLimit(50),
             ),
             chroma.WithFilter(chroma.EqString(chroma.K("category"), category)),
-            chroma.WithPage(chroma.WithLimit(resultsPerCategory)),
+            chroma.NewPage(chroma.Limit(resultsPerCategory)),
             chroma.WithSelect(
                 chroma.KDocument, chroma.KScore,
                 chroma.K("title"), chroma.K("category"), chroma.K("date"),

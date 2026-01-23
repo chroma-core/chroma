@@ -36,7 +36,7 @@ await collection.delete({
 {% Tab label="go" %}
 
 ```go
-err := collection.Delete(ctx, chroma.WithIDsDelete("id1", "id2", "id3"))
+err := collection.Delete(ctx, chroma.WithIDs("id1", "id2", "id3"))
 ```
 
 {% /Tab %}
@@ -73,8 +73,8 @@ await collection.delete({
 
 ```go
 err := collection.Delete(ctx,
-    chroma.WithIDsDelete("id1", "id2", "id3"),
-    chroma.WithWhereDelete(chroma.EqString("chapter", "20")),
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithWhere(chroma.EqString("chapter", "20")),
 )
 ```
 

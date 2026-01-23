@@ -127,7 +127,7 @@ func basicSearch(ctx context.Context, col chroma.Collection) {
 				chroma.KnnQueryText("neural networks and deep learning"),
 				chroma.WithKnnLimit(50),
 			),
-			chroma.WithPage(chroma.WithLimit(5)),
+			chroma.NewPage(chroma.Limit(5)),
 			chroma.WithSelect(chroma.KDocument, chroma.KScore),
 		),
 	)
@@ -156,7 +156,7 @@ func searchWithFilter(ctx context.Context, col chroma.Collection) {
 					chroma.GteInt(chroma.K("year"), 2023),
 				),
 			),
-			chroma.WithPage(chroma.WithLimit(5)),
+			chroma.NewPage(chroma.Limit(5)),
 			chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("category"), chroma.K("year")),
 		),
 	)
@@ -201,7 +201,7 @@ func weightedSearch(ctx context.Context, col chroma.Collection) {
 	result, err := col.Search(ctx,
 		chroma.NewSearchRequest(
 			chroma.WithRank(combined),
-			chroma.WithPage(chroma.WithLimit(5)),
+			chroma.NewPage(chroma.Limit(5)),
 			chroma.WithSelect(chroma.KDocument, chroma.KScore),
 		),
 	)
@@ -253,7 +253,7 @@ func rrfSearch(ctx context.Context, col chroma.Collection) {
 	result, err := col.Search(ctx,
 		chroma.NewSearchRequest(
 			chroma.WithRank(rrf),
-			chroma.WithPage(chroma.WithLimit(5)),
+			chroma.NewPage(chroma.Limit(5)),
 			chroma.WithSelect(chroma.KDocument, chroma.KScore),
 		),
 	)
@@ -279,10 +279,7 @@ func paginatedSearch(ctx context.Context, col chroma.Collection) {
 					chroma.KnnQueryText("learning"),
 					chroma.WithKnnLimit(50),
 				),
-				chroma.WithPage(
-					chroma.WithLimit(pageSize),
-					chroma.WithOffset(page*pageSize),
-				),
+				chroma.NewPage(chroma.Limit(pageSize), chroma.Offset(page*pageSize)),
 				chroma.WithSelect(chroma.KDocument, chroma.KScore),
 			),
 		)

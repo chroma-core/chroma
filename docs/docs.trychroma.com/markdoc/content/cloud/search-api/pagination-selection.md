@@ -50,14 +50,14 @@ import chroma "github.com/chroma-core/chroma/clients/go"
 // Limit results
 result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
-        chroma.WithPage(chroma.WithLimit(10)),  // Return top 10 results
+        chroma.NewPage(chroma.Limit(10)),  // Return top 10 results
     ),
 )
 
 // Pagination with offset
 result, err = collection.Search(ctx,
     chroma.NewSearchRequest(
-        chroma.WithPage(chroma.WithLimit(10), chroma.WithOffset(20)),  // Skip first 20, return next 10
+        chroma.NewPage(chroma.Limit(10), chroma.Offset(20)),  // Skip first 20, return next 10
     ),
 )
 ```
@@ -128,18 +128,18 @@ pageSize := 10
 
 // Page 0: Results 1-10
 result, _ := collection.Search(ctx,
-    chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(pageSize), chroma.WithOffset(0))),
+    chroma.NewSearchRequest(chroma.NewPage(chroma.Limit(pageSize), chroma.Offset(0))),
 )
 
 // Page 1: Results 11-20
 result, _ = collection.Search(ctx,
-    chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(pageSize), chroma.WithOffset(10))),
+    chroma.NewSearchRequest(chroma.NewPage(chroma.Limit(pageSize), chroma.Offset(10))),
 )
 
 // General formula
 func getPage(collection *chroma.Collection, ctx context.Context, pageNumber, pageSize int) (*chroma.SearchResult, error) {
     return collection.Search(ctx,
-        chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(pageSize), chroma.WithOffset(pageNumber*pageSize))),
+        chroma.NewSearchRequest(chroma.NewPage(chroma.Limit(pageSize), chroma.Offset(pageNumber*pageSize))),
     )
 }
 ```
@@ -294,13 +294,13 @@ const search4 = new Search().limit(100).selectAll();
 ```go
 // Fast - minimal data
 result, _ := collection.Search(ctx,
-    chroma.NewSearchRequest(chroma.WithPage(chroma.WithLimit(100))),
+    chroma.NewSearchRequest(chroma.NewPage(chroma.Limit(100))),
 )
 
 // Moderate - just what you need
 result, _ = collection.Search(ctx,
     chroma.NewSearchRequest(
-        chroma.WithPage(chroma.WithLimit(100)),
+        chroma.NewPage(chroma.Limit(100)),
         chroma.WithSelect(chroma.KScore, "title", "date"),
     ),
 )
@@ -308,7 +308,7 @@ result, _ = collection.Search(ctx,
 // Slower - large fields
 result, _ = collection.Search(ctx,
     chroma.NewSearchRequest(
-        chroma.WithPage(chroma.WithLimit(100)),
+        chroma.NewPage(chroma.Limit(100)),
         chroma.WithSelect(chroma.KDocument, chroma.KEmbedding),
     ),
 )

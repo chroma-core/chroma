@@ -155,15 +155,15 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDs("1", "2", "3"), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Get(ctx, WithIDsGet("1", "2", "3"))
+		res, err := collection.Get(ctx, WithIDs("1", "2", "3"))
 		require.NoError(t, err)
 		require.Equal(t, 3, len(res.GetIDs()))
 
-		res, err = collection.Get(ctx, WithIDsGet("1_1", "2_3", "3_0"))
+		res, err = collection.Get(ctx, WithIDs("1_1", "2_3", "3_0"))
 		require.NoError(t, err)
 		require.Equal(t, 0, len(res.GetIDs()))
 
-		res, err = collection.Get(ctx, WithIncludeGet(IncludeEmbeddings))
+		res, err = collection.Get(ctx, WithInclude(IncludeEmbeddings))
 		require.NoError(t, err)
 		require.Equal(t, 3, len(res.GetIDs()))
 
@@ -176,16 +176,16 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 
 		// wrong limit
-		_, err = collection.Get(ctx, WithLimitGet(-1))
+		_, err = collection.Get(ctx, WithLimit(-1))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "limit must be greater than 0")
 
-		_, err = collection.Get(ctx, WithLimitGet(0))
+		_, err = collection.Get(ctx, WithLimit(0))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "limit must be greater than 0")
 
 		// wrong offset
-		_, err = collection.Get(ctx, WithOffsetGet(-1))
+		_, err = collection.Get(ctx, WithOffset(-1))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "offset must be greater than or equal to 0")
 	})
@@ -197,7 +197,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Get(ctx, WithLimitGet(1), WithOffsetGet(0))
+		res, err := collection.Get(ctx, WithLimit(1), WithOffset(0))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDs()))
 	})
@@ -216,7 +216,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("this is document 1", "another document", "384km is the distance between the earth and the moon"))
 		require.NoError(t, err)
-		res, err := collection.Get(ctx, WithWhereDocumentGet(Regex("[0-9]+km")))
+		res, err := collection.Get(ctx, WithWhereDocument(Regex("[0-9]+km")))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDs()))
 		require.Equal(t, "384km is the distance between the earth and the moon", res.GetDocuments()[0].ContentString())
@@ -235,7 +235,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 			),
 		)
 		require.NoError(t, err)
-		res, err := collection.Get(ctx, WithWhereGet(EqString(K("test_key"), "doc1")))
+		res, err := collection.Get(ctx, WithWhere(EqString(K("test_key"), "doc1")))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDs()))
 		require.Equal(t, "test_document_1", res.GetDocuments()[0].ContentString())
@@ -259,7 +259,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDs("1", "2", "3"), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		err = collection.Delete(ctx, WithIDsDelete("1", "2", "3"))
+		err = collection.Delete(ctx, WithIDs("1", "2", "3"))
 		require.NoError(t, err)
 		count, err := collection.Count(ctx)
 		require.NoError(t, err)
@@ -291,7 +291,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		count, err := collection.Count(ctx)
 		require.NoError(t, err)
 		require.Equal(t, 3, count)
-		res, err := collection.Get(ctx, WithIDsGet("1", "2", "3"))
+		res, err := collection.Get(ctx, WithIDs("1", "2", "3"))
 		require.NoError(t, err)
 		require.Equal(t, 3, len(res.GetIDs()))
 		require.Equal(t, "test_document_1_updated", res.GetDocuments()[0].ContentString())
@@ -337,9 +337,9 @@ func TestCollectionAddIntegration(t *testing.T) {
 		)
 		require.NoError(t, err)
 		err = collection.Update(ctx,
-			WithIDsUpdate("1", "2", "3"),
-			WithTextsUpdate("test_document_1_updated", "test_document_2_updated", "test_document_3_updated"),
-			WithMetadatasUpdate(
+			WithIDs("1", "2", "3"),
+			WithTexts("test_document_1_updated", "test_document_2_updated", "test_document_3_updated"),
+			WithMetadatas(
 				NewMetadata(NewIntAttribute("test_key_1", 1)),
 				NewMetadata(RemoveAttribute("test_key_2"), NewStringAttribute("test_key_3", "updated")),
 				NewMetadata(NewFloatAttribute("test_key_3", 2.0)),
@@ -349,7 +349,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		count, err := collection.Count(ctx)
 		require.NoError(t, err)
 		require.Equal(t, 3, count)
-		res, err := collection.Get(ctx, WithIDsGet("1", "2", "3"))
+		res, err := collection.Get(ctx, WithIDs("1", "2", "3"))
 		require.NoError(t, err)
 		require.Equal(t, 3, len(res.GetIDs()))
 		require.Equal(t, "test_document_1_updated", res.GetDocuments()[0].ContentString())
@@ -374,14 +374,14 @@ func TestCollectionAddIntegration(t *testing.T) {
 		collection, err := createCollection("test_collection", WithEmbeddingFunctionCreate(embeddings.NewConsistentHashEmbeddingFunction()))
 		require.NoError(t, err)
 		// silent ignore of update
-		err = collection.Update(ctx, WithIDsUpdate("1", "2", "3"), WithTextsUpdate("test_document_1_updated", "test_document_2_updated", "test_document_3_updated"))
+		err = collection.Update(ctx, WithIDs("1", "2", "3"), WithTexts("test_document_1_updated", "test_document_2_updated", "test_document_3_updated"))
 		require.NoError(t, err)
 		count, err := collection.Count(ctx)
 		require.NoError(t, err)
 		require.Equal(t, 0, count)
 
 		// no ids
-		err = collection.Update(ctx, WithTextsUpdate("test_document_1_updated", "test_document_2_updated", "test_document_3_updated"))
+		err = collection.Update(ctx, WithTexts("test_document_1_updated", "test_document_2_updated", "test_document_3_updated"))
 		require.Error(t, err)
 		fmt.Println("error", err)
 		require.Contains(t, err.Error(), "at least one ID or record is required.")
@@ -416,7 +416,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 			),
 		)
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithWhereQuery(EqString(K("test_key"), "doc1")))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithWhere(EqString(K("test_key"), "doc1")))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 1, len(res.GetIDGroups()[0]))
@@ -429,7 +429,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithWhereDocumentQuery(Contains("test_document_1")))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithWhereDocument(Contains("test_document_1")))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 1, len(res.GetIDGroups()[0]))
@@ -450,7 +450,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("this is document about cats", "123141231", "$@!123115"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("123"), WithWhereDocumentQuery(Regex("^\\d+$")))
+		res, err := collection.Query(ctx, WithQueryTexts("123"), WithWhereDocument(Regex("^\\d+$")))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 1, len(res.GetIDGroups()[0]))
@@ -464,7 +464,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithWhereDocumentQuery(Contains("test_document_1")), WithIncludeQuery(IncludeMetadatas))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithWhereDocument(Contains("test_document_1")), WithInclude(IncludeMetadatas))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 1, len(res.GetIDGroups()[0]))
@@ -523,7 +523,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDs("1", "2", "3"), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithIDsQuery("1", "3"))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithIDs("1", "3"))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 2, len(res.GetIDGroups()[0]))
@@ -552,12 +552,12 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "at least one query embedding is required")
 		// empty query IDs
-		_, err = collection.Query(ctx, WithIDsQuery(), WithQueryTexts("test"))
+		_, err = collection.Query(ctx, WithIDs(), WithQueryTexts("test"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "at least one id is required")
 
 		// empty where
-		_, err = collection.Query(ctx, WithWhereQuery(EqString(K(""), "")), WithQueryTexts("test"))
+		_, err = collection.Query(ctx, WithWhere(EqString(K(""), "")), WithQueryTexts("test"))
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "invalid key for $eq, expected non-empty")
 	})
@@ -569,7 +569,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithIncludeQuery(IncludeDistances))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithInclude(IncludeDistances))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 3, len(res.GetIDGroups()[0]))
@@ -586,7 +586,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithIncludeQuery(IncludeDistances, IncludeDocuments, IncludeMetadatas))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithInclude(IncludeDistances, IncludeDocuments, IncludeMetadatas))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 3, len(res.GetIDGroups()[0]))
@@ -605,7 +605,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("apple", "banana", "cherry", "date"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("apple"), WithIncludeQuery(IncludeDistances), WithNResults(4))
+		res, err := collection.Query(ctx, WithQueryTexts("apple"), WithInclude(IncludeDistances), WithNResults(4))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetDistancesGroups()))
 		distances := res.GetDistancesGroups()[0]
@@ -622,7 +622,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1", "test_document_2"), WithIncludeQuery(IncludeDistances), WithNResults(2))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1", "test_document_2"), WithInclude(IncludeDistances), WithNResults(2))
 		require.NoError(t, err)
 		require.Equal(t, 2, len(res.GetIDGroups()))
 		require.Equal(t, 2, len(res.GetDistancesGroups()))
@@ -637,7 +637,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.NoError(t, err)
 		err = collection.Add(ctx, WithIDGenerator(NewUUIDGenerator()), WithTexts("test_document_1", "test_document_2", "test_document_3"))
 		require.NoError(t, err)
-		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithIncludeQuery(IncludeDocuments))
+		res, err := collection.Query(ctx, WithQueryTexts("test_document_1"), WithInclude(IncludeDocuments))
 		require.NoError(t, err)
 		require.Equal(t, 1, len(res.GetIDGroups()))
 		require.Equal(t, 3, len(res.GetIDGroups()[0]))
@@ -661,7 +661,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
 				WithFilter(IDIn("1", "3")),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -693,7 +693,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
 				WithFilter(IDNotIn("1", "3")),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -737,7 +737,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 					EqString(K("category"), "wildlife"),
 					IDNotIn("3"), // Exclude lions
 				)),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)

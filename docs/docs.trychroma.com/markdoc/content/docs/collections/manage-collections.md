@@ -488,7 +488,7 @@ await collection.peek();
 
 ```go
 count, err := collection.Count(ctx)
-results, err := collection.Get(ctx, chroma.WithLimitGet(10)) // peek equivalent
+results, err := collection.Get(ctx, chroma.WithLimit(10)) // peek equivalent
 ```
 
 {% /Tab %}

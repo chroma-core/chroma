@@ -90,20 +90,20 @@ searches := []*chroma.SearchRequest{
             chroma.GteInt("year", 2024),
         )),
         chroma.WithKnnRank(chroma.KnnQueryText("machine learning applications")),
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, "title"),
     ),
     // Search 2: Papers by specific authors
     chroma.NewSearchRequest(
         chroma.WithFilter(chroma.InStrings("author", "Smith", "Jones")),
         chroma.WithKnnRank(chroma.KnnQueryText("neural network research")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, "title", "author"),
     ),
     // Search 3: Featured content (no ranking)
     chroma.NewSearchRequest(
         chroma.WithFilter(chroma.EqString("status", "featured")),
-        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.NewPage(chroma.Limit(20)),
         chroma.WithSelect("title", "date"),
     ),
 }
@@ -292,7 +292,7 @@ searches := make([]*chroma.SearchRequest, len(queryVariations))
 for i, q := range queryVariations {
     searches[i] = chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText(q)),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, "title"),
     )
 }
@@ -431,7 +431,7 @@ for i, category := range categories {
     searches[i] = chroma.NewSearchRequest(
         chroma.WithFilter(chroma.EqString("category", category)),
         chroma.WithKnnRank(chroma.KnnQueryText("artificial intelligence")),
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
         chroma.WithSelect("title", "category", chroma.KScore),
     )
 }
@@ -540,11 +540,11 @@ const results = await collection.search(searches);
 ```go
 searches := []*chroma.SearchRequest{
     chroma.NewSearchRequest(
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
         chroma.WithSelect(chroma.KDocument),       // Only documents
     ),
     chroma.NewSearchRequest(
-        chroma.WithPage(chroma.WithLimit(5)),
+        chroma.NewPage(chroma.Limit(5)),
         chroma.WithSelect(chroma.KScore, "title"), // Scores and title
     ),
 }

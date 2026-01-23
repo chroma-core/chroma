@@ -59,7 +59,7 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithFilter(chroma.EqString("status", "active")),
         chroma.WithKnnRank(chroma.KnnQueryVector([]float32{0.1, 0.2})),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )
@@ -161,15 +161,15 @@ result, err := collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithFilter(chroma.EqString("status", "published")),
         chroma.WithKnnRank(chroma.KnnQueryText("machine learning applications")),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )
 
 // Build options separately if needed
 filter := chroma.EqString("category", "science")
-limit5 := chroma.WithPage(chroma.WithLimit(5))
-limit10 := chroma.WithPage(chroma.WithLimit(10))
+limit5 := chroma.NewPage(chroma.Limit(5))
+limit10 := chroma.NewPage(chroma.Limit(10))
 
 result1, _ := collection.Search(ctx, chroma.NewSearchRequest(chroma.WithFilter(filter), limit5))
 result2, _ := collection.Search(ctx, chroma.NewSearchRequest(chroma.WithFilter(filter), limit10))
@@ -596,7 +596,7 @@ result, _ = collection.Search(ctx,
                 chroma.GteInt("year", 2023),
             ),
         ),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KMetadata),
     ),
 )
@@ -605,7 +605,7 @@ result, _ = collection.Search(ctx,
 result, _ = collection.Search(ctx,
     chroma.NewSearchRequest(
         chroma.WithKnnRank(chroma.KnnQueryText(query)),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )
@@ -620,7 +620,7 @@ result, _ = collection.Search(ctx,
             ),
         ),
         chroma.WithKnnRank(chroma.KnnQueryText(query)),
-        chroma.WithPage(chroma.WithLimit(10)),
+        chroma.NewPage(chroma.Limit(10)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore),
     ),
 )
