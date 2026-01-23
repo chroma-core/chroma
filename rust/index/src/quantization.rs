@@ -284,7 +284,7 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
         // Ray-walk: find optimal grid point maximizing cosine similarity
         // max_t is when the largest magnitude component reaches max code
         let r_abs = r.iter().copied().map(f32::abs).collect::<Vec<_>>();
-        let max_t = f32::from(Self::CEIL) / r_abs.iter().copied().fold(f32::EPSILON, f32::max);
+        let max_t = f32::from(Self::CEIL - 1) / r_abs.iter().copied().fold(f32::EPSILON, f32::max);
 
         // Collect critical t values: (t, dimension)
         let mut critical_ts = r_abs
@@ -315,10 +315,17 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             }
         }
 
-        // Reconstruct codes from best_t: signed code + CEIL -> stored [0, 2^BITS-1]
+        // Reconstruct codes from best_t
+        // At best_t, we crossed integer g = best_t * |r[i]| and entered cell g + 0.5
+        // For positive r[i]: grid = g + 0.5, stored code = g + CEIL
+        // For negative r[i]: grid = -(g + 0.5), stored code = CEIL - 1 - g
         for (code, val) in code.iter_mut().zip(&r) {
-            let g_val = best_t * val + Self::CEIL as f32;
-            *code = g_val as u32;
+            let g = (best_t * val.abs() + f32::EPSILON) as u32;
+            *code = if *val >= 0.0 {
+                g + Self::CEIL as u32
+            } else {
+                Self::CEIL as u32 - 1 - g
+            };
         }
 
         // Compute correction factor: ⟨g, n⟩ = ⟨g, r⟩ / ‖r‖
@@ -419,7 +426,51 @@ mod tests {
         assert!(code.norm() < f32::EPSILON);
     }
 
-    /// BITS=3: P95 relative error bound 2.0%, observed ~1.2%
+    /// Tests that grid points quantize exactly using distance_query.
+    ///
+    /// When an embedding lies exactly on a grid point and we query with itself,
+    /// cosine distance should be zero (within floating point tolerance).
+    #[test]
+    fn test_grid_points() {
+        let centroid = vec![0.0; 4];
+        let c_norm = 0.0;
+
+        // All 16 grid values for BITS=4: -7.5, -6.5, ..., 6.5, 7.5
+        let grid: Vec<f32> = (0..16).map(|c| c as f32 - 7.5).collect();
+
+        for &g0 in &grid {
+            for &g1 in &grid {
+                for &g2 in &grid {
+                    for &g3 in &grid {
+                        let embedding = vec![g0, g1, g2, g3];
+                        let embedding_norm =
+                            (f32::dot(&embedding, &embedding).unwrap_or(0.0) as f32).sqrt();
+
+                        if embedding_norm < f32::EPSILON {
+                            continue;
+                        }
+
+                        let code = Code::<Vec<u8>, 4>::quantize(&embedding, &centroid);
+                        let dist = code.distance_query(
+                            &DistanceFunction::Cosine,
+                            &embedding,
+                            c_norm,
+                            0.0,
+                            embedding_norm,
+                        );
+                        assert!(
+                            dist.abs() < 4.0 * f32::EPSILON,
+                            "Grid point {:?} should have zero cosine self-distance, got {}",
+                            embedding,
+                            dist
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// BITS=3: P95 relative error bound 2.0%, observed ~1.5% (code), ~1.0% (query)
     #[test]
     fn test_error_bound_bits_3() {
         for k in [1.0, 2.0, 4.0] {
@@ -427,7 +478,7 @@ mod tests {
         }
     }
 
-    /// BITS=4: P95 relative error bound 1.0%, observed ~0.7%
+    /// BITS=4: P95 relative error bound 1.0%, observed ~0.65% (code), ~0.45% (query)
     #[test]
     fn test_error_bound_bits_4() {
         for k in [1.0, 2.0, 4.0] {
@@ -435,7 +486,7 @@ mod tests {
         }
     }
 
-    /// BITS=5: P95 relative error bound 0.5%, observed ~0.4%
+    /// BITS=5: P95 relative error bound 0.5%, observed ~0.30% (code), ~0.21% (query)
     #[test]
     fn test_error_bound_bits_5() {
         for k in [1.0, 2.0, 4.0] {
@@ -443,7 +494,7 @@ mod tests {
         }
     }
 
-    /// BITS=6: P95 relative error bound 0.25%, observed ~0.2%
+    /// BITS=6: P95 relative error bound 0.25%, observed ~0.14% (code), ~0.10% (query)
     #[test]
     fn test_error_bound_bits_6() {
         for k in [1.0, 2.0, 4.0] {
