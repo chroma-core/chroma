@@ -36,7 +36,8 @@ use chroma_types::{CollectionUuid, DatabaseName, DirtyMarker, Topology};
 use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionName, TopologyName};
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
-use google_cloud_spanner::client::Client as SpannerClient;
+use google_cloud_gax::conn::Environment;
+use google_cloud_spanner::client::{Client as SpannerClient, ClientConfig as SpannerClientConfig};
 use opentelemetry::metrics::Meter;
 use parking_lot::Mutex;
 use prost::Message;
@@ -3050,7 +3051,13 @@ impl Configurable<LogServerConfig> for LogServer {
                 },
                 |t| {
                     let database_path = t.spanner.database_path().clone();
-                    let config = t.spanner.spanner_config();
+                    let config = match t.spanner {
+                        SpannerConfig::Emulator(e) => SpannerClientConfig {
+                            environment: Environment::Emulator(e.grpc_endpoint()),
+                            ..Default::default()
+                        },
+                        SpannerConfig::Gcp(_) => Default::default(),
+                    };
                     let repl = t.repl.clone();
                     async {
                         Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
@@ -4319,7 +4326,10 @@ mod tests {
             };
 
             let database_path = ctor_emulator.database_path();
-            let spanner_config = ctor_emulator.spanner_config();
+            let spanner_config = SpannerClientConfig {
+                environment: Environment::Emulator(ctor_emulator.grpc_endpoint()),
+                ..Default::default()
+            };
 
             spanner_migrations::run_migrations(
                 &SpannerConfig::Emulator(ctor_emulator.clone()),
