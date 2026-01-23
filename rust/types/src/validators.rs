@@ -42,6 +42,34 @@ pub(crate) fn validate_non_empty_metadata<V>(
 
 pub fn validate_name(name: impl AsRef<str>) -> Result<(), ValidationError> {
     let name_str = name.as_ref();
+
+    // A topology is a valid name.  A database name prefixed with a topology is a valid name.  The
+    // conjunction must be separated by a single `+` and not exceed the database name limits.
+    // Thus, we recurse after validating no more plusses.
+    if let Some((topo, name)) = name_str.split_once('+') {
+        if name_str.len() > 512 {
+            return Err(ValidationError::new("name").with_message(
+                format!(
+                    "Expected a name containing 3-512 characters. Got: {}",
+                    name_str.len()
+                )
+                .into(),
+            ));
+        }
+        if name.chars().any(|c| c == '+') {
+            return Err(ValidationError::new("name").with_message(
+                "Expected a name to contain at most one topology:  Got two `+` characters.".into(),
+            ));
+        }
+        assert!(
+            !topo.chars().any(|c| c == '+'),
+            "split once should not bypass the split character"
+        );
+        validate_name(topo)?;
+        validate_name(name)?;
+        return Ok(());
+    }
+
     if !ALNUM_RE.is_match(name_str) {
         return Err(ValidationError::new("name").with_message(format!("Expected a name containing 3-512 characters from [a-zA-Z0-9._-], starting and ending with a character in [a-zA-Z0-9]. Got: {name_str}").into()));
     }
@@ -372,6 +400,95 @@ mod tests {
     use super::*;
     use crate::operator::Key;
     use crate::{MetadataValue, SparseVector};
+
+    #[test]
+    fn valid_simple_name() {
+        assert!(validate_name("abc").is_ok());
+        assert!(validate_name("my_collection").is_ok());
+        assert!(validate_name("my-collection").is_ok());
+        assert!(validate_name("my.collection").is_ok());
+        assert!(validate_name("MyCollection123").is_ok());
+    }
+
+    #[test]
+    fn invalid_simple_name_too_short() {
+        assert!(validate_name("ab").is_err());
+        assert!(validate_name("a").is_err());
+        assert!(validate_name("").is_err());
+    }
+
+    #[test]
+    fn invalid_simple_name_bad_start_or_end() {
+        assert!(validate_name("_abc").is_err());
+        assert!(validate_name("-abc").is_err());
+        assert!(validate_name(".abc").is_err());
+        assert!(validate_name("abc_").is_err());
+        assert!(validate_name("abc-").is_err());
+        assert!(validate_name("abc.").is_err());
+    }
+
+    #[test]
+    fn invalid_simple_name_double_period() {
+        assert!(validate_name("abc..def").is_err());
+        assert!(validate_name("my..collection").is_err());
+    }
+
+    #[test]
+    fn invalid_simple_name_ip_address() {
+        assert!(validate_name("192.168.0.1").is_err());
+        assert!(validate_name("127.0.0.1").is_err());
+    }
+
+    #[test]
+    fn valid_topology_prefixed_name() {
+        assert!(validate_name("topo+name").is_ok());
+        assert!(validate_name("my_topology+my_collection").is_ok());
+        assert!(validate_name("region1+database").is_ok());
+        assert!(validate_name("abc+def").is_ok());
+    }
+
+    #[test]
+    fn invalid_topology_prefixed_name_multiple_plus() {
+        assert!(validate_name("a+b+c").is_err());
+        assert!(validate_name("topo+name+extra").is_err());
+        assert!(validate_name("one+two+three").is_err());
+    }
+
+    #[test]
+    fn invalid_topology_prefixed_name_invalid_topology() {
+        // Topology part must be valid (3+ chars, start/end with alnum)
+        assert!(validate_name("ab+valid").is_err());
+        assert!(validate_name("_bad+valid").is_err());
+        assert!(validate_name("bad_+valid").is_err());
+    }
+
+    #[test]
+    fn invalid_topology_prefixed_name_invalid_name() {
+        // Name part must be valid (3+ chars, start/end with alnum)
+        assert!(validate_name("valid+ab").is_err());
+        assert!(validate_name("valid+_bad").is_err());
+        assert!(validate_name("valid+bad_").is_err());
+    }
+
+    #[test]
+    fn invalid_topology_prefixed_name_too_long() {
+        // Total length exceeds 512
+        let long_topo = "a".repeat(256);
+        let long_name = "b".repeat(258);
+        let too_long = format!("{}+{}", long_topo, long_name);
+        assert!(too_long.len() > 512);
+        assert!(validate_name(&too_long).is_err());
+    }
+
+    #[test]
+    fn valid_topology_prefixed_name_at_limit() {
+        // Total length exactly 512
+        let topo = "a".repeat(255);
+        let name = "b".repeat(256);
+        let at_limit = format!("{}+{}", topo, name);
+        assert_eq!(at_limit.len(), 512);
+        assert!(validate_name(&at_limit).is_ok());
+    }
 
     #[test]
     fn test_metadata_validation() {
