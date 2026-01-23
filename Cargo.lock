@@ -1661,8 +1661,6 @@ dependencies = [
  "async-trait",
  "chroma-error",
  "figment",
- "gcloud-gax",
- "gcloud-spanner",
  "murmur3",
  "parking_lot",
  "serde",

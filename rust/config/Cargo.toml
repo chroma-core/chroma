@@ -14,7 +14,5 @@ serde = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }
 figment = { workspace = true }
-google-cloud-spanner = { workspace = true }
-google-cloud-gax = { workspace = true }
 
 chroma-error = { workspace = true }

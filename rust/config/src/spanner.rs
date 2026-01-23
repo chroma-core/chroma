@@ -1,8 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use google_cloud_gax::conn::Environment;
-use google_cloud_spanner::client::ClientConfig as SpannerClientConfig;
-
 /// Configuration for connecting to a Spanner emulator (local development)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpannerEmulatorConfig {
@@ -70,14 +67,6 @@ impl SpannerEmulatorConfig {
     pub fn rest_endpoint(&self) -> String {
         format!("http://{}:{}", self.host, self.rest_port)
     }
-
-    /// Returns the spanner config in the format required by the Spanner client
-    pub fn spanner_config(&self) -> SpannerClientConfig {
-        SpannerClientConfig {
-            environment: Environment::Emulator(self.grpc_endpoint()),
-            ..Default::default()
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -111,11 +100,6 @@ impl SpannerGcpConfig {
             self.project, self.instance, self.database
         )
     }
-
-    /// Returns the spanner config path in the format required by the Spanner client
-    pub fn spanner_config(&self) -> SpannerClientConfig {
-        SpannerClientConfig::default()
-    }
 }
 
 impl Default for SpannerGcpConfig {
@@ -143,13 +127,6 @@ impl SpannerConfig {
         match self {
             Self::Emulator(e) => e.database_path(),
             Self::Gcp(g) => g.database_path(),
-        }
-    }
-
-    pub fn spanner_config(&self) -> SpannerClientConfig {
-        match self {
-            Self::Emulator(e) => e.spanner_config(),
-            Self::Gcp(g) => g.spanner_config(),
         }
     }
 }
