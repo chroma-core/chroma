@@ -1448,10 +1448,11 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.1"
+version = "1.2.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd9de9f2205d5ef3fd67e685b0df337994ddd4495e2a28d185500d0e1edfea47"
+checksum = "755d2fce177175ffca841e9a06afdb2c4ab0f593d53b4dee48147dfaade85932"
 dependencies = [
+ "find-msvc-tools",
  "jobserver",
  "libc",
  "shlex",
@@ -1752,6 +1753,8 @@ dependencies = [
  "arrow",
  "async-trait",
  "base64 0.22.1",
+ "bitpacking",
+ "bytemuck",
  "chroma-benchmark",
  "chroma-blockstore",
  "chroma-cache",
@@ -1776,6 +1779,7 @@ dependencies = [
  "regex",
  "roaring",
  "serde",
+ "simsimd",
  "sprs",
  "tantivy",
  "tempfile",
@@ -3214,6 +3218,12 @@ dependencies = [
  "uncased",
  "version_check",
 ]
+
+[[package]]
+name = "find-msvc-tools"
+version = "0.1.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8591b0bcc8a98a64310a2fae1bb3e9b8564dd10e381e6e28010fde8e8e8568db"
 
 [[package]]
 name = "fixedbitset"
@@ -7959,6 +7969,15 @@ dependencies = [
  "num-traits",
  "thiserror 2.0.4",
  "time",
+]
+
+[[package]]
+name = "simsimd"
+version = "6.5.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a0dcd49d13a0950ae06cd46597cfad99a9d23797e4e9f9e2b29decdc016b3f7"
+dependencies = [
+ "cc",
 ]
 
 [[package]]
