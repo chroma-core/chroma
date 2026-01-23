@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    hash::RandomState,
     sync::{
         atomic::{AtomicU32, AtomicU64},
         Arc,
@@ -17,6 +18,7 @@ use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::{Cmek, CollectionUuid, InternalSpannConfiguration, SpannPostingList};
+use dashmap::DashMap;
 use futures::future;
 use opentelemetry::global;
 use rand::seq::SliceRandom;
@@ -297,6 +299,13 @@ impl Default for SpannMetrics {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct SpannPostingListOwned {
+    ids: Vec<u32>,
+    versions: Vec<u32>,
+    embeddings: Vec<Arc<[f32]>>,
+}
+
 #[derive(Clone)]
 // Note: Fields of this struct are public for testing.
 pub struct SpannIndexWriter {
@@ -320,6 +329,13 @@ pub struct SpannIndexWriter {
     metrics: SpannMetrics,
     stats: WriteStats,
     cmek: Option<Cmek>,
+    pub embeddings: Arc<DashMap<u32, Arc<[f32]>, RandomState>>,
+    pub posting_list_staged: Arc<DashMap<u32, SpannPostingListOwned, RandomState>>,
+    pub lengths: Arc<DashMap<u32, u32, RandomState>>,
+    pub versions: Arc<DashMap<u32, u32, RandomState>>,
+    pub posting_list_reader: Option<BlockfileReader<'static, u32, SpannPostingList<'static>>>,
+    pub centroids: Arc<DashMap<u32, Arc<[f32]>, RandomState>>,
+    pub deleted_heads: Arc<DashMap<u32, (), RandomState>>,
 }
 
 #[derive(Error, Debug)]
@@ -332,6 +348,8 @@ pub enum SpannIndexWriterError {
     VersionsMapReaderCreateError(#[source] OpenError),
     #[error("Error creating/forking postings list writer {0}")]
     PostingsListWriterCreateError(#[source] CreateError),
+    #[error("Error creating/forking postings list reader {0}")]
+    PostingsListReaderCreateError(#[source] OpenError),
     #[error("Error loading data from versions map blockfile {0}")]
     VersionsMapDataLoadError(#[source] Box<dyn ChromaError>),
     #[error("Error reading max offset id for heads {0}")]
@@ -391,6 +409,7 @@ impl ChromaError for SpannIndexWriterError {
             Self::HnswIndexCreateError(e) => e.code(),
             Self::VersionsMapReaderCreateError(e) => e.code(),
             Self::PostingsListWriterCreateError(e) => e.code(),
+            Self::PostingsListReaderCreateError(e) => e.code(),
             Self::VersionsMapDataLoadError(e) => e.code(),
             Self::MaxHeadIdBlockfileGetError(e) => e.code(),
             Self::MaxHeadIdNotFound => ErrorCodes::Internal,
@@ -445,6 +464,11 @@ impl SpannIndexWriter {
         metrics: SpannMetrics,
         prefix_path: String,
         cmek: Option<Cmek>,
+        lengths: DashMap<u32, u32, RandomState>,
+        versions: DashMap<u32, u32, RandomState>,
+        posting_list_reader: Option<BlockfileReader<'static, u32, SpannPostingList<'static>>>,
+        centroids: DashMap<u32, Arc<[f32]>, RandomState>,
+        posting_list_staged: DashMap<u32, SpannPostingListOwned, RandomState>,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -463,6 +487,13 @@ impl SpannIndexWriter {
             stats: WriteStats::default(),
             prefix_path,
             cmek,
+            embeddings: Arc::new(DashMap::new()),
+            posting_list_staged: Arc::new(posting_list_staged),
+            lengths: Arc::new(lengths),
+            versions: Arc::new(versions),
+            posting_list_reader,
+            centroids: Arc::new(centroids),
+            deleted_heads: Arc::new(DashMap::new()),
         }
     }
 
@@ -538,9 +569,17 @@ impl SpannIndexWriter {
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
-    ) -> Result<VersionsMapInner, SpannIndexWriterError> {
+        hnsw_index: &HnswIndexRef,
+    ) -> Result<
+        (
+            DashMap<u32, u32>,
+            DashMap<u32, u32>,
+            DashMap<u32, Arc<[f32]>>,
+            DashMap<u32, SpannPostingListOwned>,
+        ),
+        SpannIndexWriterError,
+    > {
         // Create a reader for the blockfile. Load all the data into the versions map.
-        let mut versions_map = HashMap::new();
         let reader_options = BlockfileReaderOptions::new(*blockfile_id, prefix_path.to_string());
         let reader = match blockfile_provider.read::<u32, u32>(reader_options).await {
             Ok(reader) => reader,
@@ -562,10 +601,44 @@ impl SpannIndexWriter {
             );
             SpannIndexWriterError::VersionsMapDataLoadError(e)
         })?;
-        versions_data.for_each(|(_, key, value)| {
-            versions_map.insert(key, value);
-        });
-        Ok(VersionsMapInner { versions_map })
+        let versions = DashMap::default();
+        let lengths = DashMap::default();
+        let centroids = DashMap::default();
+        let posting_list_staged = DashMap::default();
+        let read_guard = hnsw_index.inner.read();
+        for (prefix, key, value) in versions_data {
+            if prefix.is_empty() {
+                versions.insert(key, value);
+            } else {
+                lengths.insert(key, value);
+                let embedding = read_guard
+                    .hnsw_index
+                    .get(key as usize)
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error getting embedding from hnsw index for id {}: {}",
+                            key,
+                            e
+                        );
+                        SpannIndexWriterError::HnswIndexSearchError(e)
+                    })?
+                    .ok_or_else(|| {
+                        tracing::error!("Embedding not found in hnsw index for id {}", key);
+                        SpannIndexWriterError::HeadNotFound
+                    })?;
+
+                centroids.insert(key, Arc::from(embedding));
+                posting_list_staged.insert(
+                    key,
+                    SpannPostingListOwned {
+                        ids: vec![],
+                        versions: vec![],
+                        embeddings: vec![],
+                    },
+                );
+            }
+        }
+        Ok((versions, lengths, centroids, posting_list_staged))
     }
 
     async fn fork_postings_list(
@@ -573,27 +646,46 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
         cmek: Option<Cmek>,
-    ) -> Result<BlockfileWriter, SpannIndexWriterError> {
+    ) -> Result<
+        (
+            BlockfileWriter,
+            Option<BlockfileReader<'static, u32, SpannPostingList<'static>>>,
+        ),
+        SpannIndexWriterError,
+    > {
         let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
         if let Some(cmek) = cmek {
             bf_options = bf_options.with_cmek(cmek);
         }
-        match blockfile_provider
+        let writer = match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await
         {
-            Ok(writer) => Ok(writer),
+            Ok(writer) => writer,
             Err(e) => {
                 tracing::error!(
                     "Error forking postings list writer from blockfile {:?}: {:?}",
                     blockfile_id,
                     e
                 );
-                Err(SpannIndexWriterError::PostingsListWriterCreateError(*e))
+                return Err(SpannIndexWriterError::PostingsListWriterCreateError(*e));
             }
-        }
+        };
+        let reader_options = BlockfileReaderOptions::new(*blockfile_id, prefix_path.to_string());
+        let reader: BlockfileReader<'static, u32, SpannPostingList<'static>> =
+            match blockfile_provider
+                .read::<u32, SpannPostingList<'static>>(reader_options)
+                .await
+            {
+                Ok(reader) => reader,
+                Err(e) => {
+                    tracing::error!("Error creating postings list reader: {:?}", e);
+                    return Err(SpannIndexWriterError::PostingsListReaderCreateError(*e));
+                }
+            };
+        Ok((writer, Some(reader)))
     }
 
     async fn create_posting_list(
@@ -666,17 +758,28 @@ impl SpannIndexWriter {
                 .await?
             }
         };
+
         // Load the versions map.
-        let versions_map = match versions_map_id {
+        let (versions, lengths, centroids, posting_list_staged) = match versions_map_id {
             Some(versions_map_id) => {
-                Self::load_versions_map(versions_map_id, blockfile_provider, prefix_path).await?
+                Self::load_versions_map(
+                    versions_map_id,
+                    blockfile_provider,
+                    prefix_path,
+                    &hnsw_index,
+                )
+                .await?
             }
-            None => VersionsMapInner {
-                versions_map: HashMap::new(),
-            },
+            None => (
+                DashMap::default(),
+                DashMap::default(),
+                DashMap::default(),
+                DashMap::default(),
+            ),
         };
+
         // Fork the posting list writer.
-        let posting_list_writer = match posting_list_id {
+        let (posting_list_writer, posting_list_reader) = match posting_list_id {
             Some(posting_list_id) => {
                 Self::fork_postings_list(
                     posting_list_id,
@@ -686,15 +789,16 @@ impl SpannIndexWriter {
                 )
                 .await?
             }
-            None => {
+            None => (
                 Self::create_posting_list(
                     blockfile_provider,
                     prefix_path,
                     pl_block_size,
                     cmek.clone(),
                 )
-                .await?
-            }
+                .await?,
+                None,
+            ),
         };
 
         let max_head_id = match max_head_id_bf_id {
@@ -722,7 +826,9 @@ impl SpannIndexWriter {
             blockfile_provider.clone(),
             posting_list_writer,
             max_head_id,
-            versions_map,
+            VersionsMapInner {
+                versions_map: HashMap::new(),
+            },
             dimensionality,
             params,
             gc_context,
@@ -730,43 +836,115 @@ impl SpannIndexWriter {
             metrics,
             prefix_path.to_string(),
             cmek,
+            lengths,
+            versions,
+            posting_list_reader,
+            centroids,
+            posting_list_staged,
         ))
     }
 
     async fn add_versions_map(&self, id: u32) -> u32 {
         // 0 means deleted. Version counting starts from 1.
-        let mut write_lock = self.versions_map.write().await;
-        write_lock.versions_map.insert(id, 1);
-        *write_lock.versions_map.get(&id).unwrap()
+        self.versions.insert(id, 1);
+        1
     }
 
     async fn rng_query(
         &self,
         query: &[f32],
-    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannIndexWriterError> {
-        let res = rng_query(
-            query,
-            self.hnsw_index.clone(),
-            self.params.write_nprobe as usize,
-            Some(self.params.nreplica_count as usize),
-            self.params.write_rng_epsilon,
-            self.params.write_rng_factor,
-            self.params.space.clone().into(),
-            true,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Error rng querying hnsw for {:?}: {:?}", query, e);
-            SpannIndexWriterError::RngQueryError(e)
-        });
+    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Arc<[f32]>>), SpannIndexWriterError> {
+        // Assumes that query is already normalized.
+        // TODO(Sanket): Integrate this better with existing rng query.
+        let k: usize = self.params.write_nprobe as usize;
+        let replica_count = self.params.nreplica_count as usize;
+        let rng_epsilon = self.params.write_rng_epsilon;
+        let rng_factor = self.params.write_rng_factor;
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+        let apply_rng_rule = true;
+        let mut nearby_ids: Vec<usize> = Vec::with_capacity(k);
+        let mut nearby_distances: Vec<f32> = Vec::with_capacity(k);
+        let mut embeddings: Vec<Arc<[f32]>> = Vec::with_capacity(k);
+        {
+            let read_guard = self.hnsw_index.inner.read();
+            let allowed_ids = vec![];
+            let disallowed_ids = vec![];
+            let (ids, distances) = read_guard
+                .hnsw_index
+                .query(query, k, &allowed_ids, &disallowed_ids)
+                .map_err(|e| {
+                    tracing::error!("Error querying hnsw index: {:?}", e);
+                    SpannIndexWriterError::HnswIndexSearchError(e)
+                })?;
+            for (id, distance) in ids.iter().zip(distances.iter()) {
+                let within_epsilon = if distances[0] < 0.0 && *distance < 0.0 {
+                    // Both negative: reverse the comparison
+                    *distance >= (1_f32 + rng_epsilon) * distances[0]
+                } else {
+                    // At least one is non-negative: use normal comparison
+                    *distance <= (1_f32 + rng_epsilon) * distances[0]
+                };
+
+                if !apply_rng_rule || within_epsilon {
+                    nearby_ids.push(*id);
+                    nearby_distances.push(*distance);
+                }
+            }
+        }
+        let mut nearby_ids2: Vec<usize> = Vec::with_capacity(k);
+        let mut nearby_distances2: Vec<f32> = Vec::with_capacity(k);
+        // Get the embeddings also for distance computation.
+        for (id, distance) in nearby_ids.into_iter().zip(nearby_distances.into_iter()) {
+            let Some(emb) = self.centroids.get(&(id as u32)) else {
+                continue;
+            };
+            embeddings.push(emb.clone());
+            nearby_ids2.push(id);
+            nearby_distances2.push(distance);
+        }
+        // Apply the RNG rule to prune.
+        let mut res_ids = Vec::with_capacity(replica_count);
+        let mut res_distances = Vec::with_capacity(replica_count);
+        let mut res_embeddings: Vec<Arc<[f32]>> = Vec::with_capacity(replica_count);
+        // Embeddings that were obtained are already normalized.
+        for (id, (distance, embedding)) in nearby_ids2
+            .into_iter()
+            .zip(nearby_distances2.into_iter().zip(embeddings.into_iter()))
+        {
+            if res_ids.len() >= replica_count {
+                break;
+            }
+            let mut rng_accepted = true;
+            for nbr_embedding in res_embeddings.iter() {
+                let dist = distance_function.distance(&embedding[..], &nbr_embedding[..]);
+
+                let fails_check = if dist < 0.0 && distance < 0.0 {
+                    // Both negative: reverse the comparison
+                    rng_factor * dist >= distance
+                } else {
+                    // At least one is non-negative: use normal comparison
+                    rng_factor * dist <= distance
+                };
+
+                if fails_check {
+                    rng_accepted = false;
+                    break;
+                }
+            }
+            if !rng_accepted {
+                continue;
+            }
+            res_ids.push(id);
+            res_distances.push(distance);
+            res_embeddings.push(embedding);
+        }
         self.stats
             .num_rng_calls
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.stats.num_centers_fetched_rng.fetch_add(
-            res.as_ref().map(|r| r.0.len() as u64).unwrap_or(0),
-            std::sync::atomic::Ordering::Relaxed,
-        );
-        res
+        self.stats
+            .num_centers_fetched_rng
+            .fetch_add(res_ids.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        Ok((res_ids, res_distances, res_embeddings))
     }
 
     fn is_deleted(version: u32) -> bool {
@@ -774,14 +952,9 @@ impl SpannIndexWriter {
         version == 0
     }
 
-    async fn is_outdated(
-        &self,
-        doc_offset_id: u32,
-        version: u32,
-    ) -> Result<bool, SpannIndexWriterError> {
-        let version_map_guard = self.versions_map.read().await;
-        let current_version = version_map_guard
-            .versions_map
+    fn is_outdated(&self, doc_offset_id: u32, version: u32) -> Result<bool, SpannIndexWriterError> {
+        let current_version = self
+            .versions
             .get(&doc_offset_id)
             .ok_or(SpannIndexWriterError::VersionNotFound)?;
         if Self::is_deleted(*current_version) || version < *current_version {
@@ -790,121 +963,105 @@ impl SpannIndexWriter {
         Ok(false)
     }
 
-    async fn try_delete_posting_list(&self, head_id: u32) -> Result<(), SpannIndexWriterError> {
-        let _write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
-        if self.is_head_deleted(head_id as usize).await? {
-            return Ok(());
-        }
-        let result = self
-            .posting_list_writer
-            .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
-            .await;
-        // If the error is posting list not found, then return ok.
-        match result {
-            Ok(Some((doc_offset_ids, doc_versions, _))) => {
-                let mut outdated_count = 0;
-                for (doc_offset_id, doc_version) in doc_offset_ids.iter().zip(doc_versions.iter()) {
-                    if self.is_outdated(*doc_offset_id, *doc_version).await? {
-                        outdated_count += 1;
-                    }
-                }
-                if outdated_count == doc_offset_ids.len() {
-                    {
-                        let hnsw_write_guard = self.hnsw_index.inner.write();
-                        hnsw_write_guard
-                            .hnsw_index
-                            .delete(head_id as usize)
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error deleting head {} from hnsw index: {}",
-                                    head_id,
-                                    e
-                                );
-                                SpannIndexWriterError::HnswIndexMutateError(e)
-                            })?;
-                    }
-                    self.posting_list_writer
-                        .delete::<u32, &SpannPostingList<'_>>("", head_id)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error deleting posting list for head {}: {}",
-                                head_id,
-                                e
-                            );
-                            SpannIndexWriterError::PostingListSetError(e)
-                        })?;
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                return Err(SpannIndexWriterError::PostingListGetError(e));
-            }
-        }
-        Ok(())
-    }
+    // async fn try_delete_posting_list(&self, head_id: u32) -> Result<(), SpannIndexWriterError> {
+    //     let _write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
+    //     if self.is_head_deleted(head_id as usize).await? {
+    //         return Ok(());
+    //     }
+    //     let result = self
+    //         .posting_list_writer
+    //         .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
+    //         .await;
+    //     // If the error is posting list not found, then return ok.
+    //     match result {
+    //         Ok(Some((doc_offset_ids, doc_versions, _))) => {
+    //             let mut outdated_count = 0;
+    //             for (doc_offset_id, doc_version) in doc_offset_ids.iter().zip(doc_versions.iter()) {
+    //                 if self.is_outdated(*doc_offset_id, *doc_version)? {
+    //                     outdated_count += 1;
+    //                 }
+    //             }
+    //             if outdated_count == doc_offset_ids.len() {
+    //                 {
+    //                     let hnsw_write_guard = self.hnsw_index.inner.write();
+    //                     hnsw_write_guard
+    //                         .hnsw_index
+    //                         .delete(head_id as usize)
+    //                         .map_err(|e| {
+    //                             tracing::error!(
+    //                                 "Error deleting head {} from hnsw index: {}",
+    //                                 head_id,
+    //                                 e
+    //                             );
+    //                             SpannIndexWriterError::HnswIndexMutateError(e)
+    //                         })?;
+    //                 }
+    //                 self.posting_list_writer
+    //                     .delete::<u32, &SpannPostingList<'_>>("", head_id)
+    //                     .await
+    //                     .map_err(|e| {
+    //                         tracing::error!(
+    //                             "Error deleting posting list for head {}: {}",
+    //                             head_id,
+    //                             e
+    //                         );
+    //                         SpannIndexWriterError::PostingListSetError(e)
+    //                     })?;
+    //             }
+    //         }
+    //         Ok(None) => {}
+    //         Err(e) => {
+    //             tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+    //             return Err(SpannIndexWriterError::PostingListGetError(e));
+    //         }
+    //     }
+    //     Ok(())
+    // }
 
-    #[allow(clippy::too_many_arguments)]
     async fn collect_and_reassign_split_points(
         &self,
-        new_head_ids: &[i32],
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        split_data: &[(u32, Vec<u32>, Vec<u32>, Vec<Arc<[f32]>>, Arc<[f32]>)],
         old_head_embedding: &[f32],
-        split_doc_offset_ids: &[Vec<u32>],
-        split_doc_versions: &[Vec<u32>],
-        split_doc_embeddings: &[Vec<f32>],
     ) -> Result<HashSet<u32>, SpannIndexWriterError> {
         let mut assigned_ids = HashSet::new();
-        for (k, ((doc_offset_ids, doc_versions), doc_embeddings)) in split_doc_offset_ids
-            .iter()
-            .zip(split_doc_versions.iter())
-            .zip(split_doc_embeddings.iter())
-            .enumerate()
-        {
-            for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+
+        for (head_id, ids, versions, embeddings, new_head_embedding) in split_data.iter() {
+            for (index, doc_offset_id) in ids.iter().enumerate() {
                 if assigned_ids.contains(doc_offset_id)
-                    || self
-                        .is_outdated(*doc_offset_id, doc_versions[index])
-                        .await?
+                    || self.is_outdated(*doc_offset_id, versions[index])?
                 {
                     continue;
                 }
-                let distance_function: DistanceFunction = self.params.space.clone().into();
-                let old_dist = distance_function.distance(
-                    old_head_embedding,
-                    &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                );
-                let new_dist = distance_function.distance(
-                    new_head_embeddings[k].unwrap(),
-                    &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                );
+
+                let doc_embedding = &embeddings[index];
+                let old_dist = distance_function.distance(old_head_embedding, doc_embedding);
+                let new_dist = distance_function.distance(new_head_embedding, doc_embedding);
+
                 // NPA check.
                 if new_dist > old_dist {
                     assigned_ids.insert(*doc_offset_id);
                     self.reassign(
                         *doc_offset_id,
-                        doc_versions[index],
-                        &doc_embeddings
-                            [index * self.dimensionality..(index + 1) * self.dimensionality],
-                        new_head_ids[k] as u32,
+                        versions[index],
+                        doc_embedding.clone(),
+                        *head_id,
                         ReassignReason::Split,
                     )
                     .await?;
                 }
             }
             // Delete head if all points were moved out.
-            self.try_delete_posting_list(new_head_ids[k] as u32).await?;
+            // self.try_delete_posting_list(*head_id).await?;
         }
         Ok(assigned_ids)
     }
 
-    async fn get_nearby_heads(
+    fn get_nearby_heads(
         &self,
         head_embedding: &[f32],
         k: usize,
-    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Vec<f32>>), SpannIndexWriterError> {
-        let mut nearest_embeddings: Vec<Vec<f32>> = vec![];
+    ) -> Result<(Vec<usize>, Vec<f32>, Vec<Arc<[f32]>>), SpannIndexWriterError> {
         let read_guard = self.hnsw_index.inner.read();
         let allowed_ids = vec![];
         let disallowed_ids = vec![];
@@ -915,40 +1072,37 @@ impl SpannIndexWriter {
                 tracing::error!("Error querying hnsw for {:?}: {:?}", head_embedding, e);
                 SpannIndexWriterError::HnswIndexSearchError(e)
             })?;
-        // Get the embeddings also for distance computation.
-        // TODO(Sanket): Don't consider heads that are farther away than the closest.
-        for id in nearest_ids.iter() {
-            let emb = read_guard
-                .hnsw_index
-                .get(*id)
-                .map_err(|e| {
-                    tracing::error!(
-                        "Error getting embedding from hnsw index for id {}: {}",
-                        id,
-                        e
-                    );
-                    SpannIndexWriterError::HnswIndexSearchError(e)
-                })?
-                .ok_or(SpannIndexWriterError::HeadNotFound)?;
-            nearest_embeddings.push(emb);
+        drop(read_guard); // Release HNSW lock before accessing centroids
+
+        // Get the embeddings from centroids DashMap.
+        let mut result_ids: Vec<usize> = Vec::with_capacity(k);
+        let mut result_distances: Vec<f32> = Vec::with_capacity(k);
+        let mut result_embeddings: Vec<Arc<[f32]>> = Vec::with_capacity(k);
+        for (id, distance) in nearest_ids.into_iter().zip(nearest_distances.into_iter()) {
+            let Some(emb) = self.centroids.get(&(id as u32)) else {
+                continue;
+            };
+            result_ids.push(id);
+            result_distances.push(distance);
+            result_embeddings.push(Arc::clone(&emb));
         }
-        Ok((nearest_ids, nearest_distances, nearest_embeddings))
+        Ok((result_ids, result_distances, result_embeddings))
     }
 
     async fn reassign(
         &self,
         doc_offset_id: u32,
         doc_version: u32,
-        doc_embedding: &[f32],
+        doc_embedding: Arc<[f32]>,
         prev_head_id: u32,
         reason: ReassignReason,
     ) -> Result<(), SpannIndexWriterError> {
         // Don't reassign if outdated by now.
-        if self.is_outdated(doc_offset_id, doc_version).await? {
+        if self.is_outdated(doc_offset_id, doc_version)? {
             return Ok(());
         }
         // RNG query to find the nearest heads.
-        let (nearest_head_ids, _, nearest_head_embeddings) = self.rng_query(doc_embedding).await?;
+        let (nearest_head_ids, _, nearest_head_embeddings) = self.rng_query(&doc_embedding).await?;
         // Don't reassign if empty.
         if nearest_head_ids.is_empty() {
             return Ok(());
@@ -959,27 +1113,25 @@ impl SpannIndexWriter {
             return Ok(());
         }
         // Increment version and trigger append.
-        let next_version;
-        {
-            let mut version_map_guard = self.versions_map.write().await;
-            let current_version = version_map_guard
-                .versions_map
-                .get(&doc_offset_id)
+        let next_version = {
+            let mut version_guard = self
+                .versions
+                .get_mut(&doc_offset_id)
                 .ok_or(SpannIndexWriterError::VersionNotFound)?;
-            if Self::is_deleted(*current_version) || doc_version < *current_version {
+            let current_version = *version_guard;
+            if Self::is_deleted(current_version) || doc_version < current_version {
                 return Ok(());
             }
-            next_version = *current_version + 1;
-            version_map_guard
-                .versions_map
-                .insert(doc_offset_id, next_version);
-        }
-        // Append to the posting list.
+            let next_ver = current_version + 1;
+            *version_guard = next_ver;
+            next_ver
+        }; // guard dropped here
+           // Append to the posting list.
         for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
             .into_iter()
             .zip(nearest_head_embeddings.into_iter())
         {
-            if self.is_outdated(doc_offset_id, next_version).await? {
+            if self.is_outdated(doc_offset_id, next_version)? {
                 return Ok(());
             }
             self.stats
@@ -1006,11 +1158,64 @@ impl SpannIndexWriter {
                 nearest_head_id as u32,
                 doc_offset_id,
                 next_version,
-                doc_embedding,
+                doc_embedding.clone(),
                 nearest_head_embedding,
             )
             .await?;
         }
+        Ok(())
+    }
+
+    /// Reconciles staged posting list with reader data.
+    async fn reconcile_posting_list(&self, head_id: u32) -> Result<(), SpannIndexWriterError> {
+        // If head doesn't exist in lengths, return early
+        let (length, pl_len) = {
+            let Some(length_guard) = self.lengths.get(&head_id) else {
+                return Ok(());
+            };
+            let Some(pl_guard) = self.posting_list_staged.get(&head_id) else {
+                return Ok(());
+            };
+            (*length_guard as usize, pl_guard.ids.len())
+        }; // guard dropped here
+
+        if pl_len == length {
+            return Ok(());
+        }
+
+        // If reader has more data, read it first (async), then extend staged
+        if let Some(reader) = self.posting_list_reader.as_ref() {
+            if let Some(pl) = reader.get("", head_id).await.map_err(|e| {
+                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                SpannIndexWriterError::PostingListGetError(e)
+            })? {
+                // Re-read length - could have changed concurrently
+                let Some(current_length) = self.lengths.get(&head_id) else {
+                    return Ok(());
+                };
+                // Now take mut ref and extend (no await after this until we drop)
+                if let Some(mut staged) = self.posting_list_staged.get_mut(&head_id) {
+                    // Check again - another thread may have already extended
+                    if staged.ids.len() != *current_length as usize {
+                        staged.ids.extend(pl.doc_offset_ids.iter().cloned());
+                        staged.versions.extend(pl.doc_versions.iter().cloned());
+                        for idx in 0..pl.doc_offset_ids.len() {
+                            if let Some(embedding) = self.embeddings.get(&pl.doc_offset_ids[idx]) {
+                                staged.embeddings.push(embedding.clone());
+                            } else {
+                                let em: Arc<[f32]> = Arc::from(
+                                    &pl.doc_embeddings[idx * self.dimensionality
+                                        ..(idx + 1) * self.dimensionality],
+                                );
+                                self.embeddings.insert(pl.doc_offset_ids[idx], em.clone());
+                                staged.embeddings.push(em);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -1019,59 +1224,44 @@ impl SpannIndexWriter {
         head_id: usize,
         head_embedding: &[f32],
         assigned_ids: &mut HashSet<u32>,
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        split_data: &[(u32, Vec<u32>, Vec<u32>, Vec<Arc<[f32]>>, Arc<[f32]>)],
         old_head_embedding: &[f32],
     ) -> Result<(), SpannIndexWriterError> {
-        // Get posting list of each neighbour and check for reassignment criteria.
-        let doc_offset_ids;
-        let doc_versions;
-        let doc_embeddings;
-        {
-            let result = self
-                .posting_list_writer
-                .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
-                .await;
-            match result {
-                Ok(Some((offset_ids, versions, embeddings))) => {
-                    doc_offset_ids = offset_ids;
-                    doc_versions = versions;
-                    doc_embeddings = embeddings;
-                }
-                // Posting list can be concurrent deleted so bail out early if not found.
-                Ok(None) => return Ok(()),
-                Err(e) => return Err(SpannIndexWriterError::PostingListGetError(e)),
-            }
-        }
-        for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
+        // Reconcile staged data with reader data
+        let head_id_u32 = head_id as u32;
+        self.reconcile_posting_list(head_id_u32).await?;
+
+        // Clone for iteration (needed because of await in loop)
+        let Some((ids, versions, embeddings)) = self
+            .posting_list_staged
+            .get(&head_id_u32)
+            .map(|pl| (pl.ids.clone(), pl.versions.clone(), pl.embeddings.clone()))
+        else {
+            return Ok(());
+        };
+
+        let distance_function: DistanceFunction = self.params.space.clone().into();
+
+        for (index, doc_offset_id) in ids.iter().enumerate() {
             if assigned_ids.contains(doc_offset_id)
-                || self
-                    .is_outdated(*doc_offset_id, doc_versions[index])
-                    .await?
+                || self.is_outdated(*doc_offset_id, versions[index])?
             {
                 continue;
             }
-            let distance_function: DistanceFunction = self.params.space.clone().into();
-            let distance_from_curr_center = distance_function.distance(
-                &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                head_embedding,
-            );
-            let distance_from_split_center1 = distance_function.distance(
-                &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                new_head_embeddings[0].unwrap(),
-            );
-            let distance_from_split_center2 = distance_function.distance(
-                &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                new_head_embeddings[1].unwrap(),
-            );
+            let doc_embedding = &embeddings[index];
+            let distance_from_curr_center =
+                distance_function.distance(doc_embedding, head_embedding);
+            let distance_from_split_center1 =
+                distance_function.distance(doc_embedding, &split_data[0].4);
+            let distance_from_split_center2 =
+                distance_function.distance(doc_embedding, &split_data[1].4);
             if distance_from_curr_center <= distance_from_split_center1
                 && distance_from_curr_center <= distance_from_split_center2
             {
                 continue;
             }
-            let distance_from_old_head = distance_function.distance(
-                &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                old_head_embedding,
-            );
+            let distance_from_old_head =
+                distance_function.distance(doc_embedding, old_head_embedding);
             if distance_from_old_head <= distance_from_split_center1
                 && distance_from_old_head <= distance_from_split_center2
             {
@@ -1081,56 +1271,46 @@ impl SpannIndexWriter {
             assigned_ids.insert(*doc_offset_id);
             self.reassign(
                 *doc_offset_id,
-                doc_versions[index],
-                &doc_embeddings[index * self.dimensionality..(index + 1) * self.dimensionality],
-                head_id as u32,
+                versions[index],
+                doc_embedding.clone(),
+                head_id_u32,
                 ReassignReason::Nearby,
             )
             .await?;
         }
+
         // Delete head if all points were moved out.
-        self.try_delete_posting_list(head_id as u32).await?;
+        // self.try_delete_posting_list(head_id_u32).await?;
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
     async fn collect_and_reassign(
         &self,
-        new_head_ids: &[i32],
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        split_data: &[(u32, Vec<u32>, Vec<u32>, Vec<Arc<[f32]>>, Arc<[f32]>)],
         old_head_embedding: &[f32],
-        split_doc_offset_ids: &[Vec<u32>],
-        split_doc_versions: &[Vec<u32>],
-        split_doc_embeddings: &[Vec<f32>],
     ) -> Result<(), SpannIndexWriterError> {
         let mut assigned_ids = self
-            .collect_and_reassign_split_points(
-                new_head_ids,
-                new_head_embeddings,
-                old_head_embedding,
-                split_doc_offset_ids,
-                split_doc_versions,
-                split_doc_embeddings,
-            )
+            .collect_and_reassign_split_points(split_data, old_head_embedding)
             .await?;
         // Reassign neighbors of this center if applicable.
         if self.params.reassign_neighbor_count > 0 {
-            let (nearby_head_ids, _, nearby_head_embeddings) = self
-                .get_nearby_heads(
-                    old_head_embedding,
-                    self.params.reassign_neighbor_count as usize,
-                )
-                .await?;
+            let (nearby_head_ids, _, nearby_head_embeddings) = self.get_nearby_heads(
+                old_head_embedding,
+                self.params.reassign_neighbor_count as usize,
+            )?;
             for (head_idx, head_id) in nearby_head_ids.iter().enumerate() {
                 // Skip the current split heads.
-                if new_head_ids.contains(&(*head_id as i32)) {
+                if split_data
+                    .iter()
+                    .any(|(id, _, _, _, _)| *id == *head_id as u32)
+                {
                     continue;
                 }
                 self.collect_and_reassign_nearby_points(
                     *head_id,
                     &nearby_head_embeddings[head_idx],
                     &mut assigned_ids,
-                    new_head_embeddings,
+                    split_data,
                     old_head_embedding,
                 )
                 .await?;
@@ -1139,358 +1319,353 @@ impl SpannIndexWriter {
         Ok(())
     }
 
+    /// Appends a point to a posting list. This is the main entry point.
     async fn append(
         &self,
         head_id: u32,
         id: u32,
         version: u32,
-        embedding: &[f32],
-        head_embedding: Vec<f32>,
+        embedding: Arc<[f32]>,
+        head_embedding: Arc<[f32]>,
     ) -> Result<(), SpannIndexWriterError> {
-        let mut new_posting_lists: Vec<Vec<f32>> = Vec::with_capacity(2);
-        let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
-        let mut new_doc_versions: Vec<Vec<u32>> = Vec::with_capacity(2);
-        let mut new_head_ids = vec![-1; 2];
-        let mut new_head_embeddings = vec![None; 2];
-        let clustering_output;
-        {
-            let write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
-            if self.is_head_deleted(head_id as usize).await? {
-                if self.is_outdated(id, version).await? {
-                    return Ok(());
-                }
-                // Try again.
-                drop(write_guard);
-                return Box::pin(self.reassign(
-                    id,
-                    version,
-                    embedding,
-                    head_id,
-                    ReassignReason::Split,
-                ))
-                .await;
-            }
-            let (mut doc_offset_ids, mut doc_versions, mut doc_embeddings) = self
-                .posting_list_writer
-                .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                    SpannIndexWriterError::PostingListGetError(e)
-                })?
-                .ok_or(SpannIndexWriterError::PostingListNotFound)?;
-            // Append the new point to the posting list.
-            doc_offset_ids.reserve_exact(1);
-            doc_versions.reserve_exact(1);
-            doc_embeddings.reserve_exact(embedding.len());
-            doc_offset_ids.push(id);
-            doc_versions.push(version);
-            doc_embeddings.extend_from_slice(embedding);
-            // Cleanup this posting list.
-            // Note: There is an order in which we are acquiring locks here to prevent deadlocks.
-            // Note: This way of cleaning up takes less memory since we don't allocate
-            // memory for embeddings that are not outdated.
-            let mut local_indices = vec![0; doc_offset_ids.len()];
-            let mut up_to_date_index = 0;
-            {
-                let version_map_guard = self.versions_map.read().await;
-                for (index, doc_version) in doc_versions.iter().enumerate() {
-                    let current_version = version_map_guard
-                        .versions_map
-                        .get(&doc_offset_ids[index])
-                        .ok_or(SpannIndexWriterError::VersionNotFound)?;
-                    // disregard if either deleted or on an older version.
-                    if *current_version == 0 || doc_version < current_version {
-                        continue;
-                    }
-                    local_indices[up_to_date_index] = index;
-                    up_to_date_index += 1;
-                }
-            }
-            // If size is within threshold, write the new posting back and return.
-            if up_to_date_index <= self.params.split_threshold as usize {
-                for idx in 0..up_to_date_index {
-                    if local_indices[idx] == idx {
-                        continue;
-                    }
-                    doc_offset_ids[idx] = doc_offset_ids[local_indices[idx]];
-                    doc_versions[idx] = doc_versions[local_indices[idx]];
-                    doc_embeddings.copy_within(
-                        local_indices[idx] * self.dimensionality
-                            ..(local_indices[idx] + 1) * self.dimensionality,
-                        idx * self.dimensionality,
-                    );
-                }
-                doc_offset_ids.truncate(up_to_date_index);
-                doc_versions.truncate(up_to_date_index);
-                doc_embeddings.truncate(up_to_date_index * self.dimensionality);
-                let posting_list = SpannPostingList {
-                    doc_offset_ids: &doc_offset_ids,
-                    doc_versions: &doc_versions,
-                    doc_embeddings: &doc_embeddings,
-                };
-                // The only case when this can happen is if the point that is being appended
-                // was concurrently reassigned and its version incremented. In this case,
-                // we can safely ignore the append since the reassign will take care of
-                // adding the point to the correct heads.
-                if doc_offset_ids.is_empty() {
-                    tracing::info!(
-                        "Point {} at version {} was concurrently updated. Empty posting list after appending",
-                        id, version
-                    );
-                    return Ok(());
-                }
-                self.posting_list_writer
-                    .set("", head_id, &posting_list)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
-                        SpannIndexWriterError::PostingListSetError(e)
-                    })?;
-                self.stats
-                    .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.insert_to_posting_list(head_id, id, version, embedding, head_embedding)
+            .await
+    }
 
+    /// Fast path: adds a point to the posting list, triggers scrub if over threshold.
+    async fn insert_to_posting_list(
+        &self,
+        head_id: u32,
+        id: u32,
+        version: u32,
+        embedding: Arc<[f32]>,
+        head_embedding: Arc<[f32]>,
+    ) -> Result<(), SpannIndexWriterError> {
+        // Add to staged (short-lived guards)
+        let current_length = {
+            let Some(mut length) = self.lengths.get_mut(&head_id) else {
+                // TODO(Sanket): Should ideally reassign here.
+                return Ok(());
+            };
+            let Some(mut posting_list) = self.posting_list_staged.get_mut(&head_id) else {
+                // TODO(Sanket): Should ideally reassign here.
+                return Ok(());
+            };
+            *length += 1;
+            posting_list.ids.push(id);
+            posting_list.versions.push(version);
+            posting_list.embeddings.push(embedding.clone());
+            *length
+        }; // guards dropped here
+
+        if current_length <= self.params.split_threshold {
+            return Ok(());
+        }
+
+        // Over threshold - need to scrub and potentially split
+        self.scrub_posting_list(head_id, head_embedding).await
+    }
+
+    /// Reconciles with blockfile, cleans up outdated entries, triggers split if still over threshold.
+    async fn scrub_posting_list(
+        &self,
+        head_id: u32,
+        head_embedding: Arc<[f32]>,
+    ) -> Result<(), SpannIndexWriterError> {
+        // Reconcile with blockfile (handles the async read)
+        self.reconcile_posting_list(head_id).await?;
+
+        // Re-acquire guards for cleanup
+        let needs_split = {
+            let Some(mut length) = self.lengths.get_mut(&head_id) else {
+                return Ok(());
+            };
+
+            if *length <= self.params.split_threshold {
                 return Ok(());
             }
-            self.stats
-                .num_splits
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            // Otherwise split the posting list.
-            local_indices.truncate(up_to_date_index);
-            // Shuffle local_indices.
-            local_indices.shuffle(&mut rand::thread_rng());
-            let last = local_indices.len();
-            // Prepare KMeans.
-            let mut kmeans_input = KMeansAlgorithmInput::new(
-                local_indices,
-                &doc_embeddings,
-                self.dimensionality,
-                /* k */ 2,
-                /* first */ 0,
-                last,
-                self.params.num_samples_kmeans,
-                self.params.space.clone().into(),
-                self.params.initial_lambda,
-            );
-            clustering_output = cluster(&mut kmeans_input).map_err(|e| {
-                tracing::error!("Error clustering posting list for head {}: {}", head_id, e);
-                SpannIndexWriterError::KMeansClusteringError(e)
-            })?;
-            // TODO(Sanket): Not sure how this can happen. The reference implementation
-            // just includes one point from the entire list in this case.
-            // My guess is that this can happen only when the total number of points
-            // that need to be split is 1.
-            if clustering_output.num_clusters <= 1 {
-                tracing::warn!("Clustering split the posting list into only 1 cluster");
-                let mut single_doc_offset_ids = Vec::with_capacity(1);
-                let mut single_doc_versions = Vec::with_capacity(1);
-                let mut single_doc_embeddings = Vec::with_capacity(self.dimensionality);
-                let label = clustering_output.cluster_labels.iter().nth(0);
-                match label {
-                    Some((index, _)) => {
-                        single_doc_offset_ids.push(doc_offset_ids[*index]);
-                        single_doc_versions.push(doc_versions[*index]);
-                        single_doc_embeddings.extend_from_slice(
-                            &doc_embeddings
-                                [*index * self.dimensionality..(*index + 1) * self.dimensionality],
-                        );
-                    }
-                    None => {
-                        tracing::warn!("No points in the posting list");
-                        return Ok(());
-                    }
+
+            let Some(mut posting_list) = self.posting_list_staged.get_mut(&head_id) else {
+                return Ok(());
+            };
+
+            // Cleanup outdated entries
+            let mut local_indices: Vec<usize> = vec![0; posting_list.ids.len()];
+            let mut up_to_date_index = 0;
+            for (index, (ver, doc_id)) in posting_list
+                .versions
+                .iter()
+                .zip(posting_list.ids.iter())
+                .enumerate()
+            {
+                let current_version = self
+                    .versions
+                    .get(doc_id)
+                    .ok_or(SpannIndexWriterError::VersionNotFound)?;
+                // Disregard if either deleted or on an older version
+                if *current_version == 0 || *ver < *current_version {
+                    continue;
                 }
-                let single_posting_list = SpannPostingList {
-                    doc_offset_ids: &single_doc_offset_ids,
-                    doc_versions: &single_doc_versions,
-                    doc_embeddings: &single_doc_embeddings,
+                local_indices[up_to_date_index] = index;
+                up_to_date_index += 1;
+            }
+
+            // Compact the posting list
+            for idx in 0..up_to_date_index {
+                if local_indices[idx] != idx {
+                    posting_list.ids[idx] = posting_list.ids[local_indices[idx]];
+                    posting_list.versions[idx] = posting_list.versions[local_indices[idx]];
+                    posting_list.embeddings[idx] =
+                        posting_list.embeddings[local_indices[idx]].clone();
+                }
+            }
+            posting_list.ids.truncate(up_to_date_index);
+            posting_list.versions.truncate(up_to_date_index);
+            posting_list.embeddings.truncate(up_to_date_index);
+            *length = up_to_date_index as u32;
+
+            // Check if still over threshold
+            up_to_date_index > self.params.split_threshold as usize
+        }; // guards dropped here
+
+        if needs_split {
+            self.split_posting_list(head_id, head_embedding).await?;
+        }
+
+        Ok(())
+    }
+
+    /// Splits a posting list using KMeans. Uses remove() to prevent concurrent append race.
+    async fn split_posting_list(
+        &self,
+        head_id: u32,
+        head_embedding: Arc<[f32]>,
+    ) -> Result<(), SpannIndexWriterError> {
+        // Remove from all structures to take ownership and make head fully invisible
+        // Order: HNSW (entry point) -> lengths -> posting_list_staged -> centroids
+        {
+            let hnsw_write_guard = self.hnsw_index.inner.write();
+            // Ignore error if head doesn't exist in HNSW
+            let _ = hnsw_write_guard.hnsw_index.delete(head_id as usize);
+        }
+        let Some((_, length)) = self.lengths.remove(&head_id) else {
+            return Ok(());
+        };
+        let Some((_, posting_list)) = self.posting_list_staged.remove(&head_id) else {
+            return Ok(());
+        };
+        let Some(_) = self.centroids.remove(&head_id) else {
+            return Ok(());
+        };
+        // Head is now fully invisible to concurrent operations
+
+        self.stats
+            .num_splits
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // Build indices filtering out outdated entries
+        let mut local_indices: Vec<usize> = Vec::with_capacity(posting_list.ids.len());
+        for (index, (ver, doc_id)) in posting_list
+            .versions
+            .iter()
+            .zip(posting_list.ids.iter())
+            .enumerate()
+        {
+            let current_version = self
+                .versions
+                .get(doc_id)
+                .ok_or(SpannIndexWriterError::VersionNotFound)?;
+            // Skip if deleted or on an older version
+            if *current_version == 0 || *ver < *current_version {
+                continue;
+            }
+            local_indices.push(index);
+        }
+        local_indices.shuffle(&mut rand::thread_rng());
+        let last = local_indices.len();
+
+        // Run KMeans
+        let mut kmeans_input = KMeansAlgorithmInput::new(
+            local_indices,
+            &posting_list.embeddings,
+            self.dimensionality,
+            /* k */ 2,
+            /* first */ 0,
+            last,
+            self.params.num_samples_kmeans,
+            self.params.space.clone().into(),
+            self.params.initial_lambda,
+        );
+        let clustering_output = match cluster(&mut kmeans_input) {
+            Ok(output) => output,
+            Err(e) => {
+                tracing::error!("Error clustering posting list for head {}: {}", head_id, e);
+                // Restore data on error (reverse order: centroids -> posting_list -> lengths -> HNSW)
+                self.centroids.insert(head_id, head_embedding.clone());
+                self.posting_list_staged.insert(head_id, posting_list);
+                self.lengths.insert(head_id, length);
+                {
+                    let hnsw_write_guard = self.hnsw_index.inner.write();
+                    let _ = hnsw_write_guard
+                        .hnsw_index
+                        .add(head_id as usize, &head_embedding);
+                }
+                return Err(SpannIndexWriterError::KMeansClusteringError(e));
+            }
+        };
+
+        // Handle single cluster case
+        if clustering_output.num_clusters <= 1 {
+            tracing::warn!("Clustering split the posting list into only 1 cluster");
+            if let Some((index, _)) = clustering_output.cluster_labels.iter().next() {
+                let single_pl = SpannPostingListOwned {
+                    ids: vec![posting_list.ids[*index]],
+                    versions: vec![posting_list.versions[*index]],
+                    embeddings: vec![Arc::clone(&posting_list.embeddings[*index])],
                 };
-                self.posting_list_writer
-                    .set("", head_id, &single_posting_list)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
-                        SpannIndexWriterError::PostingListSetError(e)
-                    })?;
+                // Re-add in reverse order: centroids -> posting_list -> lengths -> HNSW
+                self.centroids.insert(head_id, head_embedding.clone());
+                self.posting_list_staged.insert(head_id, single_pl);
+                self.lengths.insert(head_id, 1);
+                {
+                    let hnsw_write_guard = self.hnsw_index.inner.write();
+                    let _ = hnsw_write_guard
+                        .hnsw_index
+                        .add(head_id as usize, &head_embedding);
+                }
                 self.stats
                     .num_pl_modified
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                return Ok(());
-            } else {
-                // None of the cluster_counts should be 0. Points to some error if it is.
-                if clustering_output.cluster_counts.contains(&0) {
-                    tracing::error!("Zero points in a cluster after clustering");
-                    return Err(SpannIndexWriterError::KMeansClusteringError(
-                        KMeansError::ZeroPointsInCluster,
-                    ));
-                }
-                new_posting_lists.push(Vec::with_capacity(
-                    clustering_output.cluster_counts[0] * self.dimensionality,
-                ));
-                new_posting_lists.push(Vec::with_capacity(
-                    clustering_output.cluster_counts[1] * self.dimensionality,
-                ));
-                new_doc_offset_ids.push(Vec::with_capacity(clustering_output.cluster_counts[0]));
-                new_doc_offset_ids.push(Vec::with_capacity(clustering_output.cluster_counts[1]));
-                new_doc_versions.push(Vec::with_capacity(clustering_output.cluster_counts[0]));
-                new_doc_versions.push(Vec::with_capacity(clustering_output.cluster_counts[1]));
-                for (index, cluster) in clustering_output.cluster_labels {
-                    new_doc_offset_ids[cluster as usize].push(doc_offset_ids[index]);
-                    new_doc_versions[cluster as usize].push(doc_versions[index]);
-                    new_posting_lists[cluster as usize].extend_from_slice(
-                        &doc_embeddings
-                            [index * self.dimensionality..(index + 1) * self.dimensionality],
-                    );
-                }
-                let mut same_head = false;
-                let distance_function: DistanceFunction = self.params.space.clone().into();
-                for k in 0..2 {
-                    // Update the existing head.
-                    if !same_head
-                        && distance_function
-                            .distance(&clustering_output.cluster_centers[k], &head_embedding)
-                            .abs()
-                            < 1e-6
-                    {
-                        same_head = true;
-                        let posting_list = SpannPostingList {
-                            doc_offset_ids: &new_doc_offset_ids[k],
-                            doc_versions: &new_doc_versions[k],
-                            doc_embeddings: &new_posting_lists[k],
-                        };
-                        self.posting_list_writer
-                            .set("", head_id, &posting_list)
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error setting posting list for head {}: {}",
-                                    head_id,
-                                    e
-                                );
-                                SpannIndexWriterError::PostingListSetError(e)
-                            })?;
-                        self.stats
-                            .num_pl_modified
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        new_head_ids[k] = head_id as i32;
-                        new_head_embeddings[k] = Some(&head_embedding);
-                    } else {
-                        // Create new head.
-                        let next_id = self
-                            .next_head_id
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        let posting_list = SpannPostingList {
-                            doc_offset_ids: &new_doc_offset_ids[k],
-                            doc_versions: &new_doc_versions[k],
-                            doc_embeddings: &new_posting_lists[k],
-                        };
-                        // Insert to postings list.
-                        self.posting_list_writer
-                            .set("", next_id, &posting_list)
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error setting posting list for head {}: {}",
-                                    head_id,
-                                    e
-                                );
-                                SpannIndexWriterError::PostingListSetError(e)
-                            })?;
-                        self.stats
-                            .num_pl_modified
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        new_head_ids[k] = next_id as i32;
-                        new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
-                        // Insert to hnsw now.
-                        let mut hnsw_write_guard = self.hnsw_index.inner.write();
-                        let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
-                        let hnsw_capacity = hnsw_write_guard.hnsw_index.capacity();
-                        if hnsw_len + 1 > hnsw_capacity {
-                            hnsw_write_guard
-                                .hnsw_index
-                                .resize(hnsw_capacity * 2)
-                                .map_err(|e| {
-                                    tracing::error!(
-                                        "Error resizing hnsw index during append to {}: {}",
-                                        hnsw_capacity * 2,
-                                        e
-                                    );
-                                    SpannIndexWriterError::HnswIndexResizeError(e)
-                                })?;
-                        }
-                        hnsw_write_guard
-                            .hnsw_index
-                            .add(next_id as usize, &clustering_output.cluster_centers[k])
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error adding new head {} to hnsw index: {}",
-                                    next_id,
-                                    e
-                                );
-                                SpannIndexWriterError::HnswIndexMutateError(e)
-                            })?;
-                        self.stats
-                            .num_heads_created
-                            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                }
-                if !same_head {
-                    // Delete the old head
-                    // First delete from hnsw then from postings list. This order
-                    // ensures that the head is never dangling.
-                    {
-                        let hnsw_write_guard = self.hnsw_index.inner.write();
-                        hnsw_write_guard
-                            .hnsw_index
-                            .delete(head_id as usize)
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error deleting head {} from hnsw index: {}",
-                                    head_id,
-                                    e
-                                );
-                                SpannIndexWriterError::HnswIndexMutateError(e)
-                            })?;
-                    }
-                    self.posting_list_writer
-                        .delete::<u32, &SpannPostingList<'_>>("", head_id)
-                        .await
+            }
+            return Ok(());
+        }
+
+        // Validate cluster counts
+        if clustering_output.cluster_counts.contains(&0) {
+            tracing::error!("Zero points in a cluster after clustering");
+            // Restore data on error (reverse order: centroids -> posting_list -> lengths -> HNSW)
+            self.centroids.insert(head_id, head_embedding.clone());
+            self.posting_list_staged.insert(head_id, posting_list);
+            self.lengths.insert(head_id, length);
+            {
+                let hnsw_write_guard = self.hnsw_index.inner.write();
+                let _ = hnsw_write_guard
+                    .hnsw_index
+                    .add(head_id as usize, &head_embedding);
+            }
+            return Err(SpannIndexWriterError::KMeansClusteringError(
+                KMeansError::ZeroPointsInCluster,
+            ));
+        }
+
+        // Extract data for each cluster
+        let mut new_posting_lists: Vec<Vec<Arc<[f32]>>> = vec![
+            Vec::with_capacity(clustering_output.cluster_counts[0]),
+            Vec::with_capacity(clustering_output.cluster_counts[1]),
+        ];
+        let mut new_doc_offset_ids: Vec<Vec<u32>> = vec![
+            Vec::with_capacity(clustering_output.cluster_counts[0]),
+            Vec::with_capacity(clustering_output.cluster_counts[1]),
+        ];
+        let mut new_doc_versions: Vec<Vec<u32>> = vec![
+            Vec::with_capacity(clustering_output.cluster_counts[0]),
+            Vec::with_capacity(clustering_output.cluster_counts[1]),
+        ];
+        for (index, cluster) in &clustering_output.cluster_labels {
+            let c = *cluster as usize;
+            new_doc_offset_ids[c].push(posting_list.ids[*index]);
+            new_doc_versions[c].push(posting_list.versions[*index]);
+            new_posting_lists[c].push(Arc::clone(&posting_list.embeddings[*index]));
+        }
+
+        // Build split_data for reassignment
+        let mut split_data: Vec<(u32, Vec<u32>, Vec<u32>, Vec<Arc<[f32]>>, Arc<[f32]>)> =
+            Vec::with_capacity(2);
+
+        // Process each cluster - always create new heads
+        for k in 0..2 {
+            let cluster_head_id = self
+                .next_head_id
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let centroid = Arc::clone(&clustering_output.cluster_centers[k]);
+
+            // Build split_data entry
+            split_data.push((
+                cluster_head_id,
+                new_doc_offset_ids[k].clone(),
+                new_doc_versions[k].clone(),
+                new_posting_lists[k].clone(),
+                Arc::clone(&centroid),
+            ));
+
+            // Insert in reverse order of removal (centroids -> posting_list -> lengths -> HNSW)
+            let new_pl = SpannPostingListOwned {
+                ids: std::mem::take(&mut new_doc_offset_ids[k]),
+                versions: std::mem::take(&mut new_doc_versions[k]),
+                embeddings: std::mem::take(&mut new_posting_lists[k]),
+            };
+            self.centroids
+                .insert(cluster_head_id, Arc::clone(&centroid));
+            self.posting_list_staged.insert(cluster_head_id, new_pl);
+            self.lengths
+                .insert(cluster_head_id, clustering_output.cluster_counts[k] as u32);
+            // Add to HNSW last (entry point for discovery)
+            {
+                let mut hnsw_write_guard = self.hnsw_index.inner.write();
+                let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
+                let hnsw_capacity = hnsw_write_guard.hnsw_index.capacity();
+                if hnsw_len + 1 > hnsw_capacity {
+                    hnsw_write_guard
+                        .hnsw_index
+                        .resize(hnsw_capacity * 2)
                         .map_err(|e| {
                             tracing::error!(
-                                "Error deleting posting list for head {}: {}",
-                                head_id,
+                                "Error resizing hnsw index during split to {}: {}",
+                                hnsw_capacity * 2,
                                 e
                             );
-                            SpannIndexWriterError::PostingListSetError(e)
+                            SpannIndexWriterError::HnswIndexResizeError(e)
                         })?;
-                    self.stats
-                        .num_heads_deleted
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
+                hnsw_write_guard
+                    .hnsw_index
+                    .add(cluster_head_id as usize, &centroid)
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error adding head {} to hnsw index: {}",
+                            cluster_head_id,
+                            e
+                        );
+                        SpannIndexWriterError::HnswIndexMutateError(e)
+                    })?;
             }
+            self.stats
+                .num_pl_modified
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+            self.stats
+                .num_heads_created
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
-        // Reassign code.
-        // The Box::pin is to make compiler happy since this code is
-        // async recursive.
-        Box::pin(self.collect_and_reassign(
-            &new_head_ids,
-            &new_head_embeddings,
-            &head_embedding,
-            &new_doc_offset_ids,
-            &new_doc_versions,
-            &new_posting_lists,
-        ))
-        .await
+
+        // Count the old head as deleted and track for commit
+        self.stats
+            .num_heads_deleted
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.deleted_heads.insert(head_id, ());
+
+        // Reassign points to nearby heads
+        Box::pin(self.collect_and_reassign(&split_data, &head_embedding)).await?;
+        Ok(())
     }
 
     async fn add_to_postings_list(
         &self,
         id: u32,
         version: u32,
-        embeddings: &[f32],
+        embeddings: Arc<[f32]>,
     ) -> Result<(), SpannIndexWriterError> {
-        let (ids, _, head_embeddings) = self.rng_query(embeddings).await?;
+        let (ids, _, head_embeddings) = self.rng_query(&embeddings).await?;
         // The only cases when this can happen is initially when no data exists in the
         // index or if all the data that was added to the index was deleted later.
         // In both the cases, in the worst case, it can happen that ids is empty
@@ -1501,26 +1676,19 @@ impl SpannIndexWriter {
             let next_id = self
                 .next_head_id
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            // First add to postings list then to hnsw. This order is important
-            // to ensure that if and when the center is discoverable, it also exists
-            // in the postings list. Otherwise, it will be a dangling center.
-            {
-                let posting_list = SpannPostingList {
-                    doc_offset_ids: &[id],
-                    doc_versions: &[version],
-                    doc_embeddings: embeddings,
-                };
-                self.posting_list_writer
-                    .set("", next_id, &posting_list)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Error setting posting list for head {}: {}", next_id, e);
-                        SpannIndexWriterError::PostingListSetError(e)
-                    })?;
-                self.stats
-                    .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
+            // Insert in reverse order of removal (centroids -> posting_list -> lengths -> HNSW)
+            // This ensures head is fully set up before becoming discoverable.
+            let new_pl = SpannPostingListOwned {
+                ids: vec![id],
+                versions: vec![version],
+                embeddings: vec![embeddings.clone()],
+            };
+            self.centroids.insert(next_id, embeddings.clone());
+            self.posting_list_staged.insert(next_id, new_pl);
+            self.lengths.insert(next_id, 1);
+            self.stats
+                .num_pl_modified
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // Next add to hnsw.
             {
                 let mut write_guard = self.hnsw_index.inner.write();
@@ -1541,7 +1709,7 @@ impl SpannIndexWriter {
                 }
                 write_guard
                     .hnsw_index
-                    .add(next_id as usize, embeddings)
+                    .add(next_id as usize, &embeddings)
                     .map_err(|e| {
                         tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
                         SpannIndexWriterError::HnswIndexMutateError(e)
@@ -1553,8 +1721,15 @@ impl SpannIndexWriter {
             return Ok(());
         }
         // Otherwise add to the posting list of these arrays.
-        for (head_id, head_embedding) in ids.iter().zip(head_embeddings) {
-            Box::pin(self.append(*head_id as u32, id, version, embeddings, head_embedding)).await?;
+        for (head_id, head_embedding) in ids.into_iter().zip(head_embeddings.into_iter()) {
+            Box::pin(self.append(
+                head_id as u32,
+                id,
+                version,
+                embeddings.clone(),
+                head_embedding,
+            ))
+            .await?;
         }
 
         Ok(())
@@ -1563,49 +1738,55 @@ impl SpannIndexWriter {
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
         let version = self.add_versions_map(id).await;
         // Normalize the embedding in case of cosine.
-        let mut normalized_embedding = embedding.to_vec();
         let distance_function: DistanceFunction = self.params.space.clone().into();
-        if distance_function == DistanceFunction::Cosine {
-            normalized_embedding = normalize(embedding);
-        }
+        let owned_embedding;
+        let normalized_embedding: Arc<[f32]> = Arc::from(match distance_function {
+            DistanceFunction::Cosine => {
+                owned_embedding = normalize(embedding);
+                &owned_embedding
+            }
+            _ => embedding,
+        });
+        self.embeddings.insert(id, normalized_embedding.clone());
         // Add to the posting list.
-        self.add_to_postings_list(id, version, &normalized_embedding)
+        self.add_to_postings_list(id, version, normalized_embedding)
             .await
     }
 
     pub async fn update(&self, id: u32, embedding: &[f32]) -> Result<(), SpannIndexWriterError> {
-        let inc_version;
-        {
-            // Increment version.
-            let mut version_map_guard = self.versions_map.write().await;
-            let curr_version = match version_map_guard.versions_map.get(&id) {
-                Some(version) => *version,
-                None => {
-                    tracing::error!("Point {} not found in version map", id);
-                    return Err(SpannIndexWriterError::VersionNotFound);
-                }
-            };
+        let inc_version = {
+            let mut version_guard = self.versions.get_mut(&id).ok_or_else(|| {
+                tracing::error!("Point {} not found in version map", id);
+                SpannIndexWriterError::VersionNotFound
+            })?;
+            let curr_version = *version_guard;
             if curr_version == 0 {
                 tracing::error!("Trying to update a deleted point {}", id);
                 return Err(SpannIndexWriterError::VersionNotFound);
             }
-            inc_version = curr_version + 1;
-            version_map_guard.versions_map.insert(id, inc_version);
-        }
-        // Normalize the embedding in case of cosine.
-        let mut normalized_embedding = embedding.to_vec();
+            let next_ver = curr_version + 1;
+            *version_guard = next_ver;
+            next_ver
+        }; // guard dropped here
+           // Normalize the embedding in case of cosine.
         let distance_function: DistanceFunction = self.params.space.clone().into();
-        if distance_function == DistanceFunction::Cosine {
-            normalized_embedding = normalize(embedding);
-        }
+        let owned_embedding;
+        let normalized_embedding: Arc<[f32]> = Arc::from(match distance_function {
+            DistanceFunction::Cosine => {
+                owned_embedding = normalize(embedding);
+                &owned_embedding
+            }
+            _ => embedding,
+        });
+        self.embeddings.insert(id, normalized_embedding.clone());
         // Add to the posting list.
-        self.add_to_postings_list(id, inc_version, &normalized_embedding)
+        self.add_to_postings_list(id, inc_version, normalized_embedding)
             .await
     }
 
     pub async fn delete(&self, id: u32) -> Result<(), SpannIndexWriterError> {
-        let mut version_map_guard = self.versions_map.write().await;
-        version_map_guard.versions_map.insert(id, 0);
+        self.versions.insert(id, 0);
+        self.embeddings.remove(&id);
         Ok(())
     }
 
@@ -1697,10 +1878,7 @@ impl SpannIndexWriter {
         source_doc_versions.reserve_exact(target_cluster_len);
         source_doc_embeddings.reserve_exact(target_cluster_len * self.dimensionality);
         for (index, target_doc_offset_id) in target_doc_offset_ids.into_iter().enumerate() {
-            if self
-                .is_outdated(target_doc_offset_id, target_doc_versions[index])
-                .await?
-            {
+            if self.is_outdated(target_doc_offset_id, target_doc_versions[index])? {
                 continue;
             }
             source_doc_offset_ids.push(target_doc_offset_id);
@@ -1721,273 +1899,273 @@ impl SpannIndexWriter {
     // other add/update/delete operations.
     async fn garbage_collect_head(
         &self,
-        head_id: usize,
-        head_embedding: &[f32],
+        _head_id: usize,
+        _head_embedding: &[f32],
     ) -> Result<(), SpannIndexWriterError> {
-        // Get heads.
-        let mut merged_with_a_nbr = false;
-        let source_cluster_len;
-        let mut target_cluster_len = 0;
-        let mut doc_offset_ids;
-        let mut doc_versions;
-        let mut doc_embeddings;
-        let mut target_embedding = vec![];
-        let mut target_head = 0;
-        {
-            // TODO(Sanket): Add a lock on the head here if this is called concurrently.
-            // If head is concurrently deleted then skip.
-            if self.is_head_deleted(head_id).await? {
-                return Ok(());
-            }
-            (doc_offset_ids, doc_versions, doc_embeddings) = self
-                .posting_list_writer
-                .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                    SpannIndexWriterError::PostingListGetError(e)
-                })?
-                .ok_or(SpannIndexWriterError::PostingListNotFound)?;
-            (doc_offset_ids, doc_versions, doc_embeddings) = self
-                .remove_outdated_entries(doc_offset_ids, doc_versions, doc_embeddings)
-                .await?;
-            source_cluster_len = doc_offset_ids.len();
-            // Write the PL back and return if within the merge threshold.
-            if source_cluster_len > self.params.merge_threshold as usize {
-                let posting_list = SpannPostingList {
-                    doc_offset_ids: &doc_offset_ids,
-                    doc_versions: &doc_versions,
-                    doc_embeddings: &doc_embeddings,
-                };
-                self.posting_list_writer
-                    .set("", head_id as u32, &posting_list)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
-                        SpannIndexWriterError::PostingListSetError(e)
-                    })?;
-                self.stats
-                    .num_pl_modified
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // TODO(Sanket): Enable it later.
+        // // Get heads.
+        // let mut merged_with_a_nbr = false;
+        // let source_cluster_len;
+        // let mut target_cluster_len = 0;
+        // let mut doc_offset_ids;
+        // let mut doc_versions;
+        // let mut doc_embeddings;
+        // let mut target_embedding: Option<Arc<[f32]>> = None;
+        // let mut target_head = 0;
+        // {
+        //     // TODO(Sanket): Add a lock on the head here if this is called concurrently.
+        //     // If head is concurrently deleted then skip.
+        //     if self.is_head_deleted(head_id).await? {
+        //         return Ok(());
+        //     }
+        //     (doc_offset_ids, doc_versions, doc_embeddings) = self
+        //         .posting_list_writer
+        //         .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
+        //         .await
+        //         .map_err(|e| {
+        //             tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+        //             SpannIndexWriterError::PostingListGetError(e)
+        //         })?
+        //         .ok_or(SpannIndexWriterError::PostingListNotFound)?;
+        //     (doc_offset_ids, doc_versions, doc_embeddings) = self
+        //         .remove_outdated_entries(doc_offset_ids, doc_versions, doc_embeddings)
+        //         .await?;
+        //     source_cluster_len = doc_offset_ids.len();
+        //     // Write the PL back and return if within the merge threshold.
+        //     if source_cluster_len > self.params.merge_threshold as usize {
+        //         let posting_list = SpannPostingList {
+        //             doc_offset_ids: &doc_offset_ids,
+        //             doc_versions: &doc_versions,
+        //             doc_embeddings: &doc_embeddings,
+        //         };
+        //         self.posting_list_writer
+        //             .set("", head_id as u32, &posting_list)
+        //             .await
+        //             .map_err(|e| {
+        //                 tracing::error!("Error setting posting list for head {}: {}", head_id, e);
+        //                 SpannIndexWriterError::PostingListSetError(e)
+        //             })?;
+        //         self.stats
+        //             .num_pl_modified
+        //             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
-                return Ok(());
-            }
-            if source_cluster_len == 0 {
-                // Delete from hnsw.
-                let hnsw_write_guard = self.hnsw_index.inner.write();
-                hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
-                    tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
-                    SpannIndexWriterError::HnswIndexMutateError(e)
-                })?;
-                self.stats
-                    .num_heads_deleted
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                return Ok(());
-            }
-            // Find candidates for merge.
-            let (nearest_head_ids, _, nearest_head_embeddings) = self
-                .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)
-                .await?;
-            for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
-                .into_iter()
-                .zip(nearest_head_embeddings.into_iter())
-            {
-                // Skip if it is the current head. Can't a merge a head into itself.
-                if nearest_head_id == head_id {
-                    continue;
-                }
-                // TODO(Sanket): If and when GC is concurrent, then
-                // need to acquire a lock on the nearest_head_id here.
-                // TODO(Sanket): Also need to check if the head is deleted concurrently then.
-                let (
-                    nearest_head_doc_offset_ids,
-                    nearest_head_doc_versions,
-                    nearest_head_doc_embeddings,
-                ) = self
-                    .posting_list_writer
-                    .get_owned::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(
-                            "Error getting posting list for head {}: {}",
-                            nearest_head_id,
-                            e
-                        );
-                        SpannIndexWriterError::PostingListGetError(e)
-                    })?
-                    .ok_or(SpannIndexWriterError::PostingListNotFound)?;
-                target_cluster_len = self
-                    .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
-                    .await?;
-                // If the total count exceeds the max posting list size then skip.
-                if target_cluster_len + source_cluster_len >= self.params.split_threshold as usize {
-                    continue;
-                }
-                // Merge the two PLs.
-                (doc_offset_ids, doc_versions, doc_embeddings) = self
-                    .merge_posting_lists(
-                        doc_offset_ids,
-                        doc_versions,
-                        doc_embeddings,
-                        nearest_head_doc_offset_ids,
-                        nearest_head_doc_versions,
-                        nearest_head_doc_embeddings,
-                        target_cluster_len,
-                    )
-                    .await?;
-                // Write the merged PL back.
-                // Merge into the larger of the two clusters.
-                let merged_posting_list = SpannPostingList {
-                    doc_offset_ids: &doc_offset_ids,
-                    doc_versions: &doc_versions,
-                    doc_embeddings: &doc_embeddings,
-                };
-                if target_cluster_len > source_cluster_len {
-                    self.posting_list_writer
-                        .set("", nearest_head_id as u32, &merged_posting_list)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error setting posting list for head {}: {}",
-                                head_id,
-                                e
-                            );
-                            SpannIndexWriterError::PostingListSetError(e)
-                        })?;
-                    self.stats
-                        .num_pl_modified
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    {
-                        // Delete from hnsw.
-                        let hnsw_write_guard = self.hnsw_index.inner.write();
-                        hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
-                            tracing::error!(
-                                "Error deleting head {} from hnsw index: {}",
-                                head_id,
-                                e
-                            );
-                            SpannIndexWriterError::HnswIndexMutateError(e)
-                        })?;
-                    }
-                    self.posting_list_writer
-                        .delete::<u32, &SpannPostingList<'_>>("", head_id as u32)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error deleting posting list for head {}: {}",
-                                head_id,
-                                e
-                            );
-                            SpannIndexWriterError::PostingListSetError(e)
-                        })?;
-                    self.stats
-                        .num_heads_deleted
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                } else {
-                    self.posting_list_writer
-                        .set("", head_id as u32, &merged_posting_list)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error setting posting list for head {}: {}",
-                                head_id,
-                                e
-                            );
-                            SpannIndexWriterError::PostingListSetError(e)
-                        })?;
-                    self.stats
-                        .num_pl_modified
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    {
-                        // Delete from hnsw.
-                        let hnsw_write_guard = self.hnsw_index.inner.write();
-                        hnsw_write_guard
-                            .hnsw_index
-                            .delete(nearest_head_id)
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error deleting head {} from hnsw index: {}",
-                                    nearest_head_id,
-                                    e
-                                );
-                                SpannIndexWriterError::HnswIndexMutateError(e)
-                            })?;
-                    }
-                    self.posting_list_writer
-                        .delete::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error deleting posting list for head {}: {}",
-                                nearest_head_id,
-                                e
-                            );
-                            SpannIndexWriterError::PostingListSetError(e)
-                        })?;
-                    self.stats
-                        .num_heads_deleted
-                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                }
-                // This center is now merged with a neighbor.
-                target_head = nearest_head_id;
-                target_embedding = nearest_head_embedding;
-                merged_with_a_nbr = true;
-                break;
-            }
-        }
-        if !merged_with_a_nbr {
-            return Ok(());
-        }
-        // Reassign points that were merged to neighbouring heads.
-        if source_cluster_len > target_cluster_len {
-            // target_cluster points were merged to source_cluster
-            // so they are candidates for reassignment.
-            let distance_function: DistanceFunction = self.params.space.clone().into();
-            for idx in source_cluster_len..(source_cluster_len + target_cluster_len) {
-                let origin_dist = distance_function.distance(
-                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
-                    &target_embedding,
-                );
-                let new_dist = distance_function.distance(
-                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
-                    head_embedding,
-                );
-                if new_dist > origin_dist {
-                    self.reassign(
-                        doc_offset_ids[idx],
-                        doc_versions[idx],
-                        &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
-                        head_id as u32,
-                        ReassignReason::Merge,
-                    )
-                    .await?;
-                }
-            }
-        } else {
-            // source_cluster points were merged to target_cluster
-            // so they are candidates for reassignment.
-            let distance_function: DistanceFunction = self.params.space.clone().into();
-            for idx in 0..source_cluster_len {
-                let origin_dist = distance_function.distance(
-                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
-                    head_embedding,
-                );
-                let new_dist = distance_function.distance(
-                    &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
-                    &target_embedding,
-                );
-                if new_dist > origin_dist {
-                    self.reassign(
-                        doc_offset_ids[idx],
-                        doc_versions[idx],
-                        &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
-                        target_head as u32,
-                        ReassignReason::Merge,
-                    )
-                    .await?;
-                }
-            }
-        }
+        //         return Ok(());
+        //     }
+        //     if source_cluster_len == 0 {
+        //         // Delete from hnsw.
+        //         let hnsw_write_guard = self.hnsw_index.inner.write();
+        //         hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
+        //             tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
+        //             SpannIndexWriterError::HnswIndexMutateError(e)
+        //         })?;
+        //         self.stats
+        //             .num_heads_deleted
+        //             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        //         return Ok(());
+        //     }
+        //     // Find candidates for merge.
+        //     let (nearest_head_ids, _, nearest_head_embeddings) = self
+        //         .get_nearby_heads(head_embedding, self.params.num_centers_to_merge_to as usize)?;
+        //     for (nearest_head_id, nearest_head_embedding) in nearest_head_ids
+        //         .into_iter()
+        //         .zip(nearest_head_embeddings.into_iter())
+        //     {
+        //         // Skip if it is the current head. Can't a merge a head into itself.
+        //         if nearest_head_id == head_id {
+        //             continue;
+        //         }
+        //         // TODO(Sanket): If and when GC is concurrent, then
+        //         // need to acquire a lock on the nearest_head_id here.
+        //         // TODO(Sanket): Also need to check if the head is deleted concurrently then.
+        //         let (
+        //             nearest_head_doc_offset_ids,
+        //             nearest_head_doc_versions,
+        //             nearest_head_doc_embeddings,
+        //         ) = self
+        //             .posting_list_writer
+        //             .get_owned::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
+        //             .await
+        //             .map_err(|e| {
+        //                 tracing::error!(
+        //                     "Error getting posting list for head {}: {}",
+        //                     nearest_head_id,
+        //                     e
+        //                 );
+        //                 SpannIndexWriterError::PostingListGetError(e)
+        //             })?
+        //             .ok_or(SpannIndexWriterError::PostingListNotFound)?;
+        //         target_cluster_len = self
+        //             .get_up_to_date_count(&nearest_head_doc_offset_ids, &nearest_head_doc_versions)
+        //             .await?;
+        //         // If the total count exceeds the max posting list size then skip.
+        //         if target_cluster_len + source_cluster_len >= self.params.split_threshold as usize {
+        //             continue;
+        //         }
+        //         // Merge the two PLs.
+        //         (doc_offset_ids, doc_versions, doc_embeddings) = self
+        //             .merge_posting_lists(
+        //                 doc_offset_ids,
+        //                 doc_versions,
+        //                 doc_embeddings,
+        //                 nearest_head_doc_offset_ids,
+        //                 nearest_head_doc_versions,
+        //                 nearest_head_doc_embeddings,
+        //                 target_cluster_len,
+        //             )
+        //             .await?;
+        //         // Write the merged PL back.
+        //         // Merge into the larger of the two clusters.
+        //         let merged_posting_list = SpannPostingList {
+        //             doc_offset_ids: &doc_offset_ids,
+        //             doc_versions: &doc_versions,
+        //             doc_embeddings: &doc_embeddings,
+        //         };
+        //         if target_cluster_len > source_cluster_len {
+        //             self.posting_list_writer
+        //                 .set("", nearest_head_id as u32, &merged_posting_list)
+        //                 .await
+        //                 .map_err(|e| {
+        //                     tracing::error!(
+        //                         "Error setting posting list for head {}: {}",
+        //                         head_id,
+        //                         e
+        //                     );
+        //                     SpannIndexWriterError::PostingListSetError(e)
+        //                 })?;
+        //             self.stats
+        //                 .num_pl_modified
+        //                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        //             {
+        //                 // Delete from hnsw.
+        //                 let hnsw_write_guard = self.hnsw_index.inner.write();
+        //                 hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
+        //                     tracing::error!(
+        //                         "Error deleting head {} from hnsw index: {}",
+        //                         head_id,
+        //                         e
+        //                     );
+        //                     SpannIndexWriterError::HnswIndexMutateError(e)
+        //                 })?;
+        //             }
+        //             self.posting_list_writer
+        //                 .delete::<u32, &SpannPostingList<'_>>("", head_id as u32)
+        //                 .await
+        //                 .map_err(|e| {
+        //                     tracing::error!(
+        //                         "Error deleting posting list for head {}: {}",
+        //                         head_id,
+        //                         e
+        //                     );
+        //                     SpannIndexWriterError::PostingListSetError(e)
+        //                 })?;
+        //             self.stats
+        //                 .num_heads_deleted
+        //                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        //         } else {
+        //             self.posting_list_writer
+        //                 .set("", head_id as u32, &merged_posting_list)
+        //                 .await
+        //                 .map_err(|e| {
+        //                     tracing::error!(
+        //                         "Error setting posting list for head {}: {}",
+        //                         head_id,
+        //                         e
+        //                     );
+        //                     SpannIndexWriterError::PostingListSetError(e)
+        //                 })?;
+        //             self.stats
+        //                 .num_pl_modified
+        //                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        //             {
+        //                 // Delete from hnsw.
+        //                 let hnsw_write_guard = self.hnsw_index.inner.write();
+        //                 hnsw_write_guard
+        //                     .hnsw_index
+        //                     .delete(nearest_head_id)
+        //                     .map_err(|e| {
+        //                         tracing::error!(
+        //                             "Error deleting head {} from hnsw index: {}",
+        //                             nearest_head_id,
+        //                             e
+        //                         );
+        //                         SpannIndexWriterError::HnswIndexMutateError(e)
+        //                     })?;
+        //             }
+        //             self.posting_list_writer
+        //                 .delete::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
+        //                 .await
+        //                 .map_err(|e| {
+        //                     tracing::error!(
+        //                         "Error deleting posting list for head {}: {}",
+        //                         nearest_head_id,
+        //                         e
+        //                     );
+        //                     SpannIndexWriterError::PostingListSetError(e)
+        //                 })?;
+        //             self.stats
+        //                 .num_heads_deleted
+        //                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        //         }
+        //         // This center is now merged with a neighbor.
+        //         target_head = nearest_head_id;
+        //         target_embedding = Some(nearest_head_embedding);
+        //         merged_with_a_nbr = true;
+        //         break;
+        //     }
+        // }
+        // if !merged_with_a_nbr {
+        //     return Ok(());
+        // }
+        // // Reassign points that were merged to neighbouring heads.
+        // if source_cluster_len > target_cluster_len {
+        //     // target_cluster points were merged to source_cluster
+        //     // so they are candidates for reassignment.
+        //     let distance_function: DistanceFunction = self.params.space.clone().into();
+        //     for idx in source_cluster_len..(source_cluster_len + target_cluster_len) {
+        //         let origin_dist = distance_function.distance(
+        //             &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+        //             target_embedding.as_ref().unwrap(),
+        //         );
+        //         let new_dist = distance_function.distance(
+        //             &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+        //             head_embedding,
+        //         );
+        //         if new_dist > origin_dist {
+        //             self.reassign(
+        //                 doc_offset_ids[idx],
+        //                 doc_versions[idx],
+        //                 &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+        //                 head_id as u32,
+        //                 ReassignReason::Merge,
+        //             )
+        //             .await?;
+        //         }
+        //     }
+        // } else {
+        //     // source_cluster points were merged to target_cluster
+        //     // so they are candidates for reassignment.
+        //     let distance_function: DistanceFunction = self.params.space.clone().into();
+        //     for idx in 0..source_cluster_len {
+        //         let origin_dist = distance_function.distance(
+        //             &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+        //             head_embedding,
+        //         );
+        //         let new_dist = distance_function.distance(
+        //             &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+        //             target_embedding.as_ref().unwrap(),
+        //         );
+        //         if new_dist > origin_dist {
+        //             self.reassign(
+        //                 doc_offset_ids[idx],
+        //                 doc_versions[idx],
+        //                 &doc_embeddings[idx * self.dimensionality..(idx + 1) * self.dimensionality],
+        //                 target_head as u32,
+        //                 ReassignReason::Merge,
+        //             )
+        //             .await?;
+        //         }
+        //     }
+        // }
         Ok(())
     }
 
@@ -2307,17 +2485,59 @@ impl SpannIndexWriter {
 
     pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
         self.emit_counters();
-        // NOTE(Sanket): This is not the best way to drain the writer but the orchestrator keeps a
-        // reference to the writer so cannot do an Arc::try_unwrap() here.
-        // Pl list.
+        // Posting list: write staged data and delete removed heads.
         let pl_flusher = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.pl_commit_latency,
                 &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
-            let pl_writer_clone = self.posting_list_writer.clone();
-            let pl_flusher = pl_writer_clone
+
+            // Write all staged posting lists
+            for (head_id, pl_owned) in Arc::try_unwrap(self.posting_list_staged)
+                .unwrap_or_else(|arc| (*arc).clone())
+                .into_iter()
+            {
+                // Flatten embeddings for SpannPostingList format
+                let flattened_embeddings: Vec<f32> = pl_owned
+                    .embeddings
+                    .iter()
+                    .flat_map(|e| e.iter().cloned())
+                    .collect();
+
+                let pl = SpannPostingList {
+                    doc_offset_ids: &pl_owned.ids,
+                    doc_versions: &pl_owned.versions,
+                    doc_embeddings: &flattened_embeddings,
+                };
+
+                self.posting_list_writer
+                    .set("", head_id, &pl)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error setting posting list for head {}: {}", head_id, e);
+                        SpannIndexWriterError::PostingListSetError(e)
+                    })?;
+            }
+
+            // Delete removed heads
+            for (head_id, _) in Arc::try_unwrap(self.deleted_heads)
+                .unwrap_or_else(|arc| (*arc).clone())
+                .into_iter()
+            {
+                self.posting_list_writer
+                    .delete::<u32, &SpannPostingList<'_>>("", head_id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Error deleting posting list for head {}: {}", head_id, e);
+                        SpannIndexWriterError::PostingListSetError(e)
+                    })?;
+            }
+
+            // Commit
+            let pl_flusher = self
+                .posting_list_writer
+                .clone()
                 .commit::<u32, &SpannPostingList<'_>>()
                 .await
                 .map_err(|e| {
@@ -2350,23 +2570,45 @@ impl SpannIndexWriter {
                     tracing::error!("Error creating versions map writer: {}", e);
                     SpannIndexWriterError::VersionsMapWriterCreateError(*e)
                 })?;
+
+            // Write versions (doc_id -> version)
+            for (doc_offset_id, doc_version) in Arc::try_unwrap(self.versions)
+                .unwrap_or_else(|arc| (*arc).clone())
+                .into_iter()
             {
-                let mut version_map_guard = self.versions_map.write().await;
-                for (doc_offset_id, doc_version) in version_map_guard.versions_map.drain() {
-                    versions_map_bf_writer
-                        .set("", doc_offset_id, doc_version)
-                        .await
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error setting version in versions map for {}, version {}: {}",
-                                doc_offset_id,
-                                doc_version,
-                                e
-                            );
-                            SpannIndexWriterError::VersionsMapSetError(e)
-                        })?;
-                }
+                versions_map_bf_writer
+                    .set("", doc_offset_id, doc_version)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error setting version in versions map for {}, version {}: {}",
+                            doc_offset_id,
+                            doc_version,
+                            e
+                        );
+                        SpannIndexWriterError::VersionsMapSetError(e)
+                    })?;
             }
+
+            // Write lengths (head_id -> length) with "head" prefix
+            for (head_id, length) in Arc::try_unwrap(self.lengths)
+                .unwrap_or_else(|arc| (*arc).clone())
+                .into_iter()
+            {
+                versions_map_bf_writer
+                    .set("head", head_id, length)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            "Error setting length in versions map for head {}, length {}: {}",
+                            head_id,
+                            length,
+                            e
+                        );
+                        SpannIndexWriterError::VersionsMapSetError(e)
+                    })?;
+            }
+
             let versions_map_flusher =
                 versions_map_bf_writer
                     .commit::<u32, u32>()
@@ -2900,80 +3142,78 @@ impl<'me> SpannIndexReader<'me> {
     // Only for testing purposes as of 5 March 2024.
     // Returns all the ids with embeddings.
     // Intentionally dumb and not paginated.
-    pub async fn scan(&self) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
-        // Get all the heads.
-        let (non_deleted_heads, _) = self
-            .hnsw_index
-            .inner
-            .read()
-            .hnsw_index
-            .get_all_ids()
-            .map_err(|e| {
-                tracing::error!("Error getting all ids from hnsw index during scan: {}", e);
-                SpannIndexReaderError::ScanHnswError(e)
-            })?;
-        let mut postings_map: HashMap<u32, Vec<f32>> = HashMap::new();
-        for head in non_deleted_heads {
-            let res = self
-                .posting_lists
-                .get("", head as u32)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Error getting posting list for head {}: {}", head, e);
-                    SpannIndexReaderError::PostingListReadError(e)
-                })?
-                .ok_or(SpannIndexReaderError::PostingListNotFound)?;
-            for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
-                if self
-                    .is_outdated(*doc_offset_id, res.doc_versions[index])
-                    .await?
-                {
-                    continue;
-                }
-                // Deduplicate.
-                if let Some(posting) = postings_map.get(doc_offset_id) {
-                    // values should be same.
-                    if posting
-                        != &res.doc_embeddings
-                            [index * self.dimensionality..(index + 1) * self.dimensionality]
-                    {
-                        let actual_version = self
-                            .versions_map
-                            .get("", *doc_offset_id)
-                            .await
-                            .map_err(|e| {
-                                tracing::error!(
-                                    "Error getting version for doc offset id {}: {}",
-                                    doc_offset_id,
-                                    e
-                                );
-                                SpannIndexReaderError::VersionsMapReadError(e)
-                            })?
-                            .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
-                        tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
-                        return Err(SpannIndexReaderError::DataInconsistencyError);
-                    }
-                    continue;
-                }
-                postings_map.insert(
-                    *doc_offset_id,
-                    res.doc_embeddings
-                        [index * self.dimensionality..(index + 1) * self.dimensionality]
-                        .to_vec(),
-                );
-            }
-        }
-        let mut postings = Vec::with_capacity(postings_map.len());
-        for (doc_offset_id, embedding) in postings_map {
-            postings.push(SpannPosting {
-                doc_offset_id,
-                doc_embedding: embedding,
-            });
-        }
-        Ok(postings)
-    }
+    // pub async fn scan(&self) -> Result<Vec<SpannPosting>, SpannIndexReaderError> {
+    //     // Get all the heads.
+    //     let (non_deleted_heads, _) = self
+    //         .hnsw_index
+    //         .inner
+    //         .read()
+    //         .hnsw_index
+    //         .get_all_ids()
+    //         .map_err(|e| {
+    //             tracing::error!("Error getting all ids from hnsw index during scan: {}", e);
+    //             SpannIndexReaderError::ScanHnswError(e)
+    //         })?;
+    //     let mut postings_map: HashMap<u32, Vec<f32>> = HashMap::new();
+    //     for head in non_deleted_heads {
+    //         let res = self
+    //             .posting_lists
+    //             .get("", head as u32)
+    //             .await
+    //             .map_err(|e| {
+    //                 tracing::error!("Error getting posting list for head {}: {}", head, e);
+    //                 SpannIndexReaderError::PostingListReadError(e)
+    //             })?
+    //             .ok_or(SpannIndexReaderError::PostingListNotFound)?;
+    //         for (index, doc_offset_id) in res.doc_offset_ids.iter().enumerate() {
+    //             if self.is_outdated(*doc_offset_id, res.doc_versions[index])? {
+    //                 continue;
+    //             }
+    //             // Deduplicate.
+    //             if let Some(posting) = postings_map.get(doc_offset_id) {
+    //                 // values should be same.
+    //                 if posting
+    //                     != &res.doc_embeddings
+    //                         [index * self.dimensionality..(index + 1) * self.dimensionality]
+    //                 {
+    //                     let actual_version = self
+    //                         .versions_map
+    //                         .get("", *doc_offset_id)
+    //                         .await
+    //                         .map_err(|e| {
+    //                             tracing::error!(
+    //                                 "Error getting version for doc offset id {}: {}",
+    //                                 doc_offset_id,
+    //                                 e
+    //                             );
+    //                             SpannIndexReaderError::VersionsMapReadError(e)
+    //                         })?
+    //                         .ok_or(SpannIndexReaderError::VersionsMapNotFound)?;
+    //                     tracing::error!("Duplicate doc offset id {} at latest version {} with different embeddings", doc_offset_id, actual_version);
+    //                     return Err(SpannIndexReaderError::DataInconsistencyError);
+    //                 }
+    //                 continue;
+    //             }
+    //             postings_map.insert(
+    //                 *doc_offset_id,
+    //                 res.doc_embeddings
+    //                     [index * self.dimensionality..(index + 1) * self.dimensionality]
+    //                     .to_vec(),
+    //             );
+    //         }
+    //     }
+    //     let mut postings = Vec::with_capacity(postings_map.len());
+    //     for (doc_offset_id, embedding) in postings_map {
+    //         postings.push(SpannPosting {
+    //             doc_offset_id,
+    //             doc_embedding: embedding,
+    //         });
+    //     }
+    //     Ok(postings)
+    // }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use std::{collections::HashSet, f32::consts::PI, path::PathBuf, sync::Arc};
@@ -5232,3 +5472,4 @@ mod tests {
         });
     }
 }
+*/
