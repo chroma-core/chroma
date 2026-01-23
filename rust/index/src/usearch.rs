@@ -59,6 +59,98 @@ pub struct USearchIndex {
 }
 
 impl USearchIndex {
+    // === Core Operations ===
+
+    /// Add a vector to the index with the given key.
+    /// For quantized indexes, the vector will be encoded internally.
+    pub fn add(&self, key: u64, vector: &[f32]) -> Result<(), USearchError> {
+        let index = self.index.read()?;
+
+        if let Some(center) = &self.quantization_center {
+            let code = Code::<_>::quantize(vector, center);
+            let bytes = code.as_ref();
+            let i8_slice =
+                unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const i8, bytes.len()) };
+            index.add(key, i8_slice)
+        } else {
+            index.add(key, vector)
+        }
+        .map_err(|e| USearchError::Index(e.to_string()))
+    }
+
+    /// Mark a key as deleted in the index.
+    pub fn delete(&self, key: u64) -> Result<(), USearchError> {
+        self.index
+            .read()?
+            .remove(key)
+            .map_err(|e| USearchError::Index(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Query for k nearest neighbors.
+    /// Returns (keys, distances).
+    pub fn query(&self, vector: &[f32], k: usize) -> Result<(Vec<u64>, Vec<f32>), USearchError> {
+        let index = self.index.read()?;
+
+        let matches = if let Some(center) = &self.quantization_center {
+            let code = Code::<_>::quantize(vector, center);
+            let bytes = code.as_ref();
+            let i8_slice =
+                unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const i8, bytes.len()) };
+            index.search(i8_slice, k)
+        } else {
+            index.search(vector, k)
+        }
+        .map_err(|e| USearchError::Index(e.to_string()))?;
+
+        Ok((matches.keys, matches.distances))
+    }
+
+    /// Retrieve the vector for a given key.
+    /// Returns None if key doesn't exist or if this is a quantized index.
+    pub fn get(&self, key: u64) -> Result<Option<Vec<f32>>, USearchError> {
+        if self.quantization_center.is_some() {
+            return Ok(None);
+        }
+
+        let mut vector = Vec::new();
+        let count = self
+            .index
+            .read()?
+            .export(key, &mut vector)
+            .map_err(|e| USearchError::Index(e.to_string()))?;
+
+        Ok((count > 0).then_some(vector))
+    }
+
+    // === Capacity Management ===
+
+    /// Number of vectors in the index.
+    pub fn len(&self) -> Result<usize, USearchError> {
+        Ok(self.index.read()?.size())
+    }
+
+    /// Check if index is empty.
+    pub fn is_empty(&self) -> Result<bool, USearchError> {
+        Ok(self.len()? == 0)
+    }
+
+    /// Current capacity of the index.
+    pub fn capacity(&self) -> Result<usize, USearchError> {
+        Ok(self.index.read()?.capacity())
+    }
+
+    /// Reserve capacity for at least `capacity` vectors.
+    /// No-op if current capacity is already sufficient.
+    pub fn reserve(&self, capacity: usize) -> Result<(), USearchError> {
+        self.index
+            .write()?
+            .reserve(capacity)
+            .map_err(|e| USearchError::Index(e.to_string()))
+    }
+
+    // === Internal ===
+
     fn storage_key(&self) -> String {
         Self::format_storage_key(&self.prefix_path, self.id)
     }
