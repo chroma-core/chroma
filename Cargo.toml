@@ -86,6 +86,7 @@ chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
+chroma-config-spanner = { path = "rust/config-spanner" }
 chroma-distance = { path = "rust/distance" }
 chroma-error = { path = "rust/error", version = "0.12.0" }
 chroma-frontend = { path = "rust/frontend" }

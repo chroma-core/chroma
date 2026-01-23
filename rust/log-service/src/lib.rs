@@ -10,7 +10,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
-use chroma_config::{spanner::SpannerConfig, Configurable};
+use chroma_config::Configurable;
+use chroma_config_spanner::SpannerConfig;
 use chroma_error::ChromaError;
 use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
@@ -3164,7 +3165,7 @@ mod tests {
     use super::*;
     use crate::state_hash_table::Value;
 
-    use chroma_config::spanner::SpannerEmulatorConfig;
+    use chroma_config_spanner::SpannerEmulatorConfig;
     use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_types::Topology;
     use chroma_types::{are_update_metadatas_close_to_equal, Operation, OperationRecord};

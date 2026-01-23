@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use chroma_config::spanner::SpannerEmulatorConfig;
+use chroma_config_spanner::SpannerEmulatorConfig;
 use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::client::{Client, ClientConfig};

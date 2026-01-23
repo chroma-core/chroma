@@ -4,7 +4,7 @@ use chroma_types::{MultiCloudMultiRegionConfiguration, RegionName};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 
-pub use chroma_config::spanner::{SpannerConfig, SpannerEmulatorConfig};
+pub use chroma_config_spanner::{SpannerConfig, SpannerEmulatorConfig};
 
 /// Configuration for instantiating a SpannerBackend.
 ///

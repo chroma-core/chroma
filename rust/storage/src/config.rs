@@ -1,4 +1,4 @@
-use chroma_config::SpannerConfig;
+use chroma_config_spanner::SpannerConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Debug, Serialize, Clone)]

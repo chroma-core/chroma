@@ -24,6 +24,7 @@ tracing = { workspace = true }
 opentelemetry = { workspace = true }
 
 chroma-config = { workspace = true }
+chroma-config-spanner = { workspace = true }
 chroma-error = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-types = { workspace = true }

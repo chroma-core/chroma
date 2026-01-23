@@ -1,6 +1,6 @@
 //! Configuration for Spanner migrations.
 
-pub use chroma_config::spanner::SpannerConfig;
+pub use chroma_config_spanner::SpannerConfig;
 use figment::providers::{Env, Format, Yaml};
 use serde::Deserialize;
 use std::default::Default;

@@ -156,7 +156,7 @@ impl ManifestManagerFactory for ReplicatedManifestManagerFactory {
 mod tests {
     use std::sync::Arc;
 
-    use chroma_config::spanner::SpannerEmulatorConfig;
+    use chroma_config_spanner::SpannerEmulatorConfig;
     use google_cloud_gax::conn::Environment;
     use google_cloud_spanner::client::{Client, ClientConfig};
     use setsum::Setsum;

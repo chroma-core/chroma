@@ -13,7 +13,7 @@ pub use config::RootConfig;
 pub use migrations::MigrationDir;
 pub use migrations::MIGRATION_DIRS;
 
-use chroma_config::spanner::SpannerConfig;
+use chroma_config_spanner::SpannerConfig;
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;

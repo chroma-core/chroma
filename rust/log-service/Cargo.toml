@@ -32,6 +32,7 @@ google-cloud-gax = { workspace = true }
 
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
+chroma-config-spanner = { workspace = true }
 chroma-error = { workspace = true, features = ["sqlx"] }
 chroma-log = { workspace = true }
 chroma-storage = { workspace = true }

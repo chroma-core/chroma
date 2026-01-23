@@ -14,6 +14,7 @@ tokio-util = { workspace = true }
 tonic = { workspace = true }
 tonic-health = { workspace = true }
 chroma-config = { workspace = true }
+chroma-config-spanner = { workspace = true }
 chroma-error = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-types = { workspace = true }

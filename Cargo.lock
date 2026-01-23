@@ -1661,12 +1661,19 @@ dependencies = [
  "async-trait",
  "chroma-error",
  "figment",
- "gcloud-gax",
- "gcloud-spanner",
  "murmur3",
  "parking_lot",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "chroma-config-spanner"
+version = "0.1.0"
+dependencies = [
+ "gcloud-gax",
+ "gcloud-spanner",
+ "serde",
 ]
 
 [[package]]
@@ -1842,6 +1849,7 @@ dependencies = [
  "bytes",
  "chroma-cache",
  "chroma-config",
+ "chroma-config-spanner",
  "chroma-error",
  "chroma-log",
  "chroma-storage",
@@ -1994,6 +2002,7 @@ dependencies = [
  "aws-smithy-types",
  "bytes",
  "chroma-config",
+ "chroma-config-spanner",
  "chroma-error",
  "chroma-tracing",
  "chroma-types",
@@ -7188,6 +7197,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "chroma-config",
+ "chroma-config-spanner",
  "chroma-error",
  "chroma-storage",
  "chroma-tracing",
@@ -8055,6 +8065,7 @@ name = "spanner-migrations"
 version = "0.1.0"
 dependencies = [
  "chroma-config",
+ "chroma-config-spanner",
  "chroma-tracing",
  "clap",
  "figment",
@@ -9708,6 +9719,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "chroma-config",
+ "chroma-config-spanner",
  "chroma-error",
  "chroma-storage",
  "chroma-types",

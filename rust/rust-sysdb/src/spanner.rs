@@ -1289,8 +1289,8 @@ mod tests {
     async fn setup_test_backend() -> Option<SpannerBackend> {
         use crate::config::SpannerBackendConfig;
         use chroma_config::registry::Registry;
-        use chroma_config::spanner::SpannerEmulatorConfig;
         use chroma_config::Configurable;
+        use chroma_config_spanner::SpannerEmulatorConfig;
 
         // Use the same config as Tilt (localhost:9010 when port-forwarded)
         let emulator = SpannerEmulatorConfig {

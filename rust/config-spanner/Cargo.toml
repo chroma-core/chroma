@@ -1,0 +1,12 @@
+[package]
+name = "chroma-config-spanner"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+google-cloud-spanner = { workspace = true }
+google-cloud-gax = { workspace = true }

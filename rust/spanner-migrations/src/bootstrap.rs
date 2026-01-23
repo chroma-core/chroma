@@ -1,6 +1,6 @@
 //! Bootstrap functionality for Spanner emulator.
 
-use chroma_config::spanner::SpannerEmulatorConfig;
+use chroma_config_spanner::SpannerEmulatorConfig;
 use google_cloud_gax::conn::Environment;
 use google_cloud_googleapis::spanner::admin::database::v1::CreateDatabaseRequest;
 use google_cloud_googleapis::spanner::admin::instance::v1::{CreateInstanceRequest, Instance};
