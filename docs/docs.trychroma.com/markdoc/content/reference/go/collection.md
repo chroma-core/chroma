@@ -82,10 +82,10 @@ Update items in the collection.
 
 | Name | Type | Description |
 | :--- | :--- | :---------- |
-| `WithIDsUpdate(ids...)` | `...DocumentID` | IDs of records to update (required). |
-| `WithTextsUpdate(texts...)` | `...string` | New document text. |
-| `WithEmbeddingsUpdate(embeddings...)` | `...Embedding` | New embedding vectors. |
-| `WithMetadatasUpdate(metadatas...)` | `...DocumentMetadata` | New metadata. |
+| `WithIDs(ids...)` | `...DocumentID` | IDs of records to update (required). |
+| `WithTexts(texts...)` | `...string` | New document text. |
+| `WithEmbeddings(embeddings...)` | `...Embedding` | New embedding vectors. |
+| `WithMetadatas(metadatas...)` | `...DocumentMetadata` | New metadata. |
 
 #### Returns
 
@@ -95,9 +95,9 @@ Update items in the collection.
 
 ```go
 err := collection.Update(ctx,
-    chroma.WithIDsUpdate("id1"),
-    chroma.WithTextsUpdate("new document content"),
-    chroma.WithMetadatasUpdate(
+    chroma.WithIDs("id1"),
+    chroma.WithTexts("new document content"),
+    chroma.WithMetadatas(
         chroma.NewDocumentMetadata(chroma.NewStringAttribute("updated", "true")),
     ),
 )
@@ -113,9 +113,9 @@ Delete items from the collection.
 
 | Name | Type | Description |
 | :--- | :--- | :---------- |
-| `WithIDsDelete(ids...)` | `...DocumentID` | Specific record IDs to delete. |
-| `WithWhereDelete(where)` | `WhereFilter` | Metadata-based filtering for deletion. |
-| `WithWhereDocumentDelete(where)` | `WhereDocumentFilter` | Document content-based filtering for deletion. |
+| `WithIDs(ids...)` | `...DocumentID` | Specific record IDs to delete. |
+| `WithWhere(where)` | `WhereFilter` | Metadata-based filtering for deletion. |
+| `WithWhereDocument(where)` | `WhereDocumentFilter` | Document content-based filtering for deletion. |
 
 #### Returns
 
@@ -126,12 +126,12 @@ Delete items from the collection.
 ```go
 // Delete by IDs
 err := collection.Delete(ctx,
-    chroma.WithIDsDelete("id1", "id2"),
+    chroma.WithIDs("id1", "id2"),
 )
 
 // Delete by filter
 err := collection.Delete(ctx,
-    chroma.WithWhereDelete(chroma.EqString(chroma.K("source"), "deprecated")),
+    chroma.WithWhere(chroma.EqString(chroma.K("source"), "deprecated")),
 )
 ```
 
@@ -145,12 +145,13 @@ Get items from the collection.
 
 | Name | Type | Description |
 | :--- | :--- | :---------- |
-| `WithIDsGet(ids...)` | `...DocumentID` | Specific record IDs to retrieve. |
-| `WithWhereGet(where)` | `WhereFilter` | Metadata-based filtering. |
-| `WithWhereDocumentGet(where)` | `WhereDocumentFilter` | Document content-based filtering. |
-| `WithIncludeGet(include...)` | `...Include` | Fields to include: `IncludeDocuments`, `IncludeMetadatas`, `IncludeEmbeddings`. |
-| `WithLimitGet(limit)` | `int` | Maximum records to return. |
-| `WithOffsetGet(offset)` | `int` | Records to skip. |
+| `WithIDs(ids...)` | `...DocumentID` | Specific record IDs to retrieve. |
+| `WithWhere(where)` | `WhereFilter` | Metadata-based filtering. |
+| `WithWhereDocument(where)` | `WhereDocumentFilter` | Document content-based filtering. |
+| `WithInclude(include...)` | `...Include` | Fields to include: `IncludeDocuments`, `IncludeMetadatas`, `IncludeEmbeddings`. |
+| `WithLimit(limit)` | `int` | Maximum records to return. |
+| `WithOffset(offset)` | `int` | Records to skip. |
+| `NewPage(opts...)` | `PageOption` | Fluent pagination with `Limit(n)` and `Offset(n)`. |
 
 #### Returns
 
@@ -160,8 +161,8 @@ Get items from the collection.
 
 ```go
 result, err := collection.Get(ctx,
-    chroma.WithIDsGet("id1", "id2"),
-    chroma.WithIncludeGet(chroma.IncludeDocuments, chroma.IncludeMetadatas),
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeMetadatas),
 )
 
 // Access results
@@ -183,10 +184,10 @@ Query the collection for similar items.
 | `WithQueryTexts(texts...)` | `...string` | Query text to embed and search. |
 | `WithQueryEmbeddings(embeddings...)` | `...Embedding` | Pre-computed query embeddings. |
 | `WithNResults(n)` | `int` | Maximum results per query. Default: `10`. |
-| `WithWhereQuery(where)` | `WhereFilter` | Metadata-based filtering. |
-| `WithWhereDocumentQuery(where)` | `WhereDocumentFilter` | Document content-based filtering. |
-| `WithIncludeQuery(include...)` | `...Include` | Fields to include. Default: `["metadatas", "documents", "distances"]`. |
-| `WithIDsQuery(ids...)` | `...DocumentID` | Filter to specific record IDs (Chroma >= 1.0.3). |
+| `WithWhere(where)` | `WhereFilter` | Metadata-based filtering. |
+| `WithWhereDocument(where)` | `WhereDocumentFilter` | Document content-based filtering. |
+| `WithInclude(include...)` | `...Include` | Fields to include. Default: `["metadatas", "documents", "distances"]`. |
+| `WithIDs(ids...)` | `...DocumentID` | Filter to specific record IDs (Chroma >= 1.0.3). |
 
 #### Returns
 
@@ -199,8 +200,8 @@ Query the collection for similar items.
 result, err := collection.Query(ctx,
     chroma.WithQueryTexts("search query"),
     chroma.WithNResults(5),
-    chroma.WithWhereQuery(chroma.EqString(chroma.K("category"), "science")),
-    chroma.WithIncludeQuery(chroma.IncludeDocuments, chroma.IncludeDistances),
+    chroma.WithWhere(chroma.EqString(chroma.K("category"), "science")),
+    chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeDistances),
 )
 
 // Access results (results are nested by query)
@@ -222,7 +223,14 @@ Performs hybrid search on the collection using expression builders. Provides a f
 
 | Name | Type | Description |
 | :--- | :--- | :---------- |
-| `WithSearchRequest(req)` | `*SearchRequest` | The search request built using expression builders. |
+| `NewSearchRequest(opts...)` | `SearchOption` | Create a search request with options. |
+| `WithKnnRank(query, opts...)` | `KnnQueryOption, ...KnnOption` | KNN ranking with text or vector query. |
+| `WithFilter(where)` | `WhereClause` | Metadata-based filtering. |
+| `WithIDs(ids...)` | `...DocumentID` | Filter to specific record IDs. |
+| `NewPage(opts...)` | `PageOption` | Pagination with `Limit(n)` and `Offset(n)`. |
+| `WithSelect(keys...)` | `...Key` | Fields to include: `KDocument`, `KScore`, `KMetadata`, `KEmbedding`. |
+| `WithGroupBy(groupBy)` | `*GroupBy` | Group results by metadata keys. |
+| `WithReadLevel(level)` | `ReadLevel` | Read from index only or index+WAL. |
 
 #### Returns
 
@@ -233,20 +241,17 @@ Performs hybrid search on the collection using expression builders. Provides a f
 ```go
 // Basic search with KNN ranking
 result, err := collection.Search(ctx,
-    chroma.WithSearchRequest(
-        chroma.NewSearchRequest().
-            Where(chroma.EqString(chroma.K("category"), "science")).
-            Rank(chroma.WithKnnRank(chroma.KnnRank{
-                QueryText: "machine learning",
-                Limit:     10,
-            })).
-            Limit(5).
-            Select(chroma.K.DOCUMENT, chroma.K.SCORE, chroma.K("title")),
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning"), chroma.WithKnnLimit(50)),
+        chroma.WithFilter(chroma.EqString(chroma.K("category"), "science")),
+        chroma.NewPage(chroma.Limit(5)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("title")),
     ),
 )
 
 // Iterate over results
-for _, row := range result.Rows() {
+sr := result.(*chroma.SearchResultImpl)
+for _, row := range sr.Rows() {
     fmt.Printf("ID: %s, Score: %f\n", row.ID, row.Score)
 }
 ```

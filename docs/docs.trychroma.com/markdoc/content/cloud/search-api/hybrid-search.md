@@ -418,7 +418,7 @@ result, err := collection.Search(ctx,
             ),
             chroma.WithRrfK(60),
         ),
-        chroma.WithPage(chroma.WithLimit(20)),
+        chroma.NewPage(chroma.Limit(20)),
         chroma.WithSelect(chroma.KDocument, chroma.KScore, "title"),
     ),
 )

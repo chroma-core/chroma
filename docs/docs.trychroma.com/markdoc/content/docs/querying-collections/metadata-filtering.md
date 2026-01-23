@@ -36,7 +36,7 @@ await collection.query({
 ```go
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("first query", "second query"),
-    chroma.WithWhereQuery(chroma.EqInt("page", 10)),
+    chroma.WithWhere(chroma.EqInt("page", 10)),
 )
 ```
 
@@ -168,7 +168,7 @@ await collection.query({
 ```go
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("first query", "second query"),
-    chroma.WithWhereQuery(chroma.GtInt("page", 10)),
+    chroma.WithWhere(chroma.GtInt("page", 10)),
 )
 ```
 
@@ -273,7 +273,7 @@ await collection.query({
 ```go
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("first query", "second query"),
-    chroma.WithWhereQuery(
+    chroma.WithWhere(
         chroma.And(
             chroma.GteInt("page", 5),
             chroma.LteInt("page", 10),
@@ -376,7 +376,7 @@ await collection.get({
 
 ```go
 results, err := collection.Get(ctx,
-    chroma.WithWhereGet(
+    chroma.WithWhere(
         chroma.Or(
             chroma.EqString("color", "red"),
             chroma.EqString("color", "blue"),
@@ -504,7 +504,7 @@ await collection.get({
 
 ```go
 results, err := collection.Get(ctx,
-    chroma.WithWhereGet(
+    chroma.WithWhere(
         chroma.InString("author", "Rowling", "Fitzgerald", "Herbert"),
     ),
 )
@@ -552,8 +552,8 @@ await collection.query({
 results, err := collection.Query(ctx,
     chroma.WithQueryTexts("doc10", "thus spake zarathustra"),
     chroma.WithNResults(10),
-    chroma.WithWhereQuery(chroma.EqString("metadata_field", "is_equal_to_this")),
-    chroma.WithWhereDocumentQuery(chroma.Contains("search_string")),
+    chroma.WithWhere(chroma.EqString("metadata_field", "is_equal_to_this")),
+    chroma.WithWhereDocument(chroma.Contains("search_string")),
 )
 ```
 
