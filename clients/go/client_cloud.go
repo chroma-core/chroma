@@ -62,11 +62,6 @@ func NewCloudClient(options ...ClientOption) (*CloudAPIClient, error) {
 	return c, nil
 }
 
-// Deprecated: use NewCloudClient instead
-func NewCloudAPIClient(options ...ClientOption) (*CloudAPIClient, error) {
-	return NewCloudClient(options...)
-}
-
 // WithCloudAPIKey sets the API key for the cloud client. It will automatically set a new TokenAuthCredentialsProvider.
 func WithCloudAPIKey(apiKey string) ClientOption {
 	return func(c *BaseAPIClient) error {

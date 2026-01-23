@@ -117,7 +117,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		err = collection.Add(ctx, WithIDs("1", "2", "3"), WithTexts("this is document about cats", "123141231", "$@!123115"))
 		require.NoError(t, err)
 
-		err = collection.Delete(ctx, WithIDsDelete("1", "2"))
+		err = collection.Delete(ctx, WithIDs("1", "2"))
 		require.NoError(t, err)
 
 		// Verify deletion
@@ -139,12 +139,12 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		err = collection.Add(ctx, WithIDs("1", "2", "3"), WithTexts("this is document about cats", "123141231", "$@!123115"))
 		require.NoError(t, err)
 
-		err = collection.Update(ctx, WithIDsUpdate("1", "2"), WithTextsUpdate("updated text for 1", "updated text for 2"))
+		err = collection.Update(ctx, WithIDs("1", "2"), WithTexts("updated text for 1", "updated text for 2"))
 		require.NoError(t, err)
 
 		// Verify update
 
-		results, err := collection.Get(ctx, WithIDsGet("1", "2"))
+		results, err := collection.Get(ctx, WithIDs("1", "2"))
 		require.NoError(t, err)
 		require.Equal(t, results.Count(), 2)
 		require.Equal(t, "updated text for 1", results.GetDocuments()[0].ContentString())
@@ -332,7 +332,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("tell me about cats"), WithKnnLimit(10)),
-				WithPage(WithLimit(2)),
+				WithLimit(2),
 				WithSelect(KDocument, KScore),
 			),
 		)
@@ -346,7 +346,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.NotEmpty(t, searchResult.Scores)
 	})
 
-	t.Run("Search with pagination", func(t *testing.T) {
+	t.Run("Search with pagination using NewPage", func(t *testing.T) {
 		ctx := context.Background()
 		collectionName := "test_collection-" + uuid.New().String()
 		collection, err := client.CreateCollection(ctx, collectionName)
@@ -367,11 +367,12 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.NoError(t, err)
 		time.Sleep(2 * time.Second)
 
-		// Search with pagination
+		// Search with NewPage pagination
+		page := NewPage(Limit(2))
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
-				WithPage(WithLimit(2)),
+				page,
 				WithSelect(KDocument, KScore),
 			),
 		)
@@ -382,6 +383,13 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.True(t, ok)
 		require.NotEmpty(t, searchResult.IDs)
 		require.LessOrEqual(t, len(searchResult.IDs[0]), 2)
+
+		// Test page navigation
+		require.Equal(t, 0, page.Number())
+		require.Equal(t, 2, page.Size())
+		nextPage := page.Next()
+		require.Equal(t, 1, nextPage.Number())
+		require.Equal(t, 2, nextPage.GetOffset())
 	})
 
 	t.Run("Search with IDIn filter", func(t *testing.T) {
@@ -404,7 +412,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
 				WithFilter(IDIn("1", "3")),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -441,7 +449,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
 				WithFilter(IDNotIn("1")),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -486,7 +494,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 					EqString(K("category"), "wildlife"),
 					IDNotIn("3"),
 				)),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -527,7 +535,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("pets"), WithKnnLimit(10)),
 				WithFilter(DocumentContains("fluffy")),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -564,7 +572,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
 				WithFilter(DocumentNotContains("cats")),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KID, KDocument, KScore),
 			),
 		)
@@ -608,7 +616,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		searchResults, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
-				WithPage(WithLimit(2)),
+				WithLimit(2),
 				WithSelect(KDocument, KScore),
 			),
 		)
@@ -705,7 +713,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		searchResults, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
-				WithPage(WithLimit(2)),
+				WithLimit(2),
 				WithSelect(KDocument, KScore),
 			),
 		)
@@ -764,7 +772,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		searchResults, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("quick fox"), WithKnnLimit(10)),
-				WithPage(WithLimit(2)),
+				WithLimit(2),
 				WithSelect(KDocument, KScore),
 			),
 		)
@@ -829,7 +837,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err := collection.Query(ctx,
 			WithQueryTexts("animals"),
 			WithNResults(10),
-			WithWhereQuery(EqString(K("category"), "pets")),
+			WithWhere(EqString(K("category"), "pets")),
 		)
 		require.NoError(t, err)
 		require.LessOrEqual(t, len(results.GetDocumentsGroups()[0]), 2)
@@ -838,7 +846,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err = collection.Query(ctx,
 			WithQueryTexts("animals"),
 			WithNResults(10),
-			WithWhereQuery(GteInt("year", 2020)),
+			WithWhere(GteInt("year", 2020)),
 		)
 		require.NoError(t, err)
 		require.NotEmpty(t, results.GetDocumentsGroups())
@@ -847,7 +855,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err = collection.Query(ctx,
 			WithQueryTexts("animals"),
 			WithNResults(10),
-			WithWhereQuery(GtFloat("rating", 4.0)),
+			WithWhere(GtFloat("rating", 4.0)),
 		)
 		require.NoError(t, err)
 		require.NotEmpty(t, results.GetDocumentsGroups())
@@ -856,7 +864,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err = collection.Query(ctx,
 			WithQueryTexts("animals"),
 			WithNResults(10),
-			WithWhereQuery(EqBool("available", true)),
+			WithWhere(EqBool("available", true)),
 		)
 		require.NoError(t, err)
 		require.NotEmpty(t, results.GetDocumentsGroups())
@@ -865,7 +873,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		searchResults, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
-				WithPage(WithLimit(5)),
+				WithLimit(5),
 				WithSelect(KDocument, KScore, KMetadata),
 			),
 		)
@@ -945,7 +953,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		searchResults, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("machine learning AI"), WithKnnLimit(10)),
-				WithPage(WithLimit(3)),
+				WithLimit(3),
 				WithSelect(KDocument, KScore),
 			),
 		)
@@ -956,7 +964,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		searchResults, err = collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("learning"), WithKnnLimit(10)),
-				WithPage(WithLimit(3)),
+				WithLimit(3),
 				WithSelect(KDocument, KScore, KMetadata),
 			),
 		)
@@ -977,7 +985,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err = collection.Query(ctx,
 			WithQueryTexts("learning"),
 			WithNResults(10),
-			WithWhereQuery(EqInt("year", 2023)),
+			WithWhere(EqInt("year", 2023)),
 		)
 		require.NoError(t, err)
 		require.NotEmpty(t, results.GetDocumentsGroups())
@@ -1024,7 +1032,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
-				WithPage(WithLimit(3)),
+				WithLimit(3),
 				WithSelect(KID, KDocument, KScore, KMetadata),
 			),
 		)
@@ -1135,6 +1143,57 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.LessOrEqual(t, status.OpIndexingProgress, 1.0)
 	})
 
+	t.Run("Search with Page iteration pattern", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_page_iteration-" + uuid.New().String()
+		collection, err := client.CreateCollection(ctx, collectionName)
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+
+		// Add 6 documents
+		err = collection.Add(ctx,
+			WithIDs("1", "2", "3", "4", "5", "6"),
+			WithTexts(
+				"machine learning basics",
+				"deep learning neural networks",
+				"natural language processing",
+				"computer vision applications",
+				"reinforcement learning agents",
+				"generative AI models",
+			),
+		)
+		require.NoError(t, err)
+		time.Sleep(2 * time.Second)
+
+		// Iterate through pages of size 2
+		page := NewPage(Limit(2))
+		totalResults := 0
+		pageCount := 0
+
+		for pageCount < 3 { // Max 3 pages to prevent infinite loop
+			results, err := collection.Search(ctx,
+				NewSearchRequest(
+					WithKnnRank(KnnQueryText("AI learning"), WithKnnLimit(10)),
+					page,
+					WithSelect(KID, KDocument),
+				),
+				WithReadLevel(ReadLevelIndexAndWAL),
+			)
+			require.NoError(t, err)
+
+			sr := results.(*SearchResultImpl)
+			if len(sr.Rows()) == 0 {
+				break
+			}
+			totalResults += len(sr.Rows())
+			pageCount++
+			page = page.Next()
+		}
+
+		require.GreaterOrEqual(t, totalResults, 4, "Should have iterated through multiple pages")
+		require.GreaterOrEqual(t, pageCount, 2, "Should have at least 2 pages")
+	})
+
 	t.Run("Search with ReadLevelIndexAndWAL", func(t *testing.T) {
 		ctx := context.Background()
 		collectionName := "test_search_read_level_wal-" + uuid.New().String()
@@ -1153,7 +1212,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
-				WithPage(WithLimit(10)),
+				WithLimit(10),
 				WithSelect(KID, KDocument, KScore),
 			),
 			WithReadLevel(ReadLevelIndexAndWAL),
@@ -1185,7 +1244,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
-				WithPage(WithLimit(10)),
+				WithLimit(10),
 				WithSelect(KID, KDocument, KScore),
 			),
 			WithReadLevel(ReadLevelIndexOnly),

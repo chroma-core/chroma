@@ -107,7 +107,7 @@ type SortOp struct {
 	Sort string `json:"sort,omitempty"`
 }
 
-type CollectionGetOption func(get *CollectionGetOp) error
+type CollectionGetOption = GetOption
 
 type CollectionGetOp struct {
 	FilterOp          // ability to filter by where and whereDocument
@@ -123,8 +123,7 @@ func NewCollectionGetOp(opts ...CollectionGetOption) (*CollectionGetOp, error) {
 		ProjectOp: ProjectOp{Include: []Include{IncludeDocuments, IncludeMetadatas}},
 	}
 	for _, opt := range opts {
-		err := opt(get)
-		if err != nil {
+		if err := opt.ApplyToGet(get); err != nil {
 			return nil, err
 		}
 	}
@@ -175,56 +174,6 @@ func (c *CollectionGetOp) Operation() OperationType {
 	return OperationGet
 }
 
-func WithIDsGet(ids ...DocumentID) CollectionGetOption {
-	return func(query *CollectionGetOp) error {
-		for _, id := range ids {
-			query.Ids = append(query.Ids, DocumentID(id))
-		}
-		return nil
-	}
-}
-
-func WithWhereGet(where WhereFilter) CollectionGetOption {
-	return func(query *CollectionGetOp) error {
-		query.Where = where
-		return nil
-	}
-}
-
-func WithWhereDocumentGet(whereDocument WhereDocumentFilter) CollectionGetOption {
-	return func(query *CollectionGetOp) error {
-		query.WhereDocument = whereDocument
-		return nil
-	}
-}
-
-func WithIncludeGet(include ...Include) CollectionGetOption {
-	return func(query *CollectionGetOp) error {
-		query.Include = include
-		return nil
-	}
-}
-
-func WithLimitGet(limit int) CollectionGetOption {
-	return func(query *CollectionGetOp) error {
-		if limit <= 0 {
-			return errors.New("limit must be greater than 0")
-		}
-		query.Limit = limit
-		return nil
-	}
-}
-
-func WithOffsetGet(offset int) CollectionGetOption {
-	return func(query *CollectionGetOp) error {
-		if offset < 0 {
-			return errors.New("offset must be greater than or equal to 0")
-		}
-		query.Offset = offset
-		return nil
-	}
-}
-
 // Query
 
 type CollectionQueryOp struct {
@@ -241,8 +190,7 @@ func NewCollectionQueryOp(opts ...CollectionQueryOption) (*CollectionQueryOp, er
 		LimitResultOp: LimitResultOp{NResults: 10},
 	}
 	for _, opt := range opts {
-		err := opt(query)
-		if err != nil {
+		if err := opt.ApplyToQuery(query); err != nil {
 			return nil, err
 		}
 	}
@@ -300,73 +248,7 @@ func (c *CollectionQueryOp) Operation() OperationType {
 	return OperationQuery
 }
 
-type CollectionQueryOption func(query *CollectionQueryOp) error
-
-func WithWhereQuery(where WhereFilter) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		query.Where = where
-		return nil
-	}
-}
-
-func WithWhereDocumentQuery(whereDocument WhereDocumentFilter) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		query.WhereDocument = whereDocument
-		return nil
-	}
-}
-
-func WithNResults(nResults int) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		if nResults <= 0 {
-			return errors.New("nResults must be greater than 0")
-		}
-		query.NResults = nResults
-		return nil
-	}
-}
-
-func WithQueryTexts(queryTexts ...string) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		if len(queryTexts) == 0 {
-			return errors.New("at least one query text is required")
-		}
-		query.QueryTexts = queryTexts
-		return nil
-	}
-}
-
-func WithQueryEmbeddings(queryEmbeddings ...embeddings.Embedding) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		if len(queryEmbeddings) == 0 {
-			return errors.New("at least one query embedding is required")
-		}
-		query.QueryEmbeddings = queryEmbeddings
-		return nil
-	}
-}
-
-// WithIncludeQuery is used to include metadatas, documents, embeddings, uris in the query response.
-func WithIncludeQuery(include ...Include) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		query.Include = include
-		return nil
-	}
-}
-
-// WithIDsQuery is used to filter the query by IDs. This is only available for Chroma version 1.0.3 and above.
-func WithIDsQuery(ids ...DocumentID) CollectionQueryOption {
-	return func(query *CollectionQueryOp) error {
-		if len(ids) == 0 {
-			return errors.New("at least one id is required")
-		}
-		if query.Ids == nil {
-			query.Ids = make([]DocumentID, 0)
-		}
-		query.Ids = append(query.Ids, ids...)
-		return nil
-	}
-}
+type CollectionQueryOption = QueryOption
 
 // Add, Upsert, Update
 
@@ -380,14 +262,13 @@ type CollectionAddOp struct {
 }
 
 func NewCollectionAddOp(opts ...CollectionAddOption) (*CollectionAddOp, error) {
-	update := &CollectionAddOp{}
+	add := &CollectionAddOp{}
 	for _, opt := range opts {
-		err := opt(update)
-		if err != nil {
+		if err := opt.ApplyToAdd(add); err != nil {
 			return nil, err
 		}
 	}
-	return update, nil
+	return add, nil
 }
 
 func (c *CollectionAddOp) EmbedData(ctx context.Context, ef embeddings.EmbeddingFunction) error {
@@ -525,59 +406,7 @@ func (c *CollectionAddOp) Operation() OperationType {
 	return OperationCreate
 }
 
-type CollectionAddOption func(update *CollectionAddOp) error
-
-func WithTexts(documents ...string) CollectionAddOption {
-	return func(update *CollectionAddOp) error {
-		if len(documents) == 0 {
-			return errors.New("at least one document is required")
-		}
-		if update.Documents == nil {
-			update.Documents = make([]Document, 0)
-		}
-		for _, text := range documents {
-			update.Documents = append(update.Documents, NewTextDocument(text))
-		}
-		return nil
-	}
-}
-
-func WithMetadatas(metadatas ...DocumentMetadata) CollectionAddOption {
-	return func(update *CollectionAddOp) error {
-		update.Metadatas = metadatas
-		return nil
-	}
-}
-
-func WithIDs(ids ...DocumentID) CollectionAddOption {
-	return func(update *CollectionAddOp) error {
-		for _, id := range ids {
-			update.Ids = append(update.Ids, DocumentID(id))
-		}
-		return nil
-	}
-}
-
-func WithIDGenerator(idGenerator IDGenerator) CollectionAddOption {
-	return func(update *CollectionAddOp) error {
-		update.IDGenerator = idGenerator
-		return nil
-	}
-}
-
-func WithEmbeddings(embeddings ...embeddings.Embedding) CollectionAddOption {
-	return func(update *CollectionAddOp) error {
-		if len(embeddings) == 0 {
-			return errors.New("at least one embedding is required")
-		}
-		embds := make([]any, 0)
-		for _, e := range embeddings {
-			embds = append(embds, e)
-		}
-		update.Embeddings = embds
-		return nil
-	}
-}
+type CollectionAddOption = AddOption
 
 // Update
 
@@ -592,8 +421,7 @@ type CollectionUpdateOp struct {
 func NewCollectionUpdateOp(opts ...CollectionUpdateOption) (*CollectionUpdateOp, error) {
 	update := &CollectionUpdateOp{}
 	for _, opt := range opts {
-		err := opt(update)
-		if err != nil {
+		if err := opt.ApplyToUpdate(update); err != nil {
 			return nil, err
 		}
 	}
@@ -697,52 +525,7 @@ func (c *CollectionUpdateOp) Operation() OperationType {
 	return OperationUpdate
 }
 
-type CollectionUpdateOption func(update *CollectionUpdateOp) error
-
-func WithTextsUpdate(documents ...string) CollectionUpdateOption {
-	return func(update *CollectionUpdateOp) error {
-		if len(documents) == 0 {
-			return errors.New("at least one document is required")
-		}
-		if update.Documents == nil {
-			update.Documents = make([]Document, 0)
-		}
-		for _, text := range documents {
-			update.Documents = append(update.Documents, NewTextDocument(text))
-		}
-		return nil
-	}
-}
-
-func WithMetadatasUpdate(metadatas ...DocumentMetadata) CollectionUpdateOption {
-	return func(update *CollectionUpdateOp) error {
-		update.Metadatas = metadatas
-		return nil
-	}
-}
-
-func WithIDsUpdate(ids ...DocumentID) CollectionUpdateOption {
-	return func(update *CollectionUpdateOp) error {
-		for _, id := range ids {
-			update.Ids = append(update.Ids, DocumentID(id))
-		}
-		return nil
-	}
-}
-
-func WithEmbeddingsUpdate(embeddings ...embeddings.Embedding) CollectionUpdateOption {
-	return func(update *CollectionUpdateOp) error {
-		if len(embeddings) == 0 {
-			return errors.New("at least one embedding is required")
-		}
-		embds := make([]any, 0)
-		for _, e := range embeddings {
-			embds = append(embds, e)
-		}
-		update.Embeddings = embds
-		return nil
-	}
-}
+type CollectionUpdateOption = UpdateOption
 
 // Delete
 
@@ -754,8 +537,7 @@ type CollectionDeleteOp struct {
 func NewCollectionDeleteOp(opts ...CollectionDeleteOption) (*CollectionDeleteOp, error) {
 	del := &CollectionDeleteOp{}
 	for _, opt := range opts {
-		err := opt(del)
-		if err != nil {
+		if err := opt.ApplyToDelete(del); err != nil {
 			return nil, err
 		}
 	}
@@ -799,30 +581,7 @@ func (c *CollectionDeleteOp) Operation() OperationType {
 	return OperationDelete
 }
 
-type CollectionDeleteOption func(update *CollectionDeleteOp) error
-
-func WithWhereDelete(where WhereFilter) CollectionDeleteOption {
-	return func(delete *CollectionDeleteOp) error {
-		delete.Where = where
-		return nil
-	}
-}
-
-func WithWhereDocumentDelete(whereDocument WhereDocumentFilter) CollectionDeleteOption {
-	return func(delete *CollectionDeleteOp) error {
-		delete.WhereDocument = whereDocument
-		return nil
-	}
-}
-
-func WithIDsDelete(ids ...DocumentID) CollectionDeleteOption {
-	return func(delete *CollectionDeleteOp) error {
-		for _, id := range ids {
-			delete.Ids = append(delete.Ids, DocumentID(id))
-		}
-		return nil
-	}
-}
+type CollectionDeleteOption = DeleteOption
 
 type CollectionConfiguration interface {
 	GetRaw(key string) (interface{}, bool)

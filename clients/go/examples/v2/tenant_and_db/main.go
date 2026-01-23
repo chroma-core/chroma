@@ -80,7 +80,7 @@ func main() {
 		return
 	}
 	fmt.Printf("Query result: %v\n", qr.GetDocumentsGroups()[0][0])
-	err = col.Delete(context.Background(), chroma.WithIDsDelete("1", "2"))
+	err = col.Delete(context.Background(), chroma.WithIDs("1", "2"))
 	if err != nil {
 		log.Fatalf("Error deleting collection: %s \n", err)
 		return

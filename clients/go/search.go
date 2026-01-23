@@ -64,6 +64,11 @@ type SearchFilter struct {
 	Where WhereClause  `json:"-"` // Serialized directly as the filter
 }
 
+// AppendIDs adds document IDs to the filter.
+func (f *SearchFilter) AppendIDs(ids ...DocumentID) {
+	f.IDs = append(f.IDs, ids...)
+}
+
 func (f *SearchFilter) MarshalJSON() ([]byte, error) {
 	var clauses []WhereClause
 
@@ -184,161 +189,20 @@ func WithReadLevel(level ReadLevel) SearchCollectionOption {
 }
 
 // SearchOption configures a [SearchRequest].
-type SearchOption func(req *SearchRequest) error
+type SearchOption = SearchRequestOption
 
 // WithSearchFilter sets a complete filter on the search request.
 func WithSearchFilter(filter *SearchFilter) SearchOption {
-	return func(req *SearchRequest) error {
+	return SearchRequestOptionFunc(func(req *SearchRequest) error {
 		req.Filter = filter
 		return nil
-	}
-}
-
-// WithFilter adds a metadata filter to the search.
-// Use [K] to clearly mark field names in filter expressions.
-//
-// Example:
-//
-//	WithFilter(And(EqString(K("status"), "published"), GtInt(K("views"), 100)))
-func WithFilter(where WhereClause) SearchOption {
-	return func(req *SearchRequest) error {
-		if req.Filter == nil {
-			req.Filter = &SearchFilter{}
-		}
-		req.Filter.Where = where
-		return nil
-	}
-}
-
-// WithFilterIDs restricts search to specific document IDs.
-func WithFilterIDs(ids ...DocumentID) SearchOption {
-	return func(req *SearchRequest) error {
-		if req.Filter == nil {
-			req.Filter = &SearchFilter{}
-		}
-		req.Filter.IDs = ids
-		return nil
-	}
+	})
 }
 
 // SearchPage specifies pagination for search results.
 type SearchPage struct {
 	Limit  int `json:"limit,omitempty"`
 	Offset int `json:"offset,omitempty"`
-}
-
-// PageOpts configures pagination options.
-type PageOpts func(page *SearchPage) error
-
-// WithLimit sets the maximum number of results to return.
-func WithLimit(limit int) PageOpts {
-	return func(page *SearchPage) error {
-		if limit < 1 {
-			return errors.New("invalid limit, must be >= 1")
-		}
-		page.Limit = limit
-		return nil
-	}
-}
-
-// WithOffset sets the number of results to skip (for pagination).
-func WithOffset(offset int) PageOpts {
-	return func(page *SearchPage) error {
-		if offset < 0 {
-			return errors.New("invalid offset, must be >= 0")
-		}
-		page.Offset = offset
-		return nil
-	}
-}
-
-// WithPage adds pagination to the search request.
-//
-// Example:
-//
-//	WithPage(WithLimit(20), WithOffset(40))  // Page 3 of 20 results per page
-func WithPage(pageOpts ...PageOpts) SearchOption {
-	return func(req *SearchRequest) error {
-		page := &SearchPage{}
-		for _, opt := range pageOpts {
-			if err := opt(page); err != nil {
-				return err
-			}
-		}
-		req.Limit = page
-		return nil
-	}
-}
-
-// WithSelect specifies which fields to include in search results.
-//
-// Example:
-//
-//	WithSelect(KDocument, KScore, K("title"), K("author"))
-func WithSelect(projectionKeys ...Key) SearchOption {
-	return func(req *SearchRequest) error {
-		if req.Select == nil {
-			req.Select = &SearchSelect{}
-		}
-		req.Select.Keys = append(req.Select.Keys, projectionKeys...)
-		return nil
-	}
-}
-
-// WithSelectAll includes all standard fields in search results.
-func WithSelectAll() SearchOption {
-	return func(req *SearchRequest) error {
-		req.Select = &SearchSelect{
-			Keys: []Key{KID, KDocument, KEmbedding, KMetadata, KScore},
-		}
-		return nil
-	}
-}
-
-// WithRank sets a custom ranking expression on the search request.
-// Use this for complex rank expressions built from arithmetic operations.
-//
-// Example:
-//
-//	knn1, _ := NewKnnRank(KnnQueryText("query1"))
-//	knn2, _ := NewKnnRank(KnnQueryText("query2"))
-//	combined := knn1.Multiply(FloatOperand(0.7)).Add(knn2.Multiply(FloatOperand(0.3)))
-//
-//	result, err := col.Search(ctx,
-//	    NewSearchRequest(
-//	        WithRank(combined),
-//	        WithPage(WithLimit(10)),
-//	    ),
-//	)
-func WithRank(rank Rank) SearchOption {
-	return func(req *SearchRequest) error {
-		req.Rank = rank
-		return nil
-	}
-}
-
-// WithGroupBy groups results by metadata keys using the specified aggregation.
-//
-// Example:
-//
-//	result, err := col.Search(ctx,
-//	    NewSearchRequest(
-//	        WithKnnRank(KnnQueryText("query"), WithKnnLimit(100)),
-//	        WithGroupBy(NewGroupBy(NewMinK(3, KScore), K("category"))),
-//	        WithPage(WithLimit(30)),
-//	    ),
-//	)
-func WithGroupBy(groupBy *GroupBy) SearchOption {
-	return func(req *SearchRequest) error {
-		if groupBy == nil {
-			return nil
-		}
-		if err := groupBy.Validate(); err != nil {
-			return err
-		}
-		req.GroupBy = groupBy
-		return nil
-	}
 }
 
 // NewSearchRequest creates a search request and adds it to the query.
@@ -349,7 +213,7 @@ func WithGroupBy(groupBy *GroupBy) SearchOption {
 //	    NewSearchRequest(
 //	        WithKnnRank(KnnQueryText("machine learning"), WithKnnLimit(50)),
 //	        WithFilter(EqString(K("status"), "published")),
-//	        WithPage(WithLimit(10)),
+//	        NewPage(Limit(10)),
 //	        WithSelect(KDocument, KScore),
 //	    ),
 //	)
@@ -357,7 +221,7 @@ func NewSearchRequest(opts ...SearchOption) SearchCollectionOption {
 	return func(update *SearchQuery) error {
 		search := &SearchRequest{}
 		for _, opt := range opts {
-			if err := opt(search); err != nil {
+			if err := opt.ApplyToSearchRequest(search); err != nil {
 				return err
 			}
 		}
