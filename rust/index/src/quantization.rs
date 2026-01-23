@@ -73,8 +73,18 @@
 use std::mem::size_of;
 
 use bitpacking::{BitPacker, BitPacker8x};
+use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
+
+/// Header for quantized code containing metadata.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct CodeHeader {
+    correction: f32,
+    norm: f32,
+    radial: f32,
+}
 
 /// Quantized representation of a data residual.
 ///
@@ -83,9 +93,7 @@ use simsimd::SpatialSimilarity;
 /// the number of bits per quantization code.
 ///
 /// Byte layout:
-/// - `[0..4]` correction (f32 LE)
-/// - `[4..8]` norm (f32 LE)
-/// - `[8..12]` radial (f32 LE)
+/// - `[0..12]` CodeHeader (correction, norm, radial as f32)
 /// - `[12..]` packed codes
 pub struct Code<T, const BITS: u8 = 4>(T);
 
@@ -115,22 +123,7 @@ impl<T, const BITS: u8> Code<T, BITS> {
 impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
     /// Returns the correction factor `⟨g, n⟩`.
     pub fn correction(&self) -> f32 {
-        *bytemuck::from_bytes(&self.0.as_ref()[0..4])
-    }
-
-    /// Returns the data residual norm `‖r‖`.
-    pub fn norm(&self) -> f32 {
-        *bytemuck::from_bytes(&self.0.as_ref()[4..8])
-    }
-
-    /// Returns the radial component `⟨r, c⟩`.
-    pub fn radial(&self) -> f32 {
-        *bytemuck::from_bytes(&self.0.as_ref()[8..12])
-    }
-
-    /// Returns the size of buffer in bytes.
-    pub fn size(dim: usize) -> usize {
-        3 * size_of::<f32>() + Self::packed_len(dim)
+        self.header().correction
     }
 
     /// Estimates distance between two original data vectors `d_a` and `d_b`.
@@ -216,12 +209,34 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         }
     }
 
+    /// Returns the header containing correction, norm, and radial.
+    fn header(&self) -> &CodeHeader {
+        bytemuck::from_bytes(&self.0.as_ref()[..size_of::<CodeHeader>()])
+    }
+
+    /// Returns the data residual norm `‖r‖`.
+    pub fn norm(&self) -> f32 {
+        self.header().norm
+    }
+
+    /// Returns the packed codes portion of the buffer.
+    fn packed(&self) -> &[u8] {
+        &self.0.as_ref()[size_of::<CodeHeader>()..]
+    }
+
+    /// Returns the radial component `⟨r, c⟩`.
+    pub fn radial(&self) -> f32 {
+        self.header().radial
+    }
+
+    /// Returns the size of buffer in bytes.
+    pub fn size(dim: usize) -> usize {
+        size_of::<CodeHeader>() + Self::packed_len(dim)
+    }
+
     /// Unpacks the grid point from the packed codes.
     fn unpack_grid(&self, dim: usize) -> Vec<f32> {
-        let Some(packed) = self.0.as_ref().get(3 * size_of::<f32>()..) else {
-            return vec![0.0; dim];
-        };
-
+        let packed = self.packed();
         let bitpacker = BitPacker8x::new();
         let mut codes = vec![0u32; Self::padded_dim(dim)];
 
@@ -255,10 +270,13 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
 
         // Early return for near-zero residual
         if dim == 0 || norm < f32::EPSILON {
+            let header = CodeHeader {
+                correction: 1.0,
+                norm,
+                radial,
+            };
             let mut bytes = Vec::with_capacity(Self::size(dim));
-            bytes.extend_from_slice(&1.0_f32.to_le_bytes()); // correction = 1.0
-            bytes.extend_from_slice(&norm.to_le_bytes());
-            bytes.extend_from_slice(&radial.to_le_bytes());
+            bytes.extend_from_slice(bytemuck::bytes_of(&header));
             bytes.resize(Self::size(dim), 0);
             return Self(bytes);
         }
@@ -320,11 +338,14 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             bitpacker.compress(chunk, &mut packed[offset..], BITS);
         }
 
-        // Build output: [correction][norm][radial][packed_codes]
+        // Build output: [header][packed_codes]
+        let header = CodeHeader {
+            correction,
+            norm,
+            radial,
+        };
         let mut bytes = Vec::with_capacity(Self::size(dim));
-        bytes.extend_from_slice(&correction.to_le_bytes());
-        bytes.extend_from_slice(&norm.to_le_bytes());
-        bytes.extend_from_slice(&radial.to_le_bytes());
+        bytes.extend_from_slice(bytemuck::bytes_of(&header));
         bytes.extend_from_slice(&packed);
 
         Self(bytes)

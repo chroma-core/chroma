@@ -65,7 +65,7 @@ md5 = "0.7.0"
 pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
 http = "1.1.0"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
-bytemuck = "1.21.0"
+bytemuck = { version = "1.21.0", features = ["derive"] }
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
