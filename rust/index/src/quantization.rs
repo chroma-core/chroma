@@ -330,3 +330,68 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
         Self(bytes)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_attributes() {
+        let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
+        let centroid = (0..300).map(|i| i as f32 * 0.5).collect::<Vec<_>>();
+
+        let code = Code::<Vec<u8>>::quantize(&embedding, &centroid);
+
+        // Verify accessors return finite values
+        assert!(code.correction().is_finite());
+        assert!(code.norm().is_finite());
+        assert!(code.radial().is_finite());
+
+        // Verify norm is ‖r‖ = ‖embedding - centroid‖
+        let r = embedding
+            .iter()
+            .zip(&centroid)
+            .map(|(e, c)| e - c)
+            .collect::<Vec<_>>();
+        let expected_norm = (f32::dot(&r, &r).unwrap_or(0.0) as f32).sqrt();
+        assert!((code.norm() - expected_norm).abs() < f32::EPSILON);
+
+        // Verify radial is ⟨r, c⟩
+        let expected_radial = f32::dot(&r, &centroid).unwrap_or(0.0) as f32;
+        assert!((code.radial() - expected_radial).abs() < f32::EPSILON);
+
+        // Verify buffer size
+        assert_eq!(code.as_ref().len(), Code::<Vec<u8>>::size(embedding.len()));
+    }
+
+    #[test]
+    fn test_size() {
+        // Exactly one block (256)
+        assert_eq!(Code::<Vec<u8>>::packed_len(256), 256 * 4 / 8); // 128 bytes
+        assert_eq!(Code::<Vec<u8>>::size(256), 12 + 128); // 3 floats + packed
+
+        // Non-aligned (300) - should pad to 512
+        assert_eq!(Code::<Vec<u8>>::packed_len(300), 512 * 4 / 8); // 256 bytes
+        assert_eq!(Code::<Vec<u8>>::size(300), 12 + 256);
+
+        // Two blocks (512)
+        assert_eq!(Code::<Vec<u8>>::packed_len(512), 512 * 4 / 8); // 256 bytes
+        assert_eq!(Code::<Vec<u8>>::size(512), 12 + 256);
+    }
+
+    #[test]
+    fn test_zero_residual() {
+        let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
+
+        // Exactly zero residual
+        let code = Code::<Vec<u8>>::quantize(&embedding, &embedding);
+        assert_eq!(code.correction(), 1.0);
+        assert!(code.norm() < f32::EPSILON);
+
+        // Near-zero residual
+        let centroid = embedding.iter().map(|x| x + 1e-10).collect::<Vec<_>>();
+        let code = Code::<Vec<u8>>::quantize(&embedding, &centroid);
+        assert_eq!(code.correction(), 1.0);
+        assert!(code.norm() < f32::EPSILON);
+    }
+}
