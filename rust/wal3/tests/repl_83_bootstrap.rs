@@ -42,8 +42,10 @@ async fn test_k8s_mcmr_integration_repl_83_bootstrap() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
@@ -66,8 +68,10 @@ async fn test_k8s_mcmr_integration_repl_83_bootstrap() {
     let (reader_fragment_factory, reader_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         reader_storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory

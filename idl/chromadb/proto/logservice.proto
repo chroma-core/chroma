@@ -136,6 +136,7 @@ message MigrateLogResponse {
 
 message InspectLogStateRequest {
   string collection_id = 1;
+  string database_name = 5;
 }
 
 message InspectLogStateResponse {

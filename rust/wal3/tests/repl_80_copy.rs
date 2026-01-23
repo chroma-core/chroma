@@ -26,7 +26,12 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let storages = Arc::new(vec![wrapper]);
 
     // Initialize the source manifest.
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -43,15 +48,15 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
     let log = LogWriter::open(
         options,
-        Arc::new(storage.clone()),
-        &prefix,
         "copy source writer",
         fragment_factory,
         manifest_factory,
@@ -77,8 +82,10 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
     let fragment_consumer = fragment_factory
@@ -115,8 +122,10 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         Arc::clone(&target_storages),
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         target_log_id,
     );
     let target_fragment_publisher = target_fragment_factory
@@ -138,8 +147,10 @@ async fn test_k8s_mcmr_integration_repl_80_copy() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         target_storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         target_log_id,
     );
     let target_fragment_consumer = target_fragment_factory

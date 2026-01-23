@@ -22,7 +22,12 @@ async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -32,22 +37,16 @@ async fn test_k8s_mcmr_integration_repl_copy_single_fragment() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
-    let log = wal3::LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = wal3::LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     log.append_many(vec![Vec::from("single-record")])
         .await
@@ -72,7 +71,12 @@ async fn test_k8s_mcmr_integration_repl_copy_immediately_after_initialization() 
     let client = setup_spanner_client().await;
     let log_id = Uuid::new_v4();
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -103,7 +107,12 @@ async fn test_k8s_mcmr_integration_repl_copy_preserves_fragment_boundaries() {
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -119,22 +128,16 @@ async fn test_k8s_mcmr_integration_repl_copy_preserves_fragment_boundaries() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
-    let log = wal3::LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = wal3::LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..10 {
         let mut batch = Vec::new();
@@ -172,7 +175,12 @@ async fn test_k8s_mcmr_integration_repl_copy_multiple_times_creates_independent_
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
     let storages = Arc::new(vec![wrapper]);
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty("init"))
         .await
@@ -182,22 +190,16 @@ async fn test_k8s_mcmr_integration_repl_copy_multiple_times_creates_independent_
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
-    let log = wal3::LogWriter::open(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open should succeed");
+    let log = wal3::LogWriter::open(options, "writer", fragment_factory, manifest_factory, None)
+        .await
+        .expect("LogWriter::open should succeed");
 
     for i in 0..10 {
         log.append_many(vec![Vec::from(format!("multi:i={}", i))])
@@ -231,15 +233,15 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
     let log = wal3::LogWriter::open_or_initialize(
         options,
-        Arc::new(storage.clone()),
-        &prefix,
         "writer",
         fragment_factory,
         manifest_factory,
@@ -258,7 +260,10 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
             + 1u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log
+        .cursors(CursorStoreOptions::default())
+        .await
+        .expect("cursors should succeed");
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),
@@ -271,7 +276,12 @@ async fn test_k8s_mcmr_integration_repl_copy_with_cursors() {
         .await
         .expect("cursor init should succeed");
 
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     let consumer = init_factory.make_consumer().await.unwrap();
     let (manifest, _) = consumer.manifest_load().await.unwrap().unwrap();
 

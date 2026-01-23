@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use setsum::Setsum;
 
-use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
+use chroma_storage::{Storage, StorageError};
 
 use crate::interfaces::FragmentConsumer;
-use crate::{fragment_path, Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions};
+use crate::{CursorStore, CursorStoreOptions, Error, Fragment, LogPosition, LogReaderOptions};
 
 pub struct S3FragmentPuller {
     storage: Arc<Storage>,
@@ -20,27 +20,37 @@ impl S3FragmentPuller {
 
 #[async_trait::async_trait]
 impl FragmentConsumer for S3FragmentPuller {
-    type FragmentPointer = (FragmentSeqNo, LogPosition);
-
-    async fn read_raw_bytes(&self, path: &str, _: LogPosition) -> Result<Arc<Vec<u8>>, Error> {
-        let path = fragment_path(&self.prefix, path);
-        let parquet = self
-            .storage
-            .get(&path, GetOptions::new(StorageRequestPriority::P0))
-            .await
-            .map_err(Arc::new)?;
-        Ok(parquet)
+    async fn read_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
+        match super::read_bytes(&self.storage, &self.prefix, path).await? {
+            Some(bytes) => Ok(bytes),
+            None => Err(Arc::new(StorageError::NotFound {
+                path: path.into(),
+                source: Arc::new(std::io::Error::other("file not found")),
+            })
+            .into()),
+        }
     }
 
-    async fn read_parquet(
+    async fn parse_parquet(
         &self,
-        path: &str,
-        _: LogPosition,
+        parquet: &[u8],
+        _starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
-        super::read_parquet(&self.storage, &self.prefix, path, None).await
+        // NOTE(rescrv):  S3FragmentPuller deals with absolutes; we therefore do not pass an
+        // offset.
+        super::parse_parquet(parquet, None).await
     }
 
     async fn read_fragment(&self, path: &str, _: LogPosition) -> Result<Option<Fragment>, Error> {
         super::read_fragment(&self.storage, &self.prefix, path, None).await
+    }
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
+        CursorStore::new(
+            options,
+            Arc::clone(&self.storage),
+            self.prefix.clone(),
+            "fragment_puller".to_string(),
+        )
     }
 }

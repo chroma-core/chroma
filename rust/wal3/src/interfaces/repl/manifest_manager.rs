@@ -20,15 +20,25 @@ use crate::{
 
 pub struct ManifestManager {
     spanner: Arc<Client>,
+    local_region: String,
     log_id: Uuid,
 }
 
 impl ManifestManager {
-    pub fn new(spanner: Arc<Client>, log_id: Uuid) -> Self {
-        Self { spanner, log_id }
+    pub fn new(spanner: Arc<Client>, local_region: String, log_id: Uuid) -> Self {
+        Self {
+            spanner,
+            local_region,
+            log_id,
+        }
     }
 
-    pub async fn init(spanner: &Client, log_id: Uuid, manifest: &Manifest) -> Result<(), Error> {
+    pub async fn init(
+        regions: Vec<String>,
+        spanner: &Client,
+        log_id: Uuid,
+        manifest: &Manifest,
+    ) -> Result<(), Error> {
         let enum_offset = manifest.fragments.iter().map(|f| f.limit).max().unwrap_or(
             manifest
                 .initial_offset
@@ -39,7 +49,6 @@ impl ManifestManager {
             &[
                 "log_id",
                 "setsum",
-                "collected",
                 "acc_bytes",
                 "writer",
                 "enumeration_offset",
@@ -47,12 +56,26 @@ impl ManifestManager {
             &[
                 &log_id.to_string(),
                 &manifest.setsum.hexdigest(),
-                &manifest.collected.hexdigest(),
                 &(manifest.acc_bytes as i64),
                 &"spanner init",
                 &(enum_offset.offset() as i64),
             ],
         )];
+        let initial_offset = manifest
+            .initial_offset
+            .unwrap_or(LogPosition::from_offset(1));
+        for region in regions.iter() {
+            mutations.push(insert(
+                "manifest_regions",
+                &["log_id", "region", "collected", "initial_offset"],
+                &[
+                    &log_id.to_string(),
+                    region,
+                    &manifest.collected.hexdigest(),
+                    &(initial_offset.offset() as i64),
+                ],
+            ));
+        }
         // Also insert any fragments from the manifest.
         for fragment in &manifest.fragments {
             let FragmentIdentifier::Uuid(uuid) = fragment.seq_no else {
@@ -82,12 +105,13 @@ impl ManifestManager {
                 ],
             ));
             // Insert into fragment_regions so that GC can see this fragment.
-            // TODO(rescrv, mcmr): region-aware
-            mutations.push(insert(
-                "fragment_regions",
-                &["log_id", "ident", "region"],
-                &[&log_id_str, &uuid_str, &"dummy"],
-            ));
+            for region in regions.iter() {
+                mutations.push(insert(
+                    "fragment_regions",
+                    &["log_id", "ident", "region"],
+                    &[&log_id_str, &uuid_str, region],
+                ));
+            }
         }
         spanner
             .read_write_transaction(|tx| {
@@ -103,6 +127,7 @@ impl ManifestManager {
 
     /// Manifest storers and accessors
     async fn head(
+        &self,
         spanner: &Client,
         log_id: Uuid,
         witness: &ManifestWitness,
@@ -117,9 +142,14 @@ impl ManifestManager {
             )));
         };
         let mut stmt = Statement::new(
-            "SELECT enumeration_offset, collected FROM manifests WHERE log_id = @log_id LIMIT 1",
+            "
+            SELECT enumeration_offset, collected
+            FROM manifests INNER JOIN manifest_regions ON manifests.log_id = manifest_regions.log_id
+            WHERE manifests.log_id = @log_id AND region = @local_region LIMIT 1
+            ",
         );
         stmt.add_param("log_id", &log_id.to_string());
+        stmt.add_param("local_region", &self.local_region);
         let mut tx = spanner.read_only_transaction().await?;
         let mut reader = tx.query(stmt).await?;
         while let Some(row) = reader.next().await? {
@@ -144,15 +174,37 @@ impl ManifestManager {
     pub async fn load(
         spanner: &Client,
         log_id: Uuid,
+        local_region: &str,
     ) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
+        let local_region = local_region.to_string();
         let mut stmt1 = Statement::new(
-            "SELECT setsum, collected, acc_bytes, writer, enumeration_offset FROM manifests WHERE log_id = @log_id"
+            "
+            SELECT setsum, manifest_regions.collected, acc_bytes, writer, enumeration_offset, manifest_regions.initial_offset
+            FROM manifests INNER JOIN manifest_regions on manifests.log_id = manifest_regions.log_id
+            WHERE manifests.log_id = @log_id
+                AND manifest_regions.region = @local_region
+            ",
         );
         stmt1.add_param("log_id", &log_id.to_string());
+        stmt1.add_param("local_region", &local_region);
         let mut stmt2 = Statement::new(
-            "SELECT ident, path, position_start, position_limit, num_bytes, setsum FROM fragments WHERE log_id = @log_id"
+            "
+            SELECT
+                fragments.ident,
+                fragments.path,
+                fragments.position_start,
+                fragments.position_limit,
+                fragments.num_bytes,
+                fragments.setsum
+            FROM fragments INNER JOIN fragment_regions
+                ON fragments.log_id = fragment_regions.log_id
+                AND fragments.ident = fragment_regions.ident
+            WHERE fragments.log_id = @log_id
+                AND fragment_regions.region = @local_region
+            ",
         );
         stmt2.add_param("log_id", &log_id.to_string());
+        stmt2.add_param("local_region", &local_region);
         let mut tx = spanner.read_only_transaction().await?;
         // Load the manifest table
         let mut manifest = tx.query(stmt1).await?;
@@ -164,6 +216,7 @@ impl ManifestManager {
         let acc_bytes = manifest_row.column_by_name::<i64>("acc_bytes")?;
         let writer = manifest_row.column_by_name::<String>("writer")?;
         let enumeration_offset = manifest_row.column_by_name::<i64>("enumeration_offset")?;
+        let stored_initial_offset = manifest_row.column_by_name::<Option<i64>>("initial_offset")?;
         let Some(setsum) = Setsum::from_hexdigest(&setsum) else {
             return Err(Error::CorruptManifest(format!(
                 "invalid setsum {setsum} for manifest {log_id}"
@@ -237,10 +290,15 @@ impl ManifestManager {
         }
         // Sort fragments by position_start for sequential ordering expected by scrub.
         fragments.sort_by_key(|f| f.start);
+        // Compute initial_offset:
+        // 1. If fragments exist, use the minimum fragment start
+        // 2. If no fragments but stored_initial_offset is set (after GC), use it
+        // 3. Otherwise fall back to enumeration_offset (backward compatibility)
         let initial_offset = fragments
             .iter()
             .map(|f| f.start)
             .min()
+            .or_else(|| stored_initial_offset.map(|o| LogPosition::from_offset(o as u64)))
             .unwrap_or(LogPosition::from_offset(enumeration_offset));
         // Construct the manifest and witness.
         let manifest = Manifest {
@@ -260,6 +318,47 @@ impl ManifestManager {
             collected,
         ));
         Ok(Some((manifest, manifest_witness)))
+    }
+
+    /// Returns all log_ids from the manifests table that have fragments in the specified region.
+    ///
+    /// These are logs that exist in the system and may need compaction.
+    pub async fn get_dirty_logs(
+        spanner: &Client,
+        region: &str,
+    ) -> Result<Vec<(Uuid, LogPosition)>, Error> {
+        let mut stmt = Statement::new(
+            "
+            SELECT DISTINCT manifests.log_id, manifests.enumeration_offset
+            FROM manifests
+                INNER JOIN fragments
+                ON manifests.log_id = fragments.log_id
+                INNER JOIN fragment_regions
+                ON fragments.log_id = fragment_regions.log_id
+                    AND fragments.ident = fragment_regions.ident
+            WHERE fragment_regions.region = @region
+            ",
+        );
+        stmt.add_param("region", &region);
+        let mut tx = spanner.read_only_transaction().await?;
+        let mut reader = tx.query(stmt).await?;
+        let mut results = vec![];
+        while let Some(row) = reader.next().await? {
+            let log_id_str = row.column_by_name::<String>("log_id")?;
+            let enumeration_offset = row.column_by_name::<i64>("enumeration_offset")?;
+            let Ok(log_id) = Uuid::parse_str(&log_id_str) else {
+                tracing::warn!("invalid log_id in manifests table: {log_id_str}");
+                continue;
+            };
+            if enumeration_offset < 0 {
+                tracing::warn!(
+                    "negative enumeration_offset {enumeration_offset} for log_id {log_id}"
+                );
+                continue;
+            }
+            results.push((log_id, LogPosition::from_offset(enumeration_offset as u64)));
+        }
+        Ok(results)
     }
 }
 
@@ -292,14 +391,19 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     }
 
     /// Publish a fragment previously assigned a timestamp using assign_timestamp.
+    ///
+    /// The `successful_regions` parameter contains the list of regions that successfully stored
+    /// the fragment during upload. Only these regions will be recorded in `fragment_regions`.
+    /// This ensures that lagging replicas can detect the gap and heal, preventing durability bugs
+    /// where we believe a fragment exists on a region that didn't actually receive it.
     async fn publish_fragment(
         &self,
         pointer: &FragmentUuid,
-        regions: &[&str],
         path: &str,
         messages_len: u64,
         num_bytes: u64,
         setsum: Setsum,
+        successful_regions: &[String],
     ) -> Result<LogPosition, Error> {
         if messages_len > i64::MAX as u64 {
             return Err(Error::ReplicationBatchTooLarge {
@@ -311,7 +415,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         let _log_position: Option<LogPosition> = None;
         let pointer = pointer.to_string();
         let path = path.to_string();
-        let regions: Vec<String> = regions.iter().map(|s| s.to_string()).collect();
+        let regions: Vec<String> = successful_regions.to_vec();
         // The SDK's read_write_transaction has internal retries for Aborted errors, so this outer
         // loop handles cases where those are exhausted.
         let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
@@ -479,8 +583,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         );
         stmt1.add_param("log_id", &self.log_id.to_string());
         stmt1.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
-        // TODO(rescrv, mcmr): region-aware
-        stmt1.add_param("local_region", &"dummy");
+        stmt1.add_param("local_region", &self.local_region);
         let mut tx = self.spanner.read_only_transaction().await?;
         let mut iter = tx.query(stmt1).await?;
         let mut acc = Setsum::default();
@@ -515,17 +618,18 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 let log_id = self.log_id.to_string();
                 stmt1.add_param("log_id", &log_id);
                 stmt1.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
-                // TODO(rescrv, mcmr):  dummy region.
-                stmt1.add_param("local_region", &"dummy");
+                stmt1.add_param("local_region", &self.local_region);
                 let mut stmt2 = Statement::new(
                     "
                     SELECT collected
-                    FROM manifests
-                    WHERE manifests.log_id = @log_id
+                    FROM manifest_regions
+                    WHERE manifest_regions.log_id = @log_id
+                        AND manifest_regions.region = @local_region
                     LIMIT 1
                 ",
                 );
                 stmt2.add_param("log_id", &log_id);
+                stmt2.add_param("local_region", &self.local_region);
                 let mut stmt3 = Statement::new(
                     "
                     SELECT fragments.ident, fragments.path, count(fragment_regions.region) as c
@@ -541,8 +645,9 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 );
                 stmt3.add_param("log_id", &log_id);
                 stmt3.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
-                // TODO(rescrv, mcmr):  dummy region.
-                stmt3.add_param("local_region", &"dummy");
+                stmt3.add_param("local_region", &self.local_region);
+                let local_region = self.local_region.clone();
+                let new_initial_offset = garbage.first_to_keep.offset() as i64;
                 Box::pin(async move {
                     let mut query = tx.query(stmt2).await?;
                     let Some(row) = query.next().await? else {
@@ -562,21 +667,21 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                         })?;
                         acc += cur;
                         let ident = row.column_by_name::<String>("ident")?;
-                        // TODO(rescrv, mcmr):  Configure region.
                         mutations.push(delete(
                             "fragment_regions",
-                            Key::composite(&[&log_id, &ident, &"dummy"]),
+                            Key::composite(&[&log_id, &ident, &local_region]),
                         ));
                         selected.insert(ident);
                     }
                     let collected = collected + acc;
                     mutations.push(update(
-                        "manifests",
-                        &["log_id", "collected", "writer"],
+                        "manifest_regions",
+                        &["log_id", "region", "collected", "initial_offset"],
                         &[
                             &log_id,
+                            &local_region,
                             &collected.hexdigest(),
-                            &"replicated manifest manager",
+                            &new_initial_offset,
                         ],
                     ));
                     let mut query = tx.query(stmt3).await?;
@@ -639,8 +744,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         );
         stmt1.add_param("log_id", &self.log_id.to_string());
         stmt1.add_param("threshold", &(first_to_keep.offset() as i64));
-        // TODO(rescrv, mcmr):  dummy region.
-        stmt1.add_param("local_region", &"dummy");
+        stmt1.add_param("local_region", &self.local_region);
         stmt1.add_param("max_fragments", &MAX_FRAGMENTS_PER_GC);
         let mut tx = self.spanner.read_only_transaction().await?;
         let mut iter = tx.query(stmt1).await?;
@@ -713,11 +817,68 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
 
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error> {
-        Self::head(&self.spanner, self.log_id, witness).await
+        self.head(&self.spanner, self.log_id, witness).await
     }
 
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
-        Self::load(&self.spanner, self.log_id).await
+        Self::load(&self.spanner, self.log_id, &self.local_region).await
+    }
+
+    async fn destroy(&self) -> Result<(), Error> {
+        let log_id = self.log_id.to_string();
+        self.spanner
+            .read_write_transaction(|tx| {
+                let log_id = log_id.clone();
+                Box::pin(async move {
+                    // First, query all fragment idents and regions to delete from fragment_regions.
+                    let mut stmt1 = Statement::new(
+                        "SELECT ident, region FROM fragment_regions WHERE log_id = @log_id",
+                    );
+                    stmt1.add_param("log_id", &log_id);
+                    let mut iter = tx.query(stmt1).await?;
+                    let mut mutations = vec![];
+                    while let Some(row) = iter.next().await? {
+                        let ident = row.column_by_name::<String>("ident")?;
+                        let region = row.column_by_name::<String>("region")?;
+                        mutations.push(delete(
+                            "fragment_regions",
+                            Key::composite(&[&log_id, &ident, &region]),
+                        ));
+                    }
+
+                    // Query all fragment idents to delete from fragments.
+                    let mut stmt2 =
+                        Statement::new("SELECT ident FROM fragments WHERE log_id = @log_id");
+                    stmt2.add_param("log_id", &log_id);
+                    let mut iter = tx.query(stmt2).await?;
+                    while let Some(row) = iter.next().await? {
+                        let ident = row.column_by_name::<String>("ident")?;
+                        mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
+                    }
+
+                    // Query all regions to delete from manifest_regions.
+                    let mut stmt3 = Statement::new(
+                        "SELECT region FROM manifest_regions WHERE log_id = @log_id",
+                    );
+                    stmt3.add_param("log_id", &log_id);
+                    let mut iter = tx.query(stmt3).await?;
+                    while let Some(row) = iter.next().await? {
+                        let region = row.column_by_name::<String>("region")?;
+                        mutations.push(delete(
+                            "manifest_regions",
+                            Key::composite(&[&log_id, &region]),
+                        ));
+                    }
+
+                    // Delete from manifests.
+                    mutations.push(delete("manifests", Key::new(&log_id)));
+
+                    tx.buffer_write(mutations);
+                    Ok::<_, google_cloud_spanner::client::Error>(())
+                })
+            })
+            .await?;
+        Ok(())
     }
 
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
@@ -735,11 +896,11 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
 
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error> {
-        Self::head(&self.spanner, self.log_id, witness).await
+        self.head(&self.spanner, self.log_id, witness).await
     }
 
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
-        Self::load(&self.spanner, self.log_id).await
+        Self::load(&self.spanner, self.log_id, &self.local_region).await
     }
 }
 
@@ -826,10 +987,11 @@ mod tests {
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
 
-        let result = ManifestManager::init(&client, log_id, &manifest).await;
+        let result =
+            ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest).await;
         assert!(result.is_ok(), "init failed: {:?}", result.err());
 
-        let loaded = ManifestManager::load(&client, log_id).await;
+        let loaded = ManifestManager::load(&client, log_id, "dummy").await;
         assert!(loaded.is_ok(), "load failed: {:?}", loaded.err());
 
         let (loaded_manifest, witness) = loaded.unwrap().expect("manifest should exist");
@@ -865,7 +1027,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let result = ManifestManager::load(&client, log_id).await;
+        let result = ManifestManager::load(&client, log_id, "dummy").await;
 
         match result {
             Ok(None) => {
@@ -884,11 +1046,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let witness = ManifestWitness::Position(PositionWitness::new(
             LogPosition::from_offset(0),
             Setsum::default(),
@@ -913,11 +1075,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         // Witness with wrong enumeration_offset should not match.
         let witness = ManifestWitness::Position(PositionWitness::new(
             LogPosition::from_offset(999),
@@ -943,11 +1105,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let result = manager.manifest_and_witness().await;
         assert!(
             result.is_ok(),
@@ -971,7 +1133,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let result = manager.manifest_and_witness().await;
 
         match result {
@@ -992,7 +1154,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
 
         let ts1 = manager.assign_timestamp(0);
         let ts2 = manager.assign_timestamp(0);
@@ -1013,11 +1175,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let pointer = FragmentUuid::generate();
         let path = "test/path/fragment.parquet";
         let messages_len = 10u64;
@@ -1025,7 +1187,14 @@ mod tests {
         let setsum = make_setsum(1);
 
         let result = manager
-            .publish_fragment(&pointer, &["dummy"], path, messages_len, num_bytes, setsum)
+            .publish_fragment(
+                &pointer,
+                path,
+                messages_len,
+                num_bytes,
+                setsum,
+                &["dummy".to_string()],
+            )
             .await;
 
         assert!(
@@ -1068,16 +1237,23 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
 
         // Publish first fragment.
         let pointer1 = FragmentUuid::generate();
         let pos1 = manager
-            .publish_fragment(&pointer1, &["dummy"], "path1", 10, 100, make_setsum(1))
+            .publish_fragment(
+                &pointer1,
+                "path1",
+                10,
+                100,
+                make_setsum(1),
+                &["dummy".to_string()],
+            )
             .await
             .expect("first publish failed");
         assert_eq!(pos1.offset(), 0);
@@ -1085,7 +1261,14 @@ mod tests {
         // Publish second fragment.
         let pointer2 = FragmentUuid::generate();
         let pos2 = manager
-            .publish_fragment(&pointer2, &["dummy"], "path2", 20, 200, make_setsum(2))
+            .publish_fragment(
+                &pointer2,
+                "path2",
+                20,
+                200,
+                make_setsum(2),
+                &["dummy".to_string()],
+            )
             .await
             .expect("second publish failed");
         assert_eq!(pos2.offset(), 10);
@@ -1093,7 +1276,14 @@ mod tests {
         // Publish third fragment.
         let pointer3 = FragmentUuid::generate();
         let pos3 = manager
-            .publish_fragment(&pointer3, &["dummy"], "path3", 30, 300, make_setsum(3))
+            .publish_fragment(
+                &pointer3,
+                "path3",
+                30,
+                300,
+                make_setsum(3),
+                &["dummy".to_string()],
+            )
             .await
             .expect("third publish failed");
         assert_eq!(pos3.offset(), 30);
@@ -1124,22 +1314,22 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let pointer = FragmentUuid::generate();
 
         let messages_len = (i64::MAX as u64) + 1;
         let result = manager
             .publish_fragment(
                 &pointer,
-                &["dummy"],
                 "path",
                 messages_len,
                 100,
                 Setsum::default(),
+                &["dummy".to_string()],
             )
             .await;
 
@@ -1162,17 +1352,24 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
 
         // Publish two fragments.
         let pointer1 = FragmentUuid::generate();
         let setsum1 = make_setsum(1);
         manager
-            .publish_fragment(&pointer1, &["dummy"], "path/frag1.parquet", 5, 500, setsum1)
+            .publish_fragment(
+                &pointer1,
+                "path/frag1.parquet",
+                5,
+                500,
+                setsum1,
+                &["dummy".to_string()],
+            )
             .await
             .expect("publish failed");
 
@@ -1181,17 +1378,17 @@ mod tests {
         manager
             .publish_fragment(
                 &pointer2,
-                &["dummy"],
                 "path/frag2.parquet",
                 10,
                 1000,
                 setsum2,
+                &["dummy".to_string()],
             )
             .await
             .expect("publish failed");
 
         // Load and verify fragments.
-        let (loaded, witness) = ManifestManager::load(&client, log_id)
+        let (loaded, witness) = ManifestManager::load(&client, log_id, "dummy")
             .await
             .expect("load failed")
             .expect("manifest should exist");
@@ -1227,11 +1424,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let mut manager = ManifestManager::new(Arc::new(client), log_id);
+        let mut manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let result = manager.recover().await;
         assert!(result.is_ok(), "recover should succeed");
 
@@ -1246,7 +1443,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         manager.shutdown();
 
         println!("test_k8s_mcmr_integration_shutdown: passed");
@@ -1273,11 +1470,11 @@ mod tests {
             writer: "custom-writer".to_string(),
         };
 
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let (loaded, _) = ManifestManager::load(&client, log_id)
+        let (loaded, _) = ManifestManager::load(&client, log_id, "dummy")
             .await
             .expect("load failed")
             .expect("manifest should exist");
@@ -1300,7 +1497,7 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
@@ -1310,17 +1507,17 @@ mod tests {
         for i in 0..5 {
             let client = Arc::clone(&client);
             let handle = tokio::spawn(async move {
-                let manager = ManifestManager::new(client, log_id);
+                let manager = ManifestManager::new(client, "dummy".to_string(), log_id);
                 let pointer = FragmentUuid::generate();
                 let path = format!("path/fragment_{}.parquet", i);
                 manager
                     .publish_fragment(
                         &pointer,
-                        &["dummy"],
                         &path,
                         10,
                         100,
                         make_setsum((i + 1) as u8),
+                        &["dummy".to_string()],
                     )
                     .await
             });
@@ -1364,10 +1561,12 @@ mod tests {
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
 
-        let result1 = ManifestManager::init(&client, log_id, &manifest).await;
+        let result1 =
+            ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest).await;
         assert!(result1.is_ok(), "first init should succeed");
 
-        let result2 = ManifestManager::init(&client, log_id, &manifest).await;
+        let result2 =
+            ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest).await;
         assert!(
             result2.is_err(),
             "second init should fail for duplicate log_id"
@@ -1399,16 +1598,23 @@ mod tests {
             writer: "test-writer".to_string(),
         };
 
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let pointer = FragmentUuid::generate();
 
         // Try to publish a fragment that would overflow enumeration_offset.
         let result = manager
-            .publish_fragment(&pointer, &["dummy"], "path", 100, 100, Setsum::default())
+            .publish_fragment(
+                &pointer,
+                "path",
+                100,
+                100,
+                Setsum::default(),
+                &["dummy".to_string()],
+            )
             .await;
 
         match result {
@@ -1431,7 +1637,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let pointer = crate::SnapshotPointer {
             setsum: Setsum::default(),
             path_to_snapshot: "test/path".to_string(),
@@ -1463,7 +1669,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let snapshot = crate::Snapshot {
             path: "test/snapshot".to_string(),
             depth: 0,
@@ -1493,7 +1699,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let pointer = crate::SnapshotPointer {
             setsum: Setsum::default(),
             path_to_snapshot: "test/path".to_string(),
@@ -1526,7 +1732,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let garbage = crate::Garbage::empty();
 
         let result = manager.garbage_applies_cleanly(&garbage).await;
@@ -1551,10 +1757,15 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        ManifestManager::init(&client, log_id, &Manifest::new_empty("test writer"))
-            .await
-            .unwrap();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        ManifestManager::init(
+            vec!["dummy".to_string()],
+            &client,
+            log_id,
+            &Manifest::new_empty("test writer"),
+        )
+        .await
+        .unwrap();
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let garbage = crate::Garbage::empty();
 
         let result = manager.apply_garbage(garbage).await;
@@ -1576,32 +1787,33 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
 
         // Publish fragments with a region so they can be garbage collected.
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, &["dummy"], "path1", 10, 100, setsum1)
+            .publish_fragment(&pointer1, "path1", 10, 100, setsum1, &["dummy".to_string()])
             .await
             .expect("first publish failed");
 
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, &["dummy"], "path2", 10, 100, setsum2)
+            .publish_fragment(&pointer2, "path2", 10, 100, setsum2, &["dummy".to_string()])
             .await
             .expect("second publish failed");
 
         // Get the current witness (before GC).
-        let (manifest_before_gc, witness_before_gc) = ManifestManager::load(&client, log_id)
-            .await
-            .expect("load failed")
-            .expect("manifest should exist");
+        let (manifest_before_gc, witness_before_gc) =
+            ManifestManager::load(&client, log_id, "dummy")
+                .await
+                .expect("load failed")
+                .expect("manifest should exist");
 
         // Verify witness is valid before GC.
         let is_valid_before = manager
@@ -1647,10 +1859,11 @@ mod tests {
             );
 
             // Load the new manifest and verify the new witness is valid.
-            let (manifest_after_gc, witness_after_gc) = ManifestManager::load(&client, log_id)
-                .await
-                .expect("load failed")
-                .expect("manifest should exist");
+            let (manifest_after_gc, witness_after_gc) =
+                ManifestManager::load(&client, log_id, "dummy")
+                    .await
+                    .expect("load failed")
+                    .expect("manifest should exist");
 
             let is_new_valid = manager
                 .manifest_head(&witness_after_gc)
@@ -1709,11 +1922,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
 
         // Create a witness with correct enumeration_offset but wrong collected.
         let wrong_collected = make_setsum(1);
@@ -1740,7 +1953,7 @@ mod tests {
         };
 
         let log_id = Uuid::new_v4();
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let options = crate::GarbageCollectionOptions::default();
         let first_to_keep = LogPosition::from_offset(0);
 
@@ -1765,22 +1978,22 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
 
         // Publish first fragment with known setsum.
         let setsum1 = make_setsum(1);
         let pointer1 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer1, &["dummy"], "path1", 5, 100, setsum1)
+            .publish_fragment(&pointer1, "path1", 5, 100, setsum1, &["dummy".to_string()])
             .await
             .expect("first publish failed");
 
         // Load and verify setsum equals setsum1.
-        let (loaded1, _) = ManifestManager::load(&client, log_id)
+        let (loaded1, _) = ManifestManager::load(&client, log_id, "dummy")
             .await
             .expect("load failed")
             .expect("manifest should exist");
@@ -1793,12 +2006,12 @@ mod tests {
         let setsum2 = make_setsum(2);
         let pointer2 = FragmentUuid::generate();
         manager
-            .publish_fragment(&pointer2, &["dummy"], "path2", 5, 100, setsum2)
+            .publish_fragment(&pointer2, "path2", 5, 100, setsum2, &["dummy".to_string()])
             .await
             .expect("second publish failed");
 
         // Load and verify setsum equals setsum1 + setsum2.
-        let (loaded2, _) = ManifestManager::load(&client, log_id)
+        let (loaded2, _) = ManifestManager::load(&client, log_id, "dummy")
             .await
             .expect("load failed")
             .expect("manifest should exist");
@@ -1823,11 +2036,11 @@ mod tests {
 
         let log_id = Uuid::new_v4();
         let manifest = make_empty_manifest();
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
-        let manager = ManifestManager::new(Arc::new(client), log_id);
+        let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let witness = ManifestWitness::ETag(crate::interfaces::ETag("test-etag".to_string()));
 
         let result = manager.manifest_head(&witness).await;
@@ -1882,12 +2095,12 @@ mod tests {
         };
 
         // Initialize with the pre-existing fragment.
-        ManifestManager::init(&client, log_id, &manifest)
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
             .await
             .expect("init failed");
 
         // Verify the fragment was loaded correctly.
-        let (loaded, _) = ManifestManager::load(&client, log_id)
+        let (loaded, _) = ManifestManager::load(&client, log_id, "dummy")
             .await
             .expect("load failed")
             .expect("manifest should exist");
@@ -1899,7 +2112,7 @@ mod tests {
         assert_eq!(loaded.fragments[0].setsum, fragment_setsum);
 
         // Fragments inserted via init should be visible to garbage collection.
-        let manager = ManifestManager::new(Arc::new(client.clone()), log_id);
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
         let gc_options = crate::GarbageCollectionOptions::default();
         let first_to_keep = LogPosition::from_offset(100); // Keep nothing, GC everything.
 

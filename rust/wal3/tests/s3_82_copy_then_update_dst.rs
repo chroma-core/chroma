@@ -44,17 +44,9 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options,
-        Arc::clone(&storage),
-        prefix,
-        writer,
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options, writer, fragment_factory, manifest_factory, None)
+        .await
+        .unwrap();
     for i in 0..100 {
         let mut batch = Vec::with_capacity(100);
         for j in 0..10 {
@@ -123,17 +115,9 @@ async fn test_k8s_integration_82_copy_then_update_dst() {
         Arc::new(()),
         Arc::new(()),
     );
-    let log = LogWriter::open(
-        options2,
-        Arc::clone(&storage),
-        target_prefix,
-        writer,
-        fragment_factory2,
-        manifest_factory2,
-        None,
-    )
-    .await
-    .unwrap();
+    let log = LogWriter::open(options2, writer, fragment_factory2, manifest_factory2, None)
+        .await
+        .unwrap();
     log.append_many(vec![Vec::from("fresh-write".to_string())])
         .await
         .unwrap();

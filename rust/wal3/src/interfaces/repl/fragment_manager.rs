@@ -5,23 +5,48 @@ use std::time::{Duration, Instant};
 use setsum::Setsum;
 use tracing::Level;
 
-use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage, StorageError,
-};
+use chroma_storage::{Storage, StorageError};
 use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
-use crate::interfaces::{FragmentConsumer, FragmentUploader};
+use crate::interfaces::{FragmentConsumer, FragmentUploader, UploadResult};
 use crate::{
-    fragment_path, Error, Fragment, FragmentIdentifier, FragmentUuid, LogPosition, LogWriterOptions,
+    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentUuid,
+    LogPosition, LogWriterOptions,
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ReplicatedFragmentOptions {
+    /// The minimum number of replicas that must be written to before considering a write successful.
     pub minimum_allowed_replication_factor: usize,
+    /// The minimum number of failures before a replica is excluded from the write set.
     pub minimum_failures_to_exclude_replica: usize,
-    pub decimation_interval: Duration,
-    pub slow_writer_tolerance: Duration,
+    /// The interval at which to decimate the write set (in seconds).
+    #[serde(default = "ReplicatedFragmentOptions::default_decimation_interval_secs")]
+    pub decimation_interval_secs: u64,
+    /// The tolerance for slow writers (in seconds).
+    #[serde(default = "ReplicatedFragmentOptions::default_slow_writer_tolerance_secs")]
+    pub slow_writer_tolerance_secs: u64,
+}
+
+impl ReplicatedFragmentOptions {
+    /// Returns the decimation interval as a Duration.
+    pub fn decimation_interval(&self) -> Duration {
+        Duration::from_secs(self.decimation_interval_secs)
+    }
+
+    /// Returns the slow writer tolerance as a Duration.
+    pub fn slow_writer_tolerance(&self) -> Duration {
+        Duration::from_secs(self.slow_writer_tolerance_secs)
+    }
+
+    fn default_decimation_interval_secs() -> u64 {
+        30
+    }
+
+    fn default_slow_writer_tolerance_secs() -> u64 {
+        15
+    }
 }
 
 impl Default for ReplicatedFragmentOptions {
@@ -29,18 +54,18 @@ impl Default for ReplicatedFragmentOptions {
         Self {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 1,
-            decimation_interval: Duration::from_secs(30),
-            slow_writer_tolerance: Duration::from_secs(15),
+            decimation_interval_secs: 30,
+            slow_writer_tolerance_secs: 15,
         }
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct StorageWrapper {
-    #[allow(dead_code)]
-    region: String,
-    storage: Storage,
-    prefix: String,
-    counter: AtomicU64,
+    pub region: String,
+    pub storage: Storage,
+    pub prefix: String,
+    pub counter: Arc<AtomicU64>,
 }
 
 impl StorageWrapper {
@@ -50,7 +75,7 @@ impl StorageWrapper {
             region,
             storage,
             prefix,
-            counter: AtomicU64::new(0),
+            counter: Arc::new(AtomicU64::new(0)),
         }
     }
 }
@@ -62,6 +87,7 @@ struct BookKeeping {
 pub struct ReplicatedFragmentUploader {
     options: ReplicatedFragmentOptions,
     writer: LogWriterOptions,
+    preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
     bookkeeping: Arc<Mutex<BookKeeping>>,
 }
@@ -70,16 +96,19 @@ impl ReplicatedFragmentUploader {
     pub fn new(
         options: ReplicatedFragmentOptions,
         writer: LogWriterOptions,
+        preferred: usize,
         storages: Arc<Vec<StorageWrapper>>,
     ) -> Self {
+        assert!(preferred < storages.len());
         let bookkeeping = Arc::new(Mutex::new(BookKeeping {
-            // NOTE(rescrv):  We set it into the future to require that the process be healthy for
-            // at least decimation interval before it starts decimating.
-            last_decimation: Instant::now() + options.decimation_interval,
+            // NOTE(rescrv):  elapsed() will start at 0 and the condition `elapsed() >= interval`
+            // will effectively wait for the interval to pass before decimating.
+            last_decimation: Instant::now(),
         }));
         Self {
             options,
             writer,
+            preferred,
             storages,
             bookkeeping,
         }
@@ -88,7 +117,7 @@ impl ReplicatedFragmentUploader {
     fn compute_mask(&self) -> Result<Vec<bool>, Error> {
         // SAFETY(rescrv):  Mutex poisoning.
         let mut bookkeeping = self.bookkeeping.lock().unwrap();
-        if bookkeeping.last_decimation.elapsed() >= self.options.decimation_interval {
+        if bookkeeping.last_decimation.elapsed() >= self.options.decimation_interval() {
             bookkeeping.last_decimation = Instant::now();
             // Halve error counters periodically to implement time-decaying error rates. This
             // allows replicas that experienced temporary outages to gradually rejoin the quorum
@@ -221,7 +250,7 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error> {
+    ) -> Result<UploadResult, Error> {
         let mask = self.compute_mask()?;
         assert_eq!(mask.len(), self.storages.len());
         let mut futures = vec![];
@@ -254,22 +283,36 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
         let results = crate::quorum_writer::write_quorum(
             futures,
             self.options.minimum_allowed_replication_factor,
-            self.options.slow_writer_tolerance,
+            self.options.slow_writer_tolerance(),
         )
         .await;
         assert_eq!(indices.len(), results.len());
 
-        // Increment error counters and collect errors for logging.
+        // Increment error counters, collect errors for logging, and track successful regions.
         let mut errors = vec![];
+        let mut successful_regions = vec![];
         for (idx, r) in std::iter::zip(indices.iter().cloned(), results.iter()) {
-            if let Some(Err(err)) = r {
-                self.storages[idx].counter.fetch_add(1, Ordering::Relaxed);
-                errors.push(err);
+            match r {
+                Some(Ok(_)) => {
+                    successful_regions.push(self.storages[idx].region.clone());
+                }
+                Some(Err(err)) => {
+                    self.storages[idx].counter.fetch_add(1, Ordering::Relaxed);
+                    errors.push(err);
+                }
+                None => {
+                    // Slow writer that was cancelled - don't count as error but also not successful.
+                }
             }
         }
 
         match process_quorum_results(&results, self.options.minimum_allowed_replication_factor) {
-            QuorumOutcome::Success(result) => Ok(result),
+            QuorumOutcome::Success((path, setsum, num_bytes)) => Ok(UploadResult {
+                path,
+                setsum,
+                num_bytes,
+                successful_regions,
+            }),
             QuorumOutcome::ConsistencyError(msg) => Err(Error::ReplicationConsistencyError(msg)),
             QuorumOutcome::InsufficientQuorum => {
                 for err in errors.iter() {
@@ -283,65 +326,50 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
             }
         }
     }
+
+    async fn preferred_storage(&self) -> Storage {
+        self.storages[self.preferred].storage.clone()
+    }
+
+    async fn preferred_prefix(&self) -> String {
+        self.storages[self.preferred].prefix.clone()
+    }
+
+    async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+        &self.storages[self.preferred]
+    }
+
+    async fn storages(&self) -> &[StorageWrapper] {
+        &self.storages
+    }
 }
 
 pub struct FragmentReader {
+    preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
 }
 
 impl FragmentReader {
-    pub fn new(storages: Arc<Vec<StorageWrapper>>) -> Self {
-        Self { storages }
+    pub fn new(preferred: usize, storages: Arc<Vec<StorageWrapper>>) -> Self {
+        assert!(preferred < storages.len());
+        Self {
+            preferred,
+            storages,
+        }
     }
 }
 
 #[async_trait::async_trait]
 impl FragmentConsumer for FragmentReader {
-    type FragmentPointer = FragmentUuid;
-
-    async fn read_raw_bytes(&self, path: &str, _: LogPosition) -> Result<Arc<Vec<u8>>, Error> {
+    async fn read_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
         let mut err: Option<Error> = None;
         for storage in self.storages.iter() {
-            let path = fragment_path(&storage.prefix, path);
-            match storage
-                .storage
-                .get(&path, GetOptions::new(StorageRequestPriority::P0))
-                .await
-            {
-                Ok(parquet) => return Ok(parquet),
-                Err(StorageError::NotFound { .. }) => {
+            match crate::interfaces::s3::read_bytes(&storage.storage, &storage.prefix, path).await {
+                Ok(Some(parquet)) => return Ok(parquet),
+                Ok(None) => {
                     // TODO(rescrv, mcmr): Read repair.
                     continue;
                 }
-                Err(e) => {
-                    tracing::error!("reading from region {} failed", storage.region);
-                    err = Some(Arc::new(e).into());
-                }
-            }
-        }
-        if let Some(err) = err {
-            Err(err)
-        } else {
-            Err(Error::internal(file!(), line!()))
-        }
-    }
-
-    async fn read_parquet(
-        &self,
-        path: &str,
-        fragment_first_log_position: LogPosition,
-    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
-        let mut err: Option<Error> = None;
-        for storage in self.storages.iter() {
-            match crate::interfaces::s3::read_parquet(
-                &storage.storage,
-                &storage.prefix,
-                path,
-                Some(fragment_first_log_position),
-            )
-            .await
-            {
-                Ok(parquet) => return Ok(parquet),
                 Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
                     // TODO(rescrv, mcmr): Read repair.
                     continue;
@@ -357,6 +385,16 @@ impl FragmentConsumer for FragmentReader {
         } else {
             Err(Error::internal(file!(), line!()))
         }
+    }
+
+    async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        // NOTE(rescrv):  ReplciatedFragmentManager deals with relatives; we therefore pass an
+        // offset.
+        crate::interfaces::s3::parse_parquet(parquet, Some(starting_log_position)).await
     }
 
     async fn read_fragment(
@@ -394,6 +432,12 @@ impl FragmentConsumer for FragmentReader {
         } else {
             Ok(None)
         }
+    }
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
+        let storage = Arc::new(self.storages[self.preferred].storage.clone());
+        let prefix = self.storages[self.preferred].prefix.clone();
+        CursorStore::new(options, storage, prefix, "fragment_reader".to_string())
     }
 }
 
@@ -1202,8 +1246,8 @@ mod tests {
         ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: min_replication,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         }
     }
 
@@ -1220,6 +1264,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();
@@ -1228,13 +1273,17 @@ mod tests {
             .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
             .await;
         assert!(result.is_ok(), "upload should succeed: {:?}", result);
-        let (path, setsum, _size) = result.unwrap();
-        assert!(!path.is_empty(), "path should not be empty");
-        assert_ne!(setsum, Setsum::default(), "setsum should be computed");
+        let upload_result = result.unwrap();
+        assert!(!upload_result.path.is_empty(), "path should not be empty");
+        assert_ne!(
+            upload_result.setsum,
+            Setsum::default(),
+            "setsum should be computed"
+        );
         println!(
             "replicated_uploader_single_replica_success: path={}, setsum={}",
-            path,
-            setsum.hexdigest()
+            upload_result.path,
+            upload_result.setsum.hexdigest()
         );
     }
 
@@ -1249,6 +1298,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(2),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();
@@ -1257,13 +1307,17 @@ mod tests {
             .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
             .await;
         assert!(result.is_ok(), "upload should succeed: {:?}", result);
-        let (path, setsum, _size) = result.unwrap();
-        assert!(!path.is_empty(), "path should not be empty");
-        assert_ne!(setsum, Setsum::default(), "setsum should be computed");
+        let upload_result = result.unwrap();
+        assert!(!upload_result.path.is_empty(), "path should not be empty");
+        assert_ne!(
+            upload_result.setsum,
+            Setsum::default(),
+            "setsum should be computed"
+        );
         println!(
             "replicated_uploader_two_replicas_both_succeed: path={}, setsum={}",
-            path,
-            setsum.hexdigest()
+            upload_result.path,
+            upload_result.setsum.hexdigest()
         );
     }
 
@@ -1280,6 +1334,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(2),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();
@@ -1296,25 +1351,15 @@ mod tests {
 
     // Zero replicas yields ReplicationError.
     #[tokio::test]
+    #[should_panic]
     async fn replicated_uploader_zero_replicas() {
         let storages: Arc<Vec<StorageWrapper>> = Arc::new(vec![]);
-        let uploader = ReplicatedFragmentUploader::new(
+        let _uploader = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages,
         );
-        let pointer = FragmentUuid::generate();
-        let messages = vec![vec![1, 2, 3]];
-        let result = uploader
-            .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
-            .await;
-        assert!(result.is_err(), "upload should fail with no replicas");
-        match result {
-            Err(crate::Error::ReplicationError) => {
-                println!("replicated_uploader_zero_replicas: correctly returned ReplicationError");
-            }
-            other => panic!("expected ReplicationError, got {:?}", other),
-        }
     }
 
     // Single replica with minimum replication factor of 2 yields ReplicationError.
@@ -1326,6 +1371,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(2),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();
@@ -1359,6 +1405,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            1,
             storages.clone(),
         );
         let pointer = FragmentUuid::generate();
@@ -1394,6 +1441,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();
@@ -1430,11 +1478,13 @@ mod tests {
         let uploader1 = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages1,
         );
         let uploader2 = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages2,
         );
         let pointer1 = FragmentUuid::generate();
@@ -1448,16 +1498,16 @@ mod tests {
             .upload_parquet(&pointer2, messages2, None, TEST_EPOCH_MICROS)
             .await;
         assert!(result1.is_ok() && result2.is_ok());
-        let (_, setsum1, _) = result1.unwrap();
-        let (_, setsum2, _) = result2.unwrap();
+        let upload_result1 = result1.unwrap();
+        let upload_result2 = result2.unwrap();
         assert_ne!(
-            setsum1, setsum2,
+            upload_result1.setsum, upload_result2.setsum,
             "different messages should produce different setsums"
         );
         println!(
             "replicated_uploader_different_messages_different_setsums: {} != {}",
-            setsum1.hexdigest(),
-            setsum2.hexdigest()
+            upload_result1.setsum.hexdigest(),
+            upload_result2.setsum.hexdigest()
         );
     }
 
@@ -1473,11 +1523,11 @@ mod tests {
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_millis(1),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 0, // 0 seconds so it elapses immediately
+            slow_writer_tolerance_secs: 30,
         };
         let uploader =
-            ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), storages);
+            ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), 0, storages);
         // Wait for decimation interval to elapse.
         tokio::time::sleep(Duration::from_millis(10)).await;
         // Call compute_mask and verify it succeeds.
@@ -1501,11 +1551,11 @@ mod tests {
         let options = ReplicatedFragmentOptions {
             minimum_allowed_replication_factor: 1,
             minimum_failures_to_exclude_replica: 100,
-            decimation_interval: Duration::from_secs(3600),
-            slow_writer_tolerance: Duration::from_secs(30),
+            decimation_interval_secs: 3600,
+            slow_writer_tolerance_secs: 30,
         };
         let uploader =
-            ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), storages);
+            ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), 0, storages);
         // Call compute_mask immediately.
         let mask = uploader.compute_mask();
         assert!(mask.is_ok(), "compute_mask should succeed");
@@ -1528,6 +1578,7 @@ mod tests {
         let uploader = Arc::new(ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages,
         ));
         let mut handles = vec![];
@@ -1639,6 +1690,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();
@@ -1659,6 +1711,7 @@ mod tests {
         let uploader = ReplicatedFragmentUploader::new(
             make_test_options(1),
             LogWriterOptions::default(),
+            0,
             storages,
         );
         let pointer = FragmentUuid::generate();

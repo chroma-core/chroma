@@ -40,7 +40,7 @@ pub fn create_s3_factories(
     let fragment_manager_factory = S3FragmentManagerFactory {
         write: write.clone(),
         read: read.clone(),
-        storage: Arc::clone(&storage),
+        storage: Storage::clone(&*storage),
         prefix: prefix.clone(),
         mark_dirty: Arc::clone(&mark_dirty),
     };
@@ -59,7 +59,7 @@ pub fn create_s3_factories(
 pub struct S3FragmentManagerFactory {
     pub write: LogWriterOptions,
     pub read: LogReaderOptions,
-    pub storage: Arc<Storage>,
+    pub storage: Storage,
     pub prefix: String,
     pub mark_dirty: Arc<dyn MarkDirty>,
 }
@@ -70,10 +70,14 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     type Publisher = BatchManager<Self::FragmentPointer, S3FragmentUploader>;
     type Consumer = S3FragmentPuller;
 
+    async fn preferred_storage(&self) -> Storage {
+        self.storage.clone()
+    }
+
     async fn make_publisher(&self) -> Result<Self::Publisher, Error> {
         let fragment_uploader = S3FragmentUploader::new(
             self.write.clone(),
-            Arc::clone(&self.storage),
+            self.storage.clone(),
             self.prefix.clone(),
             Arc::clone(&self.mark_dirty),
         );
@@ -84,7 +88,7 @@ impl FragmentManagerFactory for S3FragmentManagerFactory {
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
         Ok(S3FragmentPuller::new(
             self.read.clone(),
-            Arc::clone(&self.storage),
+            Arc::new(self.storage.clone()),
             self.prefix.clone(),
         ))
     }
@@ -255,14 +259,46 @@ pub async fn read_parquet(
     path: &str,
     starting_log_position: Option<LogPosition>,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+    let bytes = read_bytes(storage, prefix, path).await?.ok_or_else(|| {
+        Arc::new(StorageError::NotFound {
+            path: path.into(),
+            source: Arc::new(std::io::Error::other("file not found")),
+        })
+    })?;
+    parse_parquet(&bytes, starting_log_position).await
+}
+
+/// Reads a parquet fragment from storage and computes its setsum and records.
+pub async fn read_bytes(
+    storage: &Storage,
+    prefix: &str,
+    path: &str,
+) -> Result<Option<Arc<Vec<u8>>>, Error> {
     let path = fragment_path(prefix, path);
-    let parquet = storage
+    match storage
         .get(&path, GetOptions::new(StorageRequestPriority::P0))
         .await
-        .map_err(Arc::new)?;
+        .map_err(Arc::new)
+    {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(err) => {
+            if matches!(&*err, StorageError::NotFound { .. }) {
+                Ok(None)
+            } else {
+                Err(err.into())
+            }
+        }
+    }
+}
+
+/// Reads a parquet fragment from storage and computes its setsum and records.
+pub async fn parse_parquet(
+    parquet: &[u8],
+    starting_log_position: Option<LogPosition>,
+) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
     let num_bytes = parquet.len() as u64;
     let (setsum, records, uses_relative_offsets, now_micros) =
-        super::checksum_parquet(&parquet, starting_log_position)?;
+        super::checksum_parquet(parquet, starting_log_position)?;
     match (starting_log_position, uses_relative_offsets) {
         (Some(_), true) => Ok((setsum, records, num_bytes, now_micros)),
         (Some(_), false) => Err(Error::internal(file!(), line!())),
@@ -282,17 +318,19 @@ pub async fn read_fragment(
     let FragmentIdentifier::SeqNo(_) = seq_no else {
         return Err(Error::internal(file!(), line!()));
     };
-    let (setsum, data, num_bytes) =
-        match read_parquet(storage, prefix, path, starting_log_position).await {
-            Ok((setsum, data, num_bytes, _ts)) => (setsum, data, num_bytes),
-            Err(Error::StorageError(storage)) => {
-                if matches!(&*storage, StorageError::NotFound { .. }) {
-                    return Ok(None);
-                }
-                return Err(Error::StorageError(storage));
+    let Some(bytes) = read_bytes(storage, prefix, path).await? else {
+        return Ok(None);
+    };
+    let (setsum, data, num_bytes) = match parse_parquet(&bytes, starting_log_position).await {
+        Ok((setsum, data, num_bytes, _ts)) => (setsum, data, num_bytes),
+        Err(Error::StorageError(storage)) => {
+            if matches!(&*storage, StorageError::NotFound { .. }) {
+                return Ok(None);
             }
-            Err(e) => return Err(e),
-        };
+            return Err(Error::StorageError(storage));
+        }
+        Err(e) => return Err(e),
+    };
     if data.is_empty() {
         return Err(Error::CorruptFragment(path.to_string()));
     }

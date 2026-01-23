@@ -39,11 +39,11 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     async fn publish_fragment(
         &self,
         _pointer: &(FragmentSeqNo, LogPosition),
-        _regions: &[&str],
         _path: &str,
         _messages_len: u64,
         _num_bytes: u64,
         _setsum: Setsum,
+        _successful_regions: &[String],
     ) -> Result<LogPosition, wal3::Error> {
         Err(wal3::Error::UninitializedLog)
     }
@@ -87,5 +87,9 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
 
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
         Err(wal3::Error::UninitializedLog)
+    }
+
+    async fn destroy(&self) -> Result<(), Error> {
+        Ok(())
     }
 }

@@ -1,17 +1,13 @@
 use std::ops::Add;
 use std::sync::Arc;
-use std::time::Duration;
 
-use chroma_storage::PutMode;
 use setsum::Setsum;
 
-use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
-    StorageError,
-};
+use chroma_storage::{ETag, StorageError};
 
 use crate::interfaces::{
-    FragmentManagerFactory, FragmentPointer, ManifestManagerFactory, ManifestPublisher,
+    FragmentManagerFactory, FragmentPointer, FragmentPublisher, ManifestManagerFactory,
+    ManifestPublisher,
 };
 use crate::manifest::unprefixed_snapshot_path;
 use crate::writer::OnceLogWriter;
@@ -20,6 +16,8 @@ use crate::{
     FragmentIdentifier, FragmentSeqNo, GarbageCollectionOptions, LogPosition, LogWriterOptions,
     Manifest, ScrubError, Snapshot, SnapshotCache, SnapshotPointer, ThrottleOptions,
 };
+
+const GARBAGE_PATH: &str = "gc/GARBAGE";
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 
@@ -64,7 +62,7 @@ impl Garbage {
     }
 
     pub fn path(prefix: &str) -> String {
-        format!("{}/gc/GARBAGE", prefix)
+        format!("{}/{}", prefix, GARBAGE_PATH)
     }
 
     #[allow(clippy::result_large_err)]
@@ -149,117 +147,53 @@ impl Garbage {
         }
     }
 
-    #[tracing::instrument(skip(storage))]
-    pub async fn load(
+    #[tracing::instrument(skip(fragment_publisher))]
+    pub async fn load<FP: FragmentPointer>(
         options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
+        fragment_publisher: &dyn FragmentPublisher<FragmentPointer = FP>,
     ) -> Result<Option<(Garbage, Option<ETag>)>, Error> {
         let exp_backoff = crate::backoff::ExponentialBackoff::new(
             options.throughput as f64,
             options.headroom as f64,
         );
         let mut retries = 0;
-        let path = Self::path(prefix);
         loop {
-            match storage
-                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
-                .await
-                .map_err(Arc::new)
-            {
+            match fragment_publisher.read_json_file(GARBAGE_PATH).await {
                 Ok((ref garbage, e_tag)) => {
                     let garbage: Garbage = serde_json::from_slice(garbage).map_err(|e| {
                         Error::CorruptGarbage(format!("could not decode JSON garbage: {e:?}"))
                     })?;
                     return Ok(Some((garbage, e_tag)));
                 }
-                Err(err) => match &*err {
-                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
-                    err => {
-                        let backoff = exp_backoff.next();
-                        tokio::time::sleep(backoff).await;
-                        if retries >= 3 {
-                            return Err(Error::StorageError(Arc::new(err.clone())));
+                Err(err) => {
+                    if let Error::StorageError(e) = &err {
+                        if matches!(&**e, StorageError::NotFound { path: _, source: _ }) {
+                            return Ok(None);
                         }
-                        retries += 1;
                     }
-                },
+                    let backoff = exp_backoff.next();
+                    tokio::time::sleep(backoff).await;
+                    if retries >= 3 {
+                        return Err(err);
+                    }
+                    retries += 1;
+                }
             }
         }
     }
 
-    #[tracing::instrument(skip(self, manifest_publisher, storage))]
-    pub async fn install<P: FragmentPointer>(
+    #[tracing::instrument(skip(self, manifest_publisher, fragment_publisher))]
+    pub async fn install<FP: FragmentPointer>(
         &self,
-        manifest_publisher: &dyn ManifestPublisher<P>,
+        manifest_publisher: &dyn ManifestPublisher<FP>,
+        fragment_publisher: &(dyn FragmentPublisher<FragmentPointer = FP> + Sync),
         options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
         existing: Option<&ETag>,
     ) -> Result<Option<ETag>, Error> {
         self.install_new_snapshots(manifest_publisher).await?;
-        Self::transition(options, storage, prefix, existing, self).await
-    }
-
-    #[tracing::instrument(skip(self, storage))]
-    pub async fn reset(
-        &self,
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-        existing: &ETag,
-    ) -> Result<Option<ETag>, Error> {
-        match Self::transition(options, storage, prefix, Some(existing), &Self::empty()).await {
-            Ok(e_tag) => Ok(e_tag),
-            Err(Error::LogContentionFailure) => Ok(None),
-            Err(err) => Err(err),
-        }
-    }
-
-    async fn transition(
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-        existing: Option<&ETag>,
-        replacement: &Self,
-    ) -> Result<Option<ETag>, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        let mut retry_count = 0;
-        loop {
-            let path = Self::path(prefix);
-            let payload = serde_json::to_string(replacement)
-                .map_err(|e| {
-                    Error::CorruptManifest(format!("could not encode JSON garbage: {e:?}"))
-                })?
-                .into_bytes();
-            let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
-            let options = if let Some(e_tag) = existing {
-                options.with_mode(PutMode::IfMatch(e_tag.clone()))
-            } else {
-                options.with_mode(PutMode::IfNotExist)
-            };
-            match storage.put_bytes(&path, payload, options).await {
-                Ok(e_tag) => return Ok(e_tag),
-                Err(StorageError::Precondition { path: _, source: _ }) => {
-                    // NOTE(rescrv):  We know that we put the file.  The e_tag no longer matches.
-                    // Therefore, we know someone else transitioned the file and our reset should
-                    // be a NOP.
-                    return Err(Error::LogContentionFailure);
-                }
-                Err(e) => {
-                    tracing::error!("error uploading garbage: {e:?}");
-                    let backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
-                        return Err(Arc::new(e).into());
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-            retry_count += 1;
-        }
+        fragment_publisher
+            .write_garbage(options, existing, self)
+            .await
     }
 
     pub fn prefixed_paths_to_delete(&self, prefix: &str) -> impl Iterator<Item = String> {
@@ -551,19 +485,15 @@ impl<
     /// Open the log into a state where it can be garbage collected.
     pub async fn open(
         options: LogWriterOptions,
-        storage: Arc<Storage>,
         new_fragment_publisher: FP,
         new_manifest_publisher: MP,
-        prefix: &str,
     ) -> Result<Self, Error> {
         let batch_manager = new_fragment_publisher.make_publisher().await?;
         let manifest_manager = new_manifest_publisher.open_publisher().await?;
         let log = OnceLogWriter::open_for_read_only_and_stale_ops(
             options.clone(),
-            Arc::clone(&storage),
             batch_manager,
             manifest_manager,
-            prefix.to_string(),
         )
         .await?;
         Ok(Self { log })
@@ -733,5 +663,12 @@ mod tests {
 
         // Verify first_to_keep
         assert_eq!(garbage.first_to_keep, LogPosition::from_offset(900883));
+    }
+
+    #[test]
+    fn garbage_path_includes_prefix_and_constant() {
+        let path = Garbage::path("my-prefix");
+        assert_eq!(path, "my-prefix/gc/GARBAGE");
+        println!("garbage_path_includes_prefix_and_constant: path={}", path);
     }
 }

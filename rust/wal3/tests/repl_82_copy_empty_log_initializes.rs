@@ -27,22 +27,17 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
-    let log = LogWriter::open_or_initialize(
-        options,
-        Arc::new(storage.clone()),
-        &prefix,
-        "writer",
-        fragment_factory,
-        manifest_factory,
-        None,
-    )
-    .await
-    .expect("LogWriter::open_or_initialize should succeed");
+    let log =
+        LogWriter::open_or_initialize(options, "writer", fragment_factory, manifest_factory, None)
+            .await
+            .expect("LogWriter::open_or_initialize should succeed");
 
     let mut position: LogPosition = LogPosition::default();
     for i in 0..100 {
@@ -57,7 +52,7 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
             + 10u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
     cursors
         .init(
             &CursorName::new("writer").unwrap(),
@@ -70,11 +65,34 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
         .await
         .expect("cursor init should succeed");
 
+    // Debug: check cursor was created
+    let cursor_check = cursors.load(&CursorName::new("writer").unwrap()).await;
+    eprintln!("cursor after init: {:?}", cursor_check);
+
+    // Debug: check manifest before GC
+    let manifest_before_gc = log.manifest_and_witness().await.expect("manifest");
+    eprintln!(
+        "manifest before GC: oldest={:?}, next_write={:?}, fragments={}",
+        manifest_before_gc.manifest.oldest_timestamp(),
+        manifest_before_gc.manifest.next_write_timestamp(),
+        manifest_before_gc.manifest.fragments.len()
+    );
+
     eprintln!("kicking off gc");
     log.garbage_collect(&GarbageCollectionOptions::default(), None)
         .await
         .expect("garbage_collect should succeed");
     eprintln!("gc finished");
+
+    // Debug: check manifest after GC from writer's perspective
+    let manifest_after_gc = log.manifest_and_witness().await.expect("manifest");
+    eprintln!(
+        "manifest after GC (writer): oldest={:?}, next_write={:?}, fragments={}, initial_offset={:?}",
+        manifest_after_gc.manifest.oldest_timestamp(),
+        manifest_after_gc.manifest.next_write_timestamp(),
+        manifest_after_gc.manifest.fragments.len(),
+        manifest_after_gc.manifest.initial_offset
+    );
 
     // Open a reader using repl factories.
     let wrapper = StorageWrapper::new("test-region".to_string(), storage.clone(), prefix.clone());
@@ -82,8 +100,10 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (reader_fragment_factory, reader_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         reader_storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
     let reader_fragment_consumer = reader_fragment_factory
@@ -122,8 +142,10 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (copy_target_fragment_factory, copy_target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         copy_target_storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         target_log_id,
     );
     let copy_target_fragment_publisher = copy_target_fragment_factory
@@ -151,8 +173,10 @@ async fn test_k8s_mcmr_integration_repl_82_copy_empty_log_initializes() {
     let (target_fragment_factory, target_manifest_factory) = create_repl_factories(
         LogWriterOptions::default(),
         default_repl_options(),
+        0,
         target_storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         target_log_id,
     );
     let target_fragment_consumer = target_fragment_factory

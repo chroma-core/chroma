@@ -864,7 +864,7 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>>;
 
     /// Returns a cursor store for this log writer.
-    fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore>;
+    async fn cursors(&self, options: CursorStoreOptions) -> Result<CursorStore, Error>;
 
     /// Perform phase 1 of garbage collection: compute garbage.
     async fn garbage_collect_phase1_compute_garbage(
@@ -920,8 +920,8 @@ where
         Some(Arc::new(reader) as Arc<dyn LogReaderTrait>)
     }
 
-    fn cursors(&self, options: CursorStoreOptions) -> Option<CursorStore> {
-        LogWriter::cursors(self, options)
+    async fn cursors(&self, options: CursorStoreOptions) -> Result<CursorStore, Error> {
+        LogWriter::cursors(self, options).await
     }
 
     async fn garbage_collect_phase1_compute_garbage(
@@ -997,6 +997,16 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
         fragment: &Fragment,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
+    /// Read bytes from the fragment.
+    async fn read_bytes(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error>;
+
+    /// Parse parquet previously returned by read_bytes.
+    async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
+
     /// Scrub the log to verify its integrity.
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>>;
 }
@@ -1004,7 +1014,7 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
 #[async_trait::async_trait]
 impl<
         P: interfaces::FragmentPointer,
-        FC: interfaces::FragmentConsumer<FragmentPointer = P>,
+        FC: interfaces::FragmentConsumer,
         MC: interfaces::ManifestConsumer<P>,
     > LogReaderTrait for LogReader<P, FC, MC>
 {
@@ -1051,6 +1061,18 @@ impl<
         fragment: &Fragment,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         LogReader::read_parquet(self, fragment).await
+    }
+
+    async fn read_bytes(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
+        LogReader::read_bytes(self, fragment).await
+    }
+
+    async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        LogReader::parse_parquet(self, parquet, starting_log_position).await
     }
 
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>> {

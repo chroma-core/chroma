@@ -122,7 +122,7 @@ async fn destroy_dangling_fragments(storage: &Arc<Storage>, prefix: &str) -> Res
     }
 }
 
-async fn destroy_manifest(storage: &Arc<Storage>, prefix: &str) -> Result<(), Error> {
+pub async fn destroy_s3_manifest(storage: &Arc<Storage>, prefix: &str) -> Result<(), Error> {
     delete_file(storage, prefix, &unprefixed_manifest_path()).await
 }
 
@@ -161,7 +161,7 @@ pub async fn destroy<P: FragmentPointer>(
     destroy_garbage(&storage, prefix).await?;
     destroy_dangling_snapshots(&storage, prefix).await?;
     destroy_dangling_fragments(&storage, prefix).await?;
-    destroy_manifest(&storage, prefix).await?;
+    manifest_publisher.destroy().await?;
     let possible_files = storage
         .list_prefix(prefix, GetOptions::default())
         .await

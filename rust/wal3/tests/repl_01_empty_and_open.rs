@@ -23,16 +23,16 @@ async fn test_k8s_mcmr_integration_repl_01_empty_and_open() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         client,
+        vec!["test-region".to_string()],
         log_id,
     );
 
     // Opening a log that hasn't been initialized should fail.
     let result = LogWriter::open(
         options,
-        Arc::new(storage),
-        &prefix,
         "test writer",
         fragment_factory,
         manifest_factory,

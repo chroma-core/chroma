@@ -6,12 +6,15 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use setsum::Setsum;
 use tracing::Span;
 
-use chroma_storage::ETag;
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, Storage, StorageError,
+};
 use chroma_types::Cmek;
 
 use crate::{
-    Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
+    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
+    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness,
+    Snapshot, SnapshotPointer, StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -72,13 +75,37 @@ impl FragmentPointer for FragmentUuid {
 pub trait FragmentManagerFactory {
     type FragmentPointer: FragmentPointer;
     type Publisher: FragmentPublisher<FragmentPointer = Self::FragmentPointer>;
-    type Consumer: FragmentConsumer<FragmentPointer = Self::FragmentPointer>;
+    type Consumer: FragmentConsumer;
 
     async fn make_publisher(&self) -> Result<Self::Publisher, Error>;
     async fn make_consumer(&self) -> Result<Self::Consumer, Error>;
+    async fn preferred_storage(&self) -> Storage;
 }
 
 ///////////////////////////////////////// FragmentUploader /////////////////////////////////////////
+
+/// The result of a successful parquet upload.
+///
+/// Contains:
+/// - `path`: The path where the fragment was stored.
+/// - `setsum`: The setsum of the fragment contents.
+/// - `num_bytes`: The size of the fragment in bytes.
+/// - `successful_regions`: The regions that successfully received the fragment.
+///   For single-region deployments, this is empty (all regions are implied).
+///   For multi-region deployments, this contains only the regions that actually
+///   stored the fragment successfully.
+#[derive(Clone, Debug)]
+pub struct UploadResult {
+    /// The path where the fragment was stored.
+    pub path: String,
+    /// The setsum of the fragment contents.
+    pub setsum: Setsum,
+    /// The size of the fragment in bytes.
+    pub num_bytes: usize,
+    /// The regions that successfully received the fragment.
+    /// Empty for single-region deployments (all regions are implied).
+    pub successful_regions: Vec<String>,
+}
 
 #[async_trait::async_trait]
 pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
@@ -89,7 +116,19 @@ pub trait FragmentUploader<FP: FragmentPointer>: Send + Sync + 'static {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error>;
+    ) -> Result<UploadResult, Error>;
+
+    /// The preferred region for this cluster.
+    async fn preferred_storage(&self) -> Storage;
+
+    /// The prefix for the preferred storage.
+    async fn preferred_prefix(&self) -> String;
+
+    /// The preferred storage wrapper for this cluster.
+    async fn preferred_storage_wrapper(&self) -> &StorageWrapper;
+
+    /// The full list of storage wrappers for this cluster
+    async fn storages(&self) -> &[StorageWrapper];
 }
 
 ///////////////////////////////////////// FragmentPublisher ////////////////////////////////////////
@@ -135,30 +174,58 @@ pub trait FragmentPublisher: Send + Sync + 'static {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error>;
+    ) -> Result<UploadResult, Error>;
+
+    async fn read_json_file(&self, path: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), Error>;
+
+    /// Returns the preferred storage for this fragment publisher.
+    async fn preferred_storage(&self) -> Storage;
+
+    /// Returns the preferred storage's prefix for this fragment publisher.
+    async fn preferred_prefix(&self) -> String;
+
+    /// Returns all storages for this fragment publisher.
+    async fn storages(&self) -> Vec<repl::StorageWrapper>;
 
     /// Start shutting down.  The shutdown is split for historical and unprincipled reasons.
     fn shutdown_prepare(&self);
     /// Finish shutting down.
     fn shutdown_finish(&self);
+
+    /// Write garbage to storage on the preferred region, returning the new ETag if successful.
+    async fn write_garbage(
+        &self,
+        options: &ThrottleOptions,
+        existing: Option<&ETag>,
+        garbage: &Garbage,
+    ) -> Result<Option<ETag>, Error>;
+
+    /// Reset the garbage on the preferred region.
+    async fn reset_garbage(&self, options: &ThrottleOptions, e_tag: &ETag) -> Result<(), Error>;
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ///////////////////////////////////////// FragmentConsumer /////////////////////////////////////////
 
 #[async_trait::async_trait]
 pub trait FragmentConsumer: Send + Sync + 'static {
-    type FragmentPointer: FragmentPointer;
-
-    async fn read_raw_bytes(
-        &self,
-        path: &str,
-        fragment_first_log_position: LogPosition,
-    ) -> Result<Arc<Vec<u8>>, Error>;
-
     async fn read_parquet(
         &self,
         path: &str,
         fragment_first_log_position: LogPosition,
+    ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        let bytes = self.read_bytes(path).await?;
+        self.parse_parquet(&bytes, fragment_first_log_position)
+            .await
+    }
+
+    async fn read_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, Error>;
+
+    async fn parse_parquet(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
     async fn read_fragment(
@@ -166,6 +233,8 @@ pub trait FragmentConsumer: Send + Sync + 'static {
         path: &str,
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error>;
+
+    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ////////////////////////////////////// ManifestManagerFactory //////////////////////////////////////
@@ -247,14 +316,19 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Assign a timestamp for the next fragment that's going to be published on this manifest.
     fn assign_timestamp(&self, record_count: usize) -> Option<FP>;
     /// Publish a fragment previously assigned a timestamp using assign_timestamp.
+    ///
+    /// The `successful_regions` parameter contains the list of regions that successfully stored
+    /// the fragment during upload. For single-region deployments, this is empty (all regions
+    /// are implied). For multi-region deployments, only these regions should be recorded as
+    /// having the fragment.
     async fn publish_fragment(
         &self,
         pointer: &FP,
-        regions: &[&str],
         path: &str,
         messages_len: u64,
         num_bytes: u64,
         setsum: Setsum,
+        successful_regions: &[String],
     ) -> Result<LogPosition, Error>;
     /// Check if the garbge will apply "cleanly", that is without violating invariants.
     async fn garbage_applies_cleanly(&self, garbage: &Garbage) -> Result<bool, Error>;
@@ -266,7 +340,6 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
         options: &GarbageCollectionOptions,
         first_to_keep: LogPosition,
     ) -> Result<Option<Garbage>, Error>;
-
     /// Snapshot storers and accessors
     async fn snapshot_load(&self, pointer: &SnapshotPointer) -> Result<Option<Snapshot>, Error>;
     async fn snapshot_install(&self, snapshot: &Snapshot) -> Result<SnapshotPointer, Error>;
@@ -277,6 +350,9 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
     /// FragmentPublisher shutdown.
     fn shutdown(&self);
+
+    /// Destroy the named manifest.
+    async fn destroy(&self) -> Result<(), Error>;
 }
 
 ///////////////////////////////////////// ManifestConsumer /////////////////////////////////////////
@@ -397,6 +473,36 @@ pub fn checksum_parquet(
         Ok((setsum, records, uses_relative_offsets, epoch_micros))
     } else {
         Ok((setsum, records, uses_relative_offsets, 0))
+    }
+}
+
+async fn read_raw_bytes(
+    path: &str,
+    storages: &[repl::StorageWrapper],
+) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
+    let mut err: Option<StorageError> = None;
+    for storage in storages.iter() {
+        let path = crate::fragment_path(&storage.prefix, path);
+        match storage
+            .storage
+            .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
+            .await
+        {
+            Ok((parquet, e_tag)) => return Ok((parquet, e_tag)),
+            Err(e @ StorageError::NotFound { .. }) => err = Some(e),
+            Err(e) => {
+                tracing::error!("reading from region {} failed", storage.region);
+                err = Some(e);
+            }
+        }
+    }
+    if let Some(err) = err {
+        Err(err)
+    } else {
+        Err(StorageError::NotFound {
+            path: path.into(),
+            source: Arc::new(std::io::Error::other("replicas exhausted")),
+        })
     }
 }
 

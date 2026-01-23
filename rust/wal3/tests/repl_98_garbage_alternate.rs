@@ -28,7 +28,7 @@ async fn writer_thread(
     notify: Arc<tokio::sync::Notify>,
     iterations: usize,
 ) -> (usize, usize) {
-    let cursors = writer.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = writer.cursors(CursorStoreOptions::default()).await.unwrap();
     let mut witness = cursors
         .load(&CursorName::new("my_cursor").unwrap())
         .await
@@ -138,7 +138,12 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
     let writer_name = "init";
 
     // Initialize the log.
-    let init_factory = ReplicatedManifestManagerFactory::new(Arc::clone(&client), log_id);
+    let init_factory = ReplicatedManifestManagerFactory::new(
+        Arc::clone(&client),
+        vec!["test-region".to_string()],
+        "test-region".to_string(),
+        log_id,
+    );
     init_factory
         .init_manifest(&Manifest::new_empty(writer_name))
         .await
@@ -152,15 +157,15 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
     let (fragment_factory1, manifest_factory1) = create_repl_factories(
         options1.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
     let writer1 = Arc::new(
         LogWriter::open(
             options1,
-            Arc::new(storage.clone()),
-            &prefix,
             "writer1",
             fragment_factory1,
             manifest_factory1,
@@ -169,7 +174,10 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
         .await
         .expect("LogWriter::open should succeed"),
     );
-    let cursors = writer1.cursors(CursorStoreOptions::default()).unwrap();
+    let cursors = writer1
+        .cursors(CursorStoreOptions::default())
+        .await
+        .unwrap();
     cursors
         .init(&CursorName::new("my_cursor").unwrap(), Cursor::default())
         .await
@@ -179,15 +187,15 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
     let (fragment_factory2, manifest_factory2) = create_repl_factories(
         options2.clone(),
         default_repl_options(),
+        0,
         Arc::clone(&storages),
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
     let writer2 = Arc::new(
         LogWriter::open(
             options2,
-            Arc::new(storage),
-            &prefix,
             "writer2",
             fragment_factory2,
             manifest_factory2,

@@ -579,6 +579,10 @@ impl ObjectStorage {
 
         Ok(keys)
     }
+
+    pub fn bucket(&self) -> Option<&str> {
+        Some(&self.bucket)
+    }
 }
 
 #[async_trait]

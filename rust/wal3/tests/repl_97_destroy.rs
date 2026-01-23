@@ -32,15 +32,15 @@ async fn test_k8s_mcmr_integration_repl_97_destroy() {
     let (fragment_factory, manifest_factory) = create_repl_factories(
         options.clone(),
         default_repl_options(),
+        0,
         storages,
         Arc::clone(&client),
+        vec!["test-region".to_string()],
         log_id,
     );
 
     let log = LogWriter::open_or_initialize(
         options.clone(),
-        Arc::new(storage.clone()),
-        &prefix,
         writer,
         fragment_factory,
         manifest_factory.clone(),

@@ -1,18 +1,17 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
-
-use setsum::Setsum;
 
 use chroma_storage::Storage;
 use chroma_types::Cmek;
 
-use crate::interfaces::FragmentUploader;
-use crate::{Error, FragmentSeqNo, LogPosition, LogWriterOptions, MarkDirty};
+use crate::interfaces::{FragmentUploader, UploadResult};
+use crate::{Error, FragmentSeqNo, LogPosition, LogWriterOptions, MarkDirty, StorageWrapper};
 
 /// Uploads fragments to S3 storage.
 pub struct S3FragmentUploader {
     pub(super) options: LogWriterOptions,
-    pub(super) storage: Arc<Storage>,
-    pub(super) prefix: String,
+    pub(super) preferred: usize,
+    pub(super) storages: Arc<Vec<StorageWrapper>>,
     pub(super) mark_dirty: Arc<dyn MarkDirty>,
 }
 
@@ -20,14 +19,20 @@ impl S3FragmentUploader {
     /// Creates a new S3FragmentUploader.
     pub fn new(
         options: LogWriterOptions,
-        storage: Arc<Storage>,
+        storage: Storage,
         prefix: String,
         mark_dirty: Arc<dyn MarkDirty>,
     ) -> Self {
+        let storages = Arc::new(vec![StorageWrapper {
+            region: "local".to_string(),
+            prefix,
+            storage,
+            counter: Arc::new(AtomicU64::new(0)),
+        }]);
         Self {
             options,
-            storage,
-            prefix,
+            preferred: 0,
+            storages,
             mark_dirty,
         }
     }
@@ -42,12 +47,13 @@ impl FragmentUploader<(FragmentSeqNo, LogPosition)> for S3FragmentUploader {
         messages: Vec<Vec<u8>>,
         cmek: Option<Cmek>,
         epoch_micros: u64,
-    ) -> Result<(String, Setsum, usize), Error> {
+    ) -> Result<UploadResult, Error> {
         let messages_len = messages.len();
+        let storage = &self.storages[self.preferred];
         let fut1 = crate::interfaces::batch_manager::upload_parquet(
             &self.options,
-            &self.storage,
-            &self.prefix,
+            &storage.storage,
+            &storage.prefix,
             pointer.0.into(),
             Some(pointer.1),
             messages,
@@ -66,6 +72,29 @@ impl FragmentUploader<(FragmentSeqNo, LogPosition)> for S3FragmentUploader {
             return Err(e.clone());
         }
         res2?;
-        res1
+        let (path, setsum, num_bytes) = res1?;
+        // S3 single-region deployment: successful_regions is empty to indicate all regions.
+        Ok(UploadResult {
+            path,
+            setsum,
+            num_bytes,
+            successful_regions: vec![],
+        })
+    }
+
+    async fn preferred_storage(&self) -> Storage {
+        self.storages[self.preferred].storage.clone()
+    }
+
+    async fn preferred_prefix(&self) -> String {
+        self.storages[self.preferred].prefix.clone()
+    }
+
+    async fn preferred_storage_wrapper(&self) -> &StorageWrapper {
+        &self.storages[self.preferred]
+    }
+
+    async fn storages(&self) -> &[StorageWrapper] {
+        &self.storages
     }
 }
