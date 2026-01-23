@@ -210,8 +210,9 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
     }
 
     /// Returns the header containing correction, norm, and radial.
-    fn header(&self) -> &CodeHeader {
-        bytemuck::from_bytes(&self.0.as_ref()[..size_of::<CodeHeader>()])
+    /// Uses unaligned read since Vec<u8> only guarantees 1-byte alignment.
+    fn header(&self) -> CodeHeader {
+        bytemuck::pod_read_unaligned(&self.0.as_ref()[..size_of::<CodeHeader>()])
     }
 
     /// Returns the data residual norm `‖r‖`.
@@ -284,7 +285,8 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
         // Ray-walk: find optimal grid point maximizing cosine similarity
         // max_t is when the largest magnitude component reaches max code
         let r_abs = r.iter().copied().map(f32::abs).collect::<Vec<_>>();
-        let max_t = f32::from(Self::CEIL - 1) / r_abs.iter().copied().fold(f32::EPSILON, f32::max);
+        let max_t = (f32::from(Self::CEIL) - 1.0 + f32::EPSILON)
+            / r_abs.iter().copied().fold(f32::EPSILON, f32::max);
 
         // Collect critical t values: (t, dimension)
         let mut critical_ts = r_abs
@@ -320,7 +322,7 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
         // For positive r[i]: grid = g + 0.5, stored code = g + CEIL
         // For negative r[i]: grid = -(g + 0.5), stored code = CEIL - 1 - g
         for (code, val) in code.iter_mut().zip(&r) {
-            let g = (best_t * val.abs() + f32::EPSILON) as u32;
+            let g = (best_t * val.abs()) as u32;
             *code = if *val >= 0.0 {
                 g + Self::CEIL as u32
             } else {
