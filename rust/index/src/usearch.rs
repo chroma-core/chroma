@@ -1,0 +1,247 @@
+use std::sync::Arc;
+
+use chroma_cache::{Cache, Weighted};
+use chroma_distance::DistanceFunction;
+use chroma_error::{ChromaError, ErrorCodes};
+use chroma_storage::{
+    admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
+};
+use chroma_types::{Cmek, CollectionUuid};
+use crossbeam::sync::ShardedLock;
+use simsimd::SpatialSimilarity;
+use thiserror::Error;
+use tracing::Instrument;
+use usearch::{IndexOptions, MetricKind, ScalarKind};
+use uuid::Uuid;
+
+use crate::quantization::Code;
+use crate::IndexUuid;
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum CacheKey {
+    Raw(CollectionUuid),
+    Quantized(CollectionUuid),
+}
+
+#[derive(Error, Debug)]
+pub enum USearchError {
+    #[error("Index error: {0}")]
+    Index(String),
+    #[error("Lock poisoned")]
+    Poison,
+    #[error("Storage error: {0}")]
+    Storage(#[from] StorageError),
+}
+
+impl<T> From<std::sync::PoisonError<T>> for USearchError {
+    fn from(_: std::sync::PoisonError<T>) -> Self {
+        Self::Poison
+    }
+}
+
+impl ChromaError for USearchError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            USearchError::Index(_) => ErrorCodes::Internal,
+            USearchError::Poison => ErrorCodes::Internal,
+            USearchError::Storage(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct USearchIndex {
+    id: IndexUuid,
+    cache_key: CacheKey,
+    index: Arc<ShardedLock<usearch::Index>>,
+    prefix_path: String,
+    quantization_center: Option<Arc<[f32]>>,
+}
+
+impl USearchIndex {
+    fn storage_key(&self) -> String {
+        Self::format_storage_key(&self.prefix_path, self.id)
+    }
+
+    pub fn format_storage_key(prefix_path: &str, id: IndexUuid) -> String {
+        if prefix_path.is_empty() {
+            format!("usearch/{}.usearch", id)
+        } else {
+            format!("{}/usearch/{}.usearch", prefix_path, id)
+        }
+    }
+}
+
+impl Weighted for USearchIndex {
+    fn weight(&self) -> usize {
+        let Ok(index) = self.index.read() else {
+            return 1;
+        };
+        let bytes = index.memory_usage();
+        (bytes / 1024 / 1024).max(1)
+    }
+}
+
+/// Cache key ensures fairness: at most one index per collection per type
+/// (raw vs quantized) in cache, preventing a single hot collection from
+/// monopolizing cache space.
+pub struct USearchIndexProvider {
+    cache: Arc<dyn Cache<CacheKey, USearchIndex>>,
+    storage: Storage,
+}
+
+impl USearchIndexProvider {
+    /// Open an existing index from S3, or create a new empty index.
+    ///
+    /// - `id`: `None` to create new, `Some(id)` to load existing
+    /// - `collection_id`: Cache key for fairness (one index per collection)
+    /// - `prefix_path`: S3 path prefix for storage
+    /// - `quantization_center`: If provided, use I8 quantization with custom metric
+    /// - `cache`: Whether to insert into cache (true for read path, false for write path)
+    #[allow(clippy::too_many_arguments)]
+    pub async fn open(
+        &self,
+        id: Option<IndexUuid>,
+        collection_id: CollectionUuid,
+        prefix_path: &str,
+        dimensions: usize,
+        distance_function: DistanceFunction,
+        connectivity: usize,
+        expansion_add: usize,
+        expansion_search: usize,
+        quantization_center: Option<Arc<[f32]>>,
+        cache: bool,
+    ) -> Result<USearchIndex, USearchError> {
+        let (cache_key, scalar, index_dimensions) = match &quantization_center {
+            Some(_) => (
+                CacheKey::Quantized(collection_id),
+                ScalarKind::I8,
+                Code::<&[u8]>::size(dimensions),
+            ),
+            None => (CacheKey::Raw(collection_id), ScalarKind::F32, dimensions),
+        };
+
+        // Check cache first for existing index
+        if let Some(id) = id {
+            if let Ok(Some(cached)) = self.cache.get(&cache_key).await {
+                if cached.id == id {
+                    return Ok(cached);
+                }
+            }
+        }
+
+        let metric = match distance_function {
+            DistanceFunction::Cosine => MetricKind::Cos,
+            DistanceFunction::Euclidean => MetricKind::L2sq,
+            DistanceFunction::InnerProduct => MetricKind::IP,
+        };
+
+        let options = IndexOptions {
+            dimensions: index_dimensions,
+            metric,
+            quantization: scalar,
+            connectivity,
+            expansion_add,
+            expansion_search,
+            multi: false,
+        };
+
+        let mut index =
+            usearch::Index::new(&options).map_err(|e| USearchError::Index(e.to_string()))?;
+
+        // Override metric for quantization
+        if let Some(center) = &quantization_center {
+            let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
+            let dim = dimensions;
+            let df = distance_function;
+            let code_len = Code::<&[u8]>::size(dim);
+            index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
+                let a = unsafe { std::slice::from_raw_parts(a_ptr as *const u8, code_len) };
+                let b = unsafe { std::slice::from_raw_parts(b_ptr as *const u8, code_len) };
+                Code::<_>::new(a).distance_code(&df, &Code::<_>::new(b), c_norm, dim)
+            }));
+        }
+
+        // Load from S3 or create new
+        let id = match id {
+            Some(id) => {
+                let key = USearchIndex::format_storage_key(prefix_path, id);
+                let bytes = self
+                    .storage
+                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
+                    .instrument(tracing::trace_span!("fetch_usearch_index", %id, %collection_id))
+                    .await?;
+
+                // Double-check cache after fetch (another thread may have loaded it)
+                if let Ok(Some(cached)) = self.cache.get(&cache_key).await {
+                    if cached.id == id {
+                        return Ok(cached);
+                    }
+                }
+
+                // USearch uses the buffer directly via memcpy - no serialization/deserialization
+                // cost, just pointer arithmetic and memory copies. Safe to run on async runtime.
+                index
+                    .load_from_buffer(&bytes)
+                    .map_err(|e| USearchError::Index(e.to_string()))?;
+
+                id
+            }
+            None => IndexUuid(Uuid::new_v4()),
+        };
+
+        let index = USearchIndex {
+            id,
+            cache_key,
+            index: Arc::new(index.into()),
+            prefix_path: prefix_path.to_string(),
+            quantization_center,
+        };
+
+        if cache {
+            self.cache.insert(cache_key, index.clone()).await;
+        }
+
+        Ok(index)
+    }
+
+    /// Commit the index: generate new id, insert into cache.
+    /// No I/O - use `flush()` to persist to S3.
+    pub async fn commit(&self, index: &mut USearchIndex) -> IndexUuid {
+        index.id = IndexUuid(Uuid::new_v4());
+        self.cache.insert(index.cache_key, index.clone()).await;
+        index.id
+    }
+
+    /// Flush the index to S3.
+    pub async fn flush(
+        &self,
+        index: &USearchIndex,
+        cmek: Option<Cmek>,
+    ) -> Result<(), USearchError> {
+        // USearch uses the buffer directly via memcpy - no serialization/deserialization
+        // cost, just pointer arithmetic and memory copies. Safe to run on async runtime.
+        let buffer = {
+            let guard = index.index.read()?;
+            let len = guard.serialized_length();
+            let mut buffer = vec![0u8; len];
+            guard
+                .save_to_buffer(&mut buffer)
+                .map_err(|e| USearchError::Index(e.to_string()))?;
+            buffer
+        };
+
+        let key = index.storage_key();
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+
+        self.storage
+            .put_bytes(&key, buffer, options)
+            .instrument(tracing::trace_span!("flush_usearch_index", id = %index.id))
+            .await?;
+
+        Ok(())
+    }
+}
