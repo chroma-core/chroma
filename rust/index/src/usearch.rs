@@ -18,7 +18,7 @@ use crate::quantization::Code;
 use crate::IndexUuid;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum CacheKey {
+pub enum CacheKey {
     Raw(CollectionUuid),
     Quantized(CollectionUuid),
 }
@@ -217,6 +217,14 @@ pub struct USearchIndexProvider {
 }
 
 impl USearchIndexProvider {
+    /// Create a new provider with the given storage backend and cache.
+    pub fn new(storage: Storage, cache: Box<dyn Cache<CacheKey, USearchIndex>>) -> Self {
+        Self {
+            cache: cache.into(),
+            storage,
+        }
+    }
+
     /// Open an existing index from S3, or create a new empty index.
     ///
     /// - `id`: `None` to create new, `Some(id)` to load existing
@@ -330,6 +338,11 @@ impl USearchIndexProvider {
         Ok(index)
     }
 
+    /// Finalize the index and return its ID for later retrieval.
+    pub fn commit(&self, index: &USearchIndex) -> IndexUuid {
+        index.id
+    }
+
     /// Flush the index to S3 and insert into cache.
     pub async fn flush(
         &self,
@@ -405,5 +418,165 @@ impl USearchIndexProvider {
         )?;
         index.load(&buffer)?;
         Ok(Some(index))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use chroma_cache::new_non_persistent_cache_for_test;
+    use chroma_storage::test_storage;
+    use chroma_types::CollectionUuid;
+    use rand::Rng;
+
+    use super::*;
+
+    fn random_vector(dim: usize) -> Vec<f32> {
+        let mut rng = rand::thread_rng();
+        (0..dim).map(|_| rng.gen::<f32>()).collect()
+    }
+
+    #[tokio::test]
+    async fn test_persist() {
+        let (temp_dir, storage) = test_storage();
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        const DIM: usize = 1024;
+
+        // Generate all test vectors upfront
+        let mut vectors: HashMap<u64, Vec<f32>> = HashMap::new();
+        for i in 0..64 {
+            vectors.insert(i, random_vector(DIM));
+        }
+
+        // Phase 1: Create new index, add 32 vectors, flush
+        let index_a_id = {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+            let index = provider
+                .open(
+                    None,
+                    collection_id,
+                    "",
+                    DIM,
+                    DistanceFunction::Euclidean,
+                    16,
+                    128,
+                    64,
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+            index.reserve(32).unwrap();
+            for i in 0..32 {
+                index.add(i, &vectors[&i]).unwrap();
+            }
+            let id = provider.commit(&index);
+            provider.flush(&index, None).await.unwrap();
+            id
+        };
+
+        // Phase 2: Recreate provider, verify persistence, fork, add 32 more, flush
+        let index_b_id = {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+            let index = provider
+                .open(
+                    Some(index_a_id),
+                    collection_id,
+                    "",
+                    DIM,
+                    DistanceFunction::Euclidean,
+                    16,
+                    128,
+                    64,
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(provider.commit(&index), index_a_id);
+            assert_eq!(index.len().unwrap(), 32);
+            for i in 0..32 {
+                assert_eq!(index.get(i).unwrap().unwrap(), vectors[&i]);
+            }
+
+            // Fork and add 32 more vectors
+            let forked = provider
+                .open(
+                    Some(index_a_id),
+                    collection_id,
+                    "",
+                    DIM,
+                    DistanceFunction::Euclidean,
+                    16,
+                    128,
+                    64,
+                    None,
+                    true,
+                )
+                .await
+                .unwrap();
+            let forked_id = provider.commit(&forked);
+            assert_ne!(forked_id, index_a_id);
+            forked.reserve(64).unwrap();
+            for i in 32..64 {
+                forked.add(i, &vectors[&i]).unwrap();
+            }
+            provider.flush(&forked, None).await.unwrap();
+            forked_id
+        };
+
+        // Phase 3: Recreate provider, verify isolation
+        {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+
+            // Original unchanged
+            let index_a = provider
+                .open(
+                    Some(index_a_id),
+                    collection_id,
+                    "",
+                    DIM,
+                    DistanceFunction::Euclidean,
+                    16,
+                    128,
+                    64,
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(index_a.len().unwrap(), 32);
+            assert!(index_a.get(32).unwrap().is_none());
+            for i in 0..32 {
+                assert_eq!(index_a.get(i).unwrap().unwrap(), vectors[&i]);
+            }
+
+            // Forked has all 64 vectors
+            let index_b = provider
+                .open(
+                    Some(index_b_id),
+                    collection_id,
+                    "",
+                    DIM,
+                    DistanceFunction::Euclidean,
+                    16,
+                    128,
+                    64,
+                    None,
+                    false,
+                )
+                .await
+                .unwrap();
+            assert_eq!(index_b.len().unwrap(), 64);
+            for i in 0..64 {
+                assert_eq!(index_b.get(i).unwrap().unwrap(), vectors[&i]);
+            }
+        }
+
+        drop(temp_dir);
     }
 }
