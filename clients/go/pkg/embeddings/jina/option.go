@@ -92,6 +92,15 @@ func WithTask(task TaskType) Option {
 	}
 }
 
+// WithLateChunking enables late chunking mode which concatenates all sentences
+// and treats them as a single input for contextual token-level embeddings.
+func WithLateChunking(lateChunking bool) Option {
+	return func(c *JinaEmbeddingFunction) error {
+		c.lateChunking = lateChunking
+		return nil
+	}
+}
+
 // WithInsecure allows the client to connect to HTTP endpoints without TLS.
 // This should only be used for local development or testing.
 func WithInsecure() Option {
