@@ -123,6 +123,20 @@ func TestJinaEmbeddingFunction(t *testing.T) {
 		require.Equal(t, 1024, resp[0].Len())
 	})
 
+	t.Run("Test with late chunking", func(t *testing.T) {
+		ef, err := NewJinaEmbeddingFunction(WithEnvAPIKey(), WithTask(TaskTextMatching), WithLateChunking(true))
+		require.NoError(t, err)
+		documents := []string{
+			"Organic skincare for sensitive skin with aloe vera and chamomile.",
+			"Bio-Hautpflege für empfindliche Haut mit Aloe Vera und Kamille.",
+		}
+		resp, err := ef.EmbedDocuments(context.Background(), documents)
+		require.NoError(t, err)
+		require.NotNil(t, resp)
+		require.Len(t, resp, 2)
+		require.Equal(t, 1024, resp[0].Len())
+	})
+
 	t.Run("Test missing API key", func(t *testing.T) {
 		_, err := NewJinaEmbeddingFunction()
 		require.Error(t, err)
