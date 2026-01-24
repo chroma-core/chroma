@@ -144,11 +144,12 @@ impl USearchIndex {
             .map_err(|e| USearchError::Index(e.to_string()))
     }
 
-    pub fn format_storage_key(prefix_path: &str, id: IndexUuid) -> String {
+    pub fn format_storage_key(prefix_path: &str, id: IndexUuid, quantized: bool) -> String {
+        let kind = if quantized { "quantized" } else { "raw" };
         if prefix_path.is_empty() {
-            format!("usearch/{}.usearch", id)
+            format!("usearch/{}/{}.bin", kind, id)
         } else {
-            format!("{}/usearch/{}.usearch", prefix_path, id)
+            format!("{}/usearch/{}/{}.bin", prefix_path, kind, id)
         }
     }
 
@@ -307,7 +308,8 @@ impl USearchIndexProvider {
 
         // Load from S3 if existing index
         if let Some(id) = id {
-            let key = USearchIndex::format_storage_key(prefix_path, id);
+            let key =
+                USearchIndex::format_storage_key(prefix_path, id, quantization_center.is_some());
             let bytes = self
                 .storage
                 .get(&key, GetOptions::new(StorageRequestPriority::P0))
@@ -360,7 +362,11 @@ impl USearchIndexProvider {
             buffer
         };
 
-        let key = USearchIndex::format_storage_key(&index.prefix_path, index.id);
+        let key = USearchIndex::format_storage_key(
+            &index.prefix_path,
+            index.id,
+            index.quantization_center.is_some(),
+        );
         let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
         if let Some(cmek) = cmek {
             options = options.with_cmek(cmek);
