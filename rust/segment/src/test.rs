@@ -589,6 +589,7 @@ impl CheckRecord for MetadataExpression {
                     SetOperator::NotIn => !contains,
                 }
             }
+            MetadataComparison::Exists(exists) => stored.is_some() == *exists,
         }
     }
 }
