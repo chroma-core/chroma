@@ -69,9 +69,7 @@ impl USearchIndex {
 
         if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(vector, center);
-            let bytes = code.as_ref();
-            let i8_slice =
-                unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const i8, bytes.len()) };
+            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             index.add(key, i8_slice)
         } else {
             index.add(key, vector)
@@ -95,9 +93,7 @@ impl USearchIndex {
 
         let matches = if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(vector, center);
-            let bytes = code.as_ref();
-            let i8_slice =
-                unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const i8, bytes.len()) };
+            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             index.search(i8_slice, k)
         } else {
             index.search(vector, k)
@@ -174,8 +170,11 @@ impl USearchIndex {
             let df = distance_function;
             let code_len = Code::<&[u8]>::size(dim);
             index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
-                let a = unsafe { std::slice::from_raw_parts(a_ptr as *const u8, code_len) };
-                let b = unsafe { std::slice::from_raw_parts(b_ptr as *const u8, code_len) };
+                // SAFETY: usearch passes valid pointers of `code_len` i8 elements
+                let a_i8 = unsafe { std::slice::from_raw_parts(a_ptr, code_len) };
+                let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
+                let a = bytemuck::cast_slice(a_i8);
+                let b = bytemuck::cast_slice(b_i8);
                 Code::<_>::new(a).distance_code(&df, &Code::<_>::new(b), c_norm, dim)
             }));
         }
@@ -428,25 +427,26 @@ mod tests {
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::test_storage;
     use chroma_types::CollectionUuid;
-    use rand::Rng;
+    use rand::rngs::StdRng;
+    use rand::{Rng, SeedableRng};
 
     use super::*;
 
-    fn random_vector(dim: usize) -> Vec<f32> {
-        let mut rng = rand::thread_rng();
-        (0..dim).map(|_| rng.gen::<f32>()).collect()
+    fn random_vector(rng: &mut impl Rng, dim: usize) -> Vec<f32> {
+        (0..dim).map(|_| rng.gen_range(-4.0_f32..4.0)).collect()
     }
 
     #[tokio::test]
     async fn test_persist() {
-        let (temp_dir, storage) = test_storage();
+        let (_temp_dir, storage) = test_storage();
         let collection_id = CollectionUuid(Uuid::new_v4());
         const DIM: usize = 1024;
 
         // Generate all test vectors upfront
+        let mut rng = StdRng::seed_from_u64(42);
         let mut vectors: HashMap<u64, Vec<f32>> = HashMap::new();
         for i in 0..64 {
-            vectors.insert(i, random_vector(DIM));
+            vectors.insert(i, random_vector(&mut rng, DIM));
         }
 
         // Phase 1: Create new index, add 32 vectors, flush
@@ -576,7 +576,91 @@ mod tests {
                 assert_eq!(index_b.get(i).unwrap().unwrap(), vectors[&i]);
             }
         }
+    }
 
-        drop(temp_dir);
+    #[tokio::test]
+    async fn test_quantize() {
+        let (_temp_dir, storage) = test_storage();
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let provider =
+            USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+        const DIM: usize = 1024;
+
+        // Generate 128 random vectors
+        let mut rng = StdRng::seed_from_u64(42);
+        let vectors = (0..128)
+            .map(|_| random_vector(&mut rng, DIM))
+            .collect::<Vec<_>>();
+
+        // Phase 1: Full precision index
+        let raw_index = provider
+            .open(
+                None,
+                collection_id,
+                "",
+                DIM,
+                DistanceFunction::Euclidean,
+                16,
+                128,
+                64,
+                None,
+                false,
+            )
+            .await
+            .unwrap();
+        raw_index.reserve(128).unwrap();
+        for (i, v) in vectors.iter().enumerate() {
+            raw_index.add(i as u64, v).unwrap();
+        }
+
+        // Verify top-1 recall is 100%
+        for (i, v) in vectors.iter().enumerate() {
+            let (keys, _) = raw_index.query(v, 1).unwrap();
+            assert_eq!(keys[0], i as u64, "Full precision: top-1 mismatch at {}", i);
+        }
+
+        // Phase 2: Quantized index (center at origin)
+        let center = Arc::from(vec![0.0f32; DIM]);
+        let quantized_index = provider
+            .open(
+                None,
+                collection_id,
+                "",
+                DIM,
+                DistanceFunction::Euclidean,
+                16,
+                128,
+                64,
+                Some(center),
+                false,
+            )
+            .await
+            .unwrap();
+        quantized_index.reserve(128).unwrap();
+        for (i, v) in vectors.iter().enumerate() {
+            quantized_index.add(i as u64, v).unwrap();
+        }
+
+        // Verify top-1 recall is 100% and distance relative error < 2%
+        for (i, v) in vectors.iter().enumerate() {
+            let (keys, distances) = quantized_index.query(v, 8).unwrap();
+            assert_eq!(keys[0], i as u64, "Quantized: top-1 mismatch at {}", i);
+
+            // Check distance relative error for results 2-8 (skip first which is self-match)
+            for (&key, &quantized_dist_sq) in keys.iter().zip(distances.iter()).skip(1) {
+                let true_dist_sq =
+                    f32::sqeuclidean(v, &vectors[key as usize]).unwrap_or(0.0) as f32;
+                let relative_err = (quantized_dist_sq - true_dist_sq).abs() / true_dist_sq;
+                assert!(
+                    relative_err < 0.02,
+                    "Distance relative error {} > 2% for query {} -> key {} (quantized: {}, true: {})",
+                    relative_err,
+                    i,
+                    key,
+                    quantized_dist_sq,
+                    true_dist_sq
+                );
+            }
+        }
     }
 }
