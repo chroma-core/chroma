@@ -54,7 +54,7 @@ import (
 
 // Create Jina embedding function
 ef, err := jina.NewJinaEmbeddingFunction(
-    os.Getenv("JINA_API_KEY"),
+    jina.WithEnvAPIKey(), // uses JINA_API_KEY env var
     jina.WithModel("jina-embeddings-v2-base-en"),
 )
 
@@ -84,9 +84,10 @@ Jina has added new attributes on embedding functions, including `task`, `late_ch
 
 ### Late Chunking Example
 
-jina-embeddings-v3 supports [Late Chunking](https://jina.ai/news/late-chunking-in-long-context-embedding-models/), a technique to leverage the model’s long-context capabilities for generating contextual chunk embeddings. Include `late_chunking=True` in your request to enable contextual chunked representation. When set to true, Jina AI API will concatenate all sentences in the input field and feed them as a single string to the model. Internally, the model embeds this long concatenated string and then performs late chunking, returning a list of embeddings that matches the size of the input list.
+jina-embeddings-v3 supports [Late Chunking](https://jina.ai/news/late-chunking-in-long-context-embedding-models/), a technique to leverage the model's long-context capabilities for generating contextual chunk embeddings. Late chunking is **disabled by default**. Set `late_chunking=True` to enable contextual chunked representation. When enabled, the Jina API concatenates all sentences in the input field and feeds them as a single string to the model. Internally, the model embeds this long concatenated string and then performs late chunking, returning a list of embeddings that matches the size of the input list.
 
-{% tabs group="code-lang" hideTabs=true %}
+{% TabbedCodeBlock %}
+
 {% Tab label="python" %}
 
 ```python
@@ -117,8 +118,48 @@ results = normal_collection.query(
 
 print(results)
 ```
+
 {% /Tab %}
-{% /tabs %}
+
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/jina"
+)
+
+// Create Jina embedding function with late chunking
+ef, err := jina.NewJinaEmbeddingFunction(
+    jina.WithEnvAPIKey(),
+    jina.WithModel("jina-embeddings-v3"),
+    jina.WithTask(jina.TaskTextMatching),
+    jina.WithLateChunking(true),
+)
+
+collection, err := client.CreateCollection(ctx, "late_chunking",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+
+documents := []string{
+    "Berlin is the capital and largest city of Germany.",
+    "The city has a rich history dating back centuries.",
+    "It was founded in the 13th century and has been a significant cultural and political center throughout European history.",
+}
+
+ids := []string{"1", "2", "3"}
+
+collection.Add(ctx, ids, nil, nil, documents, nil)
+
+results, err := collection.Query(ctx,
+    []string{"What is Berlin's population?", "When was Berlin founded?"},
+    1, nil, nil, nil,
+)
+```
+
+{% /Tab %}
+
+{% /TabbedCodeBlock %}
 
 ### Task parameter
 `jina-embeddings-v3` has been trained with 5 task-specific adapters for different embedding uses. Include task in your request to optimize your downstream application:
