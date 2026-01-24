@@ -2498,6 +2498,11 @@ impl SpannIndexWriter {
                 .unwrap_or_else(|arc| (*arc).clone())
                 .into_iter()
             {
+                // Skip empty posting lists
+                if pl_owned.ids.is_empty() {
+                    continue;
+                }
+
                 // Flatten embeddings for SpannPostingList format
                 let flattened_embeddings: Vec<f32> = pl_owned
                     .embeddings
