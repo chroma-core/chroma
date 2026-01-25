@@ -14,10 +14,10 @@
       <img src="https://img.shields.io/badge/License-Apache_2.0-blue.svg" alt="License">
   </a> |
   <a href="https://docs.trychroma.com/" target="_blank">
-      Docs
+      <img src="https://img.shields.io/badge/docs-up-green" alt="Docs">
   </a> |
   <a href="https://www.trychroma.com/" target="_blank">
-      Homepage
+      <img src="https://img.shields.io/badge/Homepage-green.svg" alt="Homepage">
   </a>
 </p>
 
