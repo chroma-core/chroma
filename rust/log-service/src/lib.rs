@@ -140,6 +140,9 @@ pub enum Error {
     PreferredRegionNotInTopology(String),
     #[error("spanner error: {0}")]
     SpannerError(#[from] google_cloud_spanner::client::Error),
+    // NOTE(rescrv):  Intentionally don't print the error here.  Log at initial time.
+    #[error("spanner auth error")]
+    SpannerAuthError(#[from] google_cloud_spanner::admin::google_cloud_auth::error::Error),
 }
 
 impl ChromaError for Error {
@@ -155,6 +158,7 @@ impl ChromaError for Error {
             Error::MissingTopology(_) => chroma_error::ErrorCodes::Internal,
             Error::PreferredRegionNotInTopology(_) => chroma_error::ErrorCodes::InvalidArgument,
             Error::SpannerError(_) => chroma_error::ErrorCodes::Internal,
+            Error::SpannerAuthError(_) => chroma_error::ErrorCodes::Internal,
         }
     }
 }
@@ -3049,24 +3053,28 @@ impl Configurable<LogServerConfig> for LogServer {
                         storage: Storage::try_from_config(&r.storage, registry).await?,
                     })
                 },
-                |t| {
+                |t| async move {
                     let database_path = t.spanner.database_path().clone();
                     let config = match t.spanner {
                         SpannerConfig::Emulator(e) => SpannerClientConfig {
                             environment: Environment::Emulator(e.grpc_endpoint()),
                             ..Default::default()
                         },
-                        SpannerConfig::Gcp(_) => Default::default(),
+                        SpannerConfig::Gcp(_) => SpannerClientConfig::default()
+                            .with_auth()
+                            .await
+                            .map_err(|e| -> Box<dyn ChromaError> {
+                            tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                            Box::new(std::convert::Into::<Error>::into(e)) as _
+                        })?,
                     };
                     let repl = t.repl.clone();
-                    async {
-                        Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
-                            spanner: SpannerClient::new(database_path, config).await.map_err(
-                                |e| -> Box<dyn ChromaError> { Box::new(Error::from(e)) as _ },
-                            )?,
-                            repl,
-                        })
-                    }
+                    Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
+                        spanner: SpannerClient::new(database_path, config).await.map_err(
+                            |e| -> Box<dyn ChromaError> { Box::new(Error::from(e)) as _ },
+                        )?,
+                        repl,
+                    })
                 },
             )
             .await?;
