@@ -79,6 +79,8 @@ message CollectionInfo {
   int64 first_log_offset = 2;
   // The timestamp of the first log entry of the collection that needs to be compacted
   int64 first_log_ts = 3;
+  // The topology the collection ID is associated with.
+  optional string topology_name = 4;
 }
 
 message GetAllCollectionInfoToCompactRequest {

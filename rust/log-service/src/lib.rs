@@ -888,15 +888,16 @@ struct Rollup {
     witness: Option<CursorWitness>,
     cursor: Cursor,
     last_record_witnessed: LogPosition,
-    rollups: HashMap<CollectionUuid, RollupPerCollection>,
+    rollups: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
 }
 
 //////////////////////////////////////////// DirtyMarker ///////////////////////////////////////////
 
 fn coalesce_markers(
+    topology: Option<TopologyName>,
     markers: &[(LogPosition, DirtyMarker)],
-    rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
-    forget: &mut HashSet<CollectionUuid>,
+    rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+    forget: &mut HashSet<(Option<TopologyName>, CollectionUuid)>,
 ) -> Result<(), wal3::Error> {
     for (_, marker) in markers {
         match marker {
@@ -907,13 +908,15 @@ fn coalesce_markers(
                 reinsert_count,
                 initial_insertion_epoch_us,
             } => {
-                let position = rollups.entry(*collection_id).or_insert_with(|| {
-                    RollupPerCollection::new(
-                        LogPosition::from_offset(*log_position),
-                        *num_records,
-                        *initial_insertion_epoch_us,
-                    )
-                });
+                let position = rollups
+                    .entry((topology.clone(), *collection_id))
+                    .or_insert_with(|| {
+                        RollupPerCollection::new(
+                            LogPosition::from_offset(*log_position),
+                            *num_records,
+                            *initial_insertion_epoch_us,
+                        )
+                    });
                 position.observe_dirty_marker(
                     LogPosition::from_offset(*log_position),
                     *num_records,
@@ -922,13 +925,13 @@ fn coalesce_markers(
                 );
             }
             DirtyMarker::Purge { collection_id } => {
-                forget.insert(*collection_id);
+                forget.insert((topology.clone(), *collection_id));
             }
             DirtyMarker::Cleared => {}
         }
     }
-    for collection_id in forget.iter() {
-        rollups.remove(collection_id);
+    for key in forget.iter() {
+        rollups.remove(key);
     }
     Ok(())
 }
@@ -984,8 +987,8 @@ impl wal3::MarkDirty for MarkDirty {
 
 #[derive(Default)]
 struct RollupTransientState {
-    rollups: HashMap<CollectionUuid, RollupPerCollection>,
-    forget: HashSet<CollectionUuid>,
+    rollups: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+    forget: HashSet<(Option<TopologyName>, CollectionUuid)>,
     largest_log_position_read: LogPosition,
 }
 
@@ -995,7 +998,7 @@ pub struct LogServer {
     dirty_log: Option<Arc<dyn LogWriterTrait>>,
     rolling_up: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
-    need_to_compact: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
+    need_to_compact: Mutex<HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>>,
     cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
     storages: MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
@@ -1123,6 +1126,11 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&request.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(TopologyName::new)
+            .transpose()
+            .map_err(|err| Status::invalid_argument(err.to_string()))?;
         tracing::info!(
             "update_collection_log_offset for {collection_id} to {}",
             adjusted_log_offset
@@ -1236,7 +1244,7 @@ impl LogServer {
                 .await;
         }
         let mut need_to_compact = self.need_to_compact.lock();
-        if let Entry::Occupied(mut entry) = need_to_compact.entry(collection_id) {
+        if let Entry::Occupied(mut entry) = need_to_compact.entry((topology_name, collection_id)) {
             let rollup = entry.get_mut();
             rollup.start_log_position = std::cmp::max(
                 rollup.start_log_position,
@@ -1262,7 +1270,7 @@ impl LogServer {
         // Do a non-allocating pass here.
         {
             let need_to_compact = self.need_to_compact.lock();
-            for (collection_id, rollup) in need_to_compact.iter() {
+            for (key, rollup) in need_to_compact.iter() {
                 let time_on_log = SystemTime::now()
                     .duration_since(SystemTime::UNIX_EPOCH)
                     .expect("time never moves to before epoch")
@@ -1279,7 +1287,7 @@ impl LogServer {
                     {
                         needs_purge_dirty += 1;
                     }
-                    selected_rollups.push((*collection_id, *rollup));
+                    selected_rollups.push((key.clone(), *rollup));
                 }
             }
         }
@@ -1295,9 +1303,10 @@ impl LogServer {
             .record(needs_purge_dirty as f64, &[]);
         // Then allocate the collection ID strings outside the lock.
         let mut all_collection_info = Vec::with_capacity(selected_rollups.len());
-        for (collection_id, rollup) in selected_rollups.into_iter() {
+        for ((topology_name, collection_id), rollup) in selected_rollups.into_iter() {
             all_collection_info.push(CollectionInfo {
                 collection_id: collection_id.to_string(),
+                topology_name: topology_name.map(|t| t.to_string()),
                 first_log_offset: rollup.start_log_position.offset() as i64,
                 first_log_ts: rollup.start_log_position.offset() as i64,
             });
@@ -1324,9 +1333,11 @@ impl LogServer {
         let dirty = self.roll_dirty_log_s3();
         let (results, dirty) = tokio::join!(results, dirty);
         let mut backpressure = vec![];
-        let mut rollups: HashMap<CollectionUuid, RollupPerCollection> = HashMap::default();
+        let mut rollups: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection> =
+            HashMap::default();
         let mut process_dirty =
-            |bp: Vec<CollectionUuid>, ru: HashMap<CollectionUuid, RollupPerCollection>| {
+            |bp: Vec<CollectionUuid>,
+             ru: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>| {
                 backpressure.extend(bp);
                 for (k, v) in ru.into_iter() {
                     match rollups.entry(k) {
@@ -1341,14 +1352,14 @@ impl LogServer {
             };
         for dirty in results {
             match dirty {
-                Ok((bp, ru)) => process_dirty(bp, ru),
+                Ok((_, bp, ru)) => process_dirty(bp, ru),
                 Err(err) => {
                     tracing::event!(Level::ERROR, name = "could not roll dirty log for topology", error =? err);
                 }
             }
         }
         match dirty {
-            Ok((bp, ru)) => process_dirty(bp, ru),
+            Ok((_, bp, ru)) => process_dirty(bp, ru),
             Err(err) => {
                 tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
             }
@@ -1365,8 +1376,9 @@ impl LogServer {
         &self,
     ) -> Result<
         (
+            Option<TopologyName>,
             Vec<CollectionUuid>,
-            HashMap<CollectionUuid, RollupPerCollection>,
+            HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
         ),
         Error,
     > {
@@ -1380,7 +1392,7 @@ impl LogServer {
             let mut need_to_compact = self.need_to_compact.lock();
             let mut rollups = HashMap::new();
             std::mem::swap(&mut *need_to_compact, &mut rollups);
-            return Ok((Default::default(), Default::default()));
+            return Ok((None, Default::default(), Default::default()));
         };
         let collections = rollup.rollups.len();
         tracing::event!(
@@ -1399,8 +1411,9 @@ impl LogServer {
         topology: &Topology<TopologicalStorage>,
     ) -> Result<
         (
+            Option<TopologyName>,
             Vec<CollectionUuid>,
-            HashMap<CollectionUuid, RollupPerCollection>,
+            HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
         ),
         Error,
     > {
@@ -1410,7 +1423,11 @@ impl LogServer {
         )
         .await?;
         if dirty_logs.is_empty() {
-            return Ok((Default::default(), Default::default()));
+            return Ok((
+                Some(topology.name.clone()),
+                Default::default(),
+                Default::default(),
+            ));
         }
         let now_us = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
@@ -1427,16 +1444,16 @@ impl LogServer {
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now_us,
             };
-            rollups.insert(collection_id, rollup);
+            rollups.insert((Some(topology.name.clone()), collection_id), rollup);
         }
         let mut backpressure = vec![];
         self.enrich_dirty_log(&mut rollups).await?;
-        for (collection_id, rollup) in rollups.iter() {
+        for ((_, collection_id), rollup) in rollups.iter() {
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
                 backpressure.push(*collection_id);
             }
         }
-        Ok((backpressure, rollups))
+        Ok((Some(topology.name.clone()), backpressure, rollups))
     }
 
     async fn save_dirty_log(
@@ -1445,15 +1462,16 @@ impl LogServer {
         dirty_log: &dyn LogWriterTrait,
     ) -> Result<
         (
+            Option<TopologyName>,
             Vec<CollectionUuid>,
-            HashMap<CollectionUuid, RollupPerCollection>,
+            HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
         ),
         Error,
     > {
         let mut markers = vec![];
         let mut backpressure = vec![];
         let mut total_uncompacted = 0;
-        for (collection_id, rollup) in rollup.rollups.iter() {
+        for ((_, collection_id), rollup) in rollup.rollups.iter() {
             if rollup.is_empty() {
                 continue;
             }
@@ -1503,23 +1521,23 @@ impl LogServer {
             let before = rollup.rollups;
             // Guard against division by zero if reinsert_threshold is misconfigured to 0.
             if self.config.reinsert_threshold > 0 {
-                for (collection_id, after_state) in after.iter() {
-                    let Some(before_state) = before.get(collection_id) else {
+                for (key, after_state) in after.iter() {
+                    let Some(before_state) = before.get(key) else {
                         continue;
                     };
                     if before_state.reinsert_count / self.config.reinsert_threshold
                         != after_state.reinsert_count / self.config.reinsert_threshold
                     {
-                        cache_collections_to_purge.push(collection_id);
+                        cache_collections_to_purge.push(key.1);
                     }
                 }
             }
             for collection_id in cache_collections_to_purge {
-                let cache_key = cache_key_for_cursor(*collection_id, &COMPACTION);
+                let cache_key = cache_key_for_cursor(collection_id, &COMPACTION);
                 cache.remove(&cache_key).await;
             }
         }
-        Ok((backpressure, after))
+        Ok((None, backpressure, after))
     }
 
     /// Read the entirety of a prefix of the dirty log.
@@ -1616,7 +1634,7 @@ impl LogServer {
                 // twice.  Further, we need to track every forget call to remove down below before
                 // we return the rollup.
                 let mut forget = HashSet::default();
-                coalesce_markers(&records, &mut rollup.rollups, &mut forget)?;
+                coalesce_markers(None, &records, &mut rollup.rollups, &mut forget)?;
                 rollup.forget.extend(forget);
                 Ok::<(), Error>(())
             })
@@ -1652,7 +1670,7 @@ impl LogServer {
     #[tracing::instrument(skip(self, rollups), err(Display))]
     async fn enrich_dirty_log(
         &self,
-        rollups: &mut HashMap<CollectionUuid, RollupPerCollection>,
+        rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
     ) -> Result<(), Error> {
         let load_witness = |_this, storage: Arc<Storage>, collection_id: CollectionUuid| async move {
             let cursor = &COMPACTION;
@@ -1702,17 +1720,16 @@ impl LogServer {
                 .storage
                 .clone(),
         );
-        for (collection_id, mut rollup) in std::mem::take(rollups) {
+        for (key, mut rollup) in std::mem::take(rollups) {
             let storage_for_task = Arc::clone(&preferred_storage);
             futures.push(async move {
-                let (witness, manifest) =
-                    match load_witness(self, storage_for_task, collection_id).await {
-                        Ok(witness) => witness,
-                        Err(err) => {
-                            tracing::warn!("could not load cursor: {err}");
-                            return Some((collection_id, rollup));
-                        }
-                    };
+                let (witness, manifest) = match load_witness(self, storage_for_task, key.1).await {
+                    Ok(witness) => witness,
+                    Err(err) => {
+                        tracing::warn!("could not load cursor: {err}");
+                        return Some((key, rollup));
+                    }
+                };
                 // NOTE(rescrv):  There are two spreads that we have.
                 // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
                 // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
@@ -1727,7 +1744,7 @@ impl LogServer {
                     (None, None) => {}
                 };
                 if !rollup.is_empty() {
-                    Some((collection_id, rollup))
+                    Some((key, rollup))
                 } else {
                     None
                 }
@@ -3239,10 +3256,10 @@ mod tests {
         ];
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(1, rollups.len());
-        let rollup = rollups.get(&collection_id).unwrap();
+        let rollup = rollups.get(&(None, collection_id)).unwrap();
         assert_eq!(LogPosition::from_offset(1), rollup.start_log_position);
         assert_eq!(LogPosition::from_offset(3), rollup.limit_log_position);
         assert_eq!(2, rollup.reinsert_count);
@@ -3283,10 +3300,10 @@ mod tests {
         ];
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(2, rollups.len());
-        let rollup_blocking = rollups.get(&collection_id_blocking).unwrap();
+        let rollup_blocking = rollups.get(&(None, collection_id_blocking)).unwrap();
         assert_eq!(
             LogPosition::from_offset(1),
             rollup_blocking.start_log_position
@@ -3297,7 +3314,7 @@ mod tests {
         );
         assert_eq!(0, rollup_blocking.reinsert_count);
         assert_eq!(now, rollup_blocking.initial_insertion_epoch_us);
-        let rollup_acting = rollups.get(&collection_id_acting).unwrap();
+        let rollup_acting = rollups.get(&(None, collection_id_acting)).unwrap();
         assert_eq!(
             LogPosition::from_offset(1),
             rollup_acting.start_log_position
@@ -3425,12 +3442,12 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         // The purge should remove all markers for the collection, even ones that come after
         assert_eq!(1, forget.len());
-        assert!(forget.contains(&collection_id));
-        for collection_id in &forget {
-            rollups.remove(collection_id);
+        assert!(forget.contains(&(None, collection_id)));
+        for key in &forget {
+            rollups.remove(key);
         }
         assert_eq!(0, rollups.len());
     }
@@ -3486,19 +3503,19 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         // collection_id1 should be completely removed due to purge
         // collection_id2 should remain
         assert_eq!(1, forget.len());
-        assert!(forget.contains(&collection_id1));
-        for collection_id in &forget {
-            rollups.remove(collection_id);
+        assert!(forget.contains(&(None, collection_id1)));
+        for key in &forget {
+            rollups.remove(key);
         }
         assert_eq!(1, rollups.len());
-        assert!(rollups.contains_key(&collection_id2));
-        assert!(!rollups.contains_key(&collection_id1));
+        assert!(rollups.contains_key(&(None, collection_id2)));
+        assert!(!rollups.contains_key(&(None, collection_id1)));
 
-        let rollup2 = rollups.get(&collection_id2).unwrap();
+        let rollup2 = rollups.get(&(None, collection_id2)).unwrap();
         assert_eq!(LogPosition::from_offset(10), rollup2.start_log_position);
         assert_eq!(LogPosition::from_offset(15), rollup2.limit_log_position);
     }
@@ -3667,7 +3684,7 @@ mod tests {
     fn dirty_marker_coalesce_empty_markers() {
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&[], &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &[], &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert!(rollups.is_empty());
     }
@@ -3716,19 +3733,19 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(2, rollups.len());
 
         // Check collection_id1 rollup
-        let rollup1 = rollups.get(&collection_id1).unwrap();
+        let rollup1 = rollups.get(&(None, collection_id1)).unwrap();
         assert_eq!(LogPosition::from_offset(10), rollup1.start_log_position);
         assert_eq!(LogPosition::from_offset(33), rollup1.limit_log_position);
         assert_eq!(1, rollup1.reinsert_count); // max of 1 and 0
         assert_eq!(now - 1000, rollup1.initial_insertion_epoch_us); // max of now and now-1000
 
         // Check collection_id2 rollup
-        let rollup2 = rollups.get(&collection_id2).unwrap();
+        let rollup2 = rollups.get(&(None, collection_id2)).unwrap();
         assert_eq!(LogPosition::from_offset(20), rollup2.start_log_position);
         assert_eq!(LogPosition::from_offset(30), rollup2.limit_log_position);
         assert_eq!(2, rollup2.reinsert_count);
@@ -3798,9 +3815,9 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
-        let collection_rollup = rollups.get(&collection_id).unwrap();
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
         assert_eq!(
             LogPosition::from_offset(u64::MAX - 1),
             collection_rollup.start_log_position
@@ -3832,9 +3849,9 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
-        let collection_rollup = rollups.get(&collection_id).unwrap();
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
         assert_eq!(
             LogPosition::from_offset(10),
             collection_rollup.start_log_position
@@ -3879,9 +3896,9 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
-        let collection_rollup = rollups.get(&collection_id).unwrap();
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
         assert_eq!(u64::MAX, collection_rollup.reinsert_count);
     }
 
@@ -4019,11 +4036,11 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert_eq!(1, forget.len());
-        assert!(forget.contains(&collection_id));
-        for collection_id in &forget {
-            rollups.remove(collection_id);
+        assert!(forget.contains(&(None, collection_id)));
+        for key in &forget {
+            rollups.remove(key);
         }
         assert_eq!(0, rollups.len());
     }
@@ -4099,10 +4116,10 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert!(forget.is_empty());
         assert_eq!(1, rollups.len());
-        let collection_rollup = rollups.get(&collection_id).unwrap();
+        let collection_rollup = rollups.get(&(None, collection_id)).unwrap();
         assert_eq!(
             LogPosition::from_offset(0),
             collection_rollup.start_log_position
@@ -4166,11 +4183,11 @@ mod tests {
 
         let mut rollups = HashMap::new();
         let mut forget = HashSet::new();
-        coalesce_markers(&markers, &mut rollups, &mut forget).unwrap();
+        coalesce_markers(None, &markers, &mut rollups, &mut forget).unwrap();
         assert_eq!(1, forget.len());
-        assert!(forget.contains(&collection_id));
-        for collection_id in &forget {
-            rollups.remove(collection_id);
+        assert!(forget.contains(&(None, collection_id)));
+        for key in &forget {
+            rollups.remove(key);
         }
         assert_eq!(0, rollups.len());
     }
@@ -5538,13 +5555,13 @@ mod tests {
             let mut need_to_compact = log_server.need_to_compact.lock();
             let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, now);
             rollup.reinsert_count = 42;
-            need_to_compact.insert(collection_id, rollup);
+            need_to_compact.insert((None, collection_id), rollup);
         }
 
         // Verify reinsert_count is non-zero before the call
         {
             let need_to_compact = log_server.need_to_compact.lock();
-            let rollup = need_to_compact.get(&collection_id).unwrap();
+            let rollup = need_to_compact.get(&(None, collection_id)).unwrap();
             assert_eq!(
                 42, rollup.reinsert_count,
                 "reinsert_count should be 42 before update"
@@ -5571,7 +5588,7 @@ mod tests {
         // Verify reinsert_count was reset to 0
         {
             let need_to_compact = log_server.need_to_compact.lock();
-            let rollup = need_to_compact.get(&collection_id).unwrap();
+            let rollup = need_to_compact.get(&(None, collection_id)).unwrap();
             assert_eq!(
                 0, rollup.reinsert_count,
                 "reinsert_count should be reset to 0 after update"

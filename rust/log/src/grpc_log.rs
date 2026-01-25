@@ -706,6 +706,7 @@ mod tests {
         let response1 = GetAllCollectionInfoToCompactResponse {
             all_collection_info: vec![ProtoCollectionInfo {
                 collection_id: collection_id.to_string(),
+                topology_name: None,
                 first_log_offset: 100,
                 first_log_ts: 1000,
             }],
@@ -714,6 +715,7 @@ mod tests {
         let response2 = GetAllCollectionInfoToCompactResponse {
             all_collection_info: vec![ProtoCollectionInfo {
                 collection_id: collection_id.to_string(),
+                topology_name: None,
                 first_log_offset: 50,
                 first_log_ts: 2000,
             }],
