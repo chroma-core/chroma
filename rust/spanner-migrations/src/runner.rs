@@ -195,7 +195,7 @@ impl MigrationRunner {
 
     async fn execute_migration_statement(&self, sql: &str) -> Result<(), MigrationError> {
         let sql = sql.trim().trim_end_matches(';');
-        if let Some(dml) = sql.strip_prefix("DML:") {
+        if let Some(dml) = sql.strip_prefix("-- DML:") {
             self.execute_dml(dml).await?;
         } else {
             tracing::info!("Executing DDL: {}", sql);
