@@ -423,6 +423,9 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
             )
             k = count
 
+        if k == 0:
+            return [[] for _ in range(len(query["vectors"]))]
+
         # Overquery by updated and deleted elements layered on the index because they may
         # hide the real nearest neighbors in the hnsw index
         hnsw_k = k + self._curr_batch.update_count + self._curr_batch.delete_count
@@ -445,7 +448,10 @@ class PersistentLocalHnswSegment(LocalHnswSegment):
         self._brute_force_index = cast(BruteForceIndex, self._brute_force_index)
         with ReadRWLock(self._lock):
             bf_results = self._brute_force_index.query(query)
-            hnsw_results = super().query_vectors(hnsw_query)
+            if hnsw_k == 0 or self._index is None:
+                hnsw_results = [[] for _ in range(len(query["vectors"]))]
+            else:
+                hnsw_results = super().query_vectors(hnsw_query)
             for i in range(len(query["vectors"])):
                 # Merge results into a single list of size k
                 bf_pointer: int = 0

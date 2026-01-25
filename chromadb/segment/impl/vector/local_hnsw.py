@@ -153,6 +153,9 @@ class LocalHnswSegment(VectorReader):
             if len(labels) < k:
                 k = len(labels)
 
+        if k == 0:
+            return [[] for _ in range(len(query["vectors"]))]
+
         def filter_function(label: int) -> bool:
             return label in labels
 
