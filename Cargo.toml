@@ -1,7 +1,7 @@
 [workspace]
 resolver = "2"
 
-members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb", "rust/spanner-migrations"]
+members = ["rust/benchmark", "rust/blockstore", "rust/cache", "rust/chroma", "rust/config", "rust/config-validator", "rust/distance", "rust/error", "rust/frontend", "rust/garbage_collector", "rust/index", "rust/load", "rust/log", "rust/log-service", "rust/memberlist", "rust/metering-macros", "rust/metering", "rust/storage", "rust/system", "rust/sysdb", "rust/types", "rust/worker", "rust/segment", "rust/python_bindings", "rust/mdac", "rust/tracing", "rust/sqlite", "rust/cli", "rust/wal3", "rust/js_bindings", "rust/jemalloc-pprof-server", "rust/s3heap", "rust/s3heap-service", "rust/api-types", "rust/rust-sysdb", "rust/spanner-migrations"]
 
 [workspace.dependencies]
 anyhow = "1.0"
@@ -86,11 +86,13 @@ chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
+chroma-config-validate = { path = "rust/config-validate" }
 chroma-distance = { path = "rust/distance" }
 chroma-error = { path = "rust/error", version = "0.12.0" }
 chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
+chroma-log-service = { path = "rust/log-service" }
 chroma-memberlist = { path = "rust/memberlist" }
 chroma-metering-macros = { path = "rust/metering-macros" }
 chroma-metering = { path = "rust/metering" }

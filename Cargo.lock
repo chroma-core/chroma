@@ -1668,6 +1668,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "chroma-config-validator"
+version = "0.1.0"
+dependencies = [
+ "chroma-config",
+ "chroma-frontend",
+ "chroma-log-service",
+ "figment",
+ "serde",
+ "worker",
+]
+
+[[package]]
 name = "chroma-distance"
 version = "0.1.0"
 dependencies = [

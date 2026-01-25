@@ -1,0 +1,13 @@
+[package]
+name = "chroma-config-validator"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { workspace = true }
+
+figment = { workspace = true }
+chroma-log-service = { workspace = true }
+chroma-config = { workspace = true }
+chroma-frontend = { workspace = true }
+worker = { workspace = true }
