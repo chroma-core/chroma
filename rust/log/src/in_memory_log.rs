@@ -128,6 +128,7 @@ impl InMemoryLog {
             logs.sort_by(|a, b| a.log_offset.cmp(&b.log_offset));
             collections.push(CollectionInfo {
                 collection_id: *collection_id,
+                topology_name: None,
                 first_log_offset: logs[0].log_offset,
                 first_log_ts: logs[0].log_ts,
             });

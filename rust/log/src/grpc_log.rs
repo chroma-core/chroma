@@ -519,20 +519,33 @@ impl GrpcLog {
                     }
                 };
                 let collection_id = CollectionUuid(collection_uuid);
+                let topology_name = match &collection.topology_name {
+                    Some(name) => match chroma_types::TopologyName::new(name) {
+                        Ok(t) => Some(t),
+                        Err(_) => {
+                            tracing::error!("Failed to parse topology name: {}", name);
+                            continue;
+                        }
+                    },
+                    None => None,
+                };
                 all_collections.push(CollectionInfo {
                     collection_id,
+                    topology_name,
                     first_log_offset: collection.first_log_offset,
                     first_log_ts: collection.first_log_ts,
                 });
             }
         }
 
-        // NOTE(rescrv):  What we want is to return each collection once.  If there are two of the
-        // same collection, assume that the older offset is correct.  In the event that a writer
-        // migrates from one server to another the dirty log entries will be fractured between two
-        // servers.  To not panic the compactor, we sort by (collection_id, offset) and then dedup.
-        all_collections.sort_by_key(|x| (x.collection_id, x.first_log_offset));
-        all_collections.dedup_by_key(|x| x.collection_id);
+        // NOTE(rescrv):  What we want is to return each (topology, collection) pair once.  If
+        // there are two of the same pair, assume that the older offset is correct.  In the event
+        // that a writer migrates from one server to another the dirty log entries will be
+        // fractured between two servers.  To not panic the compactor, we sort by
+        // (topology_name, collection_id, offset) and then dedup on (topology_name, collection_id).
+        all_collections
+            .sort_by_key(|x| (x.topology_name.clone(), x.collection_id, x.first_log_offset));
+        all_collections.dedup_by_key(|x| (x.topology_name.clone(), x.collection_id));
         Ok(all_collections)
     }
 
@@ -727,5 +740,93 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].first_log_offset, 50);
         assert_eq!(result[0].collection_id.to_string(), collection_id);
+    }
+
+    #[test]
+    fn post_process_get_all_preserves_different_topologies_for_same_collection() {
+        let collection_id = "12345678-1234-1234-1234-123456789abc";
+
+        // Same collection UUID but different topologies should be preserved as separate entries.
+        let response = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![
+                ProtoCollectionInfo {
+                    collection_id: collection_id.to_string(),
+                    topology_name: Some("topology1".to_string()),
+                    first_log_offset: 100,
+                    first_log_ts: 1000,
+                },
+                ProtoCollectionInfo {
+                    collection_id: collection_id.to_string(),
+                    topology_name: Some("topology2".to_string()),
+                    first_log_offset: 200,
+                    first_log_ts: 2000,
+                },
+                ProtoCollectionInfo {
+                    collection_id: collection_id.to_string(),
+                    topology_name: None,
+                    first_log_offset: 300,
+                    first_log_ts: 3000,
+                },
+            ],
+        };
+
+        let result = GrpcLog::post_process_get_all(vec![response]).unwrap();
+
+        // All three entries should be preserved because they have different topology_name values.
+        assert_eq!(
+            result.len(),
+            3,
+            "Expected 3 entries for same collection with different topologies, got {}",
+            result.len()
+        );
+
+        // Verify each topology is present.
+        let has_topology1 = result
+            .iter()
+            .any(|c| c.topology_name.as_ref().map(|t| t.to_string()) == Some("topology1".into()));
+        let has_topology2 = result
+            .iter()
+            .any(|c| c.topology_name.as_ref().map(|t| t.to_string()) == Some("topology2".into()));
+        let has_none = result.iter().any(|c| c.topology_name.is_none());
+
+        assert!(has_topology1, "Missing topology1 entry");
+        assert!(has_topology2, "Missing topology2 entry");
+        assert!(has_none, "Missing None topology entry");
+    }
+
+    #[test]
+    fn post_process_get_all_dedups_same_topology_and_collection() {
+        let collection_id = "12345678-1234-1234-1234-123456789abc";
+
+        // Same collection UUID and same topology should be deduped, keeping smaller offset.
+        let response1 = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![ProtoCollectionInfo {
+                collection_id: collection_id.to_string(),
+                topology_name: Some("topology1".to_string()),
+                first_log_offset: 100,
+                first_log_ts: 1000,
+            }],
+        };
+
+        let response2 = GetAllCollectionInfoToCompactResponse {
+            all_collection_info: vec![ProtoCollectionInfo {
+                collection_id: collection_id.to_string(),
+                topology_name: Some("topology1".to_string()),
+                first_log_offset: 50,
+                first_log_ts: 2000,
+            }],
+        };
+
+        let result = GrpcLog::post_process_get_all(vec![response1, response2]).unwrap();
+
+        assert_eq!(result.len(), 1, "Expected deduplication to 1 entry");
+        assert_eq!(
+            result[0].first_log_offset, 50,
+            "Expected smaller offset to be kept"
+        );
+        assert_eq!(
+            result[0].topology_name.as_ref().map(|t| t.to_string()),
+            Some("topology1".into())
+        );
     }
 }
