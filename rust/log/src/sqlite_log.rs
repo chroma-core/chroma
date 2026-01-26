@@ -429,6 +429,7 @@ impl SqliteLog {
         while let Some(row) = results.try_next().await.map_err(WrappedSqlxError)? {
             infos.push(CollectionInfo {
                 collection_id: CollectionUuid::from_str(row.get::<&str, _>("collection_id"))?,
+                topology_name: None,
                 first_log_offset: row.get("first_log_offset"),
                 first_log_ts: row.get("first_log_ts"),
             });
