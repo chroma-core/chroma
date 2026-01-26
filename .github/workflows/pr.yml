@@ -206,6 +206,13 @@ jobs:
     uses: ./.github/workflows/_go-tests.yml
     secrets: inherit
 
+  check-spanner-migrations:
+    name: Check Spanner migrations
+    needs: change-detection
+    if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
+    uses: ./.github/workflows/_check_spanner_migrations.yml
+    secrets: inherit
+
   lint:
     name: Lint
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -256,6 +263,7 @@ jobs:
     - rust-tests
     - rust-feature-tests
     - go-tests
+    - check-spanner-migrations
     - lint
     - check-helm-version-bump
     - delete-helm-comment
@@ -265,7 +273,7 @@ jobs:
       uses: re-actors/alls-green@release/v1
       with:
         jobs: ${{ toJSON(needs) }}
-        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-helm-version-bump,delete-helm-comment
+        allowed-skips: python-tests,python-vulnerability-scan,javascript-client-tests,rust-tests,rust-feature-tests,go-tests,check-spanner-migrations,check-helm-version-bump,delete-helm-comment
 
   notify-slack-on-failure:
     name: Notify Slack on Test Failure
@@ -277,6 +285,7 @@ jobs:
     - rust-tests
     - rust-feature-tests
     - go-tests
+    - check-spanner-migrations
     - lint
     - check-helm-version-bump
     - delete-helm-comment
