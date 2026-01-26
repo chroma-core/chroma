@@ -257,6 +257,9 @@ func extractSpecificFile(tarGzPath, targetFile, destPath string) error {
 			return nil // Successfully extracted the file
 		}
 		if targetFile == "" {
+			if header.Typeflag == tar.TypeDir {
+				continue
+			}
 			outPath, err := safePath(destPath, header.Name)
 			if err != nil {
 				return err
