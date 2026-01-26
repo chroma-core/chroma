@@ -1,6 +1,6 @@
 # Embedding Function Usage Example
 
-This example demonstrates who to use embedding functions.
+This example demonstrates how to use embedding functions.
 
 ## Running
 
