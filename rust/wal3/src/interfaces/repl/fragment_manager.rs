@@ -65,7 +65,7 @@ impl Default for ReplicatedFragmentOptions {
     fn default() -> Self {
         Self {
             minimum_allowed_replication_factor: 1,
-            minimum_failures_to_exclude_replica: 1,
+            minimum_failures_to_exclude_replica: 1000,
             decimation_interval_secs: 30,
             slow_writer_tolerance_secs: 15,
         }
