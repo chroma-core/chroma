@@ -363,7 +363,11 @@ impl FragmentReader {
 impl FragmentConsumer for FragmentReader {
     async fn read_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
         let mut err: Option<Error> = None;
-        for storage in self.storages.iter() {
+        // Try the preferred storage first, then fall back to others.
+        let indices = std::iter::once(self.preferred)
+            .chain((0..self.storages.len()).filter(|&i| i != self.preferred));
+        for i in indices {
+            let storage = &self.storages[i];
             match crate::interfaces::s3::read_bytes(&storage.storage, &storage.prefix, path).await {
                 Ok(Some(parquet)) => return Ok(parquet),
                 Ok(None) => {
@@ -403,7 +407,11 @@ impl FragmentConsumer for FragmentReader {
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error> {
         let mut err: Option<Error> = None;
-        for storage in self.storages.iter() {
+        // Try the preferred storage first, then fall back to others.
+        let indices = std::iter::once(self.preferred)
+            .chain((0..self.storages.len()).filter(|&i| i != self.preferred));
+        for i in indices {
+            let storage = &self.storages[i];
             match read_fragment_uuid(
                 &storage.storage,
                 &storage.prefix,
@@ -1724,5 +1732,105 @@ mod tests {
             "replicated_uploader_single_empty_message: result={:?}",
             result
         );
+    }
+
+    // ==================== FragmentReader tests ====================
+
+    use super::FragmentReader;
+    use crate::interfaces::FragmentConsumer;
+
+    /// Verifies that FragmentReader tries the preferred storage first by uploading different
+    /// data to each storage and checking which data is returned.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_fragment_reader_preferred_storage_tried_first() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        // Write different data to each storage at the same path.
+        let test_path = "test-fragment.parquet";
+        let data_storage1 = b"data from storage1 (non-preferred)";
+        let data_storage2 = b"data from storage2 (preferred)";
+
+        storage1
+            .put_bytes(
+                &format!("prefix1/{}", test_path),
+                data_storage1.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage1 should succeed");
+
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                data_storage2.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        // Create FragmentReader with preferred=1 (storage2).
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let reader = FragmentReader::new(1, storages);
+
+        // read_bytes should return data from the preferred storage (storage2).
+        let result = reader.read_bytes(test_path).await;
+        assert!(
+            result.is_ok(),
+            "read_bytes should succeed: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            result.unwrap().as_slice(),
+            data_storage2,
+            "data should come from preferred storage (storage2), not storage1"
+        );
+
+        println!("fragment_reader_preferred_storage_tried_first: passed");
+    }
+
+    /// Verifies that FragmentReader falls back to non-preferred storages when the preferred one
+    /// does not have the data.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_fragment_reader_fallback_to_non_preferred() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        // Upload data only to storage1 (index 0).
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2, "prefix2");
+
+        let test_path = "test-fragment-fallback.parquet";
+        let test_data = b"test data for fallback";
+        storage1
+            .put_bytes(
+                &format!("prefix1/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage1 should succeed");
+
+        // Create FragmentReader with preferred=1 (storage2, which has no data).
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let reader = FragmentReader::new(1, storages);
+
+        // read_bytes should succeed because it falls back to storage1 after preferred fails.
+        let result = reader.read_bytes(test_path).await;
+        assert!(
+            result.is_ok(),
+            "read_bytes should succeed via fallback: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            result.unwrap().as_slice(),
+            test_data,
+            "data should match what was uploaded"
+        );
+
+        println!("fragment_reader_fallback_to_non_preferred: passed");
     }
 }
