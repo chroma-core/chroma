@@ -619,7 +619,7 @@ func (client *APIClientV2) Satisfies(resourceOperation ResourceOperation, metric
 		return nil
 	}
 
-	if limit <= metricVal {
+	if limit < metricVal {
 		return errors.Errorf("%s count limit exceeded for %s %s. Expected less than or equal %v but got %v", metricName, string(resourceOperation.Resource()), string(resourceOperation.Operation()), limit, metricVal)
 	}
 
