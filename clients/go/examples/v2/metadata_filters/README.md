@@ -1,6 +1,6 @@
 # Metadata filtering example
 
-This example demonstrate how to use metadata filters to query Chroma collections.
+This example demonstrates how to use metadata filters to query Chroma collections.
 
 ```go
 package main
