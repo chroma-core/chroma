@@ -66,15 +66,19 @@ impl DispatcherConfig {
     }
 
     fn default_dispatcher_queue_size() -> usize {
-        // The dispatcher component's channel shouldn't need to hold a large
-        // amount of messages, because it immediately takes the incoming task
-        // messages and either enqueues them onto its internal task queue or
-        // sends them directly to a worker thread's channel.
+        // The dispatcher component's channel takes the incoming task messages
+        // and either enqueues them onto its internal task queue or sends them
+        // directly to a worker thread's channel. It needs to handle large
+        // bursts of task messages that are enqueued by the orchestrator for
+        // database queries. We would prefer to hit the task_queue_limit before
+        // hitting this limit, because the dispatcher maintains more control
+        // over the load shedding behavior of its internal task queue.
         //
-        // Therefore, we set this value to a constant default, to be able to
-        // handle a burst of task messages that are enqueued before the
-        // dispatcher's tokio task is able to process them.
-        1000
+        // Therefore, we set this value to a magnitude larger than the
+        // task_queue_limit, to be able to handle bursts of task messages that
+        // are enqueued before the dispatcher's tokio task is able to process
+        // them.
+        10 * DispatcherConfig::default_task_queue_limit()
     }
 
     fn default_worker_queue_size() -> usize {
