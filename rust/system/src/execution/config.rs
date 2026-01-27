@@ -74,7 +74,7 @@ impl DispatcherConfig {
         // Within the dispatcher, each worker component will only receive one
         // task message at a time and will process each task sequentially.
         // Therefore, we set this value to a constant, minimal default value.
-        10
+        100
     }
 
     fn default_active_io_tasks() -> usize {
