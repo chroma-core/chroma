@@ -43,6 +43,7 @@ serde = { version = "1.0.215", features = ["derive", "rc"] }
 serde_json = "1.0.133"
 serde_yml = "0.0.12"
 setsum = "0.7"
+simsimd = "6.5"
 sprs = "0.11"
 tantivy = "0.22.0"
 thiserror = "1.0.69"
@@ -64,7 +65,7 @@ md5 = "0.7.0"
 pyo3 = { version = "0.24.1", features = ["abi3-py39"] }
 http = "1.1.0"
 tower-http = { version = "0.6.2", features = ["trace", "cors"] }
-bytemuck = "1.21.0"
+bytemuck = { version = "1.21.0", features = ["derive"] }
 rayon = "1.10.0"
 validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
@@ -75,6 +76,7 @@ ndarray = { version = "0.16.1", features = ["approx"] }
 humantime = { version = "2.2.0" }
 petgraph = { version = "0.8.1" }
 base64 = "0.22"
+bitpacking = "0.9"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
 google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner" }
 google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }

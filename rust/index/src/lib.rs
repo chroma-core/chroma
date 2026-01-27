@@ -3,6 +3,7 @@ pub mod fulltext;
 mod hnsw;
 pub mod hnsw_provider;
 pub mod metadata;
+pub mod quantization;
 pub mod spann;
 pub mod sparse;
 mod types;
