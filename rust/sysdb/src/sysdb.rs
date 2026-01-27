@@ -1,6 +1,6 @@
 use super::test_sysdb::TestSysDb;
 use crate::sqlite::SqliteSysDb;
-use crate::{GetCollectionsOptions, GrpcSysDbConfig};
+use crate::{DatabaseOrTopology, GetCollectionsOptions, GrpcSysDbConfig};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
@@ -252,7 +252,7 @@ impl SysDb {
             SysDb::Sqlite(sqlite) => Ok(sqlite
                 .get_collections(GetCollectionsOptions {
                     tenant: Some(tenant),
-                    database,
+                    database_or_topology: database.map(DatabaseOrTopology::Database),
                     ..Default::default()
                 })
                 .await
@@ -261,7 +261,7 @@ impl SysDb {
             SysDb::Test(test) => Ok(test
                 .get_collections(GetCollectionsOptions {
                     tenant: Some(tenant),
-                    database,
+                    database_or_topology: database.map(DatabaseOrTopology::Database),
                     ..Default::default()
                 })
                 .await
@@ -905,6 +905,21 @@ impl GrpcSysDb {
         Ok(self.client.clone())
     }
 
+    fn client_from_topology(
+        &self,
+        _topology_name: &TopologyName,
+    ) -> Result<
+        SysDbClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>,
+        ClientResolutionError,
+    > {
+        // Route to MCMR client for valid topology names
+        if let Some(mcmr_client) = &self._mcmr_client {
+            Ok(mcmr_client.clone())
+        } else {
+            Err(ClientResolutionError::McmrNotSupported)
+        }
+    }
+
     pub async fn create_tenant(
         &mut self,
         tenant_name: String,
@@ -1092,21 +1107,34 @@ impl GrpcSysDb {
             include_soft_deleted,
             name,
             tenant,
-            database,
+            database_or_topology,
             limit,
             offset,
         } = options;
 
         // Route to MCMR client if database has a valid topology
-        let mut client = if let Some(ref db) = database {
-            self.client(db)
-                .map_err(|e| GetCollectionsError::Internal(Box::new(e)))?
+        let mut client = if let Some(ref db_or_topo) = database_or_topology {
+            match db_or_topo {
+                DatabaseOrTopology::Database(db) => self
+                    .client(db)
+                    .map_err(|e| GetCollectionsError::Internal(Box::new(e)))?,
+                DatabaseOrTopology::Topology(topo) => self
+                    .client_from_topology(topo)
+                    .map_err(|e| GetCollectionsError::Internal(Box::new(e)))?,
+            }
         } else {
             self.client.clone()
         };
 
         // TODO: move off of status into our own error type
         let collection_id_str = collection_id.map(|id| String::from(id.0));
+
+        let (database, topology_name) = match database_or_topology {
+            Some(DatabaseOrTopology::Database(db)) => (Some(db.into_string()), None),
+            Some(DatabaseOrTopology::Topology(topo)) => (None, Some(topo.to_string())),
+            None => (None, None),
+        };
+
         let res = client
             .get_collections(chroma_proto::GetCollectionsRequest {
                 id: collection_id_str,
@@ -1119,7 +1147,8 @@ impl GrpcSysDb {
                 limit: limit.map(|l| l as i32),
                 offset: Some(offset as i32),
                 tenant: tenant.unwrap_or("".to_string()),
-                database: database.map(|d| d.into_string()).unwrap_or("".to_string()),
+                database: database.unwrap_or_else(|| "".to_string()),
+                topology_name,
             })
             .await;
 

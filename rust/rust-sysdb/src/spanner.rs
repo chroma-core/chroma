@@ -764,7 +764,7 @@ impl SpannerBackend {
             where_clauses.push("c.tenant_id = @tenant_id".to_string());
         }
 
-        // Filter by database_name
+        // Filter by database_name only
         if filter.database_name.is_some() {
             where_clauses.push("c.database_name = @database_name".to_string());
         }

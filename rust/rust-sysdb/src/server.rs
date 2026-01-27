@@ -1397,4 +1397,76 @@ mod tests {
         assert!(eu_version_file_path_final.contains(&format!("/{:06}", eu_version_final)));
         assert!(eu_version_file_path_final.contains("_flush"));
     }
+
+    #[tokio::test]
+    async fn test_topology_name_routing_priority() {
+        use crate::backend::{Backend, BackendFactory};
+        use crate::types::{CollectionFilter, GetCollectionsRequest};
+        use chroma_types::{DatabaseName, TopologyName};
+        use std::collections::HashMap;
+
+        // Create a mock backend for testing
+        let Some(mock_backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Create BackendFactory with topology mapping
+        let mut topology_to_backend = HashMap::new();
+        topology_to_backend.insert(TopologyName::new("us-east").unwrap(), mock_backend.clone());
+        topology_to_backend.insert(TopologyName::new("us-west").unwrap(), mock_backend.clone());
+        let factory = BackendFactory::new(topology_to_backend);
+
+        // Test 1: Explicit topology_name takes priority over database-derived topology
+        let request_with_explicit_topology = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .database_name(DatabaseName::new("us-west+mydb").unwrap())
+                .topology_name("us-east"), // Explicit topology should win
+        };
+
+        let backend = request_with_explicit_topology.assign(&factory);
+        // Should route to us-east (explicit topology), not us-west (from database)
+        assert!(
+            matches!(backend, Backend::Spanner(_)),
+            "Should route to Spanner backend"
+        );
+
+        // Test 2: Database with topology prefix (no explicit topology)
+        let request_with_database_topology = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .database_name(DatabaseName::new("us-west+mydb").unwrap()),
+            // No explicit topology_name
+        };
+
+        let backend = request_with_database_topology.assign(&factory);
+        // Should route based on database-derived topology
+        assert!(
+            matches!(backend, Backend::Spanner(_)),
+            "Should route to Spanner backend"
+        );
+
+        // Test 3: Database without topology prefix (no explicit topology)
+        let request_with_plain_database = GetCollectionsRequest {
+            filter: CollectionFilter::default().database_name(DatabaseName::new("mydb").unwrap()),
+            // No topology_name and no topology in database
+        };
+
+        let backend = request_with_plain_database.assign(&factory);
+        // Should route to default Spanner backend
+        assert!(
+            matches!(backend, Backend::Spanner(_)),
+            "Should route to default Spanner backend"
+        );
+
+        // Test 4: No database or topology (fallback to default)
+        let request_no_filter = GetCollectionsRequest {
+            filter: CollectionFilter::default(),
+        };
+
+        let backend = request_no_filter.assign(&factory);
+        // Should route to default Spanner backend
+        assert!(
+            matches!(backend, Backend::Spanner(_)),
+            "Should route to default Spanner backend"
+        );
+    }
 }

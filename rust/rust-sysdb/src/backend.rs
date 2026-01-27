@@ -162,13 +162,17 @@ impl BackendFactory {
     pub fn backend_from_database_name(&self, db_name: &chroma_types::DatabaseName) -> Backend {
         if let Some(topo_str) = db_name.topology() {
             if let Ok(topology) = TopologyName::new(topo_str) {
-                return Backend::Spanner(self.spanner(&topology).clone());
+                return self.backend_from_topo_name(&topology);
             }
         }
         // Fall back to default backend if no topology or invalid topology
         // TODO(Sanket): Should fall back to Aurora here.
         tracing::warn!("No topology found in database name, falling back to default backend");
         Backend::Spanner(self.one_spanner().clone())
+    }
+
+    pub fn backend_from_topo_name(&self, topo_name: &TopologyName) -> Backend {
+        Backend::Spanner(self.spanner(topo_name).clone())
     }
 }
 
