@@ -2849,6 +2849,7 @@ impl<'me> SpannIndexReader<'me> {
         let res = self
             .posting_lists
             .get("", head_id)
+            .instrument(tracing::info_span!(parent: Span::current(), "fetch_posting_list"))
             .await
             .map_err(|e| {
                 tracing::error!("Error getting posting list for head {}: {}", head_id, e);
@@ -2872,6 +2873,7 @@ impl<'me> SpannIndexReader<'me> {
                     SpannIndexReaderError::VersionsMapReadError(e)
                 })
             }))
+            .instrument(tracing::info_span!(parent: Span::current(), "fetch_posting_list_versions"))
             .await?
             .into_iter()
             .collect::<Option<Vec<u32>>>()
