@@ -2032,7 +2032,7 @@ Each database contains multiple collections, and each collection name must be un
 At the top level of the model is the **tenant**, which represents a single user, team, or account. Tenants provide complete isolation. No data or metadata, is shared across tenants. All access control, quota enforcement, and billing are scoped to the tenant level.
 # Getting Started
 
-Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
+Chroma is an open-source search engine for AI. It comes with everything you need to get started built-in, and runs on your machine.
 
 For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
 
@@ -6430,7 +6430,7 @@ The Model Context Protocol (MCP) is an open protocol that standardizes how AI ap
 MCP follows a client-server architecture:
 - **MCP Hosts**: Applications like Claude Desktop that want to access data through MCP
 - **MCP Clients**: Protocol clients that maintain connections with servers
-- **MCP Servers**: Lightweight programs that expose specific capabilities (like Chroma's vector database)
+- **MCP Servers**: Lightweight programs that expose specific capabilities (like Chroma)
 - **Data Sources**: Your local or remote data that MCP servers can securely access
 
 ## What is the Chroma MCP Server?
@@ -7350,7 +7350,7 @@ Your agents are now running! To interact with them:
 4. **Start Chatting:** On the agent detail page, click the chat icon in the bottom right corner to open the chat window.
 5. **Test RAG Capabilities:** Try questions like:
    - "What is VoltAgent?"
-   - "Tell me about vector databases"
+   - "Tell me about search engines"
    - "How does TypeScript help with development?"
 
 ![VoltAgent with Chroma Demo](https://cdn.voltagent.dev/docs/chroma-rag-example.gif)
@@ -7645,7 +7645,7 @@ if (references) {
 Or when using `streamText`:
 
 ```typescript
-const result = await agent.streamText("Tell me about vector databases");
+const result = await agent.streamText("Tell me about search engines");
 
 for await (const textPart of result.textStream) {
   process.stdout.write(textPart);
