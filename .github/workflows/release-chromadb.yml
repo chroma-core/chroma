@@ -145,6 +145,40 @@ jobs:
           password: ${{ secrets.PYPI_PYTHON_CLIENT_PUBLISH_KEY }}
           verbose: 'true'
 
+  release-ruby-gem:
+    name: Publish Ruby gem
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - check-tag
+      - python-tests-linux
+      - python-tests-windows
+      - javascript-client-tests
+      - rust-tests
+      - go-tests
+    if: ${{ needs.check-tag.outputs.tag_matches == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.2"
+      - name: Configure RubyGems credentials
+        run: |
+          mkdir -p ~/.gem
+          cat <<'EOF' > ~/.gem/credentials
+          :rubygems_api_key: ${{ secrets.RUBYGEMS_API_KEY }}
+          EOF
+          chmod 0600 ~/.gem/credentials
+      - name: Build gem
+        working-directory: clients/ruby
+        run: gem build chromadb.gemspec
+      - name: Publish gem
+        working-directory: clients/ruby
+        run: gem push chromadb-*.gem
+
   release-github:
     name: Make GitHub release
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -154,6 +188,7 @@ jobs:
       - release-docker
       - release-pypi
       - release-thin-pypi
+      - release-ruby-gem
     steps:
       - name: Checkout
         uses: actions/checkout@v4
