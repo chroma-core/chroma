@@ -957,8 +957,8 @@ mod tests {
     use chroma_system::{ComponentHandle, Dispatcher, DispatcherConfig, Orchestrator, System};
     use chroma_types::{
         operator::{Filter, Limit, Projection, ProjectionRecord},
-        Collection, DatabaseName, DocumentExpression, DocumentOperator, MetadataExpression,
-        PrimitiveOperator, Segment, SegmentUuid, Where,
+        Collection, DocumentExpression, DocumentOperator, MetadataExpression, PrimitiveOperator,
+        Segment, SegmentUuid, Where,
     };
     use regex::Regex;
     use tempfile;
@@ -1079,11 +1079,9 @@ mod tests {
             });
         let log = Log::InMemory(in_memory_log);
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         let compact_result = Box::pin(compact(
             system.clone(),
             collection_id,
-            database_name.clone(),
             false,
             50,
             1000,
@@ -1161,7 +1159,6 @@ mod tests {
         let rebuild_result = Box::pin(compact(
             system.clone(),
             collection_id,
-            database_name.clone(),
             true,
             5000,
             10000,
@@ -1266,11 +1263,9 @@ mod tests {
         let in_memory_log = InMemoryLog::new();
         let log = Log::InMemory(in_memory_log);
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         let rebuild_result = Box::pin(compact(
             system.clone(),
             collection_id,
-            database_name,
             true,
             5000,
             10000,
@@ -1441,11 +1436,9 @@ mod tests {
         )
         .await;
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         let first_compaction_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name,
             false,
             5000,
             10000,
@@ -1630,11 +1623,9 @@ mod tests {
         )
         .await;
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         let first_compaction_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name,
             false,
             5000,
             10000,
@@ -1820,12 +1811,10 @@ mod tests {
         )
         .await;
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         // Run first compaction - this should fail to update the log offset
         let first_compaction_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name.clone(),
             false,
             5000,
             10000,
@@ -1860,7 +1849,6 @@ mod tests {
         let second_compaction_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name.clone(),
             false,
             5000,
             10000,
@@ -2081,11 +2069,9 @@ mod tests {
         )
         .await;
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         let compact_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name,
             false, // walrus_enabled
             50,    // min_compaction_size
             1000,  // max_compaction_size
@@ -2289,12 +2275,10 @@ mod tests {
         });
         let dispatcher_handle = system.start_component(dispatcher);
 
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         // Run first compaction with real data
         let first_compact_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name.clone(),
             false, // walrus_enabled
             50,    // min_compaction_size
             1000,  // max_compaction_size
@@ -2379,7 +2363,6 @@ mod tests {
         let second_compact_result = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name,
             false, // walrus_enabled
             50,    // min_compaction_size
             1000,  // max_compaction_size
@@ -2641,14 +2624,8 @@ mod tests {
 
         // Start compaction 1's log_fetch_orchestrator
         println!("Starting compaction 1's run_get_logs...");
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         let compaction_1_logs_result = compaction_context_1
-            .run_get_logs(
-                collection_uuid,
-                database_name.clone(),
-                system.clone(),
-                false,
-            )
+            .run_get_logs(collection_uuid, system.clone(), false)
             .await;
 
         // Store the logs for compaction 1 to use later
@@ -2694,7 +2671,6 @@ mod tests {
         let compaction_2 = Box::pin(compact(
             system.clone(),
             collection_uuid,
-            database_name.clone(),
             false, // walrus_enabled
             50,    // min_compaction_size
             1000,  // max_compaction_size
@@ -2943,12 +2919,10 @@ mod tests {
             .unwrap();
 
         // First compaction - populates both input and output collections
-        let database_name = DatabaseName::new("test_db").expect("database name should be valid");
         println!("Starting first compaction...");
         Box::pin(compact(
             system.clone(),
             collection_id,
-            database_name.clone(),
             false, // not a rebuild
             50,
             1000,
@@ -3033,7 +3007,6 @@ mod tests {
         Box::pin(compact(
             system.clone(),
             collection_id,
-            database_name.clone(),
             false, // not a rebuild
             50,
             1000,
@@ -3092,7 +3065,6 @@ mod tests {
         Box::pin(compact(
             system.clone(),
             collection_id,
-            database_name,
             true, // is_rebuild = true
             5000,
             10000,
