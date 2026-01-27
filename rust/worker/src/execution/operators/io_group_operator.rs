@@ -93,7 +93,9 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use chroma_error::ErrorCodes;
-    use chroma_system::{wrap, Component, ComponentContext, Dispatcher, Handler, System, TaskResult};
+    use chroma_system::{
+        wrap, Component, ComponentContext, Dispatcher, Handler, System, TaskResult,
+    };
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio_util::sync::CancellationToken;
 
@@ -222,7 +224,11 @@ mod tests {
         );
 
         // Send task to dispatcher
-        dispatcher_handle.clone().send(io_group_task, None).await.unwrap();
+        dispatcher_handle
+            .clone()
+            .send(io_group_task, None)
+            .await
+            .unwrap();
 
         // Wait for tasks to complete
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
