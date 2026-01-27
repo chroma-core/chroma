@@ -37,6 +37,18 @@ impl Value for f32 {
     }
 }
 
+impl Value for Vec<f32> {
+    fn get_size(&self) -> usize {
+        self.len() * size_of::<f32>()
+    }
+}
+
+impl Value for &[f32] {
+    fn get_size(&self) -> usize {
+        std::mem::size_of_val(*self)
+    }
+}
+
 impl Value for u32 {
     fn get_size(&self) -> usize {
         4
