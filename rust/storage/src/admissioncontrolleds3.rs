@@ -926,7 +926,13 @@ impl AdmissionControlledS3Storage {
                     // NOTE(hammadb): If the upstream request gets cancelled, we still
                     // finish the request once it has been spawned, if its cancelled
                     // before it has been spawned, then the task will never run.
-                    tokio::spawn(async move {
+                    // NOTE(sicheng): The following block used to be executed with tokio::spawn.
+                    // It could lead to unbounded growth in tokio task queue, and could cause
+                    // performance degration in tokio runtime. As a temporary solution, since
+                    // we do not cancel tasks right now, this block of logic is moved out
+                    // of tokio::spawn. If we introduce the cancellation logic in the future
+                    // we need to address the issue in the comment above.
+                    {
                         // Fetch all keys in parallel
                         let fetch_futures: Vec<_> = keys_clone
                             .iter()
@@ -997,7 +1003,7 @@ impl AdmissionControlledS3Storage {
                                 }
                             }
                         }
-                    });
+                    }
                     output_rx.await.map_err(|e| {
                         tracing::error!("Unexpected channel closure: {}", e);
                         StorageError::Generic {
