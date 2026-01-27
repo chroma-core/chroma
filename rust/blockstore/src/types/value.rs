@@ -1,6 +1,6 @@
 use std::mem::size_of;
 
-use chroma_types::{DataRecord, SpannPostingList};
+use chroma_types::{DataRecord, QuantizedCluster, SpannPostingList};
 use roaring::RoaringBitmap;
 
 pub trait Value: Clone + Send + Sync {
@@ -74,6 +74,12 @@ impl Value for SpannPostingList<'_> {
 }
 
 impl Value for &SpannPostingList<'_> {
+    fn get_size(&self) -> usize {
+        self.compute_size()
+    }
+}
+
+impl Value for QuantizedCluster<'_> {
     fn get_size(&self) -> usize {
         self.compute_size()
     }
