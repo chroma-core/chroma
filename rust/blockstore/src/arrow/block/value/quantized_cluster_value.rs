@@ -11,7 +11,9 @@ use chroma_types::{QuantizedCluster, QuantizedClusterOwned};
 
 use crate::{
     arrow::{
-        block::delta::{BlockStorage, UnorderedBlockDelta},
+        block::delta::{
+            quantized_cluster_delta::QuantizedClusterDelta, BlockStorage, UnorderedBlockDelta,
+        },
         types::{ArrowReadableValue, ArrowWriteableKey, ArrowWriteableValue},
     },
     key::KeyWrapper,
@@ -23,10 +25,7 @@ const CODES_COLUMN: usize = 1;
 const IDS_COLUMN: usize = 2;
 const VERSIONS_COLUMN: usize = 3;
 
-fn get_list_slice<'data, T: ArrowPrimitiveType>(
-    list_arr: &'data ListArray,
-    index: usize,
-) -> &'data [T::Native] {
+fn get_list_slice<T: ArrowPrimitiveType>(list_arr: &ListArray, index: usize) -> &[T::Native] {
     let start = list_arr.value_offsets()[index] as usize;
     let end = list_arr.value_offsets()[index + 1] as usize;
     let values = list_arr
@@ -45,6 +44,7 @@ fn get_list_array(struct_array: &StructArray, column: usize) -> &ListArray {
         .expect("expected list array")
 }
 
+#[derive(Clone)]
 pub struct QuantizedClusterSizeTracker {
     pub cluster_count: usize,
     pub code_length: usize,
@@ -73,16 +73,22 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
         unimplemented!("not used for custom delta storage")
     }
 
-    fn add(_prefix: &str, _key: KeyWrapper, _value: Self, _delta: &BlockStorage) {
-        todo!("Implement after QuantizedClusterDelta")
+    fn add(prefix: &str, key: KeyWrapper, value: Self, delta: &BlockStorage) {
+        match delta {
+            BlockStorage::QuantizedClusterDelta(delta) => delta.add(prefix, key, value),
+            _ => unreachable!("Invalid delta type for QuantizedCluster"),
+        }
     }
 
-    fn delete(_prefix: &str, _key: KeyWrapper, _delta: &UnorderedBlockDelta) {
-        todo!("Implement after QuantizedClusterDelta")
+    fn delete(prefix: &str, key: KeyWrapper, delta: &UnorderedBlockDelta) {
+        match &delta.builder {
+            BlockStorage::QuantizedClusterDelta(delta) => delta.delete(prefix, key),
+            _ => unreachable!("Invalid delta type for QuantizedCluster"),
+        }
     }
 
     fn get_delta_builder(_: BlockfileWriterMutationOrdering) -> BlockStorage {
-        todo!("Implement after QuantizedClusterDelta")
+        BlockStorage::QuantizedClusterDelta(QuantizedClusterDelta::new())
     }
 
     fn get_arrow_builder(tracker: Self::SizeTracker) -> Self::ArrowBuilder {
@@ -179,11 +185,14 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
     }
 
     fn get_owned_value_from_delta(
-        _prefix: &str,
-        _key: KeyWrapper,
-        _delta: &UnorderedBlockDelta,
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &UnorderedBlockDelta,
     ) -> Option<Self::PreparedValue> {
-        todo!("Implement after QuantizedClusterDelta")
+        match &delta.builder {
+            BlockStorage::QuantizedClusterDelta(delta) => delta.get_owned_value(prefix, key),
+            _ => unreachable!("Invalid delta type for QuantizedCluster"),
+        }
     }
 }
 
@@ -229,11 +238,11 @@ impl<'data> ArrowReadableValue<'data> for QuantizedCluster<'data> {
     }
 
     fn add_to_delta<K: ArrowWriteableKey>(
-        _prefix: &str,
-        _key: K,
-        _value: Self,
-        _storage: &mut BlockStorage,
+        prefix: &str,
+        key: K,
+        value: Self,
+        storage: &mut BlockStorage,
     ) {
-        todo!("Implement after QuantizedClusterDelta")
+        <QuantizedCluster as ArrowWriteableValue>::add(prefix, key.into(), value, storage);
     }
 }

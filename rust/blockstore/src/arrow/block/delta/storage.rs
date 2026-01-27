@@ -1,6 +1,6 @@
 use super::{
-    data_record::DataRecordStorage, single_column_storage::SingleColumnStorage,
-    spann_posting_list_delta::SpannPostingListDelta,
+    data_record::DataRecordStorage, quantized_cluster_delta::QuantizedClusterDelta,
+    single_column_storage::SingleColumnStorage, spann_posting_list_delta::SpannPostingListDelta,
 };
 use crate::{
     arrow::types::ArrowWriteableKey,
@@ -26,6 +26,7 @@ pub enum BlockStorage {
     UInt32(SingleColumnStorage<u32>),
     RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),
+    QuantizedClusterDelta(QuantizedClusterDelta),
     SpannPostingListDelta(SpannPostingListDelta),
 }
 
@@ -38,6 +39,9 @@ impl Debug for BlockStorage {
             BlockStorage::UInt32(_) => f.debug_struct("UInt32").finish(),
             BlockStorage::RoaringBitmap(_) => f.debug_struct("RoaringBitmap").finish(),
             BlockStorage::DataRecord(_) => f.debug_struct("DataRecord").finish(),
+            BlockStorage::QuantizedClusterDelta(_) => {
+                f.debug_struct("QuantizedClusterDelta").finish()
+            }
             BlockStorage::SpannPostingListDelta(_) => {
                 f.debug_struct("SpannPostingListDelta").finish()
             }
@@ -161,6 +165,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
             BlockStorage::VecUInt32(builder) => builder.get_prefix_size(),
             BlockStorage::RoaringBitmap(builder) => builder.get_prefix_size(),
+            BlockStorage::QuantizedClusterDelta(builder) => builder.get_prefix_size(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_prefix_size(),
         }
     }
@@ -173,6 +178,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_key_size(),
             BlockStorage::VecUInt32(builder) => builder.get_key_size(),
             BlockStorage::RoaringBitmap(builder) => builder.get_key_size(),
+            BlockStorage::QuantizedClusterDelta(builder) => builder.get_key_size(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_key_size(),
         }
     }
@@ -185,6 +191,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_min_key(),
             BlockStorage::VecUInt32(builder) => builder.get_min_key(),
             BlockStorage::RoaringBitmap(builder) => builder.get_min_key(),
+            BlockStorage::QuantizedClusterDelta(builder) => builder.get_min_key(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_min_key(),
         }
     }
@@ -198,6 +205,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
             BlockStorage::VecUInt32(builder) => builder.get_size::<K>(),
             BlockStorage::RoaringBitmap(builder) => builder.get_size::<K>(),
+            BlockStorage::QuantizedClusterDelta(builder) => builder.get_size::<K>(),
             BlockStorage::SpannPostingListDelta(builder) => builder.get_size::<K>(),
         }
     }
@@ -228,6 +236,10 @@ impl BlockStorage {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::RoaringBitmap(storage))
             }
+            BlockStorage::QuantizedClusterDelta(builder) => {
+                let (split_key, storage) = builder.split::<K>(split_size);
+                (split_key, BlockStorage::QuantizedClusterDelta(storage))
+            }
             BlockStorage::SpannPostingListDelta(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::SpannPostingListDelta(storage))
@@ -243,6 +255,7 @@ impl BlockStorage {
             BlockStorage::DataRecord(builder) => builder.len(),
             BlockStorage::VecUInt32(builder) => builder.len(),
             BlockStorage::RoaringBitmap(builder) => builder.len(),
+            BlockStorage::QuantizedClusterDelta(builder) => builder.len(),
             BlockStorage::SpannPostingListDelta(builder) => builder.len(),
         }
     }
@@ -282,6 +295,9 @@ impl BlockStorage {
                 // TODO: handle error
                 let (schema, columns) = builder.into_arrow(key_builder, metadata);
                 RecordBatch::try_new(schema, columns).unwrap()
+            }
+            BlockStorage::QuantizedClusterDelta(builder) => {
+                builder.into_arrow(key_builder).unwrap()
             }
             BlockStorage::SpannPostingListDelta(builder) => {
                 // TODO: handle error

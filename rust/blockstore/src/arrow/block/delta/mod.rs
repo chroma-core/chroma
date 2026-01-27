@@ -2,6 +2,7 @@ mod builder_storage;
 pub(super) mod data_record;
 pub(super) mod data_record_size_tracker;
 mod ordered_block_delta;
+pub(super) mod quantized_cluster_delta;
 pub(super) mod single_column_size_tracker;
 pub(super) mod single_column_storage;
 pub(super) mod spann_posting_list_delta;
