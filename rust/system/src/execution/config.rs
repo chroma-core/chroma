@@ -32,17 +32,14 @@ impl DispatcherConfig {
         // Get the number of available logical CPUs. When running in cloud or
         // container environments, this is equal to the number of vCPUs
         // available to the process.
-        let num_cpus =
-            std::thread::available_parallelism()
-                .unwrap_or(std::num::NonZero::new(1).expect(
-                    "Value of 1 is invalid for NonZero type (??) This should never happen.",
-                ))
-                .get();
+        let num_cpus = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
 
         // Reserve 20% of the available logical CPUs for IO-bound tasks within
         // the dispatcher and general system overhead (other components and
         // tokio tasks besides the dispatcher).
-        let reserved_cpus = (num_cpus as f64 * 0.2).floor() as usize;
+        let reserved_cpus = num_cpus / 5;
 
         // Always allocate a minimum of 4 worker threads.
         std::cmp::max(num_cpus - reserved_cpus, 4)
