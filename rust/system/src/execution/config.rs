@@ -29,7 +29,6 @@ pub struct DispatcherConfig {
 
 impl DispatcherConfig {
     fn default_num_worker_threads() -> usize {
-        // Determine the number of logical CPUs available.
         let num_cpus = num_cpus::get();
 
         // Reserve 20% of the available logical CPUs for IO-bound tasks within
@@ -83,17 +82,6 @@ impl DispatcherConfig {
         // is based on examining previous production workloads. It is subject
         // to change as we gather more data, and we may want to adjust how we
         // determine this default value in the future.
-        //
-        // The main risk with setting this value too high is that allowing too
-        // many concurrent I/O tasks will potentially allow the system to hit
-        // the process limit on the number of open file descriptors
-        // (RLIMIT_NOFILE). Unfortunately, this is difficult to reason about
-        // because it's not obvious how many file descriptors each I/O task
-        // will actually open.
-        //
-        // The risk with setting this value too low is that the dispatcher will
-        // not be able to process all of the I/O tasks that are enqueued, which
-        // will result in failed tasks.
         10000
     }
 }
