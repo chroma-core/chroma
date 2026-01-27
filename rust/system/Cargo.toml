@@ -10,7 +10,6 @@ path = "src/lib.rs"
 thiserror = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
-num_cpus = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
