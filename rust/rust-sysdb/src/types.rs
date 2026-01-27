@@ -92,13 +92,6 @@ impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantsRequest {
         })
     }
 }
-/// Internal request for updating a tenant.
-#[derive(Debug, Clone)]
-pub struct UpdateTenantRequest {
-    pub tenant_id: String,
-    pub last_compaction_time: Option<Timestamp>,
-    pub resource_name: Option<String>,
-}
 
 /// Internal request for setting tenant resource name.
 #[derive(Debug, Clone)]
@@ -548,14 +541,8 @@ impl Assignable for CreateTenantRequest {
 impl Assignable for GetTenantsRequest {
     type Output = Vec<Backend>;
     fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
-        // Single backend operation for GetTenantsRequest
-        vec![Backend::Spanner(factory.one_spanner().clone())]
-    }
-}
-impl Assignable for UpdateTenantRequest {
-    type Output = Vec<Backend>;
-    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
-        vec![Backend::Spanner(factory.one_spanner().clone())]
+        // Fan out to all backends
+        factory.get_all_backends()
     }
 }
 

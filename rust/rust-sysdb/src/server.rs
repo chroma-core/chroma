@@ -426,7 +426,6 @@ impl SysDb for SysdbService {
         let get_tenants_req = internal::GetTenantsRequest {
             ids: proto_req.tenant_id.clone(),
         };
-        // Use the existing get_tenants infrastructure
         let backend = get_tenants_req.assign(&self.backends);
         let tenants_response = get_tenants_req
             .run(backend)
