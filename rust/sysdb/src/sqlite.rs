@@ -1,8 +1,8 @@
-use crate::{GetCollectionsOptions, SqliteSysDbConfig};
+use crate::{DatabaseOrTopology, GetCollectionsOptions, SqliteSysDbConfig};
 use async_trait::async_trait;
 use chroma_config::registry::Registry;
 use chroma_config::Configurable;
-use chroma_error::{ChromaError, WrappedSqlxError};
+use chroma_error::{ChromaError, ErrorCodes, WrappedSqlxError};
 use chroma_sqlite::db::SqliteDb;
 use chroma_sqlite::helpers::{delete_metadata, get_embeddings_queue_topic_name, update_metadata};
 use chroma_sqlite::table;
@@ -16,6 +16,18 @@ use chroma_types::{
     Metadata, MetadataValue, ResetError, ResetResponse, Schema, SchemaError, Segment, SegmentScope,
     SegmentType, SegmentUuid, UpdateCollectionError, UpdateTenantError, UpdateTenantResponse,
 };
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+#[error("MCMR not supported: {0}")]
+struct McmrNotSupportedError(String);
+
+impl ChromaError for McmrNotSupportedError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
+
 use futures::TryStreamExt;
 use sea_query_binder::SqlxBinder;
 use sqlx::error::ErrorKind;
@@ -552,18 +564,28 @@ impl SqliteSysDb {
             collection_id,
             name,
             tenant,
-            database,
+            database_or_topology,
             limit,
             offset,
             ..
         } = options;
+
+        let database_string = match database_or_topology {
+            Some(DatabaseOrTopology::Database(db)) => Some(db.into_string()),
+            Some(DatabaseOrTopology::Topology(topology)) => {
+                return Err(GetCollectionsError::Internal(Box::new(
+                    McmrNotSupportedError(topology.to_string()),
+                )));
+            }
+            None => None,
+        };
 
         self.get_collections_with_conn(
             self.db.get_conn(),
             collection_id,
             name,
             tenant,
-            database.map(|d| d.into_string()),
+            database_string,
             limit,
             offset,
         )

@@ -16,7 +16,7 @@ use chroma_metering::{
 };
 use chroma_segment::local_segment_manager::LocalSegmentManager;
 use chroma_sqlite::db::SqliteDb;
-use chroma_sysdb::{GetCollectionsOptions, SysDb};
+use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::System;
 use chroma_types::{
     operator::{Filter, KnnBatch, KnnProjection, Limit, Projection, Scan},
@@ -372,7 +372,7 @@ impl ServiceBasedFrontend {
             .sysdb_client
             .get_collections(GetCollectionsOptions {
                 tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(database_name.clone())),
                 limit,
                 offset,
                 ..Default::default()
@@ -417,7 +417,7 @@ impl ServiceBasedFrontend {
             .get_collections(GetCollectionsOptions {
                 name: Some(collection_name.clone()),
                 tenant: Some(tenant_id.clone()),
-                database: Some(database_name.clone()),
+                database_or_topology: Some(DatabaseOrTopology::Database(database_name.clone())),
                 limit: Some(1),
                 ..Default::default()
             })
