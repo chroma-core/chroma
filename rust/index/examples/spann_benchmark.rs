@@ -283,8 +283,8 @@ fn create_spann_config(args: &Args) -> InternalSpannConfiguration {
     }
 
     params.nreplica_count = 4;
-    params.split_threshold = 1000;
-    params.merge_threshold = 500;
+    params.split_threshold = 50;
+    params.merge_threshold = 25;
     params.reassign_neighbor_count = 8;
 
     params
