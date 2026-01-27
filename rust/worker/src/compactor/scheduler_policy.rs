@@ -74,6 +74,7 @@ mod tests {
                 offset: 0,
                 collection_version: 0,
                 collection_logical_size_bytes: 100,
+                database_name: "test_db".to_string(),
             },
             CollectionRecord {
                 collection_id: collection_uuid_2,
@@ -83,6 +84,7 @@ mod tests {
                 offset: 0,
                 collection_version: 0,
                 collection_logical_size_bytes: 100,
+                database_name: "test_db".to_string(),
             },
         ];
         let jobs = scheduler_policy.determine(collections.clone(), 1);
