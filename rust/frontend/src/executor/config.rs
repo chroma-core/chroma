@@ -206,6 +206,7 @@ impl TiersConfig {
 
     /// Resolve the tier for a given collection based on configured patterns.
     /// Entries with empty patterns are skipped (use Tier::default() for catch-all).
+    /// A tier matches if ANY of its patterns match (OR logic).
     /// Returns the first matching tier, or Tier::default() if no patterns match.
     pub fn resolve_tier(&self, collection: &Collection) -> Tier {
         for entry in &self.0 {
@@ -213,7 +214,7 @@ impl TiersConfig {
             if entry.patterns.is_empty() {
                 continue;
             }
-            if entry.patterns.iter().all(|p| p.matches(collection)) {
+            if entry.patterns.iter().any(|p| p.matches(collection)) {
                 return Tier::new(entry.tier);
             }
         }
@@ -438,7 +439,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_tier_multiple_patterns_all_must_match() {
+    fn test_resolve_tier_multiple_patterns_any_must_match() {
         let config = TiersConfig(vec![TierEntry {
             tier: 0,
             capacity: 4,
@@ -451,10 +452,13 @@ mod tests {
         let premium_small = test_collection("premium", "", "", 500);
         let premium_large = test_collection("premium", "", "", 5000);
         let regular_small = test_collection("regular", "", "", 500);
+        let regular_large = test_collection("regular", "", "", 5000);
 
-        assert_eq!(config.resolve_tier(&premium_small), Tier::new(0)); // Both match
-        assert_eq!(config.resolve_tier(&premium_large), Tier::default()); // Size doesn't match
-        assert_eq!(config.resolve_tier(&regular_small), Tier::default()); // Tenant doesn't match
+        // OR logic: match if ANY pattern matches
+        assert_eq!(config.resolve_tier(&premium_small), Tier::new(0)); // Both patterns match
+        assert_eq!(config.resolve_tier(&premium_large), Tier::new(0)); // TenantId matches
+        assert_eq!(config.resolve_tier(&regular_small), Tier::new(0)); // CollectionSize matches
+        assert_eq!(config.resolve_tier(&regular_large), Tier::default()); // Neither matches
     }
 
     // ==================== TierPattern::matches() boundary tests ====================
