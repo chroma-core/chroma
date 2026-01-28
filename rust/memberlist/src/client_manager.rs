@@ -652,7 +652,7 @@ mod test {
         );
 
         // Test with members ["a", "b", "c", "d", "e"] (passed unsorted)
-        let members = vec!["c", "a", "e", "b", "d"];
+        let members = ["c", "a", "e", "b", "d"];
 
         // Tier 0: first 1 → ["a"]
         assert_eq!(
