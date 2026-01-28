@@ -171,7 +171,7 @@ impl ChromaError for Error {
 /// replicated (Spanner-backed) factories, allowing us to share common factory creation logic.
 struct FactoryCreationContext<'a> {
     storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
-    database_name: &'a DatabaseName,
+    topology_name: Option<&'a TopologyName>,
     collection_id: CollectionUuid,
     prefix: String,
 }
@@ -179,13 +179,13 @@ struct FactoryCreationContext<'a> {
 impl<'a> FactoryCreationContext<'a> {
     fn new(
         storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
-        database_name: &'a DatabaseName,
+        topology_name: Option<&'a TopologyName>,
         collection_id: CollectionUuid,
     ) -> Self {
         let prefix = collection_id.storage_prefix_for_log();
         Self {
             storages,
-            database_name,
+            topology_name,
             collection_id,
             prefix,
         }
@@ -197,7 +197,7 @@ impl<'a> FactoryCreationContext<'a> {
         write_options: &LogWriterOptions,
         read_options: &LogReaderOptions,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        if let Some(topology) = self.database_name.topology() {
+        if let Some(topology) = self.topology_name {
             self.make_repl_log_reader(topology, write_options, read_options)
                 .await
         } else {
@@ -208,13 +208,11 @@ impl<'a> FactoryCreationContext<'a> {
     /// Creates a replicated (Spanner-backed) LogReader.
     async fn make_repl_log_reader(
         &self,
-        topology: String,
+        topology_name: &TopologyName,
         write_options: &LogWriterOptions,
         read_options: &LogReaderOptions,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let topology_name =
-            TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
-        let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
             return Err(Error::MissingTopology(topology_name.to_string()));
         };
         let (storage_wrappers, region_names, preferred_index) =
@@ -304,7 +302,7 @@ impl<'a> FactoryCreationContext<'a> {
         read_options: &LogReaderOptions,
         repl_options: &ReplicatedFragmentOptions,
     ) -> Result<(), Error> {
-        if let Some(topology) = self.database_name.topology() {
+        if let Some(topology) = self.topology_name {
             self.fork_to_repl_target(topology, reader, cursor, write_options, repl_options)
                 .await
         } else {
@@ -316,15 +314,13 @@ impl<'a> FactoryCreationContext<'a> {
     /// Performs a fork/copy to a replicated (Spanner-backed) target.
     async fn fork_to_repl_target(
         &self,
-        topology: String,
+        topology_name: &TopologyName,
         reader: &dyn LogReaderTrait,
         cursor: LogPosition,
         write_options: &LogWriterOptions,
         repl_options: &ReplicatedFragmentOptions,
     ) -> Result<(), Error> {
-        let topology_name =
-            TopologyName::new(topology.clone()).map_err(|_| Error::InvalidTopology(topology))?;
-        let Some((regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+        let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
             return Err(Error::MissingTopology(topology_name.to_string()));
         };
         let (storage_wrappers, region_names, preferred_index) =
@@ -1005,7 +1001,7 @@ pub struct LogServer {
     need_to_compact: Mutex<HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>>,
     cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
-    storages: MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
+    storages: Arc<MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>>,
 }
 
 impl LogServer {
@@ -1038,43 +1034,12 @@ impl LogServer {
     /// Creates a LogReader for the given database and collection.
     async fn make_log_reader(
         &self,
-        database_name: DatabaseName,
+        topology_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let ctx = FactoryCreationContext::new(&self.storages, &database_name, collection_id);
+        let ctx = FactoryCreationContext::new(&self.storages, topology_name, collection_id);
         ctx.make_log_reader(&self.config.writer, &self.config.reader)
             .await
-    }
-
-    /// Creates a LogReader with default options for the given storage and prefix.
-    ///
-    /// This function uses the preferred region's storage without topology awareness.
-    async fn make_log_reader_with_defaults(
-        storages: &MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
-        prefix: String,
-    ) -> Result<Arc<dyn LogReaderTrait>, wal3::Error> {
-        let storage = storages
-            .preferred_region_config()
-            .ok_or_else(|| wal3::Error::internal(file!(), line!()))?;
-        let storage = Arc::new(storage.storage.clone());
-        let writer_options = LogWriterOptions::default();
-        let reader_options = LogReaderOptions::default();
-        let (fragment_factory, manifest_factory) = create_s3_factories(
-            writer_options,
-            reader_options.clone(),
-            storage,
-            prefix,
-            String::new(),
-            Arc::new(()),
-            Arc::new(()),
-        );
-        let fragment_consumer = fragment_factory.make_consumer().await?;
-        let manifest_consumer = manifest_factory.make_consumer().await?;
-        Ok(Arc::new(LogReader::new(
-            reader_options,
-            fragment_consumer,
-            manifest_consumer,
-        )))
     }
 
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
@@ -1171,7 +1136,7 @@ impl LogServer {
         let log_reader = match log.reader(self.config.reader.clone()).await {
             Some(reader) => reader,
             None => self
-                .make_log_reader(database_name.clone(), collection_id)
+                .make_log_reader(topology_name.as_ref(), collection_id)
                 .await
                 .map_err(|err| Status::unknown(err.to_string()))?,
         };
@@ -1676,45 +1641,51 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
     ) -> Result<(), Error> {
-        let load_witness = |_this, storage: Arc<Storage>, collection_id: CollectionUuid| async move {
-            let cursor = &COMPACTION;
-            let cursor_store = CursorStore::new(
-                CursorStoreOptions::default(),
-                Arc::clone(&storage),
-                collection_id.storage_prefix_for_log(),
-                "rollup".to_string(),
-            );
-            let witness = if let Some(cache) = self.cache.as_ref() {
-                let key = LogKey { collection_id };
-                let handle = self.open_logs.get_or_create_state(key);
-                let mut _active = handle.active.lock().await;
-                let cache_key = cache_key_for_cursor(collection_id, cursor);
-                if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
-                    let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
-                    return Ok((Some(witness), None));
-                }
-                let load_span = tracing::info_span!("cursor load");
-                let res = cursor_store.load(cursor).instrument(load_span).await?;
-                if let Some(witness) = res.as_ref() {
-                    let json_witness = serde_json::to_string(&witness)?;
-                    let value = CachedBytes::new(Vec::from(json_witness));
-                    cache.insert(cache_key, value).await;
-                }
-                res
-            } else {
-                let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
-                cursor_store.load(cursor).instrument(span).await?
-            };
-            // NOTE(rescrv):  This may turn out to be a bad idea, but do not load the manifest from
-            // cache in order to prevent a stale cache from perpetually returning a stale result.
-            let manifest = if witness.is_none() {
-                let prefix = collection_id.storage_prefix_for_log();
-                let reader = Self::make_log_reader_with_defaults(&self.storages, prefix).await?;
-                reader.manifest().await?
-            } else {
-                None
-            };
-            Ok::<(Option<CursorWitness>, Option<Manifest>), Error>((witness, manifest))
+        let load_witness = |_this: &LogServer,
+                            storage: Arc<Storage>,
+                            topology: Option<TopologyName>,
+                            collection_id: CollectionUuid| {
+            async move {
+                let cursor = &COMPACTION;
+                let cursor_store = CursorStore::new(
+                    CursorStoreOptions::default(),
+                    Arc::clone(&storage),
+                    collection_id.storage_prefix_for_log(),
+                    "rollup".to_string(),
+                );
+                let witness = if let Some(cache) = self.cache.as_ref() {
+                    let key = LogKey { collection_id };
+                    let handle = self.open_logs.get_or_create_state(key);
+                    let mut _active = handle.active.lock().await;
+                    let cache_key = cache_key_for_cursor(collection_id, cursor);
+                    if let Ok(Some(json_witness)) = cache.get(&cache_key).await {
+                        let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
+                        return Ok((Some(witness), None));
+                    }
+                    let load_span = tracing::info_span!("cursor load");
+                    let res = cursor_store.load(cursor).instrument(load_span).await?;
+                    if let Some(witness) = res.as_ref() {
+                        let json_witness = serde_json::to_string(&witness)?;
+                        let value = CachedBytes::new(Vec::from(json_witness));
+                        cache.insert(cache_key, value).await;
+                    }
+                    res
+                } else {
+                    let span = tracing::info_span!("cursor load", collection_id = ?collection_id);
+                    cursor_store.load(cursor).instrument(span).await?
+                };
+                // NOTE(rescrv):  This may turn out to be a bad idea, but do not load the manifest from
+                // cache in order to prevent a stale cache from perpetually returning a stale result.
+                let manifest = if witness.is_none() {
+                    let reader = self
+                        .make_log_reader(topology.as_ref(), collection_id)
+                        .await?;
+                    reader.manifest().await?
+                } else {
+                    None
+                };
+                Ok::<(Option<CursorWitness>, Option<Manifest>), Error>((witness, manifest))
+            }
         };
         let mut futures = Vec::with_capacity(rollups.len());
         let preferred_storage = Arc::new(
@@ -1727,13 +1698,14 @@ impl LogServer {
         for (key, mut rollup) in std::mem::take(rollups) {
             let storage_for_task = Arc::clone(&preferred_storage);
             futures.push(async move {
-                let (witness, manifest) = match load_witness(self, storage_for_task, key.1).await {
-                    Ok(witness) => witness,
-                    Err(err) => {
-                        tracing::warn!("could not load cursor: {err}");
-                        return Some((key, rollup));
-                    }
-                };
+                let (witness, manifest) =
+                    match load_witness(self, storage_for_task, key.0.clone(), key.1).await {
+                        Ok(witness) => witness,
+                        Err(err) => {
+                            tracing::warn!("could not load cursor: {err}");
+                            return Some((key, rollup));
+                        }
+                    };
                 // NOTE(rescrv):  There are two spreads that we have.
                 // `rollup` tracks the minimum and maximum offsets of a record on the dirty log.
                 // The spread between cursor (if it exists) and manifest.maximum_log_offset tracks the
@@ -1884,8 +1856,14 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&scout_logs.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+
         let log_reader = self
-            .make_log_reader(database_name, collection_id)
+            .make_log_reader(topology_name.as_ref(), collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let cache_key = cache_key_for_manifest_and_etag(collection_id);
@@ -1957,7 +1935,7 @@ impl LogServer {
 
     async fn read_fragments(
         &self,
-        database_name: &DatabaseName,
+        database_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
     ) -> Result<Vec<Fragment>, Error> {
@@ -1999,13 +1977,11 @@ impl LogServer {
 
     async fn read_fragments_via_log_reader(
         &self,
-        database_name: &DatabaseName,
+        topology_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
     ) -> Result<Vec<Fragment>, Error> {
-        let log_reader = self
-            .make_log_reader(database_name.clone(), collection_id)
-            .await?;
+        let log_reader = self.make_log_reader(topology_name, collection_id).await?;
         let limits = Limits {
             max_files: Some(pull_logs.batch_size as u64 + 1),
             max_bytes: None,
@@ -2029,6 +2005,11 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&pull_logs.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
 
         tracing::info!(
             collection_id = collection_id.to_string(),
@@ -2038,7 +2019,7 @@ impl LogServer {
         );
 
         let fragments = match self
-            .read_fragments(&database_name, collection_id, &pull_logs)
+            .read_fragments(topology_name.as_ref(), collection_id, &pull_logs)
             .await
         {
             Ok(fragments) => fragments,
@@ -2051,10 +2032,12 @@ impl LogServer {
             .iter()
             .map(|fragment| {
                 let this = self;
-                let database_name = database_name.clone();
+                let topology_name = topology_name.clone();
                 let fragment = fragment.clone();
                 async move {
-                    let log_reader = this.make_log_reader(database_name, collection_id).await?;
+                    let log_reader = this
+                        .make_log_reader(topology_name.as_ref(), collection_id)
+                        .await?;
                     if let Some(cache) = this.cache.as_ref() {
                         let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
                         if let Ok(Some(answer)) = cache.get(&cache_key).await {
@@ -2124,6 +2107,11 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&request.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
         let source_prefix = source_collection_id.storage_prefix_for_log();
         let storage = Arc::new(
             self.preferred_storage()
@@ -2136,7 +2124,7 @@ impl LogServer {
             target_collection_id = target_collection_id.to_string(),
         );
         let log_reader = self
-            .make_log_reader(database_name.clone(), source_collection_id)
+            .make_log_reader(topology_name.as_ref(), source_collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let cursors = CursorStore::new(
@@ -2154,8 +2142,11 @@ impl LogServer {
         tracing::event!(Level::INFO, offset = ?cursor);
 
         // Use FactoryCreationContext to handle both replicated and S3 targets
-        let target_ctx =
-            FactoryCreationContext::new(&self.storages, &database_name, target_collection_id);
+        let target_ctx = FactoryCreationContext::new(
+            &self.storages,
+            topology_name.as_ref(),
+            target_collection_id,
+        );
         target_ctx
             .fork_to_target(
                 &*log_reader,
@@ -2170,7 +2161,7 @@ impl LogServer {
             })?;
 
         let log_reader = self
-            .make_log_reader(database_name, target_collection_id)
+            .make_log_reader(topology_name.as_ref(), target_collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let new_manifest = log_reader
@@ -2397,10 +2388,15 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
         let database_name = DatabaseName::new(&request.database_name)
             .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(TopologyName::new)
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Topology name invalid"))?;
         tracing::info!("inspect_log_state for {collection_id}");
         let storage_prefix = collection_id.storage_prefix_for_log();
         let log_reader = self
-            .make_log_reader(database_name, collection_id)
+            .make_log_reader(topology_name.as_ref(), collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let mani = log_reader.manifest().await;
@@ -3129,6 +3125,7 @@ impl Configurable<LogServerConfig> for LogServer {
         )
         .await
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
+        let storages = Arc::new(storages);
         let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
         let rolling_up = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
@@ -4436,7 +4433,7 @@ mod tests {
             };
 
             LogServer {
-                storages,
+                storages: storages.into(),
                 dirty_log,
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
@@ -4512,7 +4509,7 @@ mod tests {
             };
             let local =
                 RegionName::new("local").expect("'local' is unit tested to be a good region name");
-            let storages = MultiCloudMultiRegionConfiguration {
+            let storages = Arc::new(MultiCloudMultiRegionConfiguration {
                 preferred: local.clone(),
                 regions: vec![ProviderRegion {
                     name: local,
@@ -4521,7 +4518,7 @@ mod tests {
                     config: RegionalStorage { storage },
                 }],
                 topologies: vec![],
-            };
+            });
             LogServer {
                 storages,
                 dirty_log,
@@ -5128,13 +5125,16 @@ mod tests {
                 .await;
             }
         });
-        let db_name = db_name.to_string();
+        let database_name = DatabaseName::new(db_name).expect("Database name should be valid");
+        let topology_name = database_name
+            .topology()
+            .map(|n| TopologyName::new(n).expect("topology name should be valid"));
 
         runtime.block_on(async move {
             for (offset, log) in operations.iter().enumerate() {
                 push_log_to_server(
                     &log_server,
-                    &db_name,
+                    db_name,
                     collection_id,
                     std::slice::from_ref(log),
                 )
@@ -5149,9 +5149,8 @@ mod tests {
                 .await
                 .expect("The background GC task should finish");
 
-            let database_name = DatabaseName::new(&db_name).expect("Database name should be valid");
             let reader = log_server
-                .make_log_reader(database_name, collection_id)
+                .make_log_reader(topology_name.as_ref(), collection_id)
                 .await
                 .expect("Log reader should be creatable");
             reader
@@ -5220,8 +5219,11 @@ mod tests {
         }
 
         let database_name = DatabaseName::new(db_name).expect("Database name should be valid");
+        let topology_name = database_name
+            .topology()
+            .map(|n| TopologyName::new(n).expect("topology name should be valid"));
         let reader = log_server
-            .make_log_reader(database_name, collection_id)
+            .make_log_reader(topology_name.as_ref(), collection_id)
             .await
             .expect("Log reader should be creatable");
         reader
@@ -5370,7 +5372,7 @@ mod tests {
         let log_server = LogServer {
             config,
             open_logs: Arc::new(StateHashTable::default()),
-            storages,
+            storages: Arc::new(storages),
             dirty_log,
             rolling_up: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
@@ -5520,7 +5522,7 @@ mod tests {
         let log_server = LogServer {
             config,
             open_logs: Arc::new(StateHashTable::default()),
-            storages,
+            storages: Arc::new(storages),
             dirty_log,
             rolling_up: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
