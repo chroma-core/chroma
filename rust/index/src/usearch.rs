@@ -10,6 +10,7 @@ use chroma_types::{Cmek, CollectionUuid};
 use crossbeam::sync::ShardedLock;
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
+use tokio::task::spawn_blocking;
 use tracing::Instrument;
 use usearch::{IndexOptions, MetricKind, ScalarKind};
 use uuid::Uuid;
@@ -101,11 +102,31 @@ impl USearchIndex {
     }
 
     /// Load serialized data into the index.
-    fn load(&self, data: &[u8]) -> Result<(), USearchError> {
-        self.index
-            .write()?
-            .load_from_buffer(data)
-            .map_err(|e| USearchError::Index(e.to_string()))
+    async fn load(&self, data: Arc<Vec<u8>>) -> Result<(), USearchError> {
+        let index = self.index.clone();
+        spawn_blocking(move || {
+            index
+                .write()?
+                .load_from_buffer(&data) // deref coercion: &Arc<Vec<u8>> -> &[u8]
+                .map_err(|e| USearchError::Index(e.to_string()))
+        })
+        .await
+        .map_err(|e| USearchError::Index(e.to_string()))?
+    }
+
+    /// Serialize the index to a buffer.
+    async fn save(&self) -> Result<Vec<u8>, USearchError> {
+        let index = self.index.clone();
+        spawn_blocking(move || {
+            let guard = index.read()?;
+            let mut buffer = vec![0u8; guard.serialized_length()];
+            guard
+                .save_to_buffer(&mut buffer)
+                .map_err(|e| USearchError::Index(e.to_string()))?;
+            Ok(buffer)
+        })
+        .await
+        .map_err(|e| USearchError::Index(e.to_string()))?
     }
 
     /// Create a new empty index.
@@ -266,14 +287,7 @@ impl USearchIndexProvider {
         }
 
         // Fork: serialize and create new index
-        let buffer = {
-            let guard = cached.index.read()?;
-            let mut buffer = vec![0u8; guard.serialized_length()];
-            guard
-                .save_to_buffer(&mut buffer)
-                .map_err(|e| USearchError::Index(e.to_string()))?;
-            buffer
-        };
+        let buffer = cached.save().await?;
         let index = USearchIndex::new(
             IndexUuid(Uuid::new_v4()),
             cache_key,
@@ -283,7 +297,7 @@ impl USearchIndexProvider {
             options.clone(),
             config.quantization_center.clone(),
         )?;
-        index.load(&buffer)?;
+        index.load(buffer.into()).await?;
         Ok(Some(index))
     }
 }
@@ -299,17 +313,7 @@ impl VectorIndexProvider for USearchIndexProvider {
     }
 
     async fn flush(&self, index: &Self::Index) -> Result<(), Self::Error> {
-        // USearch uses the buffer directly via memcpy - no serialization/deserialization
-        // cost, just pointer arithmetic and memory copies. Safe to run on async runtime.
-        let buffer = {
-            let guard = index.index.read()?;
-            let len = guard.serialized_length();
-            let mut buffer = vec![0u8; len];
-            guard
-                .save_to_buffer(&mut buffer)
-                .map_err(|e| USearchError::Index(e.to_string()))?;
-            buffer
-        };
+        let buffer = index.save().await?;
 
         let key = USearchIndex::format_storage_key(
             &index.prefix_path,
@@ -421,7 +425,7 @@ impl VectorIndexProvider for USearchIndexProvider {
                     options,
                     config.quantization_center.clone(),
                 )?;
-                index.load(&bytes)?;
+                index.load(bytes).await?;
 
                 if !is_fork {
                     self.cache.insert(cache_key, index.clone()).await;
