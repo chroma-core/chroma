@@ -91,15 +91,22 @@ where
     /// - The last configured tier absorbs all remaining members.
     /// - If the requested tier has no members, falls back to the last tier with members.
     /// - If `tiers` is empty, all members belong to the default tier.
-    fn members_for_tier(&self, sorted_members: &[String], tier: Tier) -> Vec<String> {
-        if sorted_members.is_empty() || self.tiers.is_empty() {
-            return sorted_members.to_vec();
+    fn members_for_tier<'a>(
+        &self,
+        members: impl Iterator<Item = &'a str>,
+        tier: Tier,
+    ) -> Vec<String> {
+        let mut members: Vec<String> = members.map(|s| s.to_string()).collect();
+        members.sort();
+
+        if members.is_empty() || self.tiers.is_empty() {
+            return members;
         }
 
         let mut start = 0;
         for capacity in self.tiers.iter().take(tier.0 as usize) {
-            if start + capacity >= sorted_members.len() {
-                return sorted_members[start..].to_vec();
+            if start + capacity >= members.len() {
+                return members[start..].to_vec();
             }
             start += capacity;
         }
@@ -107,10 +114,10 @@ where
         let end = self
             .tiers
             .get(tier.0 as usize)
-            .map(|capacity| min(start + capacity, sorted_members.len()))
-            .unwrap_or(sorted_members.len());
+            .map(|capacity| min(start + capacity, members.len()))
+            .unwrap_or(members.len());
 
-        sorted_members[start..end].to_vec()
+        members[start..end].to_vec()
     }
 
     /// Get the gRPC clients for the given key by performing the assignment policy
@@ -146,13 +153,8 @@ where
         tier: Tier,
     ) -> Result<HashMap<String, T>, ClientAssignmentError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
-
-        // Get all members and sort them for tier partitioning
-        let mut all_members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
-        all_members.sort();
-
-        // Get members for the requested tier
-        let members = self.members_for_tier(&all_members, tier);
+        let members =
+            self.members_for_tier(node_name_to_client_guard.keys().map(|s| s.as_str()), tier);
 
         let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);
@@ -639,5 +641,64 @@ mod test {
             Some("client3".to_string())
         );
         assert!(assigner.client_for_node("missing").is_none());
+    }
+
+    #[test]
+    fn test_members_for_tier() {
+        let assigner: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            1,
+            vec![1, 2], // tier 0: 1 member, tier 1: 2 members, tier 2+: remainder
+        );
+
+        // Test with members ["a", "b", "c", "d", "e"] (passed unsorted)
+        let members = vec!["c", "a", "e", "b", "d"];
+
+        // Tier 0: first 1 → ["a"]
+        assert_eq!(
+            assigner.members_for_tier(members.iter().copied(), Tier(0)),
+            vec!["a"]
+        );
+
+        // Tier 1: next 2 → ["b", "c"]
+        assert_eq!(
+            assigner.members_for_tier(members.iter().copied(), Tier(1)),
+            vec!["b", "c"]
+        );
+
+        // Tier 2 (last): remainder → ["d", "e"]
+        assert_eq!(
+            assigner.members_for_tier(members.iter().copied(), Tier(2)),
+            vec!["d", "e"]
+        );
+
+        // Tier beyond config → falls back to last tier
+        assert_eq!(
+            assigner.members_for_tier(members.iter().copied(), Tier(5)),
+            vec!["d", "e"]
+        );
+
+        // Default tier → falls back to last tier
+        assert_eq!(
+            assigner.members_for_tier(members.iter().copied(), Tier::default()),
+            vec!["d", "e"]
+        );
+
+        // Empty members
+        assert_eq!(
+            assigner.members_for_tier(std::iter::empty(), Tier(0)),
+            Vec::<String>::new()
+        );
+
+        // No tier config → all members returned (sorted)
+        let assigner_no_tiers: ClientAssigner<String> = ClientAssigner::new(
+            Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
+            1,
+            vec![],
+        );
+        assert_eq!(
+            assigner_no_tiers.members_for_tier(members.iter().copied(), Tier(0)),
+            vec!["a", "b", "c", "d", "e"]
+        );
     }
 }
