@@ -68,6 +68,14 @@ impl GarbageCollectionContext {
             hnsw_context,
         })
     }
+
+    pub fn pl_context(&self) -> &PlGarbageCollectionContext {
+        &self.pl_context
+    }
+
+    pub fn hnsw_context(&self) -> &HnswGarbageCollectionContext {
+        &self.hnsw_context
+    }
 }
 
 #[async_trait::async_trait]
@@ -849,7 +857,7 @@ impl SpannIndexWriter {
     async fn collect_and_reassign_split_points(
         &self,
         new_head_ids: &[i32],
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
@@ -1019,7 +1027,7 @@ impl SpannIndexWriter {
         head_id: usize,
         head_embedding: &[f32],
         assigned_ids: &mut HashSet<u32>,
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
     ) -> Result<(), SpannIndexWriterError> {
         // Get posting list of each neighbour and check for reassignment criteria.
@@ -1097,7 +1105,7 @@ impl SpannIndexWriter {
     async fn collect_and_reassign(
         &self,
         new_head_ids: &[i32],
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
@@ -1151,7 +1159,7 @@ impl SpannIndexWriter {
         let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
         let mut new_doc_versions: Vec<Vec<u32>> = Vec::with_capacity(2);
         let mut new_head_ids = vec![-1; 2];
-        let mut new_head_embeddings = vec![None; 2];
+        let mut new_head_embeddings: Vec<Option<&[f32]>> = vec![None; 2];
         let clustering_output;
         {
             let write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
@@ -1261,10 +1269,18 @@ impl SpannIndexWriter {
             // Shuffle local_indices.
             local_indices.shuffle(&mut rand::thread_rng());
             let last = local_indices.len();
+            // Convert flat embeddings to Arc<[f32]> format for kmeans.
+            let doc_embeddings_arc: Vec<Arc<[f32]>> = (0..doc_offset_ids.len())
+                .map(|i| {
+                    Arc::from(
+                        &doc_embeddings[i * self.dimensionality..(i + 1) * self.dimensionality],
+                    )
+                })
+                .collect();
             // Prepare KMeans.
             let mut kmeans_input = KMeansAlgorithmInput::new(
                 local_indices,
-                &doc_embeddings,
+                &doc_embeddings_arc,
                 self.dimensionality,
                 /* k */ 2,
                 /* first */ 0,
@@ -1374,7 +1390,7 @@ impl SpannIndexWriter {
                             .num_pl_modified
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         new_head_ids[k] = head_id as i32;
-                        new_head_embeddings[k] = Some(&head_embedding);
+                        new_head_embeddings[k] = Some(head_embedding.as_slice());
                     } else {
                         // Create new head.
                         let next_id = self
@@ -1401,7 +1417,7 @@ impl SpannIndexWriter {
                             .num_pl_modified
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         new_head_ids[k] = next_id as i32;
-                        new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
+                        new_head_embeddings[k] = Some(&*clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
                         let mut hnsw_write_guard = self.hnsw_index.inner.write();
                         let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
@@ -2469,20 +2485,20 @@ impl SpannIndexWriter {
     }
 }
 
-struct SpannIndexFlusherMetrics {
-    pl_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    versions_map_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    hnsw_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    num_pl_entries_flushed: opentelemetry::metrics::Counter<u64>,
-    num_versions_map_entries_flushed: opentelemetry::metrics::Counter<u64>,
+pub(crate) struct SpannIndexFlusherMetrics {
+    pub(crate) pl_flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub(crate) versions_map_flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub(crate) hnsw_flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub(crate) num_pl_entries_flushed: opentelemetry::metrics::Counter<u64>,
+    pub(crate) num_versions_map_entries_flushed: opentelemetry::metrics::Counter<u64>,
 }
 
 pub struct SpannIndexFlusher {
-    pl_flusher: BlockfileFlusher,
-    versions_map_flusher: BlockfileFlusher,
-    max_head_id_flusher: BlockfileFlusher,
-    hnsw_flusher: HnswIndexFlusher,
-    metrics: SpannIndexFlusherMetrics,
+    pub(crate) pl_flusher: BlockfileFlusher,
+    pub(crate) versions_map_flusher: BlockfileFlusher,
+    pub(crate) max_head_id_flusher: BlockfileFlusher,
+    pub(crate) hnsw_flusher: HnswIndexFlusher,
+    pub(crate) metrics: SpannIndexFlusherMetrics,
 }
 
 #[derive(Debug)]
@@ -3909,7 +3925,7 @@ mod tests {
         writer
             .collect_and_reassign(
                 &[1, 2],
-                &[Some(&vec![0.0, 0.0]), Some(&vec![1000.0, 1000.0])],
+                &[Some(&[0.0, 0.0]), Some(&[1000.0, 1000.0])],
                 &[5000.0, 5000.0],
                 &[split_doc_offset_ids1.clone(), split_doc_offset_ids2.clone()],
                 &[split_doc_versions1.clone(), split_doc_versions2.clone()],

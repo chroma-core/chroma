@@ -1780,6 +1780,7 @@ dependencies = [
  "chroma-types",
  "clap",
  "criterion",
+ "dashmap",
  "futures",
  "hnswlib",
  "indicatif",

@@ -1,4 +1,4 @@
-use std::{cmp::min, collections::HashMap};
+use std::{cmp::min, collections::HashMap, sync::Arc};
 
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -34,7 +34,7 @@ const NUM_ITERS_NO_IMPROVEMENT: usize = 5;
 ///   initial_lambda as the starting point.
 pub struct KMeansAlgorithmInput<'referred_data> {
     indices: Vec<usize>,
-    embeddings: &'referred_data [f32],
+    embeddings: &'referred_data [Arc<[f32]>],
     embedding_dimension: usize,
     k: usize,
     first: usize,
@@ -49,7 +49,7 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         indices: Vec<usize>,
-        embeddings: &'referred_data [f32],
+        embeddings: &'referred_data Vec<Arc<[f32]>>,
         embedding_dimension: usize,
         k: usize,
         first: usize,
@@ -81,7 +81,7 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 #[allow(dead_code)]
 #[derive(Debug)]
 pub struct KMeansAlgorithmOutput {
-    pub cluster_centers: Vec<Vec<f32>>,
+    pub cluster_centers: Vec<Arc<[f32]>>,
     pub cluster_counts: Vec<usize>,
     pub cluster_labels: HashMap<usize, i32>,
     pub num_clusters: usize,
@@ -137,23 +137,20 @@ impl ChromaError for KMeansError {
 // For a given point, get the nearest center and the distance to it.
 // lambda is a parameter used to penalize large clusters.
 // previous_counts is the number of points in each cluster in the previous iteration.
-fn get_nearest_center(
+fn get_nearest_center<T: AsRef<[f32]>>(
     input: &KMeansAlgorithmInput,
-    centers: &[Vec<f32>],
+    centers: &[T],
     idx: usize,
     lambda: f32,
     previous_counts: &[usize],
 ) -> Result<(i32, f32), KMeansError> {
     let point_idx = input.indices[idx];
-    let dim = input.embedding_dimension;
-    let start_idx = point_idx * dim;
-    let end_idx = (point_idx + 1) * dim;
     let mut min_distance = MAX_DISTANCE;
     let mut min_center: i32 = -1;
     for center_idx in 0..input.k {
         let distance = input
             .distance_function
-            .distance(&input.embeddings[start_idx..end_idx], &centers[center_idx])
+            .distance(&input.embeddings[point_idx], centers[center_idx].as_ref())
             + lambda * previous_counts[center_idx] as f32;
         if distance > -MAX_DISTANCE && distance < min_distance {
             min_distance = distance;
@@ -239,9 +236,7 @@ fn kmeansassign_for_main_loop(
             cluster_farthest_point_idx[min_center as usize] = point_idx as i32;
             cluster_farthest_distance[min_center as usize] = min_distance;
         }
-        let start_idx = point_idx * dim;
-        let end_idx = (point_idx + 1) * dim;
-        input.embeddings[start_idx..end_idx]
+        input.embeddings[point_idx]
             .iter()
             .enumerate()
             .for_each(|(index, emb)| cluster_new_centers[min_center as usize][index] += *emb);
@@ -260,9 +255,9 @@ fn kmeansassign_for_main_loop(
 // points instead of just a sample.
 // generate_labels is used to denote if this method is expected to also return
 // the assignment labels of the points.
-fn kmeansassign_finish(
+fn kmeansassign_finish<T: AsRef<[f32]>>(
     input: &KMeansAlgorithmInput,
-    centers: &[Vec<f32>],
+    centers: &[T],
     generate_labels: bool,
 ) -> Result<KMeansAssignFinishOutput, KMeansError> {
     // Assign ALL the points.
@@ -342,9 +337,8 @@ fn init_centers(
 ) -> Result<(Vec<Vec<f32>>, Vec<usize>, f32), KMeansError> {
     let batch_end = min(input.first + input.num_samples, input.last);
     let mut min_dist = MAX_DISTANCE;
-    let embedding_dim = input.k;
-    let mut final_cluster_count = vec![0; embedding_dim];
-    let mut final_centers = vec![vec![0.0; input.embedding_dimension]; embedding_dim];
+    let mut final_cluster_count = vec![0; input.k];
+    let mut final_centers = vec![vec![0.0; input.embedding_dimension]; input.k];
     let mut lambda = 0.0;
     // Randomly choose centers.
     for _ in 0..num_iters {
@@ -352,10 +346,7 @@ fn init_centers(
         let mut centers = vec![vec![0.0; input.embedding_dimension]; input.k];
         for center in centers.iter_mut() {
             let random_center = rand::thread_rng().gen_range(input.first..batch_end);
-            center.copy_from_slice(
-                &input.embeddings[input.indices[random_center] as usize * input.embedding_dimension
-                    ..((input.indices[random_center] + 1) as usize) * input.embedding_dimension],
-            );
+            center.copy_from_slice(&input.embeddings[input.indices[random_center]]);
         }
         let kmeans_assign = kmeansassign_for_centerinit(input, &centers)?;
         if kmeans_assign.total_distance < min_dist {
@@ -389,11 +380,8 @@ fn refine_centers(
             && kmeansassign_output.cluster_counts[cluster_idx] > max_count
             && input.distance_function.distance(
                 &previous_centers[cluster_idx],
-                &input.embeddings[kmeansassign_output.cluster_farthest_point_idx[cluster_idx]
-                    as usize
-                    * input.embedding_dimension
-                    ..(kmeansassign_output.cluster_farthest_point_idx[cluster_idx] + 1) as usize
-                        * input.embedding_dimension],
+                &input.embeddings
+                    [kmeansassign_output.cluster_farthest_point_idx[cluster_idx] as usize],
             ) > 1e-6
         {
             max_count = kmeansassign_output.cluster_counts[cluster_idx];
@@ -417,14 +405,10 @@ fn refine_centers(
                 .copy_from_slice(&previous_centers[cluster_idx]);
         } else {
             // copy the farthest point embedding to the center.
-            let start = kmeansassign_output.cluster_farthest_point_idx[max_cluster_idx as usize]
-                as usize
-                * input.embedding_dimension;
-            let end = (kmeansassign_output.cluster_farthest_point_idx[max_cluster_idx as usize] + 1)
-                as usize
-                * input.embedding_dimension;
-            kmeansassign_output.cluster_new_centers[cluster_idx]
-                .copy_from_slice(&input.embeddings[start..end]);
+            kmeansassign_output.cluster_new_centers[cluster_idx].copy_from_slice(
+                &input.embeddings[kmeansassign_output.cluster_farthest_point_idx
+                    [max_cluster_idx as usize] as usize],
+            );
         }
         diff += input.distance_function.distance(
             &previous_centers[cluster_idx],
@@ -475,21 +459,23 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
     // Assign points to the refined center one last time and get nearest points of each cluster.
     let kmeans_assign =
         kmeansassign_finish(input, &previous_centers, /* generate_labels */ false)?;
+    let mut final_centers = Vec::with_capacity(input.k);
     #[allow(clippy::needless_range_loop)]
     for center_ids in 0..input.k {
         if kmeans_assign.cluster_nearest_point_idx[center_ids] >= 0 {
-            let start_emb_idx = kmeans_assign.cluster_nearest_point_idx[center_ids] as usize
-                * input.embedding_dimension;
-            let end_emb_idx = (kmeans_assign.cluster_nearest_point_idx[center_ids] as usize + 1)
-                * input.embedding_dimension;
-            previous_centers[center_ids]
-                .copy_from_slice(&input.embeddings[start_emb_idx..end_emb_idx]);
+            final_centers.push(
+                input.embeddings[kmeans_assign.cluster_nearest_point_idx[center_ids] as usize]
+                    .clone(),
+            );
+        } else {
+            // Arc::from(Vec) = takes ownership of Vec's buffer, zero data copy
+            final_centers.push(Arc::from(std::mem::take(&mut previous_centers[center_ids])));
         }
     }
     // Finally assign points to these nearest points in the cluster.
     // Previous counts does not matter since lambda is 0.
     let kmeans_assign =
-        kmeansassign_finish(input, &previous_centers, /* generate_labels */ true)?;
+        kmeansassign_finish(input, &final_centers, /* generate_labels */ true)?;
     previous_counts = kmeans_assign.cluster_counts;
     let mut total_non_zero_clusters = 0;
     for count in previous_counts.iter() {
@@ -499,7 +485,7 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
     }
 
     Ok(KMeansAlgorithmOutput {
-        cluster_centers: previous_centers,
+        cluster_centers: final_centers,
         cluster_counts: previous_counts,
         cluster_labels: kmeans_assign.cluster_labels,
         num_clusters: total_non_zero_clusters,
@@ -615,6 +601,7 @@ pub async fn rng_query(
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Arc;
 
     use crate::spann::utils::{
         cluster, kmeansassign_finish, kmeansassign_for_centerinit, kmeansassign_for_main_loop,
@@ -625,9 +612,17 @@ mod tests {
     fn test_kmeans_assign_for_center_init() {
         // 2D embeddings.
         let dim = 2;
-        let embeddings = [
-            -1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 10.0, 10.0, 11.0, 10.0, 10.0, 11.0,
-            11.0, 11.0, 12.0, 12.0,
+        let embeddings: Vec<Arc<[f32]>> = vec![
+            Arc::from([-1.0_f32, -1.0].as_slice()),
+            Arc::from([0.0_f32, 0.0].as_slice()),
+            Arc::from([1.0_f32, 0.0].as_slice()),
+            Arc::from([0.0_f32, 1.0].as_slice()),
+            Arc::from([1.0_f32, 1.0].as_slice()),
+            Arc::from([10.0_f32, 10.0].as_slice()),
+            Arc::from([11.0_f32, 10.0].as_slice()),
+            Arc::from([10.0_f32, 11.0].as_slice()),
+            Arc::from([11.0_f32, 11.0].as_slice()),
+            Arc::from([12.0_f32, 12.0].as_slice()),
         ];
         let indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let kmeans_input = KMeansAlgorithmInput::new(
@@ -653,9 +648,19 @@ mod tests {
     fn test_kmeans_assign_for_main_loop() {
         // 2D embeddings.
         let dim = 2;
-        let embeddings = [
-            -1.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 5.0, 5.0, 10.0, 10.0, 11.0, 10.0,
-            10.0, 11.0, 11.0, 11.0, 12.0, 12.0, 13.0, 13.0,
+        let embeddings: Vec<Arc<[f32]>> = vec![
+            Arc::from([-1.0_f32, -1.0].as_slice()),
+            Arc::from([0.0_f32, 0.0].as_slice()),
+            Arc::from([1.0_f32, 0.0].as_slice()),
+            Arc::from([0.0_f32, 1.0].as_slice()),
+            Arc::from([1.0_f32, 1.0].as_slice()),
+            Arc::from([5.0_f32, 5.0].as_slice()),
+            Arc::from([10.0_f32, 10.0].as_slice()),
+            Arc::from([11.0_f32, 10.0].as_slice()),
+            Arc::from([10.0_f32, 11.0].as_slice()),
+            Arc::from([11.0_f32, 11.0].as_slice()),
+            Arc::from([12.0_f32, 12.0].as_slice()),
+            Arc::from([13.0_f32, 13.0].as_slice()),
         ];
         let indices = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11];
         let kmeans_input = KMeansAlgorithmInput::new(
@@ -689,8 +694,15 @@ mod tests {
     fn test_kmeans_assign_finish() {
         // 2D embeddings.
         let dim = 2;
-        let embeddings = [
-            0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 10.0, 10.0, 11.0, 10.0, 10.0, 11.0, 11.0, 11.0,
+        let embeddings: Vec<Arc<[f32]>> = vec![
+            Arc::from([0.0_f32, 0.0].as_slice()),
+            Arc::from([1.0_f32, 0.0].as_slice()),
+            Arc::from([0.0_f32, 1.0].as_slice()),
+            Arc::from([1.0_f32, 1.0].as_slice()),
+            Arc::from([10.0_f32, 10.0].as_slice()),
+            Arc::from([11.0_f32, 10.0].as_slice()),
+            Arc::from([10.0_f32, 11.0].as_slice()),
+            Arc::from([11.0_f32, 11.0].as_slice()),
         ];
         let indices = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let kmeans_algo = KMeansAlgorithmInput::new(
@@ -731,9 +743,15 @@ mod tests {
     fn test_kmeans_clustering() {
         // 2D embeddings.
         let dim = 2;
-        let embeddings = [
-            0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1000.0, 10000.0, 11000.0, 10000.0, 10000.0,
-            11000.0, 11000.0, 11000.0,
+        let embeddings: Vec<Arc<[f32]>> = vec![
+            Arc::from([0.0_f32, 0.0].as_slice()),
+            Arc::from([1.0_f32, 0.0].as_slice()),
+            Arc::from([0.0_f32, 1.0].as_slice()),
+            Arc::from([1.0_f32, 1.0].as_slice()),
+            Arc::from([1000.0_f32, 10000.0].as_slice()),
+            Arc::from([11000.0_f32, 10000.0].as_slice()),
+            Arc::from([10000.0_f32, 11000.0].as_slice()),
+            Arc::from([11000.0_f32, 11000.0].as_slice()),
         ];
         let indices = vec![0, 1, 2, 3, 4, 5, 6, 7];
         let mut kmeans_algo = KMeansAlgorithmInput::new(

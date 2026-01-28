@@ -6,7 +6,7 @@ pub mod metadata;
 pub mod quantization;
 pub mod spann;
 pub mod sparse;
-mod types;
+pub mod types;
 pub mod utils;
 
 // Re-export types
