@@ -1,7 +1,7 @@
-use crate::{HnswIndexConfigError, PersistentIndex};
+use crate::HnswIndexConfigError;
 
 use super::config::HnswProviderConfig;
-use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
+use super::{HnswIndex, HnswIndexConfig, IndexConfig, IndexUuid};
 use crate::hnsw::WrappedHnswError;
 
 use async_trait::async_trait;

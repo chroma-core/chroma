@@ -5,7 +5,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use rand::{seq::SliceRandom, Rng};
 use thiserror::Error;
 
-use crate::{hnsw_provider::HnswIndexRef, Index};
+use crate::hnsw_provider::HnswIndexRef;
 
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.

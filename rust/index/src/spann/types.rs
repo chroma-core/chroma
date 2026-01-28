@@ -35,7 +35,7 @@ use crate::{
         HnswIndexRef,
     },
     spann::utils::cluster,
-    Index, IndexUuid,
+    IndexUuid,
 };
 
 use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
@@ -3019,7 +3019,6 @@ mod tests {
             GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
             SpannMetrics,
         },
-        Index,
     };
 
     #[tokio::test]
