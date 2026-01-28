@@ -461,6 +461,78 @@ mod tests {
         assert_eq!(config.resolve_tier(&regular_large), Tier::default()); // Neither matches
     }
 
+    #[test]
+    fn test_resolve_tier_database_id_match() {
+        // Use valid UUIDs since database_id is a UUID type
+        let prod_db_uuid = "00000000-0000-0000-0000-000000000001";
+        let dev_db_uuid = "00000000-0000-0000-0000-000000000002";
+
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 4,
+            patterns: vec![TierPattern::DatabaseId(prod_db_uuid.to_string())],
+        }]);
+
+        let prod = test_collection("tenant", prod_db_uuid, "", 100);
+        let dev = test_collection("tenant", dev_db_uuid, "", 100);
+
+        assert_eq!(config.resolve_tier(&prod), Tier::new(0));
+        assert_eq!(config.resolve_tier(&dev), Tier::default());
+    }
+
+    #[test]
+    fn test_resolve_tier_collection_id_match() {
+        // Use valid UUIDs since collection_id is a UUID type
+        let important_uuid = "00000000-0000-0000-0000-000000000001";
+        let other_uuid = "00000000-0000-0000-0000-000000000002";
+
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 4,
+            patterns: vec![TierPattern::CollectionId(important_uuid.to_string())],
+        }]);
+
+        let important = test_collection("tenant", "", important_uuid, 100);
+        let other = test_collection("tenant", "", other_uuid, 100);
+
+        assert_eq!(config.resolve_tier(&important), Tier::new(0));
+        assert_eq!(config.resolve_tier(&other), Tier::default());
+    }
+
+    #[test]
+    fn test_resolve_tier_or_across_all_pattern_types() {
+        // Use valid UUIDs for database_id and collection_id
+        let priority_db_uuid = "00000000-0000-0000-0000-000000000001";
+        let hot_collection_uuid = "00000000-0000-0000-0000-000000000002";
+        let other_db_uuid = "00000000-0000-0000-0000-000000000099";
+        let other_col_uuid = "00000000-0000-0000-0000-000000000098";
+
+        // A tier with all four pattern types - any match should route to tier 0
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 4,
+            patterns: vec![
+                TierPattern::TenantId("vip_tenant".to_string()),
+                TierPattern::DatabaseId(priority_db_uuid.to_string()),
+                TierPattern::CollectionId(hot_collection_uuid.to_string()),
+                TierPattern::CollectionSize { min: 0, max: 100 },
+            ],
+        }]);
+
+        // Each of these matches exactly one pattern
+        let by_tenant = test_collection("vip_tenant", other_db_uuid, other_col_uuid, 5000);
+        let by_database = test_collection("other", priority_db_uuid, other_col_uuid, 5000);
+        let by_collection = test_collection("other", other_db_uuid, hot_collection_uuid, 5000);
+        let by_size = test_collection("other", other_db_uuid, other_col_uuid, 50);
+        let no_match = test_collection("other", other_db_uuid, other_col_uuid, 5000);
+
+        assert_eq!(config.resolve_tier(&by_tenant), Tier::new(0));
+        assert_eq!(config.resolve_tier(&by_database), Tier::new(0));
+        assert_eq!(config.resolve_tier(&by_collection), Tier::new(0));
+        assert_eq!(config.resolve_tier(&by_size), Tier::new(0));
+        assert_eq!(config.resolve_tier(&no_match), Tier::default());
+    }
+
     // ==================== TierPattern::matches() boundary tests ====================
 
     #[test]
