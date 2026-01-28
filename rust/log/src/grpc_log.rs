@@ -8,7 +8,7 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::{
-    ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions,
+    ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions, Tier,
 };
 use chroma_memberlist::config::MemberlistProviderConfig;
 use chroma_memberlist::memberlist_provider::{
@@ -258,7 +258,7 @@ impl Configurable<(GrpcLogConfig, System)> for GrpcLog {
         let (my_config, system) = my_config;
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&my_config.assignment, registry).await?;
-        let client_assigner = ClientAssigner::new(assignment_policy, 1);
+        let client_assigner = ClientAssigner::new(assignment_policy, 1, vec![]);
         let client_manager = ClientManager::new(
             client_assigner.clone(),
             1,
@@ -298,7 +298,7 @@ impl GrpcLog {
         // would return a provably non-empty vector, but in lieu of that, or panic'ing
         // on a impossible state, we return the underlying error here.
         self.client_assigner
-            .clients(&collection_id.to_string())?
+            .clients(&collection_id.to_string(), Tier::default())?
             .drain(..)
             .next()
             .ok_or(ClientAssignmentError::NoClientFound(
@@ -645,7 +645,7 @@ impl GrpcLog {
     ) -> Result<(), GarbageCollectError> {
         let mut client = self
             .client_assigner
-            .clients(&collection_id.to_string())?
+            .clients(&collection_id.to_string(), Tier::default())?
             .drain(..)
             .next()
             .ok_or(ClientAssignmentError::NoClientFound(

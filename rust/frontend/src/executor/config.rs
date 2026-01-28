@@ -43,6 +43,11 @@ pub struct DistributedExecutorConfig {
     pub client_selection: ClientSelectionConfig,
     #[serde(default = "default_query_service_port")]
     pub port: u16,
+    /// Tier configuration: index is tier level, value is member count for that tier.
+    /// The last configured tier absorbs all remaining members.
+    /// Empty vec (default) means all members belong to the default tier.
+    #[serde(default)]
+    pub tiers: Vec<usize>,
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]

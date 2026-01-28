@@ -5,8 +5,7 @@ use backon::Retryable;
 use chroma_config::registry;
 use chroma_config::{assignment::assignment_policy::AssignmentPolicy, Configurable};
 use chroma_error::ChromaError;
-use chroma_memberlist::client_manager::ClientAssigner;
-use chroma_memberlist::client_manager::{ClientManager, ClientOptions};
+use chroma_memberlist::client_manager::{ClientAssigner, ClientManager, ClientOptions, Tier};
 use chroma_memberlist::{
     config::MemberlistProviderConfig,
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
@@ -68,7 +67,11 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
     ) -> Result<Self, Box<dyn ChromaError>> {
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
-        let client_assigner = ClientAssigner::new(assignment_policy, config.replication_factor);
+        let client_assigner = ClientAssigner::new(
+            assignment_policy,
+            config.replication_factor,
+            config.tiers.clone(),
+        );
         let client_manager = ClientManager::new(
             client_assigner.clone(),
             config.connections_per_node,
@@ -127,6 +130,7 @@ impl DistributedExecutor {
                     .collection
                     .collection_id
                     .to_string(),
+                Tier::default(),
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
@@ -159,6 +163,7 @@ impl DistributedExecutor {
                     .collection
                     .collection_id
                     .to_string(),
+                Tier::default(),
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -190,6 +195,7 @@ impl DistributedExecutor {
                     .collection
                     .collection_id
                     .to_string(),
+                Tier::default(),
             )
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -222,7 +228,7 @@ impl DistributedExecutor {
 
         let clients = self
             .client_assigner
-            .clients(collection_id)
+            .clients(collection_id, Tier::default())
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
 
         // Convert plan to proto

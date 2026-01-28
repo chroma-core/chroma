@@ -7,7 +7,7 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::{
-    ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions,
+    ClientAssigner, ClientAssignmentError, ClientManager, ClientOptions, Tier,
 };
 use chroma_memberlist::config::MemberlistProviderConfig;
 use chroma_memberlist::memberlist_provider::{
@@ -108,11 +108,13 @@ impl GrpcHeapService {
 
     fn client_for(&mut self, key: &str) -> Result<HeapClient, ClientAssignmentError> {
         // Replication factor is always 1 for heap service so we grab the first assigned client.
-        self.client_assigner.clients(key)?.drain(..).next().ok_or(
-            ClientAssignmentError::NoClientFound(
+        self.client_assigner
+            .clients(key, Tier::default())?
+            .drain(..)
+            .next()
+            .ok_or(ClientAssignmentError::NoClientFound(
                 "Improbable state: no client found for key".to_string(),
-            ),
-        )
+            ))
     }
 
     /// Push schedules to the heap
@@ -174,7 +176,7 @@ impl Configurable<(GrpcHeapServiceConfig, System)> for GrpcHeapService {
         let (my_config, system) = my_config;
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&my_config.assignment, registry).await?;
-        let client_assigner = ClientAssigner::new(assignment_policy, 1);
+        let client_assigner = ClientAssigner::new(assignment_policy, 1, vec![]);
         let client_manager = ClientManager::new(
             client_assigner.clone(),
             1,
