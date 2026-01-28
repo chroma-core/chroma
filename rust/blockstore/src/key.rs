@@ -119,10 +119,14 @@ impl CompositeKey {
 
 impl Hash for CompositeKey {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // TODO: Implement a better hash function. This is only used by the
-        // memory blockfile, so its not a performance issue, since that
-        // is only used for testing.
-        self.prefix.hash(state)
+        // Hash both prefix and key for proper distribution
+        self.prefix.hash(state);
+        match &self.key {
+            KeyWrapper::String(s) => s.hash(state),
+            KeyWrapper::Float32(f) => f.to_bits().hash(state),
+            KeyWrapper::Bool(b) => b.hash(state),
+            KeyWrapper::Uint32(u) => u.hash(state),
+        }
     }
 }
 

@@ -1,5 +1,5 @@
 use super::{
-    builder_storage::{BTreeBuilderStorage, BuilderStorage, VecBuilderStorage},
+    builder_storage::{BuilderStorage, DeferredSortStorage, VecBuilderStorage},
     single_column_size_tracker::SingleColumnSizeTracker,
     BlockKeyArrowBuilder,
 };
@@ -36,7 +36,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
     pub(in crate::arrow) fn new(mutation_ordering_hint: BlockfileWriterMutationOrdering) -> Self {
         let storage = match mutation_ordering_hint {
             BlockfileWriterMutationOrdering::Unordered => {
-                BuilderStorage::BTreeBuilderStorage(BTreeBuilderStorage::default())
+                BuilderStorage::DeferredSortStorage(DeferredSortStorage::default())
             }
             BlockfileWriterMutationOrdering::Ordered => {
                 BuilderStorage::VecBuilderStorage(VecBuilderStorage::default())
@@ -67,7 +67,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
     }
 
     pub fn get_min_key(&self) -> Option<CompositeKey> {
-        let inner = self.inner.read();
+        let mut inner = self.inner.write();
         inner.storage.min_key().cloned()
     }
 
@@ -179,6 +179,8 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         &self,
         split_size: usize,
     ) -> (CompositeKey, SingleColumnStorage<V>) {
+        let mut inner = self.inner.write();
+
         let mut num_items = 0;
         let mut prefix_size = 0;
         let mut key_size = 0;
@@ -186,8 +188,7 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         let mut split_key = None;
 
         {
-            let inner = self.inner.read();
-            let storage = &inner.storage;
+            let storage = &mut inner.storage;
 
             let mut item_count = 0;
             let mut iter = storage.iter();
@@ -239,8 +240,6 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
                 }
             }
         }
-
-        let mut inner = self.inner.write();
 
         let total_num_items = inner.size_tracker.get_num_items();
         let total_prefix_size = inner.size_tracker.get_prefix_size();
@@ -336,7 +335,71 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
     use std::time::Instant;
+
+    #[test]
+    fn benchmark_deferred_sort_vs_btreemap() {
+        // This test compares DeferredSortStorage (our new impl) vs BTreeMap (old impl)
+        let iterations = 100_000;
+
+        // Pre-create data to avoid measuring allocation time
+        let data: Vec<_> = (0..iterations)
+            .map(|i| {
+                (
+                    CompositeKey {
+                        prefix: "prefix".to_string(),
+                        key: KeyWrapper::String(format!("key{}", i)),
+                    },
+                    format!("value{}", i),
+                )
+            })
+            .collect();
+
+        // Test DeferredSortStorage (O(1) insert, O(n log n) sort at end)
+        let mut deferred_storage: super::super::builder_storage::DeferredSortStorage<String> =
+            Default::default();
+        let data_clone1: Vec<_> = data.clone();
+        let start = Instant::now();
+        for (key, value) in data_clone1 {
+            deferred_storage.add(key, value);
+        }
+        let deferred_insert_time = start.elapsed();
+
+        // Measure time to iterate (which triggers sorting)
+        let start = Instant::now();
+        let _count: usize = deferred_storage.iter().count();
+        let deferred_sort_time = start.elapsed();
+
+        // Test BTreeMap (O(log n) per insert)
+        let mut btree_storage: BTreeMap<CompositeKey, String> = BTreeMap::new();
+        let data_clone2: Vec<_> = data.clone();
+        let start = Instant::now();
+        for (key, value) in data_clone2 {
+            btree_storage.insert(key, value);
+        }
+        let btree_time = start.elapsed();
+
+        // Calculate speedups
+        let total_deferred = deferred_insert_time + deferred_sort_time;
+        let insert_speedup = btree_time.as_nanos() as f64 / deferred_insert_time.as_nanos() as f64;
+        let total_speedup = btree_time.as_nanos() as f64 / total_deferred.as_nanos() as f64;
+
+        println!("\n=== DeferredSortStorage vs BTreeMap ({} items) ===", iterations);
+        println!("BTreeMap inserts: {:?}", btree_time);
+        println!("DeferredSort inserts: {:?}", deferred_insert_time);
+        println!("DeferredSort sort (on iter): {:?}", deferred_sort_time);
+        println!("DeferredSort total: {:?}", total_deferred);
+        println!("Insert speedup: {:.2}x faster", insert_speedup);
+        println!("Total speedup: {:.2}x faster", total_speedup);
+        println!("=================================================\n");
+
+        // DeferredSort inserts should be faster than BTreeMap inserts
+        assert!(
+            deferred_insert_time < btree_time,
+            "DeferredSort inserts should be faster than BTreeMap inserts"
+        );
+    }
 
     #[test]
     fn benchmark_individual_vs_batch_add() {

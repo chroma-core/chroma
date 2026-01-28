@@ -1,5 +1,139 @@
 use crate::{arrow::types::ArrowWriteableValue, key::CompositeKey};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+
+/// A storage structure that defers sorting until iteration/commit time.
+/// This provides O(1) amortized insert performance instead of O(log n) for BTreeMap.
+///
+/// The structure works as follows:
+/// - Inserts append to a Vec (O(1) amortized)
+/// - A HashMap tracks the latest index for each key (for deduplication)
+/// - Sorting happens lazily when iteration is requested
+/// - This is optimal for write-heavy workloads with bulk inserts
+pub struct DeferredSortStorage<V: ArrowWriteableValue> {
+    /// Unsorted storage of key-value pairs
+    storage: Vec<(CompositeKey, V)>,
+    /// Maps keys to their index in the storage vec (for deduplication and lookups)
+    index: HashMap<CompositeKey, usize>,
+    /// Whether the storage is currently sorted
+    is_sorted: bool,
+}
+
+impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
+    /// Add a key-value pair to the storage. O(1) amortized.
+    pub fn add(&mut self, key: CompositeKey, value: V) {
+        if let Some(&existing_idx) = self.index.get(&key) {
+            // Key exists - update in place (deduplication)
+            self.storage[existing_idx].1 = value;
+        } else {
+            // New key - append to vec
+            let idx = self.storage.len();
+            self.index.insert(key.clone(), idx);
+            self.storage.push((key, value));
+            self.is_sorted = false;
+        }
+    }
+
+    fn delete(&mut self, key: &CompositeKey) -> Option<V> {
+        if let Some(idx) = self.index.remove(key) {
+            // Mark as deleted by taking the value
+            // We use swap_remove for efficiency and update the moved element's index
+            let (_, value) = self.storage.swap_remove(idx);
+
+            // If we removed an element that wasn't the last, update the moved element's index
+            if idx < self.storage.len() {
+                let moved_key = &self.storage[idx].0;
+                self.index.insert(moved_key.clone(), idx);
+            }
+
+            self.is_sorted = false;
+            Some(value)
+        } else {
+            None
+        }
+    }
+
+    fn get(&self, key: &CompositeKey) -> Option<V::PreparedValue> {
+        self.index
+            .get(key)
+            .map(|&idx| V::prepare(self.storage[idx].1.clone()))
+    }
+
+    fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
+        self.index.get(key).map(|&idx| &self.storage[idx].1)
+    }
+
+    fn min_key(&mut self) -> Option<&CompositeKey> {
+        self.ensure_sorted();
+        self.storage.first().map(|(key, _)| key)
+    }
+
+    fn ensure_sorted(&mut self) {
+        if !self.is_sorted && !self.storage.is_empty() {
+            self.storage.sort_by(|(a, _), (b, _)| a.cmp(b));
+            // Rebuild index after sorting
+            self.index.clear();
+            for (idx, (key, _)) in self.storage.iter().enumerate() {
+                self.index.insert(key.clone(), idx);
+            }
+            self.is_sorted = true;
+        }
+    }
+
+    fn split_off(&mut self, key: &CompositeKey) -> Self {
+        self.ensure_sorted();
+        let split_index = self
+            .storage
+            .binary_search_by(|(k, _)| k.cmp(key))
+            .unwrap_or_else(|i| i);
+        let split_off = self.storage.split_off(split_index);
+
+        // Rebuild index for remaining elements
+        self.index.clear();
+        for (idx, (k, _)) in self.storage.iter().enumerate() {
+            self.index.insert(k.clone(), idx);
+        }
+
+        // Build index for split elements
+        let mut new_index = HashMap::with_capacity(split_off.len());
+        for (idx, (k, _)) in split_off.iter().enumerate() {
+            new_index.insert(k.clone(), idx);
+        }
+
+        Self {
+            storage: split_off,
+            index: new_index,
+            is_sorted: true,
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.storage.len()
+    }
+
+    /// Iterate over the storage in sorted order. Triggers sorting if needed.
+    pub fn iter<'referred_data>(
+        &'referred_data mut self,
+    ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
+    {
+        self.ensure_sorted();
+        Box::new(self.storage.iter().map(|(k, v)| (k, v)))
+    }
+
+    fn into_iter(mut self) -> impl Iterator<Item = (CompositeKey, V)> {
+        self.ensure_sorted();
+        self.storage.into_iter()
+    }
+}
+
+impl<V: ArrowWriteableValue> Default for DeferredSortStorage<V> {
+    fn default() -> Self {
+        Self {
+            storage: Vec::new(),
+            index: HashMap::new(),
+            is_sorted: true,
+        }
+    }
+}
 
 pub struct BTreeBuilderStorage<V: ArrowWriteableValue> {
     storage: BTreeMap<CompositeKey, V>,
@@ -119,7 +253,7 @@ impl<V: ArrowWriteableValue> Default for VecBuilderStorage<V> {
 }
 
 pub enum BuilderStorage<V: ArrowWriteableValue> {
-    BTreeBuilderStorage(BTreeBuilderStorage<V>),
+    DeferredSortStorage(DeferredSortStorage<V>),
     VecBuilderStorage(VecBuilderStorage<V>),
 }
 
@@ -147,50 +281,50 @@ where
 impl<V: ArrowWriteableValue> BuilderStorage<V> {
     pub fn add(&mut self, key: CompositeKey, value: V) {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.add(key, value),
+            BuilderStorage::DeferredSortStorage(storage) => storage.add(key, value),
             BuilderStorage::VecBuilderStorage(storage) => storage.add(key, value),
         }
     }
 
     pub fn delete(&mut self, key: &CompositeKey) -> Option<V> {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.delete(key),
+            BuilderStorage::DeferredSortStorage(storage) => storage.delete(key),
             BuilderStorage::VecBuilderStorage(storage) => storage.delete(key),
         }
     }
 
     pub fn get(&self, key: &CompositeKey) -> Option<V::PreparedValue> {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.get(key),
+            BuilderStorage::DeferredSortStorage(storage) => storage.get(key),
             BuilderStorage::VecBuilderStorage(storage) => storage.get(key),
         }
     }
 
     pub fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.get_ref(key),
+            BuilderStorage::DeferredSortStorage(storage) => storage.get_ref(key),
             BuilderStorage::VecBuilderStorage(storage) => storage.get_ref(key),
         }
     }
 
     pub fn len(&self) -> usize {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.len(),
+            BuilderStorage::DeferredSortStorage(storage) => storage.len(),
             BuilderStorage::VecBuilderStorage(storage) => storage.len(),
         }
     }
 
-    pub fn min_key(&self) -> Option<&CompositeKey> {
+    pub fn min_key(&mut self) -> Option<&CompositeKey> {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.min_key(),
+            BuilderStorage::DeferredSortStorage(storage) => storage.min_key(),
             BuilderStorage::VecBuilderStorage(storage) => storage.min_key(),
         }
     }
 
     pub fn split_off(&mut self, key: &CompositeKey) -> Self {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => {
-                BuilderStorage::BTreeBuilderStorage(storage.split_off(key))
+            BuilderStorage::DeferredSortStorage(storage) => {
+                BuilderStorage::DeferredSortStorage(storage.split_off(key))
             }
             BuilderStorage::VecBuilderStorage(storage) => {
                 BuilderStorage::VecBuilderStorage(storage.split_off(key))
@@ -199,18 +333,18 @@ impl<V: ArrowWriteableValue> BuilderStorage<V> {
     }
 
     pub fn iter<'referred_data>(
-        &'referred_data self,
+        &'referred_data mut self,
     ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
     {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => storage.iter(),
+            BuilderStorage::DeferredSortStorage(storage) => storage.iter(),
             BuilderStorage::VecBuilderStorage(storage) => storage.iter(),
         }
     }
 
     pub fn into_iter(self) -> impl Iterator<Item = (CompositeKey, V)> {
         match self {
-            BuilderStorage::BTreeBuilderStorage(storage) => Either::Left(storage.into_iter()),
+            BuilderStorage::DeferredSortStorage(storage) => Either::Left(storage.into_iter()),
             BuilderStorage::VecBuilderStorage(storage) => Either::Right(storage.into_iter()),
         }
     }
