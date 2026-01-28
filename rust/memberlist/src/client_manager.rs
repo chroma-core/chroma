@@ -19,6 +19,24 @@ use std::{
 };
 use thiserror::Error;
 use tonic::transport::{channel::Change, Channel, Endpoint};
+
+/// Represents a tier for client assignment isolation.
+/// Lower values indicate higher priority tiers.
+/// `Tier::default()` returns `Tier(u8::MAX)`, which acts as the fallback tier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Tier(pub u8);
+
+impl Tier {
+    pub const fn new(level: u8) -> Self {
+        Tier(level)
+    }
+}
+
+impl Default for Tier {
+    fn default() -> Self {
+        Tier(u8::MAX)
+    }
+}
 use tower::ServiceBuilder;
 
 #[derive(Debug, Clone)]
@@ -26,6 +44,10 @@ pub struct ClientAssigner<T> {
     node_name_to_client: Arc<RwLock<HashMap<String, T>>>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     replication_factor: usize,
+    /// Tier configuration: index is tier level, value is member count for that tier.
+    /// The last configured tier absorbs all remaining members.
+    /// Empty vec means all members belong to the default tier.
+    tiers: Vec<usize>,
 }
 
 #[derive(Error, Debug)]
@@ -49,30 +71,70 @@ impl<T> ClientAssigner<T>
 where
     T: Clone,
 {
-    pub fn new(assignment_policy: Box<dyn AssignmentPolicy>, replication_factor: usize) -> Self {
+    pub fn new(
+        assignment_policy: Box<dyn AssignmentPolicy>,
+        replication_factor: usize,
+        tiers: Vec<usize>,
+    ) -> Self {
         Self {
             node_name_to_client: Arc::new(RwLock::new(HashMap::new())),
             assignment_policy,
             replication_factor,
+            tiers,
         }
+    }
+
+    /// Returns the members belonging to the specified tier, with fallback logic.
+    ///
+    /// Members are sorted lexicographically by name and partitioned according to `self.tiers`.
+    /// - Each tier index `i` gets `tiers[i]` members.
+    /// - The last configured tier absorbs all remaining members.
+    /// - If the requested tier has no members, falls back to the last tier with members.
+    /// - If `tiers` is empty, all members belong to the default tier.
+    fn members_for_tier(&self, sorted_members: &[String], tier: Tier) -> Vec<String> {
+        if sorted_members.is_empty() || self.tiers.is_empty() {
+            return sorted_members.to_vec();
+        }
+
+        let mut start = 0;
+        for capacity in self.tiers.iter().take(tier.0 as usize) {
+            if start + capacity >= sorted_members.len() {
+                return sorted_members[start..].to_vec();
+            }
+            start += capacity;
+        }
+
+        let end = self
+            .tiers
+            .get(tier.0 as usize)
+            .map(|capacity| min(start + capacity, sorted_members.len()))
+            .unwrap_or(sorted_members.len());
+
+        sorted_members[start..end].to_vec()
     }
 
     /// Get the gRPC clients for the given key by performing the assignment policy
     /// # Arguments
     /// - `assignment_key` - The key for which the client is to be fetched
+    /// - `tier` - The tier to select members from
     /// # Returns
     /// - The gRPC clients for the given key in the order of the assignment policy with the target replication factor
     /// # Errors
     /// - If no client is found for the given key
     /// - If the assignment policy fails to assign the key
-    pub fn clients(&mut self, assignment_key: &str) -> Result<Vec<T>, ClientAssignmentError> {
-        self.assigned_clients(assignment_key)
+    pub fn clients(
+        &mut self,
+        assignment_key: &str,
+        tier: Tier,
+    ) -> Result<Vec<T>, ClientAssignmentError> {
+        self.assigned_clients(assignment_key, tier)
             .map(|assigned_clients| assigned_clients.into_values().collect())
     }
 
     /// Get a map of assigned node names to their clients for the given key in a single lock acquisition
     /// # Arguments
     /// - `assignment_key` - The key for which the client is to be fetched
+    /// - `tier` - The tier to select members from
     /// # Returns
     /// - A HashMap<String, T> mapping assigned node names to their corresponding gRPC clients
     /// # Errors
@@ -81,9 +143,17 @@ where
     pub fn assigned_clients(
         &mut self,
         assignment_key: &str,
+        tier: Tier,
     ) -> Result<HashMap<String, T>, ClientAssignmentError> {
         let node_name_to_client_guard = self.node_name_to_client.read();
-        let members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
+
+        // Get all members and sort them for tier partitioning
+        let mut all_members: Vec<String> = node_name_to_client_guard.keys().cloned().collect();
+        all_members.sort();
+
+        // Get members for the requested tier
+        let members = self.members_for_tier(&all_members, tier);
+
         let target_replication_factor = min(self.replication_factor, members.len());
         self.assignment_policy.set_members(members);
         let assigned = self
@@ -444,6 +514,7 @@ mod test {
         let client_assigner = ClientAssigner::new(
             Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
             1,
+            vec![],
         );
         let client_manager = ClientManager::new(
             client_assigner.clone(),
@@ -551,6 +622,7 @@ mod test {
         let assigner: ClientAssigner<String> = ClientAssigner::new(
             Box::new(chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy::default()),
             2,
+            vec![],
         );
         {
             let mut guard = assigner.node_name_to_client.write();
