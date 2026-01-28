@@ -5,7 +5,7 @@ use backon::Retryable;
 use chroma_config::registry;
 use chroma_config::{assignment::assignment_policy::AssignmentPolicy, Configurable};
 use chroma_error::ChromaError;
-use chroma_memberlist::client_manager::{ClientAssigner, ClientManager, ClientOptions, Tier};
+use chroma_memberlist::client_manager::{ClientAssigner, ClientManager, ClientOptions};
 use chroma_memberlist::{
     config::MemberlistProviderConfig,
     memberlist_provider::{CustomResourceMemberlistProvider, MemberlistProvider},
@@ -42,6 +42,7 @@ pub struct DistributedExecutor {
     replication_factor: usize,
     backoff: ExponentialBuilder,
     client_selection_config: ClientSelectionConfig,
+    tiers_config: config::TiersConfig,
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -65,12 +66,18 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         (config, system): &(config::DistributedExecutorConfig, System),
         registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        // Validate tiers configuration
+        config
+            .tiers
+            .validate()
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
         let client_assigner = ClientAssigner::new(
             assignment_policy,
             config.replication_factor,
-            config.tiers.clone(),
+            config.tiers.capacities(),
         );
         let client_manager = ClientManager::new(
             client_assigner.clone(),
@@ -103,6 +110,7 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
             replication_factor: config.replication_factor,
             backoff,
             client_selection_config,
+            tiers_config: config.tiers.clone(),
         })
     }
 }
@@ -121,17 +129,11 @@ impl DistributedExecutor {
 impl DistributedExecutor {
     ///////////////////////// Plan Operations /////////////////////////
     pub async fn count(&mut self, plan: Count) -> Result<CountResult, ExecutorError> {
+        let collection = &plan.scan.collection_and_segments.collection;
+        let tier = self.tiers_config.resolve_tier(collection);
         let clients = self
             .client_assigner
-            .clients(
-                &plan
-                    .scan
-                    .collection_and_segments
-                    .collection
-                    .collection_id
-                    .to_string(),
-                Tier::default(),
-            )
+            .clients(&collection.collection_id.to_string(), tier)
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let plan: chroma_types::chroma_proto::CountPlan = plan.clone().try_into()?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
@@ -154,17 +156,11 @@ impl DistributedExecutor {
     }
 
     pub async fn get(&mut self, plan: Get) -> Result<GetResult, ExecutorError> {
+        let collection = &plan.scan.collection_and_segments.collection;
+        let tier = self.tiers_config.resolve_tier(collection);
         let clients = self
             .client_assigner
-            .clients(
-                &plan
-                    .scan
-                    .collection_and_segments
-                    .collection
-                    .collection_id
-                    .to_string(),
-                Tier::default(),
-            )
+            .clients(&collection.collection_id.to_string(), tier)
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let config = self.client_selection_config.clone();
@@ -186,17 +182,11 @@ impl DistributedExecutor {
     }
 
     pub async fn knn(&mut self, plan: Knn) -> Result<KnnBatchResult, ExecutorError> {
+        let collection = &plan.scan.collection_and_segments.collection;
+        let tier = self.tiers_config.resolve_tier(collection);
         let clients = self
             .client_assigner
-            .clients(
-                &plan
-                    .scan
-                    .collection_and_segments
-                    .collection
-                    .collection_id
-                    .to_string(),
-                Tier::default(),
-            )
+            .clients(&collection.collection_id.to_string(), tier)
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
         let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
         let config = self.client_selection_config.clone();
@@ -218,17 +208,11 @@ impl DistributedExecutor {
     }
 
     pub async fn search(&mut self, plan: Search) -> Result<SearchResult, ExecutorError> {
-        // Get the collection ID from the plan
-        let collection_id = &plan
-            .scan
-            .collection_and_segments
-            .collection
-            .collection_id
-            .to_string();
-
+        let collection = &plan.scan.collection_and_segments.collection;
+        let tier = self.tiers_config.resolve_tier(collection);
         let clients = self
             .client_assigner
-            .clients(collection_id, Tier::default())
+            .clients(&collection.collection_id.to_string(), tier)
             .map_err(|e| ExecutorError::Internal(e.boxed()))?;
 
         // Convert plan to proto
