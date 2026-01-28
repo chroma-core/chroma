@@ -21,6 +21,10 @@ impl<V: ArrowWriteableValue> BTreeBuilderStorage<V> {
         Some(V::prepare(self.storage.get(key).unwrap().clone()))
     }
 
+    fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
+        self.storage.get(key)
+    }
+
     fn min_key(&self) -> Option<&CompositeKey> {
         self.storage.keys().next()
     }
@@ -70,6 +74,13 @@ impl<V: ArrowWriteableValue> VecBuilderStorage<V> {
 
     fn get(&self, _: &CompositeKey) -> Option<V::PreparedValue> {
         unimplemented!()
+    }
+
+    fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
+        self.storage
+            .binary_search_by(|(k, _)| k.cmp(key))
+            .ok()
+            .map(|idx| &self.storage[idx].1)
     }
 
     fn min_key(&self) -> Option<&CompositeKey> {
@@ -152,6 +163,13 @@ impl<V: ArrowWriteableValue> BuilderStorage<V> {
         match self {
             BuilderStorage::BTreeBuilderStorage(storage) => storage.get(key),
             BuilderStorage::VecBuilderStorage(storage) => storage.get(key),
+        }
+    }
+
+    pub fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
+        match self {
+            BuilderStorage::BTreeBuilderStorage(storage) => storage.get_ref(key),
+            BuilderStorage::VecBuilderStorage(storage) => storage.get_ref(key),
         }
     }
 

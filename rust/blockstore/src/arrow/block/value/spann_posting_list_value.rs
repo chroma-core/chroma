@@ -189,6 +189,18 @@ impl ArrowWriteableValue for &SpannPostingList<'_> {
             _ => panic!("Invalid builder type"),
         }
     }
+
+    fn with_value_from_delta<R>(
+        _prefix: &str,
+        _key: KeyWrapper,
+        _delta: &BlockStorage,
+        _f: impl FnOnce(Option<&Self>) -> R,
+    ) -> R {
+        // SpannPostingList is stored as a PreparedValue tuple, not as &SpannPostingList.
+        // Zero-copy access is not directly possible for this type.
+        // Use get_owned_value_from_delta instead.
+        unimplemented!("Zero-copy access not supported for SpannPostingList; use get_owned_value_from_delta")
+    }
 }
 
 impl<'referred_data> ArrowReadableValue<'referred_data> for SpannPostingList<'referred_data> {

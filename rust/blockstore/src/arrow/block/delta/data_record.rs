@@ -59,6 +59,23 @@ impl DataRecordStorage {
         inner.storage.get(&composite_key).cloned()
     }
 
+    /// Access the stored value reference without copying.
+    /// The closure `f` is called with a reference to the prepared value if it exists.
+    /// This allows zero-copy access to stored data.
+    pub fn with_value<R>(
+        &self,
+        prefix: &str,
+        key: KeyWrapper,
+        f: impl FnOnce(Option<&DataRecordStorageEntry>) -> R,
+    ) -> R {
+        let inner = self.inner.read();
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        f(inner.storage.get(&composite_key))
+    }
+
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: &DataRecord<'_>) {
         let mut inner = self.inner.write();
         let composite_key = CompositeKey {

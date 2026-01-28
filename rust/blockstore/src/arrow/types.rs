@@ -50,6 +50,19 @@ pub trait ArrowWriteableValue: Value {
         key: KeyWrapper,
         delta: &UnorderedBlockDelta,
     ) -> Option<Self::PreparedValue>;
+
+    /// Access a value reference without copying.
+    /// The closure `f` is called with a reference to the stored value if it exists.
+    /// This allows zero-copy access to stored data without calling `prepare()`.
+    /// For value types where `Self == PreparedValue` (e.g., String, u32), this provides
+    /// direct access to the stored value. For types like `RoaringBitmap`, this provides
+    /// access to the original unserialized value.
+    fn with_value_from_delta<R>(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockStorage,
+        f: impl FnOnce(Option<&Self>) -> R,
+    ) -> R;
 }
 
 pub trait ArrowReadableKey<'referred_data>: Key + PartialOrd {

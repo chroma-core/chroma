@@ -124,6 +124,38 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         inner.size_tracker.increment_item_count();
     }
 
+    /// Add multiple key-value pairs in a single batch operation.
+    /// This is more efficient than calling `add` multiple times because it
+    /// acquires the write lock only once and amortizes the lock overhead.
+    pub fn batch_add<I>(&self, items: I)
+    where
+        I: IntoIterator<Item = (String, KeyWrapper, V)>,
+    {
+        let mut inner = self.inner.write();
+        for (prefix, key, value) in items {
+            let key_len = key.get_size();
+            let prefix_len = prefix.len();
+
+            let composite_key = CompositeKey { prefix, key };
+
+            if let Some(old_value) = inner.storage.delete(&composite_key) {
+                let old_value_size = old_value.get_size();
+                inner.size_tracker.subtract_value_size(old_value_size);
+                inner.size_tracker.subtract_key_size(key_len);
+                inner.size_tracker.subtract_prefix_size(prefix_len);
+                inner.size_tracker.decrement_item_count();
+            }
+
+            let value_size = value.get_size();
+
+            inner.storage.add(composite_key, value);
+            inner.size_tracker.add_prefix_size(prefix_len);
+            inner.size_tracker.add_key_size(key_len);
+            inner.size_tracker.add_value_size(value_size);
+            inner.size_tracker.increment_item_count();
+        }
+    }
+
     pub fn delete(&self, prefix: &str, key: KeyWrapper) {
         let mut inner = self.inner.write();
         let maybe_removed_prefix_len = prefix.len();
@@ -286,5 +318,17 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             key,
         };
         self.inner.read().storage.get(&composite_key)
+    }
+
+    /// Returns a reference to the value without copying it.
+    /// The closure `f` is called with a reference to the value if it exists.
+    /// This allows zero-copy access to the stored data.
+    pub fn with_value<R>(&self, prefix: &str, key: KeyWrapper, f: impl FnOnce(Option<&V>) -> R) -> R {
+        let composite_key = CompositeKey {
+            prefix: prefix.to_string(),
+            key,
+        };
+        let inner = self.inner.read();
+        f(inner.storage.get_ref(&composite_key))
     }
 }

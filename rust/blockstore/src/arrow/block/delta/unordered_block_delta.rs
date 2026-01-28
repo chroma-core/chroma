@@ -65,6 +65,22 @@ impl UnorderedBlockDelta {
         V::add(prefix, key.into(), value, &self.builder);
     }
 
+    /// Gets a reference to a value without copying it.
+    /// The closure `f` is called with a reference to the stored value if it exists.
+    /// This allows zero-copy access to the stored data while the delta is locked.
+    pub fn with_value<K, V, R>(
+        &self,
+        prefix: &str,
+        key: K,
+        f: impl FnOnce(Option<&V>) -> R,
+    ) -> R
+    where
+        K: ArrowWriteableKey,
+        V: ArrowWriteableValue,
+    {
+        V::with_value_from_delta(prefix, key.into(), &self.builder, f)
+    }
+
     /// Deletes a key from the block delta.
     pub fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, prefix: &str, key: K) {
         V::delete(prefix, key.into(), self)
