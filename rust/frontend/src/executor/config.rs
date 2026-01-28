@@ -324,6 +324,7 @@ mod tests {
         assert_eq!(config.capacities(), vec![4, 5, 3]);
     }
 
+    // This should not happen and upstream should validate this.
     #[test]
     fn test_capacities_non_sequential_tiers() {
         // Tier 0 and tier 2, but no tier 1 - should fill with 0
