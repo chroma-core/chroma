@@ -26,6 +26,8 @@ num_cpus = { workspace = true }
 flatbuffers = { workspace = true }
 itertools = { workspace = true }
 opentelemetry = { workspace = true }
+ahash = "0.8.11"
+rayon = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-config = { workspace = true }

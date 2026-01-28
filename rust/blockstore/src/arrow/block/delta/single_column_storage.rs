@@ -356,7 +356,7 @@ mod tests {
             })
             .collect();
 
-        // Test DeferredSortStorage (O(1) insert, O(n log n) sort at end)
+        // Test DeferredSortStorage with dedup checking
         let mut deferred_storage: super::super::builder_storage::DeferredSortStorage<String> =
             Default::default();
         let data_clone1: Vec<_> = data.clone();
@@ -371,6 +371,21 @@ mod tests {
         let _count: usize = deferred_storage.iter().count();
         let deferred_sort_time = start.elapsed();
 
+        // Test DeferredSortStorage with add_unchecked (no dedup - fastest path)
+        let mut deferred_unchecked: super::super::builder_storage::DeferredSortStorage<String> =
+            Default::default();
+        let data_clone_unchecked: Vec<_> = data.clone();
+        let start = Instant::now();
+        for (key, value) in data_clone_unchecked {
+            deferred_unchecked.add_unchecked(key, value);
+        }
+        let unchecked_insert_time = start.elapsed();
+
+        // Measure sort time for unchecked
+        let start = Instant::now();
+        let _count: usize = deferred_unchecked.iter().count();
+        let unchecked_sort_time = start.elapsed();
+
         // Test BTreeMap (O(log n) per insert)
         let mut btree_storage: BTreeMap<CompositeKey, String> = BTreeMap::new();
         let data_clone2: Vec<_> = data.clone();
@@ -382,16 +397,28 @@ mod tests {
 
         // Calculate speedups
         let total_deferred = deferred_insert_time + deferred_sort_time;
+        let total_unchecked = unchecked_insert_time + unchecked_sort_time;
         let insert_speedup = btree_time.as_nanos() as f64 / deferred_insert_time.as_nanos() as f64;
+        let unchecked_insert_speedup = btree_time.as_nanos() as f64 / unchecked_insert_time.as_nanos() as f64;
         let total_speedup = btree_time.as_nanos() as f64 / total_deferred.as_nanos() as f64;
+        let unchecked_total_speedup = btree_time.as_nanos() as f64 / total_unchecked.as_nanos() as f64;
 
         println!("\n=== DeferredSortStorage vs BTreeMap ({} items) ===", iterations);
         println!("BTreeMap inserts: {:?}", btree_time);
-        println!("DeferredSort inserts: {:?}", deferred_insert_time);
-        println!("DeferredSort sort (on iter): {:?}", deferred_sort_time);
-        println!("DeferredSort total: {:?}", total_deferred);
-        println!("Insert speedup: {:.2}x faster", insert_speedup);
-        println!("Total speedup: {:.2}x faster", total_speedup);
+        println!();
+        println!("DeferredSort (with dedup check):");
+        println!("  Inserts: {:?}", deferred_insert_time);
+        println!("  Sort: {:?}", deferred_sort_time);
+        println!("  Total: {:?}", total_deferred);
+        println!("  Insert speedup: {:.2}x", insert_speedup);
+        println!("  Total speedup: {:.2}x", total_speedup);
+        println!();
+        println!("DeferredSort (unchecked - no dedup):");
+        println!("  Inserts: {:?}", unchecked_insert_time);
+        println!("  Sort: {:?}", unchecked_sort_time);
+        println!("  Total: {:?}", total_unchecked);
+        println!("  Insert speedup: {:.2}x", unchecked_insert_speedup);
+        println!("  Total speedup: {:.2}x", unchecked_total_speedup);
         println!("=================================================\n");
 
         // DeferredSort inserts should be faster than BTreeMap inserts
