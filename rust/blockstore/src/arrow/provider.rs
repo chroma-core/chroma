@@ -145,24 +145,28 @@ impl ArrowBlockfileProvider {
                 StorageRequestPriority::P1,
             ));
         }
-        let count = futures.len();
+        let total = futures.len();
 
         tracing::info!(
             "Prefetching up to {} blocks to disk for blockfile ID: {:?}",
-            count,
+            total,
             id
         );
 
+        let mut fetched_count = 0;
         while let Some(result) = futures.next().await {
-            result?;
+            if result?.is_some() {
+                fetched_count += 1;
+            }
         }
 
         tracing::info!(
-            "Prefetched {} blocks to disk for blockfile ID: {:?}",
-            count,
+            "Prefetched {}/{} blocks to disk for blockfile ID: {:?}",
+            fetched_count,
+            total,
             id
         );
-        Ok(count)
+        Ok(fetched_count)
     }
 
     pub async fn write<
