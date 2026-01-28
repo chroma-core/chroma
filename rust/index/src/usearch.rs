@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use chroma_cache::{Cache, Weighted};
 use chroma_distance::DistanceFunction;
@@ -80,6 +83,8 @@ impl ChromaError for USearchError {
     }
 }
 
+const RESERVE_BUFFER: usize = 128;
+
 #[derive(Clone)]
 pub struct USearchIndex {
     id: IndexUuid,
@@ -88,6 +93,7 @@ pub struct USearchIndex {
     index: Arc<ShardedLock<usearch::Index>>,
     prefix_path: String,
     quantization_center: Option<Arc<[f32]>>,
+    tombstones: Arc<AtomicUsize>,
 }
 
 impl USearchIndex {
@@ -104,11 +110,14 @@ impl USearchIndex {
     /// Load serialized data into the index.
     async fn load(&self, data: Arc<Vec<u8>>) -> Result<(), USearchError> {
         let index = self.index.clone();
+        let tombstones = self.tombstones.clone();
         spawn_blocking(move || {
             index
                 .write()?
-                .load_from_buffer(&data) // deref coercion: &Arc<Vec<u8>> -> &[u8]
-                .map_err(|e| USearchError::Index(e.to_string()))
+                .load_from_buffer(&data)
+                .map_err(|e| USearchError::Index(e.to_string()))?;
+            tombstones.store(0, Ordering::Relaxed);
+            Ok(())
         })
         .await
         .map_err(|e| USearchError::Index(e.to_string()))?
@@ -164,6 +173,7 @@ impl USearchIndex {
             index: Arc::new(index.into()),
             prefix_path: prefix_path.to_string(),
             quantization_center,
+            tombstones: Default::default(),
         })
     }
 }
@@ -172,8 +182,24 @@ impl VectorIndex for USearchIndex {
     type Error = USearchError;
 
     fn add(&self, key: u64, vector: &[f32]) -> Result<(), Self::Error> {
-        let index = self.index.read()?;
+        let need_resize = {
+            let index = self.index.read()?;
+            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+            raw_size + RESERVE_BUFFER >= index.capacity()
+        };
 
+        if need_resize {
+            let index = self.index.write()?;
+            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+            if raw_size + RESERVE_BUFFER >= index.capacity() {
+                let new_capacity = (index.capacity() * 2).max(RESERVE_BUFFER);
+                index
+                    .reserve(new_capacity)
+                    .map_err(|e| USearchError::Index(e.to_string()))?;
+            }
+        }
+
+        let index = self.index.read()?;
         if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(vector, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
@@ -208,6 +234,7 @@ impl VectorIndex for USearchIndex {
     }
 
     fn remove(&self, key: u64) -> Result<(), Self::Error> {
+        self.tombstones.fetch_add(1, Ordering::Relaxed);
         self.index
             .read()?
             .remove(key)
@@ -483,7 +510,6 @@ mod tests {
             let provider =
                 USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
             let index = provider.open(&config, OpenMode::Create).await.unwrap();
-            index.reserve(32).unwrap();
             for i in 0..32 {
                 index.add(i, &vectors[&i]).unwrap();
             }
@@ -513,7 +539,6 @@ mod tests {
                 .unwrap();
             let forked_id = provider.commit(&forked).await.unwrap();
             assert_ne!(forked_id, index_a_id);
-            forked.reserve(64).unwrap();
             for i in 32..64 {
                 forked.add(i, &vectors[&i]).unwrap();
             }
@@ -577,7 +602,6 @@ mod tests {
 
         // Phase 1: Full precision index
         let raw_index = provider.open(&config, OpenMode::Create).await.unwrap();
-        raw_index.reserve(128).unwrap();
         for (i, v) in vectors.iter().enumerate() {
             raw_index.add(i as u64, v).unwrap();
         }
@@ -602,7 +626,6 @@ mod tests {
             .open(&quantized_config, OpenMode::Create)
             .await
             .unwrap();
-        quantized_index.reserve(128).unwrap();
         for (i, v) in vectors.iter().enumerate() {
             quantized_index.add(i as u64, v).unwrap();
         }
