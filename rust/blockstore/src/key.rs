@@ -139,34 +139,30 @@ impl PartialEq for CompositeKey {
 impl Eq for CompositeKey {}
 
 impl PartialOrd for CompositeKey {
+    #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for CompositeKey {
+    #[inline]
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        if self.prefix == other.prefix {
-            match self.key {
-                KeyWrapper::String(ref s1) => match &other.key {
-                    KeyWrapper::String(s2) => s1.cmp(s2),
-                    _ => panic!("Invalid comparison"),
-                },
-                KeyWrapper::Float32(f1) => match &other.key {
-                    KeyWrapper::Float32(f2) => f1.partial_cmp(f2).unwrap(),
-                    _ => panic!("Invalid comparison"),
-                },
-                KeyWrapper::Bool(b1) => match &other.key {
-                    KeyWrapper::Bool(b2) => b1.cmp(b2),
-                    _ => panic!("Invalid comparison"),
-                },
-                KeyWrapper::Uint32(u1) => match &other.key {
-                    KeyWrapper::Uint32(u2) => u1.cmp(u2),
-                    _ => panic!("Invalid comparison"),
-                },
+        // Compare prefix first (most likely to differ)
+        match self.prefix.cmp(&other.prefix) {
+            std::cmp::Ordering::Equal => {
+                // Prefixes equal, compare keys
+                match (&self.key, &other.key) {
+                    (KeyWrapper::String(s1), KeyWrapper::String(s2)) => s1.cmp(s2),
+                    (KeyWrapper::Float32(f1), KeyWrapper::Float32(f2)) => {
+                        f1.partial_cmp(f2).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    (KeyWrapper::Bool(b1), KeyWrapper::Bool(b2)) => b1.cmp(b2),
+                    (KeyWrapper::Uint32(u1), KeyWrapper::Uint32(u2)) => u1.cmp(u2),
+                    _ => panic!("Invalid comparison: mismatched key types"),
+                }
             }
-        } else {
-            self.prefix.cmp(&other.prefix)
+            ord => ord,
         }
     }
 }
