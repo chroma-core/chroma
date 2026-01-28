@@ -41,6 +41,11 @@ queryService:
   image:
     repository: 'query-service'
     tag: 'latest'
+  updateStrategy:
+    type: 'RollingUpdate'
+    # Example of using a partition to update only the first pod.
+    # rollingUpdate:
+    #   partition: 0  # Pods with ordinal >= partition get updated
   env:
   cache:
     hostPath: '/local/cache/chroma-query-service'
