@@ -43,9 +43,9 @@ queryService:
     tag: 'latest'
   updateStrategy:
     type: 'RollingUpdate'
-    # Example of using a partition to update only the first pod.
+    # For staged/canary rollouts, set partition > 0 to keep lower-ordinal pods on the old version.
     # rollingUpdate:
-    #   partition: 0  # Pods with ordinal >= partition get updated
+    #   partition: 1
   env:
   cache:
     hostPath: '/local/cache/chroma-query-service'
