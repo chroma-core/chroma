@@ -6,10 +6,12 @@ use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_error::ErrorCodes;
 use chroma_memberlist::client_manager::Tier;
 use chroma_system::System;
 use chroma_types::Collection;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 // 32 MB
 fn default_max_query_service_response_size_bytes() -> usize {
@@ -116,6 +118,23 @@ impl TierPattern {
     }
 }
 
+/// Error type for invalid tiers configuration
+#[derive(Error, Debug)]
+pub enum TiersConfigError {
+    #[error("Tier {0} has zero capacity")]
+    ZeroCapacity(usize),
+    #[error("Duplicate tier number: {0}")]
+    DuplicateTier(usize),
+    #[error("Tier numbers must be contiguous starting from 0. Expected tier {expected}, found tier {actual}")]
+    NonContiguousTiers { expected: usize, actual: usize },
+}
+
+impl ChromaError for TiersConfigError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::Internal
+    }
+}
+
 /// Configuration for tier-based routing.
 /// Each entry specifies a tier's capacity and routing patterns.
 /// Tiers are evaluated in order; the first matching tier wins.
@@ -132,6 +151,44 @@ pub struct TierEntry {
 }
 
 impl TiersConfig {
+    /// Validate the tiers configuration.
+    /// Returns an error if:
+    /// - Tier numbers are not contiguous starting from 0
+    /// - Any capacity is 0
+    /// - Duplicate tier numbers exist
+    pub fn validate(&self) -> Result<(), TiersConfigError> {
+        if self.0.is_empty() {
+            return Ok(());
+        }
+
+        // Check for zero capacities
+        for entry in &self.0 {
+            if entry.capacity == 0 {
+                return Err(TiersConfigError::ZeroCapacity(entry.tier));
+            }
+        }
+
+        // Collect and sort tier numbers
+        let mut tier_numbers: Vec<usize> = self.0.iter().map(|e| e.tier).collect();
+        tier_numbers.sort();
+
+        // Check for duplicates
+        for window in tier_numbers.windows(2) {
+            if window[0] == window[1] {
+                return Err(TiersConfigError::DuplicateTier(window[0]));
+            }
+        }
+
+        // Check for contiguous sequence starting from 0
+        for (expected, &actual) in tier_numbers.iter().enumerate() {
+            if expected != actual {
+                return Err(TiersConfigError::NonContiguousTiers { expected, actual });
+            }
+        }
+
+        Ok(())
+    }
+
     /// Get capacities ordered by tier number for ClientAssigner.
     /// Returns a Vec where index i contains the capacity for tier i.
     pub fn capacities(&self) -> Vec<usize> {
@@ -148,9 +205,14 @@ impl TiersConfig {
     }
 
     /// Resolve the tier for a given collection based on configured patterns.
+    /// Entries with empty patterns are skipped (use Tier::default() for catch-all).
     /// Returns the first matching tier, or Tier::default() if no patterns match.
     pub fn resolve_tier(&self, collection: &Collection) -> Tier {
         for entry in &self.0 {
+            // Skip entries with no patterns - they can't match anything specific
+            if entry.patterns.is_empty() {
+                continue;
+            }
             if entry.patterns.iter().all(|p| p.matches(collection)) {
                 return Tier::new(entry.tier);
             }
@@ -352,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_tier_empty_patterns_catch_all() {
+    fn test_resolve_tier_empty_patterns_skipped() {
         let config = TiersConfig(vec![
             TierEntry {
                 tier: 0,
@@ -362,7 +424,7 @@ mod tests {
             TierEntry {
                 tier: 1,
                 capacity: 5,
-                patterns: vec![], // Empty patterns = catch-all
+                patterns: vec![], // Empty patterns are skipped
             },
         ]);
 
@@ -370,7 +432,8 @@ mod tests {
         let anyone = test_collection("anyone", "", "", 0);
 
         assert_eq!(config.resolve_tier(&premium), Tier::new(0));
-        assert_eq!(config.resolve_tier(&anyone), Tier::new(1)); // Caught by empty patterns
+        // Empty patterns are skipped, falls through to Tier::default()
+        assert_eq!(config.resolve_tier(&anyone), Tier::default());
     }
 
     #[test]
@@ -487,5 +550,107 @@ mod tests {
         assert_eq!(config.0[0].tier, 0);
         assert_eq!(config.0[0].capacity, 10);
         assert!(config.0[0].patterns.is_empty()); // Default empty
+    }
+
+    // ==================== Validation tests ====================
+
+    #[test]
+    fn test_validate_empty_config() {
+        let config = TiersConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_valid_contiguous_tiers() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 1,
+                capacity: 5,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 2,
+                capacity: 3,
+                patterns: vec![],
+            },
+        ]);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_zero_capacity_error() {
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 0,
+            patterns: vec![],
+        }]);
+        assert!(matches!(
+            config.validate(),
+            Err(TiersConfigError::ZeroCapacity(0))
+        ));
+    }
+
+    #[test]
+    fn test_validate_non_contiguous_tiers_error() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 2, // Gap: missing tier 1
+                capacity: 6,
+                patterns: vec![],
+            },
+        ]);
+        assert!(matches!(
+            config.validate(),
+            Err(TiersConfigError::NonContiguousTiers {
+                expected: 1,
+                actual: 2
+            })
+        ));
+    }
+
+    #[test]
+    fn test_validate_not_starting_from_zero_error() {
+        let config = TiersConfig(vec![TierEntry {
+            tier: 1, // Should start from 0
+            capacity: 4,
+            patterns: vec![],
+        }]);
+        assert!(matches!(
+            config.validate(),
+            Err(TiersConfigError::NonContiguousTiers {
+                expected: 0,
+                actual: 1
+            })
+        ));
+    }
+
+    #[test]
+    fn test_validate_duplicate_tier_error() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 0, // Duplicate
+                capacity: 5,
+                patterns: vec![],
+            },
+        ]);
+        assert!(matches!(
+            config.validate(),
+            Err(TiersConfigError::DuplicateTier(0))
+        ));
     }
 }

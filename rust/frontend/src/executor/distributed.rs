@@ -66,6 +66,12 @@ impl Configurable<(config::DistributedExecutorConfig, System)> for DistributedEx
         (config, system): &(config::DistributedExecutorConfig, System),
         registry: &registry::Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        // Validate tiers configuration
+        config
+            .tiers
+            .validate()
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
         let assignment_policy =
             Box::<dyn AssignmentPolicy>::try_from_config(&config.assignment, registry).await?;
         let client_assigner = ClientAssigner::new(
