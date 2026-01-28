@@ -332,3 +332,62 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
         f(inner.storage.get_ref(&composite_key))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn benchmark_individual_vs_batch_add() {
+        // This test compares individual add() calls vs batch_add()
+        let iterations = 10_000;
+
+        // Test individual adds
+        let storage: SingleColumnStorage<String> =
+            SingleColumnStorage::new(BlockfileWriterMutationOrdering::Unordered);
+        let start = Instant::now();
+        for i in 0..iterations {
+            storage.add(
+                "prefix",
+                KeyWrapper::String(format!("key{}", i)),
+                format!("value{}", i),
+            );
+        }
+        let individual_time = start.elapsed();
+
+        // Test batch adds
+        let storage2: SingleColumnStorage<String> =
+            SingleColumnStorage::new(BlockfileWriterMutationOrdering::Unordered);
+        let items: Vec<_> = (0..iterations)
+            .map(|i| {
+                (
+                    "prefix".to_string(),
+                    KeyWrapper::String(format!("key{}", i)),
+                    format!("value{}", i),
+                )
+            })
+            .collect();
+        let start = Instant::now();
+        storage2.batch_add(items);
+        let batch_time = start.elapsed();
+
+        let speedup = individual_time.as_nanos() as f64 / batch_time.as_nanos() as f64;
+
+        println!(
+            "\n=== Performance Comparison ({} items) ===",
+            iterations
+        );
+        println!("Individual adds: {:?}", individual_time);
+        println!("Batch add: {:?}", batch_time);
+        println!("Speedup: {:.2}x", speedup);
+        println!("==========================================\n");
+
+        // The batch should be faster (at least some improvement)
+        // The actual speedup depends on the workload characteristics
+        assert!(
+            batch_time <= individual_time,
+            "Batch add should not be slower than individual adds"
+        );
+    }
+}
