@@ -3045,4 +3045,63 @@ mod tests {
         assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
         assert_eq!(reader.count().await.unwrap(), 4);
     }
+
+    #[tokio::test]
+    async fn test_zero_copy_get() {
+        // Test the new zero-copy get() API
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let prefix_path = String::from("");
+        let writer = blockfile_provider
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path.clone()))
+            .await
+            .unwrap();
+
+        // Set some values
+        writer.set("", "key1", "value1".to_string()).await.unwrap();
+        writer.set("", "key2", "value2".to_string()).await.unwrap();
+        writer.set("", "key3", "value3".to_string()).await.unwrap();
+
+        // Test zero-copy get - should find existing keys
+        let result = writer
+            .get::<&str, String, Option<String>>("", "key1", |v| v.cloned())
+            .await
+            .unwrap();
+        assert_eq!(result, Some("value1".to_string()));
+
+        let result = writer
+            .get::<&str, String, Option<String>>("", "key2", |v| v.cloned())
+            .await
+            .unwrap();
+        assert_eq!(result, Some("value2".to_string()));
+
+        // Test zero-copy get - should not find non-existent key
+        let result = writer
+            .get::<&str, String, Option<String>>("", "nonexistent", |v| v.cloned())
+            .await
+            .unwrap();
+        assert_eq!(result, None);
+
+        // Test zero-copy get that just checks existence
+        let exists = writer
+            .get::<&str, String, bool>("", "key1", |v| v.is_some())
+            .await
+            .unwrap();
+        assert!(exists);
+
+        let exists = writer
+            .get::<&str, String, bool>("", "nonexistent", |v| v.is_some())
+            .await
+            .unwrap();
+        assert!(!exists);
+    }
 }
