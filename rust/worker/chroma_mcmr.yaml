@@ -15,6 +15,11 @@ query_service:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
+  mcmr_sysdb:
+    host: "rust-sysdb-service.chroma"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000
   storage:
     admission_controlled_s3:
       s3_config:
@@ -103,6 +108,11 @@ compaction_service:
       port: 50051
       connect_timeout_ms: 5000
       request_timeout_ms: 5000
+  mcmr_sysdb:
+    host: "rust-sysdb-service.chroma"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000
   storage:
     admission_controlled_s3:
       s3_config:
