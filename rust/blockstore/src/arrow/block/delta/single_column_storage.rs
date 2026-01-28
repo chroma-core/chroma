@@ -96,29 +96,32 @@ impl<V: ArrowWriteableValue<SizeTracker = SingleColumnSizeTracker>> SingleColumn
             + value_validity_bytes
     }
 
+    /// Add a key-value pair to the storage.
+    /// If the key already exists, the old value is replaced.
+    #[inline]
     pub fn add(&self, prefix: &str, key: KeyWrapper, value: V) {
         let mut inner = self.inner.write();
         let key_len = key.get_size();
+        let prefix_len = prefix.len();
 
         let composite_key = CompositeKey {
             prefix: prefix.to_string(),
             key,
         };
 
+        // Check if key exists and delete old value
         if let Some(old_value) = inner.storage.delete(&composite_key) {
-            // subtract the old value size
-            // unwrap is safe here because we just checked if the key exists
             let old_value_size = old_value.get_size();
             inner.size_tracker.subtract_value_size(old_value_size);
             inner.size_tracker.subtract_key_size(key_len);
-            inner.size_tracker.subtract_prefix_size(prefix.len());
+            inner.size_tracker.subtract_prefix_size(prefix_len);
             inner.size_tracker.decrement_item_count();
         }
 
         let value_size = value.get_size();
 
         inner.storage.add(composite_key, value);
-        inner.size_tracker.add_prefix_size(prefix.len());
+        inner.size_tracker.add_prefix_size(prefix_len);
         inner.size_tracker.add_key_size(key_len);
         inner.size_tracker.add_value_size(value_size);
         inner.size_tracker.increment_item_count();

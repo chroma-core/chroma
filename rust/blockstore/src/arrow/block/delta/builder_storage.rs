@@ -34,39 +34,41 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
         }
     }
 
-    /// FAST PATH: Pure append, no hashing, no cloning.
-    /// If the same key is added multiple times, last value wins (handled at sort time).
+    /// Add with dedup support - builds index on first call, then O(1) per add
     #[inline(always)]
     pub fn add(&mut self, key: CompositeKey, value: V) {
+        // Ensure we have an index for O(1) dedup
+        self.ensure_index_for_writes();
+        
         if let Some(ref mut index) = self.index {
-            // Index mode - check for duplicates
             match index.get(&key) {
                 Some(&existing_idx) => {
+                    // Key exists - update in place (no allocation)
                     self.storage[existing_idx].1 = value;
                     return;
                 }
                 None => {
+                    // New key - add to index and storage
                     let idx = self.storage.len();
                     index.insert(key.clone(), idx);
                 }
             }
         }
-        // Pure append - O(1), no hashing
         self.storage.push((key, value));
         self.is_sorted = false;
     }
 
-    /// Same as add - both use the fast path
+    /// Same as add - both use the same path now
     #[inline(always)]
     pub fn add_unchecked(&mut self, key: CompositeKey, value: V) {
-        self.storage.push((key, value));
-        self.is_sorted = false;
+        self.add(key, value);
     }
 
-    /// Build index lazily when needed for lookups
-    fn ensure_index(&mut self) {
-        if self.index.is_none() && !self.is_sorted {
-            let mut index = AHashMap::with_capacity(self.storage.len());
+    /// Build index for write operations (always builds if not present)
+    #[inline]
+    fn ensure_index_for_writes(&mut self) {
+        if self.index.is_none() {
+            let mut index = AHashMap::with_capacity(self.storage.len().max(16));
             // For duplicates, later entries win
             for (idx, (key, _)) in self.storage.iter().enumerate() {
                 index.insert(key.clone(), idx);
@@ -75,8 +77,15 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
         }
     }
 
+    /// Build index lazily when needed for lookups (only if not sorted)
+    fn ensure_index(&mut self) {
+        if self.index.is_none() && !self.is_sorted {
+            self.ensure_index_for_writes();
+        }
+    }
+
     fn delete(&mut self, key: &CompositeKey) -> Option<V> {
-        self.ensure_index();
+        self.ensure_index_for_writes();
         
         if let Some(ref mut index) = self.index {
             if let Some(idx) = index.remove(key) {
