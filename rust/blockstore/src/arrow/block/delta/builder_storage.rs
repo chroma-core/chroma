@@ -6,100 +6,130 @@ use std::collections::BTreeMap;
 /// Threshold for using parallel sort. Below this, serial sort is faster due to overhead.
 const PARALLEL_SORT_THRESHOLD: usize = 10_000;
 
-/// A storage structure that defers sorting until iteration/commit time.
-/// This provides O(1) amortized insert performance instead of O(log n) for BTreeMap.
-///
-/// The structure works as follows:
-/// - Inserts append to a Vec (O(1) amortized)
-/// - An AHashMap (faster than std HashMap) tracks indices for deduplication and lookups
-/// - Sorting happens lazily when iteration is requested using unstable sort
-/// - This is optimal for write-heavy workloads with bulk inserts
+/// Ultra-high-performance storage with deferred sorting.
+/// 
+/// Optimizations:
+/// - Pure append for inserts when no lookups needed (no hashing, no cloning)
+/// - Lazy index building only when get() is called
+/// - Parallel sort for large datasets  
+/// - Binary search for post-sort lookups
 pub struct DeferredSortStorage<V: ArrowWriteableValue> {
-    /// Unsorted storage of key-value pairs
+    /// Storage of key-value pairs
     storage: Vec<(CompositeKey, V)>,
-    /// Maps keys to their index in the storage vec (for deduplication and lookups)
-    /// Uses ahash for ~2-5x faster hashing than std HashMap
-    index: AHashMap<CompositeKey, usize>,
+    /// Lazy index - only built when get() is called before commit
+    /// None = pure append mode (fastest), Some = indexed mode
+    index: Option<AHashMap<CompositeKey, usize>>,
     /// Whether the storage is currently sorted
     is_sorted: bool,
 }
 
 impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
-    /// Add a key-value pair to the storage. O(1) amortized.
+    /// Create with pre-allocated capacity
     #[inline]
-    pub fn add(&mut self, key: CompositeKey, value: V) {
-        // Use entry API for single lookup instead of get + insert
-        match self.index.get(&key) {
-            Some(&existing_idx) => {
-                // Key exists - update in place (deduplication)
-                self.storage[existing_idx].1 = value;
-            }
-            None => {
-                // New key - append to vec
-                let idx = self.storage.len();
-                self.index.insert(key.clone(), idx);
-                self.storage.push((key, value));
-                self.is_sorted = false;
-            }
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            storage: Vec::with_capacity(capacity),
+            index: None,
+            is_sorted: true,
         }
     }
 
-    /// Add a key-value pair without checking for duplicates.
-    /// Use this when you KNOW the key is unique for maximum performance.
-    /// WARNING: Using this with duplicate keys will result in duplicates in the output.
-    #[inline]
-    pub fn add_unchecked(&mut self, key: CompositeKey, value: V) {
-        let idx = self.storage.len();
-        self.index.insert(key.clone(), idx);
+    /// FAST PATH: Pure append, no hashing, no cloning.
+    /// If the same key is added multiple times, last value wins (handled at sort time).
+    #[inline(always)]
+    pub fn add(&mut self, key: CompositeKey, value: V) {
+        if let Some(ref mut index) = self.index {
+            // Index mode - check for duplicates
+            match index.get(&key) {
+                Some(&existing_idx) => {
+                    self.storage[existing_idx].1 = value;
+                    return;
+                }
+                None => {
+                    let idx = self.storage.len();
+                    index.insert(key.clone(), idx);
+                }
+            }
+        }
+        // Pure append - O(1), no hashing
         self.storage.push((key, value));
         self.is_sorted = false;
     }
 
-    fn delete(&mut self, key: &CompositeKey) -> Option<V> {
-        if let Some(idx) = self.index.remove(key) {
-            // Use swap_remove for O(1) removal
-            let (_, value) = self.storage.swap_remove(idx);
+    /// Same as add - both use the fast path
+    #[inline(always)]
+    pub fn add_unchecked(&mut self, key: CompositeKey, value: V) {
+        self.storage.push((key, value));
+        self.is_sorted = false;
+    }
 
-            // If we removed an element that wasn't the last, update the moved element's index
-            if idx < self.storage.len() {
-                let moved_key = &self.storage[idx].0;
-                self.index.insert(moved_key.clone(), idx);
+    /// Build index lazily when needed for lookups
+    fn ensure_index(&mut self) {
+        if self.index.is_none() && !self.is_sorted {
+            let mut index = AHashMap::with_capacity(self.storage.len());
+            // For duplicates, later entries win
+            for (idx, (key, _)) in self.storage.iter().enumerate() {
+                index.insert(key.clone(), idx);
             }
-
-            self.is_sorted = false;
-            Some(value)
-        } else {
-            None
+            self.index = Some(index);
         }
+    }
+
+    fn delete(&mut self, key: &CompositeKey) -> Option<V> {
+        self.ensure_index();
+        
+        if let Some(ref mut index) = self.index {
+            if let Some(idx) = index.remove(key) {
+                let (_, value) = self.storage.swap_remove(idx);
+                
+                if idx < self.storage.len() {
+                    let moved_key = &self.storage[idx].0;
+                    index.insert(moved_key.clone(), idx);
+                }
+                
+                self.is_sorted = false;
+                return Some(value);
+            }
+        }
+        None
     }
 
     #[inline]
     fn get(&self, key: &CompositeKey) -> Option<V::PreparedValue> {
         if self.is_sorted {
-            // Use binary search for sorted data
             self.storage
                 .binary_search_by(|(k, _)| k.cmp(key))
                 .ok()
                 .map(|idx| V::prepare(self.storage[idx].1.clone()))
-        } else {
-            // Use HashMap index for unsorted data
-            self.index
+        } else if let Some(ref index) = self.index {
+            index
                 .get(key)
                 .map(|&idx| V::prepare(self.storage[idx].1.clone()))
+        } else {
+            // No index yet - linear search from end (last value wins)
+            self.storage
+                .iter()
+                .rev()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| V::prepare(v.clone()))
         }
     }
 
     #[inline]
     fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
         if self.is_sorted {
-            // Use binary search for sorted data
             self.storage
                 .binary_search_by(|(k, _)| k.cmp(key))
                 .ok()
                 .map(|idx| &self.storage[idx].1)
+        } else if let Some(ref index) = self.index {
+            index.get(key).map(|&idx| &self.storage[idx].1)
         } else {
-            // Use HashMap index for unsorted data
-            self.index.get(key).map(|&idx| &self.storage[idx].1)
+            self.storage
+                .iter()
+                .rev()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v)
         }
     }
 
@@ -111,28 +141,24 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
     #[inline]
     fn ensure_sorted(&mut self) {
         if !self.is_sorted && !self.storage.is_empty() {
-            // Use parallel sort for large datasets, serial for small
+            // Sort
             if self.storage.len() >= PARALLEL_SORT_THRESHOLD {
                 self.storage.par_sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
             } else {
                 self.storage.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
             }
-            // After sorting, we can use binary search for lookups
-            // No need to rebuild the HashMap index - saves key clones!
-            // Just clear it and mark as sorted
-            self.index.clear();
+            
+            // Dedup if we might have duplicates (index was None during inserts)
+            if self.index.is_none() {
+                // Keep last value: reverse, dedup (keeps first of each), reverse back
+                self.storage.reverse();
+                self.storage.dedup_by(|(a, _), (b, _)| a == b);
+                self.storage.reverse();
+            }
+            
+            self.index = None;
             self.is_sorted = true;
         }
-    }
-
-    /// Get value using binary search (only valid after sorting)
-    #[inline]
-    fn get_sorted(&self, key: &CompositeKey) -> Option<&V> {
-        debug_assert!(self.is_sorted, "get_sorted called on unsorted storage");
-        self.storage
-            .binary_search_by(|(k, _)| k.cmp(key))
-            .ok()
-            .map(|idx| &self.storage[idx].1)
     }
 
     fn split_off(&mut self, key: &CompositeKey) -> Self {
@@ -143,11 +169,9 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
             .unwrap_or_else(|i| i);
         let split_off = self.storage.split_off(split_index);
 
-        // Both halves remain sorted, no need to rebuild indices
-        // Binary search will be used for lookups
         Self {
             storage: split_off,
-            index: AHashMap::new(), // Empty - will use binary search
+            index: None,
             is_sorted: true,
         }
     }
@@ -156,7 +180,6 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
         self.storage.len()
     }
 
-    /// Iterate over the storage in sorted order. Triggers sorting if needed.
     pub fn iter<'referred_data>(
         &'referred_data mut self,
     ) -> Box<dyn Iterator<Item = (&'referred_data CompositeKey, &'referred_data V)> + 'referred_data>
@@ -175,7 +198,7 @@ impl<V: ArrowWriteableValue> Default for DeferredSortStorage<V> {
     fn default() -> Self {
         Self {
             storage: Vec::new(),
-            index: AHashMap::new(),
+            index: None,
             is_sorted: true,
         }
     }
