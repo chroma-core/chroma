@@ -22,19 +22,19 @@ use tonic::transport::{channel::Change, Channel, Endpoint};
 
 /// Represents a tier for client assignment isolation.
 /// Lower values indicate higher priority tiers.
-/// `Tier::default()` returns `Tier(u8::MAX)`, which acts as the fallback tier.
+/// `Tier::default()` returns `Tier(usize::MAX)`, which acts as the fallback tier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct Tier(pub u8);
+pub struct Tier(pub usize);
 
 impl Tier {
-    pub const fn new(level: u8) -> Self {
+    pub const fn new(level: usize) -> Self {
         Tier(level)
     }
 }
 
 impl Default for Tier {
     fn default() -> Self {
-        Tier(u8::MAX)
+        Tier(usize::MAX)
     }
 }
 use tower::ServiceBuilder;
@@ -104,7 +104,7 @@ where
         }
 
         let mut start = 0;
-        for capacity in self.tiers.iter().take(tier.0 as usize) {
+        for capacity in self.tiers.iter().take(tier.0) {
             if start + capacity >= members.len() {
                 return members[start..].to_vec();
             }
@@ -113,7 +113,7 @@ where
 
         let end = self
             .tiers
-            .get(tier.0 as usize)
+            .get(tier.0)
             .map(|capacity| min(start + capacity, members.len()))
             .unwrap_or(members.len());
 
