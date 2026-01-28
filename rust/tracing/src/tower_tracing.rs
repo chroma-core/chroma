@@ -41,6 +41,7 @@ impl<B> MakeSpan<B> for RequestTracing {
             http.user_agent = %user_agent,
             otel.name = name,
             otel.status_code = tracing::field::Empty,
+            collection_size_bytes = tracing::field::Empty,
         )
     }
 }

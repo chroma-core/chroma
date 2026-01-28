@@ -1584,6 +1584,10 @@ impl ServiceBasedFrontend {
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
+        tracing::Span::current().record(
+            "collection_size_bytes",
+            latest_collection_logical_size_bytes,
+        );
         let metadata_predicate_count = r#where
             .as_ref()
             .map(Where::metadata_predicate_count)
@@ -1737,6 +1741,10 @@ impl ServiceBasedFrontend {
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
+        tracing::Span::current().record(
+            "collection_size_bytes",
+            latest_collection_logical_size_bytes,
+        );
         let metadata_predicate_count = r#where
             .as_ref()
             .map(Where::metadata_predicate_count)
@@ -1924,6 +1932,10 @@ impl ServiceBasedFrontend {
         let latest_collection_logical_size_bytes = collection_and_segments
             .collection
             .size_bytes_post_compaction;
+        tracing::Span::current().record(
+            "collection_size_bytes",
+            latest_collection_logical_size_bytes,
+        );
 
         // Aggregate metrics across all search payloads
         let mut total_metadata_predicate_count = 0u64;
