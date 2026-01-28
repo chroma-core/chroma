@@ -41,6 +41,11 @@ queryService:
   image:
     repository: 'query-service'
     tag: 'latest'
+  updateStrategy:
+    type: 'RollingUpdate'
+    # For staged/canary rollouts, set partition > 0 to keep lower-ordinal pods on the old version.
+    # rollingUpdate:
+    #   partition: 1
   env:
   cache:
     hostPath: '/local/cache/chroma-query-service'

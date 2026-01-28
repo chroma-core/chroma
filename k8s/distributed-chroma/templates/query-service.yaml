@@ -41,6 +41,10 @@ spec:
   selector:
     matchLabels:
       app: query-service
+  {{- if .Values.queryService.updateStrategy }}
+  updateStrategy:
+    {{- toYaml .Values.queryService.updateStrategy | nindent 4 }}
+  {{- end }}
   template:
     metadata:
       labels:
