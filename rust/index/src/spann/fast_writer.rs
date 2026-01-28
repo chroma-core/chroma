@@ -591,15 +591,14 @@ impl FastSpannIndexWriter {
         let mut embeddings: Vec<Arc<[f32]>> = Vec::with_capacity(k);
         {
             let read_guard = self.hnsw_index.inner.read();
-            let allowed_ids = vec![];
-            let disallowed_ids = vec![];
-            let (ids, distances) = read_guard
-                .hnsw_index
-                .query(query, k, &allowed_ids, &disallowed_ids)
-                .map_err(|e| {
-                    tracing::error!("Error querying hnsw index: {:?}", e);
-                    SpannIndexWriterError::HnswIndexSearchError(e)
-                })?;
+            let (ids, distances) =
+                read_guard
+                    .hnsw_index
+                    .query(query, k, &[], &[])
+                    .map_err(|e| {
+                        tracing::error!("Error querying hnsw index: {:?}", e);
+                        SpannIndexWriterError::HnswIndexSearchError(e)
+                    })?;
             for (id, distance) in ids.iter().zip(distances.iter()) {
                 let within_epsilon = if distances[0] < 0.0 && *distance < 0.0 {
                     // Both negative: reverse the comparison
@@ -782,11 +781,9 @@ impl FastSpannIndexWriter {
         k: usize,
     ) -> Result<NearbyHeadsResult, SpannIndexWriterError> {
         let read_guard = self.hnsw_index.inner.read();
-        let allowed_ids = vec![];
-        let disallowed_ids = vec![];
         let (nearest_ids, nearest_distances) = read_guard
             .hnsw_index
-            .query(head_embedding, k, &allowed_ids, &disallowed_ids)
+            .query(head_embedding, k, &[], &[])
             .map_err(|e| {
                 tracing::error!("Error querying hnsw for {:?}: {:?}", head_embedding, e);
                 SpannIndexWriterError::HnswIndexSearchError(e)
