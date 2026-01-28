@@ -6,7 +6,9 @@ use async_trait::async_trait;
 use backon::ExponentialBuilder;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
+use chroma_memberlist::client_manager::Tier;
 use chroma_system::System;
+use chroma_types::Collection;
 use serde::{Deserialize, Serialize};
 
 // 32 MB
@@ -43,11 +45,9 @@ pub struct DistributedExecutorConfig {
     pub client_selection: ClientSelectionConfig,
     #[serde(default = "default_query_service_port")]
     pub port: u16,
-    /// Tier configuration: index is tier level, value is member count for that tier.
-    /// The last configured tier absorbs all remaining members.
-    /// Empty vec (default) means all members belong to the default tier.
+    /// Tier configuration with capacities and routing rules
     #[serde(default)]
-    pub tiers: Vec<usize>,
+    pub tiers: TiersConfig,
 }
 
 #[derive(Deserialize, Clone, Serialize, Debug)]
@@ -83,6 +83,79 @@ impl Configurable<(ExecutorConfig, System)> for Executor {
                 Ok(Executor::Local(local_executor))
             }
         }
+    }
+}
+
+//////////////////////// Tiers Config ////////////////////////
+
+/// Pattern for matching requests to tiers
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TierPattern {
+    /// Match specific tenant ID
+    TenantId(String),
+    /// Match specific database ID
+    DatabaseId(String),
+    /// Match specific collection ID
+    CollectionId(String),
+    /// Match collection size range [min, max) - max is exclusive
+    CollectionSize { min: u64, max: u64 },
+}
+
+impl TierPattern {
+    fn matches(&self, collection: &Collection) -> bool {
+        match self {
+            TierPattern::TenantId(id) => &collection.tenant == id,
+            TierPattern::DatabaseId(id) => collection.database_id.to_string() == *id,
+            TierPattern::CollectionId(id) => collection.collection_id.to_string() == *id,
+            TierPattern::CollectionSize { min, max } => {
+                let size = collection.total_records_post_compaction;
+                size >= *min && size < *max
+            }
+        }
+    }
+}
+
+/// Configuration for tier-based routing.
+/// Each entry specifies a tier's capacity and routing patterns.
+/// Tiers are evaluated in order; the first matching tier wins.
+#[derive(Clone, Debug, Deserialize, Serialize, Default)]
+pub struct TiersConfig(#[serde(default)] pub Vec<TierEntry>);
+
+/// A single tier entry with its capacity and routing patterns
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TierEntry {
+    pub tier: usize,
+    pub capacity: usize,
+    #[serde(default)]
+    pub patterns: Vec<TierPattern>,
+}
+
+impl TiersConfig {
+    /// Get capacities ordered by tier number for ClientAssigner.
+    /// Returns a Vec where index i contains the capacity for tier i.
+    pub fn capacities(&self) -> Vec<usize> {
+        if self.0.is_empty() {
+            return vec![];
+        }
+
+        let max_tier = self.0.iter().map(|t| t.tier).max().unwrap_or(0);
+        let mut capacities = vec![0; max_tier + 1];
+        for entry in &self.0 {
+            capacities[entry.tier] = entry.capacity;
+        }
+        capacities
+    }
+
+    /// Resolve the tier for a given collection based on configured patterns.
+    /// Returns the first matching tier, or Tier::default() if no patterns match.
+    pub fn resolve_tier(&self, collection: &Collection) -> Tier {
+        for entry in &self.0 {
+            if entry.patterns.iter().all(|p| p.matches(collection)) {
+                return Tier::new(entry.tier);
+            }
+        }
+        Tier::default()
     }
 }
 
@@ -126,5 +199,218 @@ impl From<&RetryConfig> for ExponentialBuilder {
         } else {
             b
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chroma_types::{CollectionUuid, DatabaseUuid};
+
+    fn test_collection(
+        tenant: &str,
+        database_id: &str,
+        collection_id: &str,
+        size: u64,
+    ) -> Collection {
+        Collection {
+            tenant: tenant.to_string(),
+            database_id: database_id.parse().unwrap_or(DatabaseUuid::new()),
+            collection_id: collection_id.parse().unwrap_or(CollectionUuid::new()),
+            total_records_post_compaction: size,
+            ..Default::default()
+        }
+    }
+
+    // ==================== TiersConfig::capacities() tests ====================
+
+    #[test]
+    fn test_capacities_empty() {
+        let config = TiersConfig::default();
+        assert_eq!(config.capacities(), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn test_capacities_single_tier() {
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 4,
+            patterns: vec![],
+        }]);
+        assert_eq!(config.capacities(), vec![4]);
+    }
+
+    #[test]
+    fn test_capacities_multiple_tiers() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 1,
+                capacity: 5,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 2,
+                capacity: 3,
+                patterns: vec![],
+            },
+        ]);
+        assert_eq!(config.capacities(), vec![4, 5, 3]);
+    }
+
+    #[test]
+    fn test_capacities_non_sequential_tiers() {
+        // Tier 0 and tier 2, but no tier 1 - should fill with 0
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![],
+            },
+            TierEntry {
+                tier: 2,
+                capacity: 6,
+                patterns: vec![],
+            },
+        ]);
+        assert_eq!(config.capacities(), vec![4, 0, 6]);
+    }
+
+    // ==================== TiersConfig::resolve_tier() tests ====================
+
+    #[test]
+    fn test_resolve_tier_empty_config() {
+        let config = TiersConfig::default();
+        let collection = test_collection("tenant1", "", "", 100);
+        assert_eq!(config.resolve_tier(&collection), Tier::default());
+    }
+
+    #[test]
+    fn test_resolve_tier_tenant_match() {
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 4,
+            patterns: vec![TierPattern::TenantId("premium".to_string())],
+        }]);
+
+        let premium = test_collection("premium", "", "", 0);
+        let regular = test_collection("regular", "", "", 0);
+
+        assert_eq!(config.resolve_tier(&premium), Tier::new(0));
+        assert_eq!(config.resolve_tier(&regular), Tier::default());
+    }
+
+    #[test]
+    fn test_resolve_tier_collection_size_match() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![TierPattern::CollectionSize { min: 0, max: 1000 }],
+            },
+            TierEntry {
+                tier: 1,
+                capacity: 5,
+                patterns: vec![TierPattern::CollectionSize {
+                    min: 1000,
+                    max: 10000,
+                }],
+            },
+        ]);
+
+        let small = test_collection("t", "", "", 500);
+        let medium = test_collection("t", "", "", 5000);
+        let large = test_collection("t", "", "", 50000);
+
+        assert_eq!(config.resolve_tier(&small), Tier::new(0));
+        assert_eq!(config.resolve_tier(&medium), Tier::new(1));
+        assert_eq!(config.resolve_tier(&large), Tier::default()); // No match
+    }
+
+    #[test]
+    fn test_resolve_tier_first_match_wins() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![TierPattern::TenantId("vip".to_string())],
+            },
+            TierEntry {
+                tier: 1,
+                capacity: 5,
+                patterns: vec![TierPattern::TenantId("vip".to_string())], // Same pattern, different tier
+            },
+        ]);
+
+        let collection = test_collection("vip", "", "", 0);
+        // First match wins - should be tier 0, not tier 1
+        assert_eq!(config.resolve_tier(&collection), Tier::new(0));
+    }
+
+    #[test]
+    fn test_resolve_tier_empty_patterns_catch_all() {
+        let config = TiersConfig(vec![
+            TierEntry {
+                tier: 0,
+                capacity: 4,
+                patterns: vec![TierPattern::TenantId("premium".to_string())],
+            },
+            TierEntry {
+                tier: 1,
+                capacity: 5,
+                patterns: vec![], // Empty patterns = catch-all
+            },
+        ]);
+
+        let premium = test_collection("premium", "", "", 0);
+        let anyone = test_collection("anyone", "", "", 0);
+
+        assert_eq!(config.resolve_tier(&premium), Tier::new(0));
+        assert_eq!(config.resolve_tier(&anyone), Tier::new(1)); // Caught by empty patterns
+    }
+
+    #[test]
+    fn test_resolve_tier_multiple_patterns_all_must_match() {
+        let config = TiersConfig(vec![TierEntry {
+            tier: 0,
+            capacity: 4,
+            patterns: vec![
+                TierPattern::TenantId("premium".to_string()),
+                TierPattern::CollectionSize { min: 0, max: 1000 },
+            ],
+        }]);
+
+        let premium_small = test_collection("premium", "", "", 500);
+        let premium_large = test_collection("premium", "", "", 5000);
+        let regular_small = test_collection("regular", "", "", 500);
+
+        assert_eq!(config.resolve_tier(&premium_small), Tier::new(0)); // Both match
+        assert_eq!(config.resolve_tier(&premium_large), Tier::default()); // Size doesn't match
+        assert_eq!(config.resolve_tier(&regular_small), Tier::default()); // Tenant doesn't match
+    }
+
+    // ==================== TierPattern::matches() boundary tests ====================
+
+    #[test]
+    fn test_collection_size_boundaries() {
+        let pattern = TierPattern::CollectionSize { min: 100, max: 200 };
+
+        let below = test_collection("t", "", "", 99);
+        let at_min = test_collection("t", "", "", 100);
+        let middle = test_collection("t", "", "", 150);
+        let at_max_minus_one = test_collection("t", "", "", 199);
+        let at_max = test_collection("t", "", "", 200);
+        let above = test_collection("t", "", "", 201);
+
+        assert!(!pattern.matches(&below));
+        assert!(pattern.matches(&at_min)); // min is inclusive
+        assert!(pattern.matches(&middle));
+        assert!(pattern.matches(&at_max_minus_one));
+        assert!(!pattern.matches(&at_max)); // max is exclusive
+        assert!(!pattern.matches(&above));
     }
 }

@@ -48,6 +48,17 @@ executor:
     assignment:
       rendezvous_hashing:
         hasher: Murmur3
+    tiers:
+      - tier: 0
+        capacity: 4
+        patterns:
+          - tenant_id: "premium_tenant"
+      - tier: 1
+        capacity: 5
+        patterns:
+          - collection_size:
+              min: 0
+              max: 10000
     memberlist_provider:
       custom_resource:
         kube_namespace: "chroma"
