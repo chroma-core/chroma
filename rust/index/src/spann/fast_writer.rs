@@ -150,7 +150,7 @@ pub struct HeadData {
 
 #[derive(Clone)]
 // Note: Fields of this struct are public for testing.
-pub struct SpannIndexWriter2 {
+pub struct FastSpannIndexWriter {
     // HNSW index and its provider for centroid search.
     pub hnsw_index: HnswIndexRef,
     pub cleaned_up_hnsw_index: Option<HnswIndexRef>,
@@ -198,7 +198,7 @@ struct NearbyHeadsResult {
     embeddings: Vec<Arc<[f32]>>,
 }
 
-impl SpannIndexWriter2 {
+impl FastSpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         hnsw_index: HnswIndexRef,
@@ -217,7 +217,7 @@ impl SpannIndexWriter2 {
         versions: DashMap<u32, u32, RandomState>,
         posting_list_reader: Option<BlockfileReader<'static, u32, SpannPostingList<'static>>>,
     ) -> Self {
-        SpannIndexWriter2 {
+        FastSpannIndexWriter {
             hnsw_index,
             cleaned_up_hnsw_index: None,
             hnsw_provider,
@@ -1052,7 +1052,7 @@ impl SpannIndexWriter2 {
         Ok(())
     }
 
-    /// Appends a point to a posting list. This is the main entry point.
+    /// Appends a point to a posting list, triggers scrub if over threshold.
     async fn append(
         &self,
         head_id: u32,
@@ -1061,31 +1061,11 @@ impl SpannIndexWriter2 {
         embedding: Arc<[f32]>,
         head_embedding: Arc<[f32]>,
     ) -> Result<(), SpannIndexWriterError> {
-        self.insert_to_posting_list(head_id, id, version, embedding, head_embedding)
-            .await
-    }
-
-    /// Adds a point to the posting list, triggers scrub if over threshold.
-    async fn insert_to_posting_list(
-        &self,
-        head_id: u32,
-        id: u32,
-        version: u32,
-        embedding: Arc<[f32]>,
-        head_embedding: Arc<[f32]>,
-    ) -> Result<(), SpannIndexWriterError> {
-        // Add to staged (short-lived guards)
-        let current_length = {
-            let Some(mut head_data) = self.heads.get_mut(&head_id) else {
-                // TODO(Sanket): Should ideally reassign here.
-                return Ok(());
-            };
-            head_data.length += 1;
-            head_data.posting_list.ids.push(id);
-            head_data.posting_list.versions.push(version);
-            head_data.posting_list.embeddings.push(embedding.clone());
-            head_data.length
-        }; // guards dropped here
+        let Some(current_length) = self.insert_to_posting_list(head_id, id, version, embedding)
+        else {
+            // TODO(Sanket): Should ideally reassign here.
+            return Ok(());
+        };
 
         if current_length <= self.params.split_threshold {
             return Ok(());
@@ -1093,6 +1073,23 @@ impl SpannIndexWriter2 {
 
         // Over threshold - need to scrub and potentially split
         self.scrub_posting_list(head_id, head_embedding).await
+    }
+
+    /// Adds a point to the posting list, returns the new length.
+    /// Returns None if head not found.
+    fn insert_to_posting_list(
+        &self,
+        head_id: u32,
+        id: u32,
+        version: u32,
+        embedding: Arc<[f32]>,
+    ) -> Option<u32> {
+        let mut head_data = self.heads.get_mut(&head_id)?;
+        head_data.length += 1;
+        head_data.posting_list.ids.push(id);
+        head_data.posting_list.versions.push(version);
+        head_data.posting_list.embeddings.push(embedding);
+        Some(head_data.length)
     }
 
     /// Tries to merge a small posting list into a nearby head.
@@ -1216,14 +1213,8 @@ impl SpannIndexWriter2 {
         // Reconcile with blockfile.
         self.reconcile_posting_list(head_id).await?;
 
-        // Re-acquire guards for cleanup and determine action needed
-        enum PostScrubAction {
-            None,
-            Split,
-            Merge,
-        }
-
-        let action = {
+        // Re-acquire guards for cleanup
+        let final_length = {
             let Some(mut head_data) = self.heads.get_mut(&head_id) else {
                 return Ok(());
             };
@@ -1269,27 +1260,14 @@ impl SpannIndexWriter2 {
             head_data.posting_list.versions.truncate(up_to_date_index);
             head_data.posting_list.embeddings.truncate(up_to_date_index);
             head_data.length = up_to_date_index as u32;
-
-            // Determine action based on final length
-            if up_to_date_index > self.params.split_threshold as usize {
-                PostScrubAction::Split
-            } else if up_to_date_index > 0
-                && up_to_date_index < self.params.merge_threshold as usize
-            {
-                PostScrubAction::Merge
-            } else {
-                PostScrubAction::None
-            }
+            up_to_date_index
         }; // guards dropped here
 
-        match action {
-            PostScrubAction::Split => {
-                self.split_posting_list(head_id, head_embedding).await?;
-            }
-            PostScrubAction::Merge => {
-                self.try_merge_posting_list(head_id, head_embedding).await?;
-            }
-            PostScrubAction::None => {}
+        // Determine action based on final length
+        if final_length > self.params.split_threshold as usize {
+            self.split_posting_list(head_id, head_embedding).await?;
+        } else if final_length > 0 && final_length < self.params.merge_threshold as usize {
+            self.try_merge_posting_list(head_id, head_embedding).await?;
         }
 
         Ok(())
@@ -2262,7 +2240,7 @@ mod tests {
         Index,
     };
 
-    use super::{SpannIndexWriter2, SpannMetrics};
+    use super::{FastSpannIndexWriter, SpannMetrics};
 
     #[tokio::test]
     async fn test_split() {
@@ -2307,7 +2285,7 @@ mod tests {
         .expect("Error converting config to gc context");
         let prefix_path = "";
         let pl_block_size = 5 * 1024 * 1024;
-        let writer = SpannIndexWriter2::from_id(
+        let writer = FastSpannIndexWriter::from_id(
             &hnsw_provider,
             None,
             None,

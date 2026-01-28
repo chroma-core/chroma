@@ -137,9 +137,9 @@ impl ChromaError for KMeansError {
 // For a given point, get the nearest center and the distance to it.
 // lambda is a parameter used to penalize large clusters.
 // previous_counts is the number of points in each cluster in the previous iteration.
-fn get_nearest_center(
+fn get_nearest_center<T: AsRef<[f32]>>(
     input: &KMeansAlgorithmInput,
-    centers: &[Vec<f32>],
+    centers: &[T],
     idx: usize,
     lambda: f32,
     previous_counts: &[usize],
@@ -150,37 +150,7 @@ fn get_nearest_center(
     for center_idx in 0..input.k {
         let distance = input
             .distance_function
-            .distance(&input.embeddings[point_idx], &centers[center_idx])
-            + lambda * previous_counts[center_idx] as f32;
-        if distance > -MAX_DISTANCE && distance < min_distance {
-            min_distance = distance;
-            min_center = center_idx as i32;
-        }
-    }
-    if min_center == -1 {
-        return Err(KMeansError::PointAssignmentFailed);
-    }
-    Ok((min_center, min_distance))
-}
-
-// TODO(Sanket): Clean this up later.
-// For a given point, get the nearest center and the distance to it.
-// lambda is a parameter used to penalize large clusters.
-// previous_counts is the number of points in each cluster in the previous iteration.
-fn get_nearest_center_arc(
-    input: &KMeansAlgorithmInput,
-    centers: &[Arc<[f32]>],
-    idx: usize,
-    lambda: f32,
-    previous_counts: &[usize],
-) -> Result<(i32, f32), KMeansError> {
-    let point_idx = input.indices[idx];
-    let mut min_distance = MAX_DISTANCE;
-    let mut min_center: i32 = -1;
-    for center_idx in 0..input.k {
-        let distance = input
-            .distance_function
-            .distance(&input.embeddings[point_idx], &centers[center_idx])
+            .distance(&input.embeddings[point_idx], centers[center_idx].as_ref())
             + lambda * previous_counts[center_idx] as f32;
         if distance > -MAX_DISTANCE && distance < min_distance {
             min_distance = distance;
@@ -280,64 +250,14 @@ fn kmeansassign_for_main_loop(
     })
 }
 
-// TODO(Sanket): Clean this up later.
 // This is run in the end to assign all points to their nearest centers.
 // It does not penalize the clusters via lambda. Also, it assigns ALL the
 // points instead of just a sample.
 // generate_labels is used to denote if this method is expected to also return
 // the assignment labels of the points.
-fn kmeansassign_finish_arc(
+fn kmeansassign_finish<T: AsRef<[f32]>>(
     input: &KMeansAlgorithmInput,
-    centers: &[Arc<[f32]>],
-    generate_labels: bool,
-) -> Result<KMeansAssignFinishOutput, KMeansError> {
-    // Assign ALL the points.
-    let batch_end = input.last;
-    // Number of points in each cluster.
-    let mut cluster_counts = vec![0; input.k];
-    // Index and Distance of the nearest point from the cluster center.
-    let mut cluster_nearest_point_idx: Vec<i32> = vec![-1; input.k];
-    let mut cluster_nearest_distance = vec![MAX_DISTANCE; input.k];
-    // Point id -> label id mapping for the cluster assignment.
-    let mut cluster_labels;
-    if generate_labels {
-        cluster_labels = HashMap::with_capacity(batch_end - input.first);
-    } else {
-        cluster_labels = HashMap::new();
-    }
-    // Assign all points the nearest center.
-    // TODO(Sanket): Scope for perf improvements here. Like Paralleization, SIMD, etc.
-    // The actual value of previous_counts does not matter since lambda is 0. Using a vector of 0s.
-    let previous_counts = vec![0; input.k];
-    for idx in input.first..batch_end {
-        let (min_center, min_distance) =
-            get_nearest_center_arc(input, centers, idx, 0.0, &previous_counts)?;
-        cluster_counts[min_center as usize] += 1;
-        let point_idx = input.indices[idx];
-        if min_distance <= cluster_nearest_distance[min_center as usize] {
-            cluster_nearest_distance[min_center as usize] = min_distance;
-            cluster_nearest_point_idx[min_center as usize] = point_idx as i32;
-        }
-        if generate_labels {
-            cluster_labels.insert(point_idx, min_center);
-        }
-    }
-    Ok(KMeansAssignFinishOutput {
-        cluster_counts,
-        cluster_nearest_point_idx,
-        cluster_nearest_distance,
-        cluster_labels,
-    })
-}
-
-// This is run in the end to assign all points to their nearest centers.
-// It does not penalize the clusters via lambda. Also, it assigns ALL the
-// points instead of just a sample.
-// generate_labels is used to denote if this method is expected to also return
-// the assignment labels of the points.
-fn kmeansassign_finish(
-    input: &KMeansAlgorithmInput,
-    centers: &[Vec<f32>],
+    centers: &[T],
     generate_labels: bool,
 ) -> Result<KMeansAssignFinishOutput, KMeansError> {
     // Assign ALL the points.
@@ -555,7 +475,7 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
     // Finally assign points to these nearest points in the cluster.
     // Previous counts does not matter since lambda is 0.
     let kmeans_assign =
-        kmeansassign_finish_arc(input, &final_centers, /* generate_labels */ true)?;
+        kmeansassign_finish(input, &final_centers, /* generate_labels */ true)?;
     previous_counts = kmeans_assign.cluster_counts;
     let mut total_non_zero_clusters = 0;
     for count in previous_counts.iter() {

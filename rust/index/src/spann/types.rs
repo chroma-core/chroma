@@ -3925,7 +3925,7 @@ mod tests {
         writer
             .collect_and_reassign(
                 &[1, 2],
-                &[Some(&vec![0.0, 0.0]), Some(&vec![1000.0, 1000.0])],
+                &[Some(&[0.0, 0.0]), Some(&[1000.0, 1000.0])],
                 &[5000.0, 5000.0],
                 &[split_doc_offset_ids1.clone(), split_doc_offset_ids2.clone()],
                 &[split_doc_versions1.clone(), split_doc_versions2.clone()],

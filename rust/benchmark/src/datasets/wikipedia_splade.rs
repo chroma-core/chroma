@@ -24,13 +24,11 @@ impl WikipediaSplade {
         let api = Api::new()?;
         let dataset = api.dataset("Sicheng-Chroma/wikipedia-en-splade-bge".to_string());
 
-        // Download all 7 shards from train directory
+        // Download first shard from train directory
         let mut train_paths = Vec::new();
-        for i in 0..7 {
-            let train_shard = format!("train/train-{:05}-of-00007.parquet", i);
-            let train_path = dataset.get(&train_shard).await?;
-            train_paths.push(train_path);
-        }
+        let train_shard = "train/train-00000-of-00007.parquet";
+        let train_path = dataset.get(train_shard).await?;
+        train_paths.push(train_path);
 
         // Download test queries
         let test_path = dataset.get("test/test-00000-of-00001.parquet").await?;
@@ -88,11 +86,6 @@ impl WikipediaSplade {
             .context("Missing sparse_embedding_values column")?
             .as_list::<i32>();
 
-        let dense_embeddings = batch
-            .column_by_name("dense_embedding")
-            .context("Missing dense_embedding column")?
-            .as_list::<i32>();
-
         let mut documents = Vec::with_capacity(batch.num_rows());
 
         for i in 0..batch.num_rows() {
@@ -117,20 +110,12 @@ impl WikipediaSplade {
             let sparse_vector =
                 CsVec::new(SPLADE_VOCAB_SIZE, sparse_indices_vec, sparse_values_vec);
 
-            // Extract dense embedding (1024 dimensions)
-            let dense_emb = dense_embeddings.value(i);
-            let dense_array = dense_emb.as_primitive::<Float32Type>();
-            let dense_vector: Vec<f32> = (0..dense_array.len())
-                .map(|j| dense_array.value(j))
-                .collect();
-
             documents.push(SparseDocument {
                 doc_id: url.clone(),
                 url,
                 title,
                 body: text,
                 sparse_vector,
-                dense_vector,
             });
         }
 
@@ -212,7 +197,6 @@ pub struct SparseDocument {
     pub title: String,
     pub body: String,
     pub sparse_vector: CsVec<f32>,
-    pub dense_vector: Vec<f32>,
 }
 
 #[derive(Debug, Clone)]
