@@ -413,4 +413,79 @@ mod tests {
         assert!(!pattern.matches(&at_max)); // max is exclusive
         assert!(!pattern.matches(&above));
     }
+
+    // ==================== Deserialization tests ====================
+
+    #[test]
+    fn test_tiers_config_deserialization() {
+        let json = r#"[
+            {
+                "tier": 0,
+                "capacity": 4,
+                "patterns": [{"tenant_id": "premium"}]
+            },
+            {
+                "tier": 1,
+                "capacity": 5,
+                "patterns": [{"collection_size": {"min": 0, "max": 10000}}]
+            }
+        ]"#;
+        let config: TiersConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(config.0.len(), 2);
+        assert_eq!(config.0[0].tier, 0);
+        assert_eq!(config.0[0].capacity, 4);
+        assert_eq!(config.0[0].patterns.len(), 1);
+        assert_eq!(config.0[1].tier, 1);
+        assert_eq!(config.0[1].capacity, 5);
+        assert_eq!(config.0[1].patterns.len(), 1);
+    }
+
+    #[test]
+    fn test_tier_pattern_tenant_id_deserialization() {
+        let json = r#"{"tenant_id": "my_tenant"}"#;
+        let pattern: TierPattern = serde_json::from_str(json).unwrap();
+        assert!(matches!(pattern, TierPattern::TenantId(ref id) if id == "my_tenant"));
+    }
+
+    #[test]
+    fn test_tier_pattern_database_id_deserialization() {
+        let json = r#"{"database_id": "db-123"}"#;
+        let pattern: TierPattern = serde_json::from_str(json).unwrap();
+        assert!(matches!(pattern, TierPattern::DatabaseId(ref id) if id == "db-123"));
+    }
+
+    #[test]
+    fn test_tier_pattern_collection_id_deserialization() {
+        let json = r#"{"collection_id": "col-456"}"#;
+        let pattern: TierPattern = serde_json::from_str(json).unwrap();
+        assert!(matches!(pattern, TierPattern::CollectionId(ref id) if id == "col-456"));
+    }
+
+    #[test]
+    fn test_tier_pattern_collection_size_deserialization() {
+        let json = r#"{"collection_size": {"min": 100, "max": 500}}"#;
+        let pattern: TierPattern = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            pattern,
+            TierPattern::CollectionSize { min: 100, max: 500 }
+        ));
+    }
+
+    #[test]
+    fn test_empty_tiers_config_deserialization() {
+        let json = "[]";
+        let config: TiersConfig = serde_json::from_str(json).unwrap();
+        assert!(config.0.is_empty());
+    }
+
+    #[test]
+    fn test_tier_entry_with_empty_patterns_deserialization() {
+        let json = r#"[{"tier": 0, "capacity": 10}]"#;
+        let config: TiersConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.0.len(), 1);
+        assert_eq!(config.0[0].tier, 0);
+        assert_eq!(config.0[0].capacity, 10);
+        assert!(config.0[0].patterns.is_empty()); // Default empty
+    }
 }
