@@ -75,14 +75,32 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
 
     #[inline]
     fn get(&self, key: &CompositeKey) -> Option<V::PreparedValue> {
-        self.index
-            .get(key)
-            .map(|&idx| V::prepare(self.storage[idx].1.clone()))
+        if self.is_sorted {
+            // Use binary search for sorted data
+            self.storage
+                .binary_search_by(|(k, _)| k.cmp(key))
+                .ok()
+                .map(|idx| V::prepare(self.storage[idx].1.clone()))
+        } else {
+            // Use HashMap index for unsorted data
+            self.index
+                .get(key)
+                .map(|&idx| V::prepare(self.storage[idx].1.clone()))
+        }
     }
 
     #[inline]
     fn get_ref(&self, key: &CompositeKey) -> Option<&V> {
-        self.index.get(key).map(|&idx| &self.storage[idx].1)
+        if self.is_sorted {
+            // Use binary search for sorted data
+            self.storage
+                .binary_search_by(|(k, _)| k.cmp(key))
+                .ok()
+                .map(|idx| &self.storage[idx].1)
+        } else {
+            // Use HashMap index for unsorted data
+            self.index.get(key).map(|&idx| &self.storage[idx].1)
+        }
     }
 
     fn min_key(&mut self) -> Option<&CompositeKey> {
@@ -99,14 +117,22 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
             } else {
                 self.storage.sort_unstable_by(|(a, _), (b, _)| a.cmp(b));
             }
-            // Rebuild index after sorting
+            // After sorting, we can use binary search for lookups
+            // No need to rebuild the HashMap index - saves key clones!
+            // Just clear it and mark as sorted
             self.index.clear();
-            self.index.reserve(self.storage.len());
-            for (idx, (key, _)) in self.storage.iter().enumerate() {
-                self.index.insert(key.clone(), idx);
-            }
             self.is_sorted = true;
         }
+    }
+
+    /// Get value using binary search (only valid after sorting)
+    #[inline]
+    fn get_sorted(&self, key: &CompositeKey) -> Option<&V> {
+        debug_assert!(self.is_sorted, "get_sorted called on unsorted storage");
+        self.storage
+            .binary_search_by(|(k, _)| k.cmp(key))
+            .ok()
+            .map(|idx| &self.storage[idx].1)
     }
 
     fn split_off(&mut self, key: &CompositeKey) -> Self {
@@ -117,22 +143,11 @@ impl<V: ArrowWriteableValue> DeferredSortStorage<V> {
             .unwrap_or_else(|i| i);
         let split_off = self.storage.split_off(split_index);
 
-        // Rebuild index for remaining elements
-        self.index.clear();
-        self.index.reserve(self.storage.len());
-        for (idx, (k, _)) in self.storage.iter().enumerate() {
-            self.index.insert(k.clone(), idx);
-        }
-
-        // Build index for split elements using AHashMap
-        let mut new_index = AHashMap::with_capacity(split_off.len());
-        for (idx, (k, _)) in split_off.iter().enumerate() {
-            new_index.insert(k.clone(), idx);
-        }
-
+        // Both halves remain sorted, no need to rebuild indices
+        // Binary search will be used for lookups
         Self {
             storage: split_off,
-            index: new_index,
+            index: AHashMap::new(), // Empty - will use binary search
             is_sorted: true,
         }
     }
