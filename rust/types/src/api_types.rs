@@ -1230,10 +1230,17 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
 
+/// Payload for adding records to a collection.
+///
+/// Records are added in batches. All arrays must have the same length, with each index
+/// representing a single record. For example, `ids[0]`, `embeddings[0]`, `documents[0]`, etc.
+/// all belong to the same record.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsPayload {
+    /// Unique identifiers for each record.
     pub ids: Vec<String>,
+    /// Embeddings for each record. Can contain the raw f32 arrays or base64 encoded strings.
     pub embeddings: EmbeddingsPayload,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
@@ -1348,10 +1355,16 @@ impl ChromaError for AddCollectionRecordsError {
 
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
+/// Payload for updating existing records in a collection.
+///
+/// Records are added in batches. All arrays must have the same length, with each index
+/// representing a single record. For example, `ids[0]`, `embeddings[0]`, `documents[0]`, etc.
+/// all belong to the same record.
 #[derive(Deserialize, Debug, Clone, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsPayload {
     pub ids: Vec<String>,
+    /// Updated embeddings for each record. Can contain the raw f32 arrays or base64 encoded strings.
     pub embeddings: Option<UpdateEmbeddingsPayload>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
@@ -1436,10 +1449,17 @@ impl ChromaError for UpdateCollectionRecordsError {
 
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
+/// Payload for upserting records in a collection.
+///
+/// Upsert creates records if they don't exist, or updates them if they do.
+/// Records are added in batches. All arrays must have the same length, with each index
+/// representing a single record. For example, `ids[0]`, `embeddings[0]`, `documents[0]`, etc.
+/// all belong to the same record.
 #[derive(Deserialize, Debug, Clone, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsPayload {
     pub ids: Vec<String>,
+    /// Embeddings for each record. Can contain the raw f32 arrays or base64 encoded strings.
     pub embeddings: EmbeddingsPayload,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
@@ -1525,6 +1545,10 @@ impl ChromaError for UpsertCollectionRecordsError {
 
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
+/// Payload for deleting records from a collection.
+///
+/// Records can be deleted by their IDs or by a metadata filter. At least one of `ids` or `where`
+/// must be provided.
 #[derive(Deserialize, Debug, Clone, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsPayload {
@@ -1623,6 +1647,7 @@ impl ChromaError for IncludeParsingError {
     }
 }
 
+/// Use this enum to specify which fields should be returned when retrieving records.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Include {
@@ -1742,6 +1767,8 @@ pub enum WhereError {
 
 ////////////////////////// Get //////////////////////////
 
+/// Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
+/// must be provided. Use `include` to specify which fields to return in the response.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetRequestPayload {
@@ -1810,6 +1837,8 @@ impl GetRequest {
     }
 }
 
+/// All arrays have the same length, with each index representing a single record.
+/// Only fields specified in the request's `include` parameter are populated.
 #[derive(Clone, Deserialize, Serialize, Debug, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
@@ -1818,8 +1847,8 @@ pub struct GetResponse {
     pub embeddings: Option<Vec<Vec<f32>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
-    // TODO(hammadb): Add metadata & include to the response
     pub metadatas: Option<Vec<Option<Metadata>>>,
+    /// List of fields that were included in this response.
     pub include: Vec<Include>,
 }
 
@@ -2181,8 +2210,7 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequestPayload {
     pub searches: Vec<SearchPayload>,
-    /// Specifies the read level for consistency vs performance tradeoffs.
-    /// Defaults to IndexAndWal (full consistency).
+    /// Specifies whether to include unindexed data in the search results.
     #[serde(default)]
     pub read_level: ReadLevel,
 }
@@ -2418,8 +2446,11 @@ impl AttachFunctionRequest {
 #[derive(Clone, Debug, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachedFunctionInfo {
+    /// Unique identifier for the attached function.
     pub id: String,
+    /// Human-readable name for the attached function instance.
     pub name: String,
+    /// Name of the function (e.g., "record_counter", "statistics").
     pub function_name: String,
 }
 
@@ -2427,7 +2458,7 @@ pub struct AttachedFunctionInfo {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AttachFunctionResponse {
     pub attached_function: AttachedFunctionInfo,
-    /// True if newly created, false if already existed (idempotent request)
+    /// True if newly created, false if already existed (idempotent request).
     pub created: bool,
 }
 
@@ -2558,7 +2589,7 @@ impl ChromaError for GetAttachedFunctionError {
 #[derive(Clone, Debug, Deserialize, Validate, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DetachFunctionRequest {
-    /// Whether to delete the output collection as well
+    /// Whether to delete the output collection as well when detaching the function.
     #[serde(default)]
     pub delete_output: bool,
 }

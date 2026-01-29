@@ -35,6 +35,7 @@ use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -447,9 +448,14 @@ impl FrontendServer {
 // the appropriate method on the `FrontendServer` struct.
 
 /// Health check endpoint that returns 200 if the server and executor are ready
+/// Healthcheck
+/// Returns the health status of the service.
 #[utoipa::path(
     get,
     path = "/api/v2/healthcheck",
+    summary = "Healthcheck",
+    description = "Returns the health status of the service.",
+    tag = "System",
     responses(
         (status = 200, description = "Success", body = String, content_type = "application/json"),
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
@@ -465,10 +471,14 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
     (code, Json(res))
 }
 
-/// Heartbeat endpoint that returns a nanosecond timestamp of the current time.
+/// Heartbeat
+/// Returns a nanosecond timestamp of the current time.
 #[utoipa::path(
     get,
     path = "/api/v2/heartbeat",
+    summary = "Heartbeat",
+    description = "Returns a nanosecond timestamp of the current time.",
+    tag = "System",
     responses(
         (status = 200, description = "Success", body = HeartbeatResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
@@ -481,10 +491,14 @@ async fn heartbeat(
     Ok(Json(server.frontend.heartbeat().await?))
 }
 
-/// Pre-flight checks endpoint reporting basic readiness info.
+/// Pre-flight checks
+/// Returns basic readiness information.
 #[utoipa::path(
     get,
     path = "/api/v2/pre-flight-checks",
+    summary = "Pre-flight checks",
+    description = "Returns basic readiness information.",
+    tag = "System",
     responses(
         (status = 200, description = "Pre flight checks", body = ChecklistResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
@@ -500,10 +514,17 @@ async fn pre_flight_checks(
     }))
 }
 
-/// Reset endpoint allowing authorized users to reset the database.
+/// Reset database
+/// Resets the database. Requires authorization.
 #[utoipa::path(
     post,
     path = "/api/v2/reset",
+    summary = "Reset database",
+    description = "Resets the database. Requires authorization.",
+    tag = "System",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Reset successful", body = bool),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -530,10 +551,14 @@ async fn reset(
     Ok(Json(true))
 }
 
+/// Get version
 /// Returns the version of the server.
 #[utoipa::path(
     get,
     path = "/api/v2/version",
+    summary = "Get version",
+    description = "Returns the version of the server.",
+    tag = "System",
     responses(
         (status = 200, description = "Get server version", body = String)
     )
@@ -545,12 +570,19 @@ async fn version(State(server): State<FrontendServer>) -> Json<String> {
     Json("1.0.0".to_string())
 }
 
-/// Retrieves the current user's identity, tenant, and databases.
+/// Get user identity
+/// Returns the current user's identity, tenant, and databases.
 #[utoipa::path(
     get,
     path = "/api/v2/auth/identity",
+    summary = "Get user identity",
+    description = "Returns the current user's identity, tenant, and databases.",
+    tag = "Authentication",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
-        (status = 200, description = "Get user identity", body = GetUserIdentityResponse),
+        (status = 200, description = "User identity", body = GetUserIdentityResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     )
 )]
@@ -567,10 +599,17 @@ struct CreateTenantPayload {
     name: String,
 }
 
+/// Create tenant
 /// Creates a new tenant.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants",
+    summary = "Create tenant",
+    description = "Creates a new tenant.",
+    tag = "Tenants",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = CreateTenantPayload,
     responses(
         (status = 200, description = "Tenant created successfully", body = CreateTenantResponse),
@@ -600,15 +639,27 @@ async fn create_tenant(
     Ok(Json(server.frontend.create_tenant(request).await?))
 }
 
+/// Get tenant
 /// Returns an existing tenant by name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant_name}",
+    summary = "Get tenant",
+    description = "Returns an existing tenant by name.",
+    tag = "Tenants",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     params(
-        ("tenant_name" = String, Path, description = "Tenant to retrieve")
+        ("tenant_name" = String, Path, description = "Tenant name")
     ),
     responses(
-        (status = 200, description = "Tenant found", body = GetTenantResponse),
+        (status = 200, description = "Tenant found", body = GetTenantResponse,
+            example = json!({
+                "name": "1e30d217-3d78-4f8c-b244-79381dc6a254",
+                "resource_name": null
+            })
+        ),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Tenant not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
@@ -641,12 +692,19 @@ pub struct UpdateTenantPayload {
     pub resource_name: String,
 }
 
+/// Update tenant
 /// Updates an existing tenant by name.
 #[utoipa::path(
     patch,
     path = "/api/v2/tenants/{tenant_name}",
+    summary = "Update tenant",
+    description = "Updates an existing tenant by name.",
+    tag = "Tenants",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     params(
-        ("tenant_name" = String, Path, description = "Tenant to update")
+        ("tenant_name" = String, Path, description = "Tenant name")
     ),
     request_body = UpdateTenantPayload,
     responses(
@@ -705,10 +763,17 @@ pub struct CreateDatabasePayload {
     pub name: String,
 }
 
-/// Creates a new database for a given tenant.
+/// Create database
+/// Creates a new database for a tenant.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases",
+    summary = "Create database",
+    description = "Creates a new database for a tenant.",
+    tag = "Databases",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = CreateDatabasePayload,
     responses(
         (status = 200, description = "Database created successfully", body = CreateDatabaseResponse),
@@ -716,7 +781,7 @@ pub struct CreateDatabasePayload {
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID to associate with the new database")
+        ("tenant" = String, Path, description = "Tenant UUID")
     )
 )]
 async fn create_database(
@@ -770,19 +835,26 @@ struct ListDatabasesParams {
     offset: u32,
 }
 
-/// Lists all databases for a given tenant.
+/// List databases
+/// Lists all databases for a tenant.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases",
+    summary = "List databases",
+    description = "Lists all databases for a tenant.",
+    tag = "Databases",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "List of databases", body = ListDatabasesResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID to list databases for"),
-        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
-        ("offset" = Option<u32>, Query, description = "Offset for pagination")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
     )
 )]
 async fn list_databases(
@@ -811,10 +883,17 @@ async fn list_databases(
     Ok(Json(server.frontend.list_databases(request).await?))
 }
 
-/// Retrieves a specific database by name.
+/// Get database
+/// Returns a database by name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}",
+    summary = "Get database",
+    description = "Returns a database by name.",
+    tag = "Databases",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Database retrieved successfully", body = GetDatabaseResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -822,8 +901,8 @@ async fn list_databases(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Name of the database to retrieve")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name")
     )
 )]
 async fn get_database(
@@ -854,10 +933,17 @@ async fn get_database(
     Ok(Json(res))
 }
 
-/// Deletes a specific database.
+/// Delete database
+/// Deletes a database by name.
 #[utoipa::path(
     delete,
     path = "/api/v2/tenants/{tenant}/databases/{database}",
+    summary = "Delete database",
+    description = "Deletes a database by name.",
+    tag = "Databases",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Database deleted successfully", body = DeleteDatabaseResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -865,8 +951,8 @@ async fn get_database(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Name of the database to delete")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name")
     )
 )]
 async fn delete_database(
@@ -900,20 +986,27 @@ struct ListCollectionsParams {
     offset: u32,
 }
 
-/// Lists all collections in the specified database.
+/// List collections
+/// Lists all collections in a database.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections",
+    summary = "List collections",
+    description = "Lists all collections in a database.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "List of collections", body = ListCollectionsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name to list collections from"),
-        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
-        ("offset" = Option<u32>, Query, description = "Offset for pagination")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
     )
 )]
 async fn list_collections(
@@ -962,18 +1055,25 @@ async fn list_collections(
     Ok(Json(server.frontend.list_collections(request).await?))
 }
 
-/// Retrieves the total number of collections in a given database.
+/// Get number of collections
+/// Returns the total number of collections in a database.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections_count",
+    summary = "Get number of collections",
+    description = "Returns the total number of collections in a database.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Count of collections", body = CountCollectionsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name to count collections from")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name")
     )
 )]
 async fn count_collections(
@@ -1006,19 +1106,36 @@ async fn count_collections(
     Ok(Json(server.frontend.count_collections(request).await?))
 }
 
-/// Creates a new collection under the specified database.
+/// Create collection
+/// Creates a new collection in a database.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections",
-    request_body = CreateCollectionPayload,
+    summary = "Create collection",
+    description = "Creates a new collection in a database.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body(
+        content = CreateCollectionPayload,
+        description = "Collection creation payload",
+        example = json!({
+            "name": "my_collection",
+            "schema": null,
+            "configuration": null,
+            "metadata": {"key": "value"},
+            "get_or_create": false
+        })
+    ),
     responses(
         (status = 200, description = "Collection created successfully", body = Collection),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name containing the new collection")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name")
     )
 )]
 async fn create_collection(
@@ -1087,10 +1204,17 @@ async fn create_collection(
     Ok(Json(collection))
 }
 
-/// Retrieves a collection by ID or name.
+/// Get collection
+/// Returns a collection by ID or name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+    summary = "Get collection",
+    description = "Returns a collection by ID or name.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Collection found", body = Collection),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -1098,9 +1222,9 @@ async fn create_collection(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "UUID of the collection")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn get_collection(
@@ -1131,10 +1255,17 @@ async fn get_collection(
     Ok(Json(collection))
 }
 
-/// Retrieves a collection by Chroma Resource Name.
+/// Get collection by CRN
+/// Returns a collection by Chroma Resource Name.
 #[utoipa::path(
     get,
     path = "/api/v2/collections/{crn}",
+    summary = "Get collection by CRN",
+    description = "Returns a collection by Chroma Resource Name.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Collection found", body = Collection),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -1142,7 +1273,7 @@ async fn get_collection(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("crn" = String, Path, description = "Chroma Resource Name")
+        ("crn" = String, Path, description = "Chroma Resource Name", example = "my_tenant:my_database:my_collection")
     )
 )]
 async fn get_collection_by_crn(
@@ -1168,11 +1299,26 @@ async fn get_collection_by_crn(
     Ok(Json(collection))
 }
 
+/// Update collection
 /// Updates an existing collection's name or metadata.
 #[utoipa::path(
     put,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
-    request_body = UpdateCollectionPayload,
+    summary = "Update collection",
+    description = "Updates an existing collection's name or metadata.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body(
+        content = UpdateCollectionPayload,
+        description = "Collection update payload",
+        example = json!({
+            "new_name": "updated_collection_name",
+            "new_metadata": {"key": "value"},
+            "new_configuration": null
+        })
+    ),
     responses(
         (status = 200, description = "Collection updated successfully", body = UpdateCollectionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -1180,9 +1326,9 @@ async fn get_collection_by_crn(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "UUID of the collection to update")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn update_collection(
@@ -1249,10 +1395,17 @@ async fn update_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
-/// Deletes a collection in a given database.
+/// Delete collection
+/// Deletes a collection in a database.
 #[utoipa::path(
     delete,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+    summary = "Delete collection",
+    description = "Deletes a collection in a database.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Collection deleted successfully", body = UpdateCollectionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -1260,9 +1413,9 @@ async fn update_collection(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "UUID of the collection to delete")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn delete_collection(
@@ -1294,10 +1447,17 @@ async fn delete_collection(
     Ok(Json(UpdateCollectionResponse {}))
 }
 
-/// Forks an existing collection.
+/// Fork collection
+/// Creates a fork of an existing collection.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
+    summary = "Fork collection",
+    description = "Creates a fork of an existing collection.",
+    tag = "Collections",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = ForkCollectionPayload,
     responses(
         (status = 200, description = "Collection forked successfully", body = ForkCollectionResponse),
@@ -1306,9 +1466,9 @@ async fn delete_collection(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "UUID of the collection to update")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn fork_collection(
@@ -1371,14 +1531,26 @@ async fn fork_collection(
     ))
 }
 
+/// Add records
 /// Adds records to a collection.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
+    summary = "Add records",
+    description = "Adds records to a collection.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = AddCollectionRecordsPayload,
     responses(
         (status = 201, description = "Collection added successfully", body = AddCollectionRecordsResponse),
         (status = 400, description = "Invalid data for collection addition")
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 // NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
@@ -1473,14 +1645,26 @@ async fn collection_add(
     Ok((StatusCode::CREATED, Json(res)))
 }
 
+/// Update records
 /// Updates records in a collection by ID.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
+    summary = "Update records",
+    description = "Updates records in a collection by ID.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = UpdateCollectionRecordsPayload,
     responses(
         (status = 200, description = "Collection updated successfully", body = UpdateCollectionRecordsResponse),
         (status = 404, description = "Collection not found")
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 // NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
@@ -1576,10 +1760,17 @@ async fn collection_update(
     ))
 }
 
+/// Upsert records
 /// Upserts records in a collection (create if not exists, otherwise update).
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
+    summary = "Upsert records",
+    description = "Upserts records in a collection (create if not exists, otherwise update).",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = UpsertCollectionRecordsPayload,
     responses(
         (status = 200, description = "Records upserted successfully", body = UpsertCollectionRecordsResponse),
@@ -1588,9 +1779,9 @@ async fn collection_update(
         (status = 500, description = "Server error", body = ErrorResponse),
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection ID"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
     )
 )]
 // NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
@@ -1684,10 +1875,17 @@ async fn collection_upsert(
     ))
 }
 
+/// Delete records
 /// Deletes records in a collection. Can filter by IDs or metadata.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
+    summary = "Delete records",
+    description = "Deletes records in a collection. Can filter by IDs or metadata.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = DeleteCollectionRecordsPayload,
     responses(
         (status = 200, description = "Records deleted successfully", body = DeleteCollectionRecordsResponse),
@@ -1696,9 +1894,9 @@ async fn collection_upsert(
         (status = 500, description = "Server error", body = ErrorResponse),
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection ID"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
     )
 )]
 async fn collection_delete(
@@ -1776,10 +1974,17 @@ async fn collection_delete(
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
-/// Retrieves the number of records in a collection.
+/// Get number of records
+/// Returns the number of records in a collection.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+    summary = "Get number of records",
+    description = "Returns the number of records in a collection.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Number of records in the collection", body = CountResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -1787,9 +1992,9 @@ async fn collection_delete(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID for the collection"),
-        ("database" = String, Path, description = "Database containing this collection"),
-        ("collection_id" = String, Path, description = "Collection ID whose records are counted")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn collection_count(
@@ -1862,10 +2067,17 @@ async fn collection_count(
     ))
 }
 
-/// Retrieves the indexing status of a collection.
+/// Get indexing status
+/// Returns the indexing status of a collection.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+    summary = "Get indexing status",
+    description = "Returns the indexing status of a collection.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Index status retrieved successfully", body = IndexStatusResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -1873,9 +2085,9 @@ async fn collection_count(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name for the collection"),
-        ("collection_id" = String, Path, description = "Collection ID to get index status for")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn indexing_status(
@@ -1944,21 +2156,37 @@ async fn indexing_status(
     ))
 }
 
-/// Retrieves records from a collection by ID or metadata filter.
+/// Get records
+/// Returns records from a collection by ID or metadata filter.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
+    summary = "Get records",
+    description = "Returns records from a collection by ID or metadata filter.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = GetRequestPayload,
     responses(
-        (status = 200, description = "Records retrieved from the collection", body = GetResponse),
+        (status = 200, description = "Records retrieved from the collection", body = GetResponse,
+            example = json!({
+                "ids": ["record1", "record2"],
+                "embeddings": [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]],
+                "documents": ["Document 1", "Document 2"],
+                "uris": null,
+                "metadatas": [{"key": "value"}, {"key2": "value2"}],
+                "include": ["documents", "metadatas", "embeddings"]
+            })
+        ),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name for the collection"),
-        ("collection_id" = String, Path, description = "Collection ID to fetch records from")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn collection_get(
@@ -2069,11 +2297,26 @@ async fn collection_get(
     Ok(Json(res))
 }
 
-/// Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search
+/// Query collection
+/// Queries a collection using dense vector search with metadata and full-text search filtering.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
-    request_body = QueryRequestPayload,
+    summary = "Query collection",
+    description = "Queries a collection using dense vector search with metadata and full-text search filtering.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body(
+        content = QueryRequestPayload,
+        description = "Query request payload",
+        example = json!({
+            "query_embeddings": [[0.1, 0.2, 0.3]],
+            "n_results": 10,
+            "include": ["documents", "metadatas", "distances"]
+        })
+    ),
     responses(
         (status = 200, description = "Records matching the query", body = QueryResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -2081,11 +2324,11 @@ async fn collection_get(
         (status = 500, description = "Server error", body = ErrorResponse),
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name containing the collection"),
-        ("collection_id" = String, Path, description = "Collection ID to query"),
-        ("limit" = Option<u32>, Query, description = "Limit for pagination"),
-        ("offset" = Option<u32>, Query, description = "Offset for pagination")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
+        ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
     )
 )]
 
@@ -2198,11 +2441,28 @@ async fn collection_query(
     Ok(Json(res))
 }
 
-/// Search records from a collection with hybrid criterias.
+/// Search records
+/// Searches records from a collection with dense, sparse, or hybrid vector search.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
-    request_body = SearchRequestPayload,
+    summary = "Search records",
+    description = "Searches records from a collection with dense, sparse, or hybrid vector search.",
+    tag = "Records",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body(
+        content = SearchRequestPayload,
+        description = "Search request payload",
+        example = json!({
+            "searches": [{
+                "query_embeddings": [[0.1, 0.2, 0.3]],
+                "n_results": 10
+            }],
+            "read_level": "IndexAndWal"
+        })
+    ),
     responses(
         (status = 200, description = "Records searched from the collection", body = SearchResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -2210,9 +2470,9 @@ async fn collection_query(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
-        ("database" = String, Path, description = "Database name for the collection"),
-        ("collection_id" = String, Path, description = "Collection ID to search records from")
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn collection_search(
@@ -2316,20 +2576,36 @@ async fn collection_search(
     Ok(Json(res))
 }
 
-/// Attach a function to a collection
+/// Attach function
+/// Attaches a function to a collection.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
-    request_body = AttachFunctionRequest,
+    summary = "Attach function",
+    description = "Attaches a function to a collection.",
+    tag = "Functions",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    request_body(
+        content = AttachFunctionRequest,
+        description = "Function attachment request",
+        example = json!({
+            "name": "my_function",
+            "function_id": "1e30d217-3d78-4f8c-b244-79381dc6a254",
+            "output_collection": "output_collection_name",
+            "params": {}
+        })
+    ),
     responses(
         (status = 200, description = " Function attached successfully", body = AttachFunctionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection ID")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
     )
 )]
 async fn attach_function(
@@ -2367,10 +2643,17 @@ async fn attach_function(
     Ok(Json(res))
 }
 
-/// Get an attached function by name
+/// Get attached function
+/// Returns an attached function by name.
 #[utoipa::path(
     get,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
+    summary = "Get attached function",
+    description = "Returns an attached function by name.",
+    tag = "Functions",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     responses(
         (status = 200, description = "Attached function retrieved successfully", body = GetAttachedFunctionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
@@ -2378,10 +2661,10 @@ async fn attach_function(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection ID"),
-        ("function_name" = String, Path, description = "Attached function name")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("function_name" = String, Path, description = "Function name")
     )
 )]
 async fn get_attached_function(
@@ -2422,10 +2705,17 @@ async fn get_attached_function(
     }))
 }
 
-/// Detach a function
+/// Detach function
+/// Detaches a function from a collection.
 #[utoipa::path(
     post,
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
+    summary = "Detach function",
+    description = "Detaches a function from a collection.",
+    tag = "Functions",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
     request_body = DetachFunctionRequest,
     responses(
         (status = 200, description = "Function detached successfully", body = DetachFunctionResponse),
@@ -2433,10 +2723,10 @@ async fn get_attached_function(
         (status = 500, description = "Server error", body = ErrorResponse)
     ),
     params(
-        ("tenant" = String, Path, description = "Tenant ID"),
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Input collection ID"),
-        ("name" = String, Path, description = "Attached function name")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("name" = String, Path, description = "Function name")
     )
 )]
 async fn detach_function(
@@ -2494,7 +2784,7 @@ impl Modify for ChromaTokenSecurityAddon {
             .as_mut()
             .expect("It should be able to get components as mutable");
         components.add_security_scheme(
-            "x-chroma-token",
+            "ApiKeyAuth",
             SecurityScheme::ApiKey(ApiKey::Header(ApiKeyValue::new("x-chroma-token"))),
         );
     }

@@ -14,7 +14,7 @@ use uuid::Uuid;
 #[cfg(feature = "pyo3")]
 use pyo3::{exceptions::PyValueError, types::PyAnyMethods};
 
-/// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
+// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
     Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
