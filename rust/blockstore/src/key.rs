@@ -20,6 +20,7 @@ pub enum KeyWrapper {
     Float32(f32),
     Bool(bool),
     Uint32(u32),
+    Uint64(u64),
 }
 
 impl KeyWrapper {
@@ -30,6 +31,7 @@ impl KeyWrapper {
             KeyWrapper::Float32(_) => 4,
             KeyWrapper::Bool(_) => 1,
             KeyWrapper::Uint32(_) => 4,
+            KeyWrapper::Uint64(_) => 8,
         }
     }
 }
@@ -102,6 +104,23 @@ impl TryFrom<&KeyWrapper> for u32 {
     }
 }
 
+impl From<u64> for KeyWrapper {
+    fn from(u: u64) -> KeyWrapper {
+        KeyWrapper::Uint64(u)
+    }
+}
+
+impl TryFrom<&KeyWrapper> for u64 {
+    type Error = InvalidKeyConversion;
+
+    fn try_from(key: &KeyWrapper) -> Result<Self, InvalidKeyConversion> {
+        match key {
+            KeyWrapper::Uint64(u) => Ok(*u),
+            _ => Err(InvalidKeyConversion),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompositeKey {
     pub(super) prefix: String,
@@ -158,6 +177,10 @@ impl Ord for CompositeKey {
                 },
                 KeyWrapper::Uint32(u1) => match &other.key {
                     KeyWrapper::Uint32(u2) => u1.cmp(u2),
+                    _ => panic!("Invalid comparison"),
+                },
+                KeyWrapper::Uint64(u1) => match &other.key {
+                    KeyWrapper::Uint64(u2) => u1.cmp(u2),
                     _ => panic!("Invalid comparison"),
                 },
             }

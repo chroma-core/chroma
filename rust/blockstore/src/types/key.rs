@@ -29,3 +29,9 @@ impl Key for u32 {
         4
     }
 }
+
+impl Key for u64 {
+    fn get_size(&self) -> usize {
+        8
+    }
+}
