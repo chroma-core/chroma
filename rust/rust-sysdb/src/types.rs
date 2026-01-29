@@ -79,17 +79,17 @@ impl TryFrom<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
     }
 }
 
-/// Internal request for getting a tenant.
+/// Internal request for getting tenants.
 #[derive(Debug, Clone)]
-pub struct GetTenantRequest {
-    pub id: String,
+pub struct GetTenantsRequest {
+    pub ids: Vec<String>,
 }
-
-impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantRequest {
+impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantsRequest {
     type Error = SysDbError;
-
     fn try_from(req: chroma_proto::GetTenantRequest) -> Result<Self, Self::Error> {
-        Ok(Self { id: req.name })
+        Ok(Self {
+            ids: vec![req.name],
+        })
     }
 }
 
@@ -538,12 +538,11 @@ impl Assignable for CreateTenantRequest {
     }
 }
 
-impl Assignable for GetTenantRequest {
-    type Output = Backend;
-
-    fn assign(&self, factory: &BackendFactory) -> Backend {
-        // Single backend operation
-        Backend::Spanner(factory.one_spanner().clone())
+impl Assignable for GetTenantsRequest {
+    type Output = Vec<Backend>;
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        factory.get_all_backends()
     }
 }
 
@@ -633,12 +632,22 @@ impl Runnable for CreateTenantRequest {
 }
 
 #[async_trait::async_trait]
-impl Runnable for GetTenantRequest {
-    type Response = GetTenantResponse;
-    type Input = Backend;
+impl Runnable for GetTenantsRequest {
+    type Response = GetTenantsResponse;
+    type Input = Vec<Backend>;
 
-    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
-        backend.get_tenant(self).await
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut tenants = HashMap::new();
+        for backend in backends {
+            let result = backend.get_tenants(self.clone()).await?;
+            for tenant in result.tenants {
+                tenants.insert(tenant.id.clone(), tenant);
+            }
+        }
+        let tenants_vec = tenants.values().cloned().collect::<Vec<_>>();
+        Ok(GetTenantsResponse {
+            tenants: tenants_vec,
+        })
     }
 }
 
@@ -647,11 +656,8 @@ impl Runnable for SetTenantResourceNameRequest {
     type Response = SetTenantResourceNameResponse;
     type Input = Vec<Backend>;
 
-    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
-        for backend in backends {
-            backend.set_tenant_resource_name(self.clone()).await?;
-        }
-        Ok(SetTenantResourceNameResponse {})
+    async fn run(self, _backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        todo!("SetTenantResourceNameRequest not yet implemented for mcmr")
     }
 }
 
@@ -731,17 +737,29 @@ impl From<CreateTenantResponse> for chroma_proto::CreateTenantResponse {
     }
 }
 
-/// Internal response for getting a tenant.
+/// Internal response for getting tenants.
 #[derive(Debug, Clone)]
-pub struct GetTenantResponse {
-    pub tenant: Tenant,
+pub struct GetTenantsResponse {
+    pub tenants: Vec<Tenant>,
 }
 
-impl From<GetTenantResponse> for chroma_proto::GetTenantResponse {
-    fn from(r: GetTenantResponse) -> Self {
-        chroma_proto::GetTenantResponse {
-            tenant: Some(r.tenant.into()),
-        }
+/// Internal response for updating a tenant.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantResponse {
+    pub updated_tenant: Tenant,
+}
+impl TryFrom<GetTenantsResponse> for chroma_proto::GetTenantResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: GetTenantsResponse) -> Result<Self, Self::Error> {
+        let tenant = r
+            .tenants
+            .into_iter()
+            .next()
+            .ok_or_else(|| SysDbError::NotFound("No tenants found".to_string()))?;
+        Ok(chroma_proto::GetTenantResponse {
+            tenant: Some(tenant.into()),
+        })
     }
 }
 

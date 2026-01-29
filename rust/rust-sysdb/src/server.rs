@@ -225,14 +225,14 @@ impl SysDb for SysdbService {
         request: Request<GetTenantRequest>,
     ) -> Result<Response<GetTenantResponse>, Status> {
         let proto_req = request.into_inner();
-        let internal_req: internal::GetTenantRequest = proto_req
+        let internal_req: internal::GetTenantsRequest = proto_req
             .try_into()
             .map_err(|e: SysDbError| Status::from(e))?;
 
         let backend = internal_req.assign(&self.backends);
         let internal_resp = internal_req.run(backend).await?;
 
-        Ok(Response::new(internal_resp.into()))
+        Ok(Response::new(internal_resp.try_into()?))
     }
 
     async fn set_tenant_resource_name(
@@ -419,15 +419,42 @@ impl SysDb for SysdbService {
 
     async fn get_last_compaction_time_for_tenant(
         &self,
-        _request: Request<GetLastCompactionTimeForTenantRequest>,
+        request: Request<GetLastCompactionTimeForTenantRequest>,
     ) -> Result<Response<GetLastCompactionTimeForTenantResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+        // Create a GetTenantsRequest with the same tenant IDs
+        let get_tenants_req = internal::GetTenantsRequest {
+            ids: proto_req.tenant_id.clone(),
+        };
+        // Use the existing get_tenants infrastructure
+        let backend = get_tenants_req.assign(&self.backends);
+        let tenants_response = get_tenants_req
+            .run(backend)
+            .await
+            .map_err(|e: SysDbError| Status::from(e))?;
+        // Extract last compaction times from the tenants
+        let tenant_last_compaction_times: Vec<
+            chroma_types::chroma_proto::TenantLastCompactionTime,
+        > = tenants_response
+            .tenants
+            .into_iter()
+            .map(
+                |tenant| chroma_types::chroma_proto::TenantLastCompactionTime {
+                    tenant_id: tenant.id,
+                    last_compaction_time: tenant.last_compaction_time,
+                },
+            )
+            .collect();
+        Ok(Response::new(GetLastCompactionTimeForTenantResponse {
+            tenant_last_compaction_time: tenant_last_compaction_times,
+        }))
     }
 
     async fn set_last_compaction_time_for_tenant(
         &self,
         _request: Request<SetLastCompactionTimeForTenantRequest>,
     ) -> Result<Response<()>, Status> {
+        // TODO: Remove this method
         todo!()
     }
 

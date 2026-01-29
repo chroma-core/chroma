@@ -69,9 +69,8 @@ use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
-    GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -231,22 +230,15 @@ impl Backend {
         }
     }
 
-    /// Get a tenant by name.
+    /// Get tenants by ids.
     ///
-    /// Returns `SysDbError::NotFound` if the tenant does not exist.
-    pub async fn get_tenant(&self, req: GetTenantRequest) -> Result<GetTenantResponse, SysDbError> {
-        match self {
-            Backend::Spanner(s) => s.get_tenant(req).await,
-        }
-    }
-
-    /// Set the resource name for a tenant.
-    pub async fn set_tenant_resource_name(
+    /// Returns `SysDbError::NotFound` if any tenant does not exist.
+    pub async fn get_tenants(
         &self,
-        req: SetTenantResourceNameRequest,
-    ) -> Result<SetTenantResourceNameResponse, SysDbError> {
+        req: GetTenantsRequest,
+    ) -> Result<GetTenantsResponse, SysDbError> {
         match self {
-            Backend::Spanner(s) => s.set_tenant_resource_name(req).await,
+            Backend::Spanner(s) => s.get_tenants(req).await,
         }
     }
 
