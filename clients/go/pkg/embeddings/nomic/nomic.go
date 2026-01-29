@@ -199,17 +199,17 @@ func (e *NomicEmbeddingFunction) EmbedDocuments(ctx context.Context, documents [
 	if len(documents) == 0 {
 		return embeddings.NewEmptyEmbeddings(), nil
 	}
-	var model = e.apiClient.DefaultModel
-	if ctx.Value(ModelContextVar) != nil {
-		model = embeddings.EmbeddingModel(ctx.Value(ModelContextVar).(string))
+	model := e.apiClient.DefaultModel
+	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+		model = embeddings.EmbeddingModel(m)
 	}
-	var dimensionality = e.apiClient.DefaultDimensionality
-	if ctx.Value(DimensionalityContextVar) != nil {
-		dimensionality = ctx.Value(DimensionalityContextVar).(*int)
+	dimensionality := e.apiClient.DefaultDimensionality
+	if d, ok := ctx.Value(DimensionalityContextVar).(*int); ok {
+		dimensionality = d
 	}
-	var taskType = TaskTypeSearchDocument
-	if ctx.Value(TaskTypeContextVar) != nil {
-		taskType = ctx.Value(TaskTypeContextVar).(TaskType)
+	taskType := TaskTypeSearchDocument
+	if t, ok := ctx.Value(TaskTypeContextVar).(TaskType); ok {
+		taskType = t
 	}
 	req := CreateEmbeddingRequest{
 		Model:          model,
@@ -225,17 +225,17 @@ func (e *NomicEmbeddingFunction) EmbedDocuments(ctx context.Context, documents [
 }
 
 func (e *NomicEmbeddingFunction) EmbedQuery(ctx context.Context, document string) (embeddings.Embedding, error) {
-	var model = e.apiClient.DefaultModel
-	if ctx.Value(ModelContextVar) != nil {
-		model = embeddings.EmbeddingModel(ctx.Value(ModelContextVar).(string))
+	model := e.apiClient.DefaultModel
+	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+		model = embeddings.EmbeddingModel(m)
 	}
-	var dimensionality = e.apiClient.DefaultDimensionality
-	if ctx.Value(DimensionalityContextVar) != nil {
-		dimensionality = ctx.Value(DimensionalityContextVar).(*int)
+	dimensionality := e.apiClient.DefaultDimensionality
+	if d, ok := ctx.Value(DimensionalityContextVar).(*int); ok {
+		dimensionality = d
 	}
-	var taskType = TaskTypeSearchQuery
-	if ctx.Value(TaskTypeContextVar) != nil {
-		taskType = ctx.Value(TaskTypeContextVar).(TaskType)
+	taskType := TaskTypeSearchQuery
+	if t, ok := ctx.Value(TaskTypeContextVar).(TaskType); ok {
+		taskType = t
 	}
 	req := CreateEmbeddingRequest{
 		Model:          model,
