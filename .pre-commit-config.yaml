@@ -4,9 +4,10 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
+        exclude: ".*\\.gen\\.ts$"
       - id: mixed-line-ending
       - id: end-of-file-fixer
-        exclude: "go/migrations"
+        exclude: "go/migrations|.*\\.gen\\.ts$"
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
