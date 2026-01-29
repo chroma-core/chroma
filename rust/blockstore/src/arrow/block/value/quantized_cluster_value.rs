@@ -134,7 +134,7 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
         builder.center.values().append_slice(&value.center);
         builder.center.append(true);
 
-        let code_length = value.codes.len() / value.ids.len();
+        let code_length = value.codes.len() / value.ids.len().max(1);
         let inner_codes = builder.codes.values();
         for chunk in value.codes.chunks(code_length) {
             inner_codes.values().append_slice(chunk);

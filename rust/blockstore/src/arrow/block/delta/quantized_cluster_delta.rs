@@ -98,7 +98,7 @@ impl QuantizedClusterDelta {
             .storage
             .values()
             .next()
-            .map(|v| (v.center.len(), v.codes.len() / v.ids.len()))
+            .map(|v| (v.center.len(), v.codes.len() / v.ids.len().max(1)))
             .unwrap_or((0, 0));
 
         // Size breakdown:
@@ -157,7 +157,7 @@ impl QuantizedClusterDelta {
             .storage
             .values()
             .next()
-            .map(|v| (v.center.len(), v.codes.len() / v.ids.len()))
+            .map(|v| (v.center.len(), v.codes.len() / v.ids.len().max(1)))
             .unwrap_or((0, 0));
 
         let mut prefix_size = 0;
@@ -208,7 +208,7 @@ impl QuantizedClusterDelta {
             .storage
             .values()
             .next()
-            .map(|v| (v.center.len(), v.codes.len() / v.ids.len()))
+            .map(|v| (v.center.len(), v.codes.len() / v.ids.len().max(1)))
             .unwrap_or((0, 0));
 
         let size_tracker = QuantizedClusterSizeTracker {
