@@ -383,7 +383,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 
 func (s *collectionDb) CountCollections(tenantID string, databaseName *string) (uint64, error) {
 	var count int64
-	query := s.db.Table("collections").
+	query := s.read_db.Table("collections").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Where("databases.tenant_id = ? AND collections.is_deleted = ?", tenantID, false)
 
