@@ -1,7 +1,9 @@
 ---
 title: Index Configuration Reference
-description: Reference for all index types and their configuration parameters.
+description: Comprehensive reference for all index types and their configuration parameters.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 ## Index Types Overview
 
@@ -61,9 +63,9 @@ These index types have no configuration parameters.
 - Cannot be deleted
 - Applies to `K.EMBEDDING` only
 
-<Tip>
+<Callout>
 **Advanced tuning:** HNSW and SPANN parameters control index build and search behavior. They are pre-optimized for most use cases. Only adjust if you have specific performance requirements and understand the tradeoffs between recall, speed, and resource usage. Incorrect tuning can degrade performance.
-</Tip>
+</Callout>
 
 ## SparseVectorIndexConfig
 

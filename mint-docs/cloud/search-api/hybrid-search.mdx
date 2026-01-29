@@ -1,13 +1,13 @@
 ---
 title: Hybrid Search with RRF
-description: Combine dense and sparse rankings with Reciprocal Rank Fusion.
+description: Learn how to combine multiple ranking strategies using Reciprocal Rank Fusion (RRF). RRF is ideal for hybrid search scenarios where you want to merge results from different ranking methods (e.g., dense and sparse embeddings).
 ---
 
-Combine multiple ranking strategies using Reciprocal Rank Fusion (RRF). RRF is ideal for hybrid search scenarios where you want to merge results from different ranking methods (e.g., dense and sparse embeddings).
+import { Callout } from '/snippets/callout.mdx';
 
-<Tip>
+<Callout>
 **Prerequisites:** To use hybrid search with sparse embeddings, you must first configure a sparse vector index in your collection schema. See [Sparse Vector Search Setup](../schema/sparse-vector-search) for configuration instructions.
-</Tip>
+</Callout>
 
 ## Understanding RRF
 
@@ -28,9 +28,9 @@ Where:
 
 The score is negative because Chroma uses ascending order (lower scores = better matches).
 
-<Tip>
+<Callout>
 **Important:** The legacy `query` API outputs *distances*, whereas RRF uses *scores*
-</Tip>
+</Callout>
 
 
 <CodeGroup>

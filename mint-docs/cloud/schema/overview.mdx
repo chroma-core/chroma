@@ -1,7 +1,8 @@
 ---
 title: "Schema Overview"
-description: "Learn how to use Schema for fine-grained index configuration on Chroma collections."
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 Schema enables fine-grained control over index configuration on collections. Control which indexes are created, optimize for your workload, and enable advanced capabilities like hybrid search.
 
@@ -103,9 +104,9 @@ try {
 ```
 </CodeGroup>
 
-<Tip>
+<Callout>
 **Important:** Schema is only configurable in `create_collection`. We are working on supporting schema update via collection `modify`
-</Tip>
+</Callout>
 
 ## Feature Highlights
 

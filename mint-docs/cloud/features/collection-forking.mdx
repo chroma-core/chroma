@@ -1,9 +1,9 @@
 ---
 title: "Collection Forking"
-description: "**Instant copy-on-write collection forking in Chroma Cloud.**"
+description: "Instant copy-on-write collection forking in Chroma Cloud."
 ---
 
-import {Callout} from '/snippets/callout.mdx';
+import { Callout } from '/snippets/callout.mdx';
 
 Forking lets you create a new collection from an existing one instantly, using copy-on-write under the hood. The forked collection initially shares its data with the source and only incurs additional storage for incremental changes you make afterward.
 
@@ -77,4 +77,3 @@ If you exceed the limit, the request returns a quota error for the NUM\_FORKS ru
 ## Notes
 
 - Your forked collections will belong to the same database as the source collection.
-

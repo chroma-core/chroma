@@ -3,6 +3,8 @@ title: "Troubleshooting"
 description: "Common issues and solutions when working with Chroma."
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 This page is a list of common gotchas or issues and how to fix them.
 
 If you don't see your problem listed here, please also search the [Github Issues](https://github.com/chroma-core/chroma/issues).
@@ -42,9 +44,9 @@ results = collection.query(
 )
 ```
 
-<Tip>
+<Callout>
 We may change `None` to something else to more clearly communicate why they were not returned.
-</Tip>
+</Callout>
 
 ## Build error when running `pip install chromadb`
 

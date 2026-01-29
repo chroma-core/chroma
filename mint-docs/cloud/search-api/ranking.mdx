@@ -1,9 +1,9 @@
 ---
 title: Ranking and Scoring
-description: Use ranking expressions to score and order search results.
+description: Learn how to use ranking expressions to score and order your search results. In Chroma, lower scores indicate better matches (distance-based scoring).
 ---
 
-Use ranking expressions to score and order your search results. In Chroma, lower scores indicate better matches (distance-based scoring).
+import { Callout } from '/snippets/callout.mdx';
 
 ## How Ranking Works
 
@@ -80,9 +80,9 @@ When combining multiple `Knn` expressions, documents must appear in at least one
 
 The `Knn` class performs K-nearest neighbor search to find similar vectors. It's the primary way to add vector similarity scoring to your searches.
 
-<Tip>
+<Callout>
 **Sparse embeddings:** To search custom sparse embedding fields, you must first configure a sparse vector index in your collection schema. See [Sparse Vector Search Setup](../schema/sparse-vector-search) for configuration instructions.
-</Tip>
+</Callout>
 
 <CodeGroup>
 ```python Python

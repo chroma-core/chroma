@@ -1,7 +1,8 @@
 ---
 title: Chroma Cloud Qwen
-description: Use Qwen embeddings via Chroma Cloud's hosted API.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 Chroma provides a convenient wrapper around Chroma Cloud's Qwen embedding API. This embedding function runs remotely on Chroma Cloud's servers, and requires a Chroma API key. You can get an API key by signing up for an account at [Chroma Cloud](https://www.trychroma.com/).
 
@@ -53,6 +54,6 @@ const collection = await client.createCollection({
 </Tab>
 </Tabs>
 
-<Tip>
+<Callout>
 Visit Chroma Cloud [documentation](https://docs.trychroma.com/) for more information on available models and configuration.
-</Tip>
+</Callout>

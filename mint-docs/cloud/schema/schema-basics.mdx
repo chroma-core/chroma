@@ -1,7 +1,9 @@
 ---
 title: Schema Basics
-description: Create and use Schema to configure indexes on your collections.
+description: Learn how to create and use Schema to configure indexes on your Chroma collections.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 ## Schema Structure
 
@@ -249,9 +251,9 @@ schema.deleteIndex(undefined, "temporary_field");
 ```
 </CodeGroup>
 
-<Tip>
+<Callout>
 **Note:** Not all indexes can be deleted. Vector and FTS indexes currently cannot be disabled
-</Tip>
+</Callout>
 
 ## Method Chaining
 

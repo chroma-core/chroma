@@ -3,6 +3,8 @@ title: Look at Your Data
 description: Design your collection schema and chunking strategy based on your data.
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 Before building our RAG pipelines and inserting data into Chroma collections, it is worth asking ourselves the following questions:
 
 * What types of searches do we want to support? (semantic, regex, keyword, etc.)
@@ -217,9 +219,9 @@ A Chroma collection indexes records using a specific embedding model and configu
 
 Chunking is the process of breaking source data into smaller, meaningful units ("chunks") that are embedded and stored as individual records in a Chroma collection. Because embedding models operate on limited context windows and produce a single vector per input, storing entire documents as one record often blurs multiple ideas together and reduces retrieval quality. Chunking allows Chroma to index information at the level users actually search for-paragraphs, sections, functions, or messages-improving both recall and precision. Well-chosen chunks ensure that retrieved results are specific, semantically coherent, and useful on their own, while still allowing larger context to be reconstructed through metadata when needed.
 
-<Tip>
+<Callout>
 To learn more about chunking best practices, see our [Chunking Guide](./chunking)
-</Tip>
+</Callout>
 
 Chroma is flexible enough to support nearly any chunking strategy so long as each chunk fits in 16kB.  This is also the best way to work with large documents, regardless of performance concerns.
 

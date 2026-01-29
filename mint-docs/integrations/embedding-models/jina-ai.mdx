@@ -1,7 +1,8 @@
 ---
 title: Jina AI
-description: Use Jina AI embedding models with Chroma.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 Chroma provides a convenient wrapper around JinaAI's embedding API. This embedding function runs remotely on JinaAI's servers, and requires an API key. You can get an API key by signing up for an account at [JinaAI](https://jina.ai/embeddings/).
 
@@ -38,9 +39,9 @@ const collectionGet = await client.getCollection({name:"name", embeddingFunction
 
 You can pass in an optional `model_name` argument, which lets you choose which Jina model to use. By default, Chroma uses `jina-embedding-v2-base-en`.
 
-<Tip>
+<Callout>
 Jina has added new attributes on embedding functions, including `task`, `late_chunking`, `truncate`, `dimensions`, `embedding_type`, and `normalized`. See [JinaAI](https://jina.ai/embeddings/) for references on which models support these attributes.
-</Tip>
+</Callout>
 
 ### Late Chunking Example
 

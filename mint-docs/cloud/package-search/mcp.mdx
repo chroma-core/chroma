@@ -1,7 +1,9 @@
 ---
-title: Package Search MCP
-description: Add ground truth code context to AI agents via MCP.
+title: Package Search MCP Server
+sidebarTitle: MCP
 ---
+
+import {Callout} from '/snippets/callout.mdx';
 
 The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/getting-started/intro) server designed to add ground truth context about code packages to AI agents. Our research demonstrates that by exposing the source code of a project's dependencies to a model, we improve its performance on coding tasks and reduce its potential for hallucination. Chroma's Package Search MCP server achieves this by exposing tools to allow the model to retrieve necessary context:
 
@@ -13,22 +15,19 @@ The Package Search MCP Server is an [MCP](https://modelcontextprotocol.io/docs/g
 
 ## Getting Started
 
-<Note>
-
+<Callout>
 To guarantee that your model uses package search when desired, add `use package search` to either the system prompt (to use the MCP server whenever applicable) or to each task prompt (to use it only when you instruct the model to do so).
-
-</Note>
+</Callout>
 
 <Tabs>
 <Tab title="Anthropic SDK">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Connect to the Chroma MCP server to search code packages. In this example, we search for how the Fast Fourier Transform algorithm is implemented in the `numpy` package from PyPI.
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Connect to the Chroma MCP server to search code packages. In this example, we search for how the Fast Fourier Transform algorithm is implemented in the `numpy` package from PyPI.</Step>
+</Steps>
 
 <CodeGroup>
 
@@ -127,13 +126,12 @@ func main() {
 
 <Tab title="OpenAI SDK">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `numpy` package from PyPI.
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Connect to the Chroma MCP server to search code packages. In this example, we search for class definitions in the `numpy` package from PyPI.</Step>
+</Steps>
 
 ```python
 from openai import OpenAI
@@ -165,15 +163,13 @@ print(resp)
 
 <Tab title="Google Gemini SDK">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Get a Gemini API key in [Google's AI Studio](https://aistudio.google.com/app/apikey)
-
-5. Connect the Chroma MCP server with Gemini to enable AI-powered code searches. In this example, we ask Gemini to explain how the Fast Fourier Transform algorithm is implemented in `numpy`, using the Chroma MCP tools to search and analyze the code.
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Get a Gemini API key in [Google's AI Studio](https://aistudio.google.com/app/apikey)</Step>
+<Step>Connect the Chroma MCP server with Gemini to enable AI-powered code searches. In this example, we ask Gemini to explain how the Fast Fourier Transform algorithm is implemented in `numpy`, using the Chroma MCP tools to search and analyze the code.</Step>
+</Steps>
 
 ```python
 import asyncio
@@ -219,13 +215,12 @@ asyncio.run(run())
 
 <Tab title="Claude Code">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Add the Chroma MCP server to Claude Code with your Chroma API key:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Add the Chroma MCP server to Claude Code with your Chroma API key:</Step>
+</Steps>
 
 ```terminal
 claude mcp add --transport http package-search https://mcp.trychroma.com/package-search/v1 --header "x-chroma-token: <YOUR_CHROMA_API_KEY>"
@@ -235,13 +230,12 @@ claude mcp add --transport http package-search https://mcp.trychroma.com/package
 
 <Tab title="Codex">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Add the following to your `~/.codex/config.toml` file with your Chroma Cloud API key:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Add the following to your `~/.codex/config.toml` file with your Chroma Cloud API key:</Step>
+</Steps>
 
 ```TOML
 [mcp_servers.package-search]
@@ -254,13 +248,12 @@ env = { "X_CHROMA_TOKEN" = "<YOUR_CHROMA_API_KEY>" }
 
 <Tab title="Cursor">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. In Cursor's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>In Cursor's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:</Step>
+</Steps>
 
 ```JSON
 {
@@ -280,13 +273,12 @@ env = { "X_CHROMA_TOKEN" = "<YOUR_CHROMA_API_KEY>" }
 
 <Tab title="Windsurf">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. In Windsurf's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>In Windsurf's settings, search for "MCP" and add the following configuration with your Chroma Cloud API key:</Step>
+</Steps>
 
 ```JSON
 {
@@ -305,13 +297,12 @@ env = { "X_CHROMA_TOKEN" = "<YOUR_CHROMA_API_KEY>" }
 
 <Tab title="Claude Desktop">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Add the following to your `~/Library/Application Support/Claude/claude_desktop_config.json`:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Add the following to your `~/Library/Application Support/Claude/claude_desktop_config.json`:</Step>
+</Steps>
 
 ```JSON
 {
@@ -331,13 +322,12 @@ env = { "X_CHROMA_TOKEN" = "<YOUR_CHROMA_API_KEY>" }
 
 <Tab title="Warp">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Add the following to your Warp MCP config. Make sure to click "Start" on the server after adding.
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Add the following to your Warp MCP config. Make sure to click "Start" on the server after adding.</Step>
+</Steps>
 
 ```JSON
 {
@@ -355,13 +345,12 @@ env = { "X_CHROMA_TOKEN" = "<YOUR_CHROMA_API_KEY>" }
 
 <Tab title="Open Code">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Add the following to your `~/.config/opencode/opencode.json` file with your Chroma Cloud API key:</Step>
+</Steps>
 
 ```JSON
 {
@@ -383,19 +372,20 @@ env = { "X_CHROMA_TOKEN" = "<YOUR_CHROMA_API_KEY>" }
 
 <Tab title="Ollama">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Install the `ollmcp` package:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Install the `ollmcp` package:</Step>
+</Steps>
 
 ```bash
 pip install ollmcp
 ```
 
-5. Create an `mcp_config.json` file with the following content and your Chroma Cloud API key:
+<Steps>
+<Step>Create an `mcp_config.json` file with the following content and your Chroma Cloud API key:</Step>
+</Steps>
 
 ```JSON
 {
@@ -412,7 +402,9 @@ pip install ollmcp
 }
 ```
 
-6. Start an Ollama MCP session with the path to your `mcp_config.json` file and model of choice:
+<Steps>
+<Step>Start an Ollama MCP session with the path to your `mcp_config.json` file and model of choice:</Step>
+</Steps>
 
 ```terminal
 ollmcp --servers-json <path/to/mcp_config.json> --model <model>
@@ -422,13 +414,12 @@ ollmcp --servers-json <path/to/mcp_config.json> --model <model>
 
 <Tab title="MCP SDK">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Connect to the Chroma MCP server to search code packages. In this example, we search for the Fast Fourier Transform function in the `numpy` package from PyPI using the `package_search_grep` tool.
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Connect to the Chroma MCP server to search code packages. In this example, we search for the Fast Fourier Transform function in the `numpy` package from PyPI using the `package_search_grep` tool.</Step>
+</Steps>
 
 ```python
 import asyncio
@@ -465,13 +456,12 @@ asyncio.run(main())
 
 <Tab title="Roo Code">
 
-1. Visit Chroma's [Package Search](http://trychroma.com/package-search) page.
-
-2. Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.
-
-3. After issuing your API key, click the "Other" tab and copy your API key.
-
-4. Add this to your Roo Code MCP server configuration:
+<Steps>
+<Step>Visit Chroma's [Package Search](http://trychroma.com/package-search) page.</Step>
+<Step>Click "Get API Key" to create or log into your Chroma account and issue an API key for Package Search.</Step>
+<Step>After issuing your API key, click the "Other" tab and copy your API key.</Step>
+<Step>Add this to your Roo Code MCP server configuration:</Step>
+</Steps>
 
 ```JSON
 {

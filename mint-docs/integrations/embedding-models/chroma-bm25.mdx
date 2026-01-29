@@ -1,7 +1,8 @@
 ---
 title: Chroma BM25
-description: Built-in BM25 sparse embedding function for keyword matching.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 Chroma provides a built-in BM25 sparse embedding function. BM25 (Best Matching 25) is a ranking function used to estimate the relevance of documents to a given search query. This embedding function runs locally and does not require any external API keys.
 
@@ -59,6 +60,6 @@ const collection = await client.createCollection({
 </Tab>
 </Tabs>
 
-<Tip>
+<Callout>
 BM25 is a classic information retrieval algorithm that works well for keyword-based search. For semantic search, consider using dense embedding functions instead.
-</Tip>
+</Callout>

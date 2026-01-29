@@ -3,6 +3,8 @@ title: Performance
 description: Single-node Chroma performance benchmarks and limitations.
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 The single-node version of Chroma is designed to be easy to deploy and maintain, while still providing robust performance that satisfies a broad range of production applications.
 
 To help you understand when single-node Chroma is a good fit for your use case, we have performed a series of stress tests and performance experiments to probe the system's capabilities and discover its limitations and edge cases. We analyzed these boundaries across a range of hardware configurations, to determine what sort of deployment is appropriate for different workloads.
@@ -70,9 +72,9 @@ As collections get larger and the size of the index grows, inserts and queries b
 
 ![Insert latency performance](/images/insert_latency_1_0_10.png)
 
-<Tip>
+<Callout>
 If you're using multiple collections, performance looks quite similar, based on the total number of embeddings across collections. Splitting collections into multiple smaller collections doesn't help, but it doesn't hurt, either, as long as they all fit in memory at once.
-</Tip>
+</Callout>
 
 ## Concurrency
 

@@ -1,15 +1,16 @@
 ---
 title: DeepEval
-description: Evaluate and optimize your Chroma retriever with 20+ metrics.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 [DeepEval](https://www.deepeval.com/integrations/vector-databases/chroma) is the open-source LLM evaluation framework. It provides 20+ research-backed metrics to help you evaluate and pick the best hyperparameters for your LLM system.
 
 When building a RAG system, you can use DeepEval to pick the best parameters for your **Choma retriever** for optimal retrieval performance and accuracy: `n_results`, `distance_function`, `embedding_model`, `chunk_size`, etc.
 
-<Tip>
+<Callout>
 For more information on how to use DeepEval, see the [DeepEval docs](https://www.deepeval.com/docs/getting-started).
-</Tip>
+</Callout>
 
 ## Getting Started
 
@@ -49,9 +50,9 @@ test_case = LLMTestCase(
 
 Define retriever metrics like `Contextual Precision`, `Contextual Recall`, and `Contextual Relevancy` to evaluate test cases. Recall ensures enough vectors are retrieved, while relevancy reduces noise by filtering out irrelevant ones.
 
-<Tip>
+<Callout>
 Balancing recall and relevancy is key. `distance_function` and `embedding_model` affects recall, while `n_results` and `chunk_size` impact relevancy.
-</Tip>
+</Callout>
 
 ```python
 from deepeval.metrics import (
@@ -84,9 +85,9 @@ When logged in, running `evaluate` will automatically send evaluation results to
 
 ![](https://github.com/confident-ai/deepeval/raw/main/assets/demo.gif)
 
-<Tip>
+<Callout>
 To learn more about how to use the platform, please see [this Quickstart Guide](https://documentation.confident-ai.com/).
-</Tip>
+</Callout>
 
 ## Support
 

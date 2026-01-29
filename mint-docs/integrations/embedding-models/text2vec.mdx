@@ -1,7 +1,8 @@
 ---
 title: Text2Vec
-description: Local embedding function for Chinese text embeddings.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 Chroma provides a convenient wrapper around the Text2Vec library. This embedding function runs locally and is particularly useful for Chinese text embeddings.
 
@@ -26,6 +27,6 @@ You can pass in an optional `model_name` argument. By default, Chroma uses `shib
 </Tab>
 </Tabs>
 
-<Tip>
+<Callout>
 Text2Vec is optimized for Chinese text embeddings. For English text, consider using Sentence Transformer or other embedding functions.
-</Tip>
+</Callout>

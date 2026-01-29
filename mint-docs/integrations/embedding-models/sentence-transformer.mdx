@@ -1,7 +1,8 @@
 ---
 title: Sentence Transformer
-description: Use Sentence Transformers models locally with Chroma.
 ---
+
+import { Callout } from '/snippets/callout.mdx';
 
 Chroma provides a convenient wrapper around the Sentence Transformers library. This embedding function runs locally and uses pre-trained models from Hugging Face.
 
@@ -55,6 +56,6 @@ const embeddings = await sentenceTransformerEF.generate(texts);
 
 </Tabs>
 
-<Tip>
+<Callout>
 Sentence Transformers are great for semantic search tasks. Popular models include `all-MiniLM-L6-v2` (fast and efficient) and `all-mpnet-base-v2` (higher quality). Visit [SBERT documentation](https://www.sbert.net/docs/pretrained_models.html) for more model recommendations.
-</Tip>
+</Callout>
