@@ -865,3 +865,70 @@ func TestCollectionGet(t *testing.T) {
 		})
 	}
 }
+
+func TestCloneRank(t *testing.T) {
+	t.Run("nil rank returns nil", func(t *testing.T) {
+		require.Nil(t, cloneRank(nil))
+	})
+
+	t.Run("KnnRank clone is independent", func(t *testing.T) {
+		original, err := NewKnnRank(KnnQueryText("test query"), WithKnnLimit(50))
+		require.NoError(t, err)
+
+		cloned := cloneRank(original).(*KnnRank)
+
+		require.NotSame(t, original, cloned)
+		require.Equal(t, original.Query, cloned.Query)
+		require.Equal(t, original.Limit, cloned.Limit)
+
+		// Mutate clone, verify original unchanged
+		cloned.Query = []float32{1.0, 2.0, 3.0}
+		cloned.Limit = 100
+
+		require.Equal(t, "test query", original.Query)
+		require.Equal(t, 50, original.Limit)
+	})
+
+	t.Run("nested rank tree is deep cloned", func(t *testing.T) {
+		knn1, err := NewKnnRank(KnnQueryText("query1"), WithKnnReturnRank())
+		require.NoError(t, err)
+		knn2, err := NewKnnRank(KnnQueryText("query2"), WithKnnReturnRank())
+		require.NoError(t, err)
+
+		rrf, err := NewRrfRank(WithRffRanks(
+			knn1.WithWeight(0.5),
+			knn2.WithWeight(0.5),
+		))
+		require.NoError(t, err)
+
+		cloned := cloneRank(rrf).(*RrfRank)
+
+		require.NotSame(t, rrf, cloned)
+		require.NotSame(t, rrf.Ranks[0].Rank, cloned.Ranks[0].Rank)
+		require.NotSame(t, rrf.Ranks[1].Rank, cloned.Ranks[1].Rank)
+
+		// Mutate nested clone
+		clonedKnn := cloned.Ranks[0].Rank.(*KnnRank)
+		clonedKnn.Query = []float32{1.0, 2.0}
+
+		// Original unchanged
+		require.Equal(t, "query1", knn1.Query)
+	})
+
+	t.Run("arithmetic expression tree is deep cloned", func(t *testing.T) {
+		knn, err := NewKnnRank(KnnQueryText("test"))
+		require.NoError(t, err)
+		expr := knn.Multiply(FloatOperand(0.5)).Add(Val(1.0))
+
+		cloned := cloneRank(expr)
+
+		require.NotSame(t, expr, cloned)
+
+		// Verify structure preserved via JSON
+		origJSON, err := expr.MarshalJSON()
+		require.NoError(t, err)
+		clonedJSON, err := cloned.MarshalJSON()
+		require.NoError(t, err)
+		require.Equal(t, string(origJSON), string(clonedJSON))
+	})
+}
