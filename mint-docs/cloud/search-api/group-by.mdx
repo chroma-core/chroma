@@ -1,0 +1,436 @@
+---
+title: Group By & Aggregation
+description: Learn how to group search results by metadata keys and select the top results from each group. GroupBy is useful for diversifying results, deduplication, and category-aware ranking.
+---
+
+# Group By & Aggregation
+
+Learn how to group search results by metadata keys and select the top results from each group. GroupBy is useful for diversifying results, deduplication, and category-aware ranking.
+
+<Tip>
+GroupBy currently requires a ranking expression to be specified. Support for grouping without ranking is planned for a future release.
+</Tip>
+
+## How Grouping Works
+
+GroupBy organizes ranked results into groups based on metadata keys, then performs aggregation on each group. Currently, aggregation supports `MinK` and `MaxK`, which select the top k results from each group based on the specified sorting keys.
+
+After grouping and aggregation, results from all groups are flattened and sorted by score. The `limit()` method operates on this flattened list.
+
+<CodeGroup>
+```python Python
+from chromadb import Search, K, Knn, GroupBy, MinK
+
+# Get top 3 results per category, ordered by score
+search = (Search()
+    .rank(Knn(query="machine learning research"))
+    .group_by(GroupBy(
+        keys=K("category"),
+        aggregate=MinK(keys=K.SCORE, k=3)
+    ))
+    .limit(30)
+    .select(K.DOCUMENT, K.SCORE, "category"))
+
+results = collection.search(search)
+```
+
+```typescript TypeScript
+import { Search, K, Knn, GroupBy, MinK } from 'chromadb';
+
+// Get top 3 results per category, ordered by score
+const search = new Search()
+  .rank(Knn({ query: "machine learning research" }))
+  .groupBy(new GroupBy(
+    [K("category")],
+    new MinK([K.SCORE], 3)
+  ))
+  .limit(30)
+  .select(K.DOCUMENT, K.SCORE, "category");
+
+const results = await collection.search(search);
+```
+</CodeGroup>
+
+## The GroupBy Class
+
+The `GroupBy` class specifies how to partition results and which records to keep from each partition.
+
+<CodeGroup>
+```python Python
+from chromadb import GroupBy, MinK, K
+
+# Single grouping key
+GroupBy(
+    keys=K("category"),
+    aggregate=MinK(keys=K.SCORE, k=3)
+)
+
+# Multiple grouping keys
+GroupBy(
+    keys=[K("category"), K("year")],
+    aggregate=MinK(keys=K.SCORE, k=1)
+)
+```
+
+```typescript TypeScript
+import { GroupBy, MinK, K } from 'chromadb';
+
+// Single grouping key
+new GroupBy(
+  [K("category")],
+  new MinK([K.SCORE], 3)
+);
+
+// Multiple grouping keys
+new GroupBy(
+  [K("category"), K("year")],
+  new MinK([K.SCORE], 1)
+);
+```
+</CodeGroup>
+
+## GroupBy Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `keys` | Key or List[Key] | Metadata key(s) to group by |
+| `aggregate` | MinK or MaxK | Aggregation function to select top k records within each group |
+
+## Aggregation Functions
+
+### MinK
+
+Keeps the k records with the **smallest** values for the specified keys. Use `MinK` when lower values are better (e.g., distance scores, prices, priorities).
+
+<CodeGroup>
+```python Python
+from chromadb import MinK, K
+
+# Keep 3 records with lowest scores per group
+MinK(keys=K.SCORE, k=3)
+
+# Keep 2 records with lowest priority, then lowest score as tiebreaker
+MinK(keys=[K("priority"), K.SCORE], k=2)
+```
+
+```typescript TypeScript
+import { MinK, K } from 'chromadb';
+
+// Keep 3 records with lowest scores per group
+new MinK([K.SCORE], 3);
+
+// Keep 2 records with lowest priority, then lowest score as tiebreaker
+new MinK([K("priority"), K.SCORE], 2);
+```
+</CodeGroup>
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `keys` | Key or List[Key] | Key(s) to sort by in ascending order |
+| `k` | int | Number of records to keep from each group |
+
+### MaxK
+
+Keeps the k records with the **largest** values for the specified keys. Use `MaxK` when higher values are better (e.g., ratings, relevance scores, dates).
+
+<CodeGroup>
+```python Python
+from chromadb import MaxK, K
+
+# Keep 3 records with highest ratings per group
+MaxK(keys=K("rating"), k=3)
+
+# Keep 2 records with highest year, then highest rating as tiebreaker
+MaxK(keys=[K("year"), K("rating")], k=2)
+```
+
+```typescript TypeScript
+import { MaxK, K } from 'chromadb';
+
+// Keep 3 records with highest ratings per group
+new MaxK([K("rating")], 3);
+
+// Keep 2 records with highest year, then highest rating as tiebreaker
+new MaxK([K("year"), K("rating")], 2);
+```
+</CodeGroup>
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `keys` | Key or List[Key] | Key(s) to sort by in descending order |
+| `k` | int | Number of records to keep from each group |
+
+## Key References
+
+Use `K.SCORE` to reference the search score, or `K("field_name")` for metadata fields.
+
+<CodeGroup>
+```python Python
+from chromadb import K
+
+# Built-in score key
+K.SCORE  # References "#score" - the search/ranking score
+
+# Metadata field keys
+K("category")   # References the "category" metadata field
+K("priority")   # References the "priority" metadata field
+K("year")       # References the "year" metadata field
+```
+
+```typescript TypeScript
+import { K } from 'chromadb';
+
+// Built-in score key
+K.SCORE;  // References "#score" - the search/ranking score
+
+// Metadata field keys
+K("category");   // References the "category" metadata field
+K("priority");   // References the "priority" metadata field
+K("year");       // References the "year" metadata field
+```
+</CodeGroup>
+
+## Common Patterns
+
+### Single Key Grouping
+
+Group by one metadata field and keep the top results from each group.
+
+<CodeGroup>
+```python Python
+# Top 2 articles per category by relevance
+search = (Search()
+    .rank(Knn(query="climate change impacts"))
+    .group_by(GroupBy(
+        keys=K("category"),
+        aggregate=MinK(keys=K.SCORE, k=2)
+    ))
+    .limit(20))
+```
+
+```typescript TypeScript
+// Top 2 articles per category by relevance
+const search = new Search()
+  .rank(Knn({ query: "climate change impacts" }))
+  .groupBy(new GroupBy(
+    [K("category")],
+    new MinK([K.SCORE], 2)
+  ))
+  .limit(20);
+```
+</CodeGroup>
+
+### Multiple Key Grouping
+
+Group by combinations of metadata fields for finer-grained control.
+
+<CodeGroup>
+```python Python
+# Top 1 article per (category, year) combination
+search = (Search()
+    .rank(Knn(query="renewable energy"))
+    .group_by(GroupBy(
+        keys=[K("category"), K("year")],
+        aggregate=MinK(keys=K.SCORE, k=1)
+    ))
+    .limit(30))
+```
+
+```typescript TypeScript
+// Top 1 article per (category, year) combination
+const search = new Search()
+  .rank(Knn({ query: "renewable energy" }))
+  .groupBy(new GroupBy(
+    [K("category"), K("year")],
+    new MinK([K.SCORE], 1)
+  ))
+  .limit(30);
+```
+</CodeGroup>
+
+### Multiple Ranking Keys with Tiebreakers
+
+Sort within groups by multiple criteria when the primary key has ties.
+
+<CodeGroup>
+```python Python
+# Top 2 per category: sort by priority first, then by score
+search = (Search()
+    .rank(Knn(query="artificial intelligence"))
+    .group_by(GroupBy(
+        keys=K("category"),
+        aggregate=MinK(keys=[K("priority"), K.SCORE], k=2)
+    ))
+    .limit(20))
+```
+
+```typescript TypeScript
+// Top 2 per category: sort by priority first, then by score
+const search = new Search()
+  .rank(Knn({ query: "artificial intelligence" }))
+  .groupBy(new GroupBy(
+    [K("category")],
+    new MinK([K("priority"), K.SCORE], 2)
+  ))
+  .limit(20);
+```
+</CodeGroup>
+
+## Dictionary Syntax
+
+You can also construct GroupBy using dictionary syntax for programmatic query building.
+
+<CodeGroup>
+```python Python
+# GroupBy with MinK
+search = Search(
+    rank={"$knn": {"query": "machine learning", "limit": 100}},
+    group_by={
+        "keys": ["category"],
+        "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}
+    },
+    limit=30
+)
+
+# GroupBy with MaxK
+search = Search(
+    rank={"$knn": {"query": "top rated products", "limit": 100}},
+    group_by={
+        "keys": ["category", "brand"],
+        "aggregate": {"$max_k": {"keys": ["rating", "#score"], "k": 2}}
+    },
+    limit=20
+)
+```
+
+```typescript TypeScript
+// GroupBy with MinK
+const search1 = new Search({
+  rank: { $knn: { query: "machine learning", limit: 100 } },
+  groupBy: {
+    keys: ["category"],
+    aggregate: { $min_k: { keys: ["#score"], k: 3 } }
+  },
+  limit: 30
+});
+
+// GroupBy with MaxK
+const search2 = new Search({
+  rank: { $knn: { query: "top rated products", limit: 100 } },
+  groupBy: {
+    keys: ["category", "brand"],
+    aggregate: { $max_k: { keys: ["rating", "#score"], k: 2 } }
+  },
+  limit: 20
+});
+```
+</CodeGroup>
+
+## Edge Cases and Important Behavior
+
+### Groups with Fewer Records
+
+If a group has fewer records than the requested `k`, all records from that group are returned.
+
+<CodeGroup>
+```python Python
+# Request top 5 per category, but "rare_category" only has 2 documents
+# Result: "rare_category" returns 2, other categories return up to 5
+search = (Search()
+    .rank(Knn(query="search query"))
+    .group_by(GroupBy(keys=K("category"), aggregate=MinK(keys=K.SCORE, k=5)))
+    .limit(50))
+```
+
+```typescript TypeScript
+// Request top 5 per category, but "rare_category" only has 2 documents
+// Result: "rare_category" returns 2, other categories return up to 5
+const search = new Search()
+  .rank(Knn({ query: "search query" }))
+  .groupBy(new GroupBy([K("category")], new MinK([K.SCORE], 5)))
+  .limit(50);
+```
+</CodeGroup>
+
+### Missing Metadata Keys
+
+Documents missing the grouping key are treated as having a `null`/`None` value for that key, and are grouped together.
+
+### Limit Still Applies
+
+The `Search.limit()` still controls the final number of results returned after grouping. Set it high enough to include results from all groups.
+
+## Complete Example
+
+Here's a practical example showing diversified search results across categories:
+
+<CodeGroup>
+```python Python
+from chromadb import Search, K, Knn, GroupBy, MinK
+
+# Diversified product search - ensure results from multiple categories
+search = (Search()
+    .where(K("in_stock") == True)
+    .rank(Knn(query="wireless headphones", limit=100))
+    .group_by(GroupBy(
+        keys=K("category"),
+        aggregate=MinK(keys=K.SCORE, k=2)  # Top 2 per category
+    ))
+    .limit(20)
+    .select(K.DOCUMENT, K.SCORE, "name", "category", "price"))
+
+results = collection.search(search)
+rows = results.rows()[0]
+
+# Results now include top 2 from each category instead of
+# potentially all results from a single dominant category
+for row in rows:
+    print(f"{row['metadata']['name']}")
+    print(f"  Category: {row['metadata']['category']}")
+    print(f"  Price: ${row['metadata']['price']:.2f}")
+    print(f"  Score: {row['score']:.3f}")
+    print()
+```
+
+```typescript TypeScript
+import { Search, K, Knn, GroupBy, MinK } from 'chromadb';
+
+// Diversified product search - ensure results from multiple categories
+const search = new Search()
+  .where(K("in_stock").eq(true))
+  .rank(Knn({ query: "wireless headphones", limit: 100 }))
+  .groupBy(new GroupBy(
+    [K("category")],
+    new MinK([K.SCORE], 2)  // Top 2 per category
+  ))
+  .limit(20)
+  .select(K.DOCUMENT, K.SCORE, "name", "category", "price");
+
+const results = await collection.search(search);
+const rows = results.rows()[0];
+
+// Results now include top 2 from each category instead of
+// potentially all results from a single dominant category
+for (const row of rows) {
+  console.log(row.metadata?.name);
+  console.log(`  Category: ${row.metadata?.category}`);
+  console.log(`  Price: $${row.metadata?.price?.toFixed(2)}`);
+  console.log(`  Score: ${row.score?.toFixed(3)}`);
+  console.log();
+}
+```
+</CodeGroup>
+
+## Tips and Best Practices
+
+- **Set Knn limit high enough** - The Knn `limit` determines the candidate pool before grouping. Set it high enough to include candidates from all groups you want represented.
+- **Use MinK with scores** - Since Chroma uses distance-based scoring (lower is better), use `MinK` with `K.SCORE` to get the most relevant results per group.
+- **Use MaxK for user-defined metrics** - For metadata fields where higher is better (ratings, popularity), use `MaxK`.
+- **Combine with filtering** - Use `.where()` to filter before grouping to reduce the candidate pool to relevant documents.
+- **Account for group size variance** - Groups may return fewer than `k` results if they don't have enough matching documents.
+
+## Next Steps
+
+- Learn about [ranking expressions](./ranking) to control how documents are scored before grouping
+- See [Filtering with Where](./filtering) to narrow down candidates before grouping
+- Explore [batch operations](./batch-operations) to run multiple grouped searches at once
