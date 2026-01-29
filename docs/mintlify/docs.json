@@ -218,78 +218,7 @@
       {
         "tab": "API Reference",
         "icon": "brackets-curly",
-        "pages": [
-          {
-            "group": "Authentication",
-            "openapi": "openapi.json",
-            "pages": [
-              "GET /api/v2/auth/identity"
-            ]
-          },
-          {
-            "group": "Tenants",
-            "openapi": "openapi.json",
-            "pages": [
-              "POST /api/v2/tenants",
-              "GET /api/v2/tenants/{tenant_name}",
-              "PATCH /api/v2/tenants/{tenant_name}"
-            ]
-          },
-          {
-            "group": "Databases",
-            "openapi": "openapi.json",
-            "pages": [
-              "GET /api/v2/tenants/{tenant}/databases",
-              "POST /api/v2/tenants/{tenant}/databases",
-              "GET /api/v2/tenants/{tenant}/databases/{database}",
-              "DELETE /api/v2/tenants/{tenant}/databases/{database}"
-            ]
-          },
-          {
-            "group": "Collections",
-            "openapi": "openapi.json",
-            "pages": [
-              "GET /api/v2/tenants/{tenant}/databases/{database}/collections",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections",
-              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
-              "PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
-              "DELETE /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
-              "GET /api/v2/tenants/{tenant}/databases/{database}/collections_count",
-              "GET /api/v2/collections/{crn}",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork"
-            ]
-          },
-          {
-            "group": "Records",
-            "openapi": "openapi.json",
-            "pages": [
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
-              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
-              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status"
-            ]
-          },
-          {
-            "group": "Query & Search",
-            "openapi": "openapi.json",
-            "pages": [
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search"
-            ]
-          },
-          {
-            "group": "Functions",
-            "openapi": "openapi.json",
-            "pages": [
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
-              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
-              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach"
-            ]
-          }
-        ]
+        "openapi": "openapi.json"
       }
     ],
     "global": {
