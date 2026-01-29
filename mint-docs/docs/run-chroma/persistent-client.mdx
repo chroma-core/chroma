@@ -2,7 +2,8 @@
 title: "Persistent Client"
 ---
 
-<View title="Python" icon="python">
+<Tabs>
+<Tab title="Python" icon="python">
 
 You can configure Chroma to save and load the database from your local machine, using the PersistentClient.
 
@@ -26,9 +27,9 @@ client.heartbeat()
 client.reset()
 ```
 
-</View>
+</Tab>
 
-<View title="TypeScript" icon="js">
+<Tab title="TypeScript" icon="js">
 
 To connect with the JS/TS client, you must connect to a Chroma server.
 
@@ -83,4 +84,5 @@ await client.heartbeat();
 await client.reset();
 ```
 
-</View>
+</Tab>
+</Tabs>
