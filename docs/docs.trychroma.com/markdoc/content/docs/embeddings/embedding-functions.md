@@ -21,26 +21,28 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          |
 | [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          |
 | [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
+| [RunPod](../../integrations/embedding-models/runpod)                                     | ✓      | ✓          |
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
 
 
 For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships will all embedding functions included.
 
-| Provider                    | Embedding Function Package                    
-| ----------                  | ------------------------- 
-| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)     
-| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)     
-| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere) 
-| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)     
-| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)     
-| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)     
-| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)     
-| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)     
-| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
-| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)     
+| Provider                    | Embedding Function Package
+| ----------                  | -------------------------
+| All (installs all packages) | [@chroma-core/all](https://www.npmjs.com/package/@chroma-core/all)
+| Cloudflare Workers AI       | [@chroma-core/cloudflare-worker-ai](https://www.npmjs.com/package/@chroma-core/cloudflare-worker-ai)
+| Cohere                      | [@chroma-core/cohere](https://www.npmjs.com/package/@chroma-core/cohere)
+| Google Gemini               | [@chroma-core/google-gemini](https://www.npmjs.com/package/@chroma-core/google-gemini)
+| Hugging Face Server         | [@chroma-core/huggingface-server](https://www.npmjs.com/package/@chroma-core/huggingface-server)
+| Jina                        | [@chroma-core/jina](https://www.npmjs.com/package/@chroma-core/jina)
+| Mistral                     | [@chroma-core/mistral](https://www.npmjs.com/package/@chroma-core/mistral)
+| Morph                       | [@chroma-core/morph](https://www.npmjs.com/package/@chroma-core/morph)
+| Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)
+| OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)
 | Qwen (via Chroma Cloud)     | [@chroma-core/chroma-cloud-qwen](https://www.npmjs.com/package/@chroma-core/chroma-cloud-qwen)
-| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
-| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
+| RunPod                      | [@chroma-core/runpod](https://www.npmjs.com/package/@chroma-core/runpod)
+| Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)
+| Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)
 
 We welcome pull requests to add new Embedding Functions to the community.
 

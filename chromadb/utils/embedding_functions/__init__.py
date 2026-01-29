@@ -91,6 +91,9 @@ from chromadb.utils.embedding_functions.chroma_cloud_splade_embedding_function i
 from chromadb.utils.embedding_functions.chroma_bm25_embedding_function import (
     ChromaBm25EmbeddingFunction,
 )
+from chromadb.utils.embedding_functions.runpod_embedding_function import (
+    RunPodEmbeddingFunction,
+)
 
 
 # Get all the class names for backward compatibility
@@ -120,6 +123,7 @@ _all_classes: Set[str] = {
     "BasetenEmbeddingFunction",
     "CloudflareWorkersAIEmbeddingFunction",
     "TogetherAIEmbeddingFunction",
+    "RunPodEmbeddingFunction",
     "DefaultEmbeddingFunction",
     "HuggingFaceSparseEmbeddingFunction",
     "FastembedSparseEmbeddingFunction",
@@ -163,6 +167,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "cloudflare_workers_ai": CloudflareWorkersAIEmbeddingFunction,
     "together_ai": TogetherAIEmbeddingFunction,
     "chroma-cloud-qwen": ChromaCloudQwenEmbeddingFunction,
+    "runpod": RunPodEmbeddingFunction,
 }
 
 sparse_known_embedding_functions: Dict[str, Type[SparseEmbeddingFunction]] = {  # type: ignore
@@ -291,6 +296,7 @@ __all__ = [
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
     "ChromaBm25EmbeddingFunction",
+    "RunPodEmbeddingFunction",
     "register_embedding_function",
     "config_to_embedding_function",
     "known_embedding_functions",
