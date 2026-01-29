@@ -143,17 +143,34 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(None);
         };
 
-        if let Some(reader) = &self.raw_embedding_reader {
-            for (id, version) in delta.cluster.ids.iter().zip(delta.cluster.versions.iter()) {
-                if self.is_valid(*id, *version) && !self.embeddings.contains_key(id) {
-                    if let Some(record) = reader.get("", *id as u32).await? {
-                        self.embeddings.insert(*id, Arc::from(record.embedding));
-                    }
-                }
+        let ids = delta
+            .cluster
+            .ids
+            .iter()
+            .zip(delta.cluster.versions.iter())
+            .filter_map(|(id, version)| self.is_valid(*id, *version).then_some(*id))
+            .collect::<Vec<_>>();
+        self.load_raw(&ids).await?;
+
+        Ok(Some(delta.cluster))
+    }
+
+    /// Load raw embeddings for given ids into the embeddings cache.
+    async fn load_raw(&self, ids: &[u64]) -> Result<(), QuantizedSpannError> {
+        let Some(reader) = &self.raw_embedding_reader else {
+            return Ok(());
+        };
+
+        for id in ids {
+            if self.embeddings.contains_key(id) {
+                continue;
+            }
+            if let Some(record) = reader.get("", *id as u32).await? {
+                self.embeddings.insert(*id, Arc::from(record.embedding));
             }
         }
 
-        Ok(Some(delta.cluster))
+        Ok(())
     }
 
     /// Compute distance between two vectors using the configured distance function.
@@ -475,14 +492,18 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             None
         };
 
+        let mut new_cluster_ids = [0u64; 2];
+        let new_centers = &clustering_output.cluster_centers;
+
         for k in 0..2 {
             let new_cluster_id = if same_head_cluster == Some(k) {
                 cluster_id
             } else {
                 self.next_cluster_id.fetch_add(1, Ordering::Relaxed)
             };
+            new_cluster_ids[k] = new_cluster_id;
 
-            let centroid = &clustering_output.cluster_centers[k];
+            let centroid = &new_centers[k];
             let mut new_cluster = QuantizedClusterOwned::new(centroid.clone());
 
             for (idx, &label) in &clustering_output.cluster_labels {
@@ -517,7 +538,78 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             self.deleted_clusters.insert(cluster_id);
         }
 
+        // Collect points to reassign
+        let mut reassignable = Vec::new();
+
+        // Points in new clusters that prefer old center
+        for &new_id in &new_cluster_ids {
+            reassignable.extend(self.trim(new_id, &old_center).await?);
+        }
+
+        // Points in nearby clusters that prefer new centers
+        let neighbors = self.navigate(&old_center)?;
+        for &neighbor_id in &neighbors.keys {
+            if new_cluster_ids.contains(&neighbor_id) || neighbor_id == cluster_id {
+                continue;
+            }
+            for new_center in new_centers {
+                reassignable.extend(self.trim(neighbor_id, new_center).await?);
+            }
+        }
+
+        reassignable.sort_unstable();
+        reassignable.dedup();
+
+        self.load_raw(&reassignable).await?;
+        for id in reassignable {
+            if let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) {
+                self.insert(id, embedding).await?;
+            }
+        }
+
         Ok(())
+    }
+
+    /// Returns ids of points closer to candidate_center than their current center.
+    async fn trim(
+        &self,
+        cluster_id: u64,
+        candidate_center: &[f32],
+    ) -> Result<Vec<u64>, QuantizedSpannError> {
+        self.load(cluster_id).await?;
+
+        if let Some(mut delta) = self.deltas.get_mut(&cluster_id) {
+            let new_len = delta
+                .cluster
+                .scrub(|id, version| self.is_valid(id, version));
+            delta.length = new_len;
+        }
+
+        let Some(delta) = self.deltas.get(&cluster_id) else {
+            return Ok(Vec::new());
+        };
+
+        let current_center = &delta.cluster.center;
+        let cluster_ref = QuantizedCluster::from(&delta.cluster);
+
+        let dists_to_candidate = query_quantized_cluster(
+            &cluster_ref,
+            candidate_center,
+            &self.config.distance_function,
+        );
+        let dists_to_current =
+            query_quantized_cluster(&cluster_ref, current_center, &self.config.distance_function);
+
+        Ok(cluster_ref
+            .ids
+            .iter()
+            .zip(cluster_ref.versions.iter())
+            .zip(dists_to_candidate.distances.iter())
+            .zip(dists_to_current.distances.iter())
+            .filter_map(|(((id, version), d_cand), d_curr)| {
+                (self.is_valid(*id, *version) && d_cand < d_curr).then_some(*id)
+            })
+            .collect())
     }
 
     /// Increment and return the next version for a key.
