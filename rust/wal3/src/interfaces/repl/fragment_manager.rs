@@ -3,9 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use setsum::Setsum;
-use tracing::Level;
+use tokio::sync::Semaphore;
+use tracing::{Instrument, Level};
 
-use chroma_storage::{Storage, StorageError};
+use chroma_storage::{PutOptions, Storage, StorageError};
 use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
@@ -29,6 +30,14 @@ pub struct ReplicatedFragmentOptions {
     /// The tolerance for slow writers (in seconds).
     #[serde(default = "ReplicatedFragmentOptions::default_slow_writer_tolerance_secs")]
     pub slow_writer_tolerance_secs: u64,
+    /// Whether to enable read repair. When enabled, successful reads will asynchronously
+    /// write data back to replicas that are missing the fragment.
+    #[serde(default = "ReplicatedFragmentOptions::default_enable_read_repair")]
+    pub enable_read_repair: bool,
+    /// Maximum number of concurrent read repair tasks across all readers sharing a semaphore.
+    /// If all permits are in use, new read repair requests are dropped.
+    #[serde(default = "ReplicatedFragmentOptions::default_max_concurrent_read_repairs")]
+    pub max_concurrent_read_repairs: usize,
 }
 
 impl ReplicatedFragmentOptions {
@@ -59,6 +68,14 @@ impl ReplicatedFragmentOptions {
     fn default_slow_writer_tolerance_secs() -> u64 {
         15
     }
+
+    fn default_enable_read_repair() -> bool {
+        true
+    }
+
+    fn default_max_concurrent_read_repairs() -> usize {
+        128
+    }
 }
 
 impl Default for ReplicatedFragmentOptions {
@@ -69,6 +86,8 @@ impl Default for ReplicatedFragmentOptions {
             ),
             decimation_interval_secs: Self::default_decimation_interval_secs(),
             slow_writer_tolerance_secs: Self::default_slow_writer_tolerance_secs(),
+            enable_read_repair: Self::default_enable_read_repair(),
+            max_concurrent_read_repairs: Self::default_max_concurrent_read_repairs(),
         }
     }
 }
@@ -358,16 +377,76 @@ impl FragmentUploader<FragmentUuid> for ReplicatedFragmentUploader {
 }
 
 pub struct FragmentReader {
+    options: ReplicatedFragmentOptions,
     preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
+    read_repair_semaphore: Arc<Semaphore>,
 }
 
 impl FragmentReader {
-    pub fn new(preferred: usize, storages: Arc<Vec<StorageWrapper>>) -> Self {
+    /// Creates a new FragmentReader with a shared semaphore for read repair concurrency control.
+    pub fn new(
+        options: ReplicatedFragmentOptions,
+        preferred: usize,
+        storages: Arc<Vec<StorageWrapper>>,
+        read_repair_semaphore: Arc<Semaphore>,
+    ) -> Self {
         assert!(preferred < storages.len());
         Self {
+            options,
             preferred,
             storages,
+            read_repair_semaphore,
+        }
+    }
+
+    /// Perform read repair by writing the data to storages that are missing it.
+    /// This spawns background tasks to repair missing replicas without blocking the read.
+    /// If the semaphore has no available permits, the repair is skipped.
+    fn read_repair_bytes(&self, path: &str, data: Arc<Vec<u8>>, missing_indices: Vec<usize>) {
+        if !self.options.enable_read_repair || missing_indices.is_empty() {
+            return;
+        }
+
+        for idx in missing_indices {
+            // Try to acquire a permit without blocking. If unavailable, skip this repair.
+            let permit = match self.read_repair_semaphore.clone().try_acquire_owned() {
+                Ok(permit) => permit,
+                Err(_) => {
+                    tracing::debug!(
+                        "read repair skipped: semaphore full (max {} concurrent repairs)",
+                        self.options.max_concurrent_read_repairs
+                    );
+                    continue;
+                }
+            };
+
+            let storage = &self.storages[idx];
+            let full_path = crate::fragment_path(&storage.prefix, path);
+            let data_clone = Arc::clone(&data);
+            let region = storage.region.clone();
+            let storage_clone = storage.storage.clone();
+
+            let span = tracing::info_span!("read_repair", path = %full_path, region = %region);
+            // Spawn the repair write asynchronously without blocking the read.
+            // The permit is moved into the task and released when the task completes.
+            tokio::spawn(
+                async move {
+                    let _permit = permit;
+                    match storage_clone
+                        .put_bytes(&full_path, (*data_clone).clone(), PutOptions::default())
+                        .await
+                    {
+                        Ok(_) => {
+                            tracing::info!("read repair successful");
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = ?e, "read repair failed");
+                        }
+                    }
+                }
+                .instrument(span),
+            );
         }
     }
 }
@@ -376,19 +455,25 @@ impl FragmentReader {
 impl FragmentConsumer for FragmentReader {
     async fn read_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
         let mut err: Option<Error> = None;
+        let mut missing_indices: Vec<usize> = Vec::new();
+        let mut result: Option<Arc<Vec<u8>>> = None;
         // Try the preferred storage first, then fall back to others.
-        let indices = std::iter::once(self.preferred)
-            .chain((0..self.storages.len()).filter(|&i| i != self.preferred));
-        for i in indices {
-            let storage = &self.storages[i];
+        let indices: Vec<usize> = std::iter::once(self.preferred)
+            .chain((0..self.storages.len()).filter(|&i| i != self.preferred))
+            .collect();
+        for i in &indices {
+            let storage = &self.storages[*i];
             match crate::interfaces::s3::read_bytes(&storage.storage, &storage.prefix, path).await {
-                Ok(Some(parquet)) => return Ok(parquet),
+                Ok(Some(parquet)) => {
+                    result = Some(parquet);
+                    break;
+                }
                 Ok(None) => {
-                    // TODO(rescrv, mcmr): Read repair.
+                    missing_indices.push(*i);
                     continue;
                 }
                 Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
-                    // TODO(rescrv, mcmr): Read repair.
+                    missing_indices.push(*i);
                     continue;
                 }
                 Err(e) => {
@@ -397,6 +482,13 @@ impl FragmentConsumer for FragmentReader {
                 }
             }
         }
+
+        // If we found the data, trigger read repair for missing replicas
+        if let Some(ref data) = result {
+            self.read_repair_bytes(path, Arc::clone(data), missing_indices);
+            return Ok(Arc::clone(data));
+        }
+
         if let Some(err) = err {
             Err(err)
         } else {
@@ -420,11 +512,15 @@ impl FragmentConsumer for FragmentReader {
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error> {
         let mut err: Option<Error> = None;
+        let mut missing_indices: Vec<usize> = Vec::new();
+        let mut success_index: Option<usize> = None;
+        let mut result: Option<Fragment> = None;
         // Try the preferred storage first, then fall back to others.
-        let indices = std::iter::once(self.preferred)
-            .chain((0..self.storages.len()).filter(|&i| i != self.preferred));
-        for i in indices {
-            let storage = &self.storages[i];
+        let indices: Vec<usize> = std::iter::once(self.preferred)
+            .chain((0..self.storages.len()).filter(|&i| i != self.preferred))
+            .collect();
+        for i in &indices {
+            let storage = &self.storages[*i];
             match read_fragment_uuid(
                 &storage.storage,
                 &storage.prefix,
@@ -433,13 +529,17 @@ impl FragmentConsumer for FragmentReader {
             )
             .await
             {
-                Ok(Some(fragment)) => return Ok(Some(fragment)),
+                Ok(Some(fragment)) => {
+                    result = Some(fragment);
+                    success_index = Some(*i);
+                    break;
+                }
                 Ok(None) => {
-                    // TODO(rescrv, mcmr): Read repair.
+                    missing_indices.push(*i);
                     continue;
                 }
                 Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
-                    // TODO(rescrv, mcmr): Read repair.
+                    missing_indices.push(*i);
                     continue;
                 }
                 Err(e) => {
@@ -448,6 +548,42 @@ impl FragmentConsumer for FragmentReader {
                 }
             }
         }
+
+        // If we found the fragment, trigger read repair for missing replicas
+        if let Some(ref fragment) = result {
+            if self.options.enable_read_repair && !missing_indices.is_empty() {
+                if let Some(success_idx) = success_index {
+                    let success_storage = &self.storages[success_idx];
+                    // Read the raw bytes from the successful storage for repair
+                    match crate::interfaces::s3::read_bytes(
+                        &success_storage.storage,
+                        &success_storage.prefix,
+                        path,
+                    )
+                    .await
+                    {
+                        Ok(Some(bytes)) => {
+                            self.read_repair_bytes(path, bytes, missing_indices);
+                        }
+                        Ok(None) => {
+                            tracing::warn!(
+                                "Could not read bytes for read repair from region {}",
+                                success_storage.region
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to read bytes for read repair from region {}: {:?}",
+                                success_storage.region,
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+            return Ok(Some(fragment.clone()));
+        }
+
         if let Some(err) = err {
             Err(err)
         } else {
@@ -910,6 +1046,89 @@ mod tests {
         );
     }
 
+    // ==================== ReplicatedFragmentOptions tests ====================
+
+    use super::ReplicatedFragmentOptions;
+
+    // Verifies that default() sets enable_read_repair to true.
+    #[test]
+    fn options_default_enable_read_repair_is_true() {
+        let options = ReplicatedFragmentOptions::default();
+        assert!(
+            options.enable_read_repair,
+            "enable_read_repair should default to true"
+        );
+    }
+
+    // Verifies that default() sets max_concurrent_read_repairs to 128.
+    #[test]
+    fn options_default_max_concurrent_read_repairs_is_128() {
+        let options = ReplicatedFragmentOptions::default();
+        assert_eq!(
+            options.max_concurrent_read_repairs, 128,
+            "max_concurrent_read_repairs should default to 128"
+        );
+    }
+
+    // Verifies that serde deserialization uses defaults for missing read repair fields.
+    #[test]
+    fn options_serde_defaults_for_read_repair_fields() {
+        let json = r#"{
+            "minimum_allowed_replication_factor": 2,
+            "minimum_failures_to_exclude_replica": 50,
+            "decimation_interval_secs": 60,
+            "slow_writer_tolerance_secs": 10
+        }"#;
+        let options: ReplicatedFragmentOptions =
+            serde_json::from_str(json).expect("should parse JSON");
+        assert!(
+            options.enable_read_repair,
+            "enable_read_repair should default to true when missing from JSON"
+        );
+        assert_eq!(
+            options.max_concurrent_read_repairs, 128,
+            "max_concurrent_read_repairs should default to 128 when missing from JSON"
+        );
+    }
+
+    // Verifies that serde deserialization respects explicit read repair field values.
+    #[test]
+    fn options_serde_explicit_read_repair_fields() {
+        let json = r#"{
+            "enable_read_repair": false,
+            "max_concurrent_read_repairs": 64
+        }"#;
+        let options: ReplicatedFragmentOptions =
+            serde_json::from_str(json).expect("should parse JSON");
+        assert!(
+            !options.enable_read_repair,
+            "enable_read_repair should be false when explicitly set"
+        );
+        assert_eq!(
+            options.max_concurrent_read_repairs, 64,
+            "max_concurrent_read_repairs should be 64 when explicitly set"
+        );
+    }
+
+    // Verifies that serde serialization includes read repair fields.
+    #[test]
+    fn options_serde_serializes_read_repair_fields() {
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 256,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let json = serde_json::to_string(&options).expect("should serialize");
+        assert!(
+            json.contains("\"enable_read_repair\":false"),
+            "serialized JSON should contain enable_read_repair"
+        );
+        assert!(
+            json.contains("\"max_concurrent_read_repairs\":256"),
+            "serialized JSON should contain max_concurrent_read_repairs"
+        );
+    }
+
     // ==================== process_quorum_results tests ====================
 
     use super::process_quorum_results;
@@ -1251,15 +1470,16 @@ mod tests {
 
     // ==================== ReplicatedFragmentUploader integration tests ====================
 
-    use super::ReplicatedFragmentOptions;
+    use super::FragmentReader;
     use super::ReplicatedFragmentUploader;
     use super::StorageWrapper;
     use crate::interfaces::FragmentUploader;
     use crate::FragmentUuid;
     use crate::LogWriterOptions;
-    use chroma_storage::s3_client_for_test_with_new_bucket;
+    use chroma_storage::{s3_client_for_test_with_new_bucket, DeleteOptions, GetOptions};
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::Semaphore;
 
     const TEST_EPOCH_MICROS: u64 = 1234567890123456;
 
@@ -1269,6 +1489,8 @@ mod tests {
             minimum_failures_to_exclude_replica: 100,
             decimation_interval_secs: 3600,
             slow_writer_tolerance_secs: 30,
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
         }
     }
 
@@ -1546,6 +1768,8 @@ mod tests {
             minimum_failures_to_exclude_replica: 100,
             decimation_interval_secs: 0, // 0 seconds so it elapses immediately
             slow_writer_tolerance_secs: 30,
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
         };
         let uploader =
             ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), 0, storages);
@@ -1574,6 +1798,8 @@ mod tests {
             minimum_failures_to_exclude_replica: 100,
             decimation_interval_secs: 3600,
             slow_writer_tolerance_secs: 30,
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
         };
         let uploader =
             ReplicatedFragmentUploader::new(options, LogWriterOptions::default(), 0, storages);
@@ -1749,7 +1975,6 @@ mod tests {
 
     // ==================== FragmentReader tests ====================
 
-    use super::FragmentReader;
     use crate::interfaces::FragmentConsumer;
 
     /// Verifies that FragmentReader tries the preferred storage first by uploading different
@@ -1787,7 +2012,9 @@ mod tests {
 
         // Create FragmentReader with preferred=1 (storage2).
         let storages = Arc::new(vec![wrapper1, wrapper2]);
-        let reader = FragmentReader::new(1, storages);
+        let options = ReplicatedFragmentOptions::default();
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 1, storages, semaphore);
 
         // read_bytes should return data from the preferred storage (storage2).
         let result = reader.read_bytes(test_path).await;
@@ -1829,7 +2056,9 @@ mod tests {
 
         // Create FragmentReader with preferred=1 (storage2, which has no data).
         let storages = Arc::new(vec![wrapper1, wrapper2]);
-        let reader = FragmentReader::new(1, storages);
+        let options = ReplicatedFragmentOptions::default();
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 1, storages, semaphore);
 
         // read_bytes should succeed because it falls back to storage1 after preferred fails.
         let result = reader.read_bytes(test_path).await;
@@ -1845,5 +2074,834 @@ mod tests {
         );
 
         println!("fragment_reader_fallback_to_non_preferred: passed");
+    }
+
+    // ==================== Read repair tests ====================
+
+    /// Verifies that read repair is triggered when reading from a fallback storage and the
+    /// preferred storage is missing the data. After the repair, the data should be available
+    /// in the previously-missing storage.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_writes_to_missing_storage() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        // Storage1 (preferred) has no data, storage2 (fallback) has data.
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        let test_path = "test-read-repair.parquet";
+        let test_data = b"test data for read repair";
+
+        // Upload data only to storage2.
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        // Create FragmentReader with preferred=0 (storage1, which has no data) and read repair
+        // enabled.
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 0, storages, semaphore);
+
+        // Read should succeed via fallback to storage2.
+        let result = reader.read_bytes(test_path).await;
+        assert!(
+            result.is_ok(),
+            "read_bytes should succeed via fallback: {:?}",
+            result.err()
+        );
+        assert_eq!(
+            result.unwrap().as_slice(),
+            test_data,
+            "data should match what was uploaded"
+        );
+
+        // Wait for the async read repair task to complete.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Verify storage1 now has the data from read repair.
+        let repaired_data = storage1
+            .get(&format!("prefix1/{}", test_path), GetOptions::default())
+            .await
+            .expect("get from storage1 should succeed after read repair");
+        assert_eq!(
+            repaired_data.as_slice(),
+            test_data,
+            "storage1 should have the data after read repair"
+        );
+
+        println!("read_repair_writes_to_missing_storage: passed");
+    }
+
+    /// Verifies that read repair does not trigger when enable_read_repair is false.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_disabled_no_write() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        let test_path = "test-no-read-repair.parquet";
+        let test_data = b"test data no repair";
+
+        // Upload data only to storage2.
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        // Create FragmentReader with read repair disabled.
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 0, storages, semaphore);
+
+        // Read should succeed via fallback.
+        let result = reader.read_bytes(test_path).await;
+        assert!(result.is_ok(), "read_bytes should succeed via fallback");
+        assert_eq!(result.unwrap().as_slice(), test_data);
+
+        // Wait to ensure any potential repair would have happened.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Verify storage1 still does not have the data (no read repair).
+        let get_result = storage1
+            .get(&format!("prefix1/{}", test_path), GetOptions::default())
+            .await;
+        assert!(
+            get_result.is_err(),
+            "storage1 should not have data when read repair is disabled"
+        );
+
+        println!("read_repair_disabled_no_write: passed");
+    }
+
+    /// Verifies that read repair does not trigger when all storages already have the data.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_no_missing_replicas() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        let test_path = "test-all-have-data.parquet";
+        let test_data = b"test data all replicas";
+
+        // Upload data to both storages.
+        storage1
+            .put_bytes(
+                &format!("prefix1/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage1 should succeed");
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        // Create FragmentReader with read repair enabled.
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 0, storages, semaphore.clone());
+
+        // Read should succeed from preferred storage.
+        let result = reader.read_bytes(test_path).await;
+        assert!(result.is_ok(), "read_bytes should succeed from preferred");
+        assert_eq!(result.unwrap().as_slice(), test_data);
+
+        // Semaphore should not have been used since there were no missing replicas.
+        // All 16 permits should still be available.
+        assert_eq!(
+            semaphore.available_permits(),
+            16,
+            "semaphore should not have been used when no replicas are missing"
+        );
+
+        println!("read_repair_no_missing_replicas: passed");
+    }
+
+    /// Verifies that read repair skips repairs when the semaphore is exhausted.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_semaphore_exhausted_skips_repair() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        let test_path = "test-semaphore-exhausted.parquet";
+        let test_data = b"test data semaphore";
+
+        // Upload data only to storage2.
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        // Create FragmentReader with only 1 permit and hold it.
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 1,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(1));
+
+        // Acquire the only permit to simulate exhausted semaphore.
+        let _held_permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("should acquire permit");
+
+        let reader = FragmentReader::new(options, 0, storages, semaphore.clone());
+
+        // Read should succeed via fallback.
+        let result = reader.read_bytes(test_path).await;
+        assert!(result.is_ok(), "read_bytes should succeed via fallback");
+        assert_eq!(result.unwrap().as_slice(), test_data);
+
+        // Wait to ensure repair would have happened if it wasn't skipped.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Verify storage1 does not have the data (repair was skipped).
+        let get_result = storage1
+            .get(&format!("prefix1/{}", test_path), GetOptions::default())
+            .await;
+        assert!(
+            get_result.is_err(),
+            "storage1 should not have data when semaphore is exhausted"
+        );
+
+        println!("read_repair_semaphore_exhausted_skips_repair: passed");
+    }
+
+    /// Verifies that the semaphore permit is released after the read repair task completes.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_releases_semaphore_permit() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        let test_path = "test-permit-release.parquet";
+        let test_data = b"test data permit release";
+
+        // Upload data only to storage2.
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 1,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(1));
+        let reader = FragmentReader::new(options, 0, storages, semaphore.clone());
+
+        // Before read, permit should be available.
+        assert_eq!(
+            semaphore.available_permits(),
+            1,
+            "permit should be available before read"
+        );
+
+        // Trigger read which will spawn a repair task.
+        let result = reader.read_bytes(test_path).await;
+        assert!(result.is_ok(), "read_bytes should succeed");
+
+        // Immediately after read, permit may be in use by the spawned task.
+        // We cannot reliably check this due to timing, so we skip this assertion.
+
+        // Wait for the repair task to complete.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // After repair completes, permit should be released.
+        assert_eq!(
+            semaphore.available_permits(),
+            1,
+            "permit should be released after repair completes"
+        );
+
+        println!("read_repair_releases_semaphore_permit: passed");
+    }
+
+    /// Verifies that read repair works with multiple missing replicas, writing to all of them.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_multiple_missing_replicas() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+        let storage3 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+        let wrapper3 = make_storage_wrapper(storage3.clone(), "prefix3");
+
+        let test_path = "test-multi-repair.parquet";
+        let test_data = b"test data multiple missing";
+
+        // Upload data only to storage3 (last fallback).
+        storage3
+            .put_bytes(
+                &format!("prefix3/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage3 should succeed");
+
+        // Create FragmentReader with preferred=0 (storage1).
+        let storages = Arc::new(vec![wrapper1, wrapper2, wrapper3]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 0, storages, semaphore);
+
+        // Read should succeed via fallback to storage3.
+        let result = reader.read_bytes(test_path).await;
+        assert!(result.is_ok(), "read_bytes should succeed via fallback");
+        assert_eq!(result.unwrap().as_slice(), test_data);
+
+        // Wait for read repair tasks to complete.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // Verify both storage1 and storage2 now have the data.
+        let repaired_data1 = storage1
+            .get(&format!("prefix1/{}", test_path), GetOptions::default())
+            .await
+            .expect("get from storage1 should succeed after read repair");
+        assert_eq!(
+            repaired_data1.as_slice(),
+            test_data,
+            "storage1 should have the data after read repair"
+        );
+
+        let repaired_data2 = storage2
+            .get(&format!("prefix2/{}", test_path), GetOptions::default())
+            .await
+            .expect("get from storage2 should succeed after read repair");
+        assert_eq!(
+            repaired_data2.as_slice(),
+            test_data,
+            "storage2 should have the data after read repair"
+        );
+
+        println!("read_repair_multiple_missing_replicas: passed");
+    }
+
+    /// Verifies that the read operation returns immediately without waiting for read repair.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_does_not_block_read() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        let test_path = "test-nonblocking-repair.parquet";
+        let test_data = b"test data nonblocking";
+
+        // Upload data only to storage2.
+        storage2
+            .put_bytes(
+                &format!("prefix2/{}", test_path),
+                test_data.to_vec(),
+                chroma_storage::PutOptions::default(),
+            )
+            .await
+            .expect("upload to storage2 should succeed");
+
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 0, storages, semaphore);
+
+        // Time the read operation.
+        let start = std::time::Instant::now();
+        let result = reader.read_bytes(test_path).await;
+        let read_duration = start.elapsed();
+
+        assert!(result.is_ok(), "read_bytes should succeed");
+        assert_eq!(result.unwrap().as_slice(), test_data);
+
+        // Read should complete quickly (< 50ms) without waiting for repair.
+        // The repair task runs asynchronously after the read returns.
+        assert!(
+            read_duration < Duration::from_millis(50),
+            "read should complete quickly without waiting for repair, took {:?}",
+            read_duration
+        );
+
+        println!(
+            "read_repair_does_not_block_read: passed (read took {:?})",
+            read_duration
+        );
+    }
+
+    /// Verifies that concurrent reads with read repair do not interfere with each other.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_concurrent_reads() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        // Upload different data for multiple test files, all only to storage2.
+        let num_files = 5;
+        for i in 0..num_files {
+            let path = format!("prefix2/test-concurrent-{}.parquet", i);
+            let data = format!("data for file {}", i);
+            storage2
+                .put_bytes(
+                    &path,
+                    data.into_bytes(),
+                    chroma_storage::PutOptions::default(),
+                )
+                .await
+                .expect("upload should succeed");
+        }
+
+        let storages = Arc::new(vec![wrapper1, wrapper2]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = Arc::new(FragmentReader::new(options, 0, storages, semaphore));
+
+        // Spawn concurrent read tasks.
+        let mut handles = vec![];
+        for i in 0..num_files {
+            let reader = Arc::clone(&reader);
+            let handle = tokio::spawn(async move {
+                let path = format!("test-concurrent-{}.parquet", i);
+                let expected_data = format!("data for file {}", i);
+                let result = reader.read_bytes(&path).await;
+                assert!(result.is_ok(), "read {} should succeed", i);
+                assert_eq!(
+                    result.unwrap().as_slice(),
+                    expected_data.as_bytes(),
+                    "data {} should match",
+                    i
+                );
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all reads to complete.
+        for handle in handles {
+            handle.await.expect("task should not panic");
+        }
+
+        // Wait for repair tasks to complete.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // Verify all files were repaired to storage1.
+        for i in 0..num_files {
+            let path = format!("prefix1/test-concurrent-{}.parquet", i);
+            let expected_data = format!("data for file {}", i);
+            let repaired = storage1
+                .get(&path, GetOptions::default())
+                .await
+                .expect("should have repaired data");
+            assert_eq!(
+                repaired.as_slice(),
+                expected_data.as_bytes(),
+                "file {} should be repaired",
+                i
+            );
+        }
+
+        println!("read_repair_concurrent_reads: passed");
+    }
+
+    /// Verifies that read repair with a shared semaphore correctly limits total concurrent repairs
+    /// across multiple FragmentReader instances.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_repair_shared_semaphore_limits_concurrency() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        // Upload multiple files only to storage2.
+        let num_files = 10;
+        for i in 0..num_files {
+            let path = format!("prefix2/test-shared-sem-{}.parquet", i);
+            let data = format!("data for shared semaphore file {}", i);
+            storage2
+                .put_bytes(
+                    &path,
+                    data.into_bytes(),
+                    chroma_storage::PutOptions::default(),
+                )
+                .await
+                .expect("upload should succeed");
+        }
+
+        // Create two readers sharing the same semaphore with only 2 permits.
+        let storages = Arc::new(vec![wrapper1.clone(), wrapper2.clone()]);
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 2,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let shared_semaphore = Arc::new(Semaphore::new(2));
+        let reader1 = Arc::new(FragmentReader::new(
+            options.clone(),
+            0,
+            Arc::clone(&storages),
+            Arc::clone(&shared_semaphore),
+        ));
+        let reader2 = Arc::new(FragmentReader::new(
+            options,
+            0,
+            Arc::clone(&storages),
+            Arc::clone(&shared_semaphore),
+        ));
+
+        // Trigger many reads from both readers concurrently.
+        let mut handles = vec![];
+        for i in 0..num_files {
+            let reader = if i % 2 == 0 {
+                Arc::clone(&reader1)
+            } else {
+                Arc::clone(&reader2)
+            };
+            let handle = tokio::spawn(async move {
+                let path = format!("test-shared-sem-{}.parquet", i);
+                let _ = reader.read_bytes(&path).await;
+            });
+            handles.push(handle);
+        }
+
+        // Wait for all reads.
+        for handle in handles {
+            handle.await.expect("task should not panic");
+        }
+
+        // Wait for repairs to complete.
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        // The test verifies that with only 2 permits, some repairs may be skipped.
+        // Count how many files were actually repaired.
+        let mut repaired_count = 0;
+        for i in 0..num_files {
+            let path = format!("prefix1/test-shared-sem-{}.parquet", i);
+            if storage1.get(&path, GetOptions::default()).await.is_ok() {
+                repaired_count += 1;
+            }
+        }
+
+        // At least some files should be repaired (the semaphore allows 2 concurrent).
+        assert!(
+            repaired_count >= 2,
+            "at least 2 files should be repaired, got {}",
+            repaired_count
+        );
+
+        println!(
+            "read_repair_shared_semaphore_limits_concurrency: {} of {} files repaired",
+            repaired_count, num_files
+        );
+    }
+
+    // ==================== read_fragment read repair tests ====================
+
+    /// Verifies that read_fragment triggers read repair when a replica is missing the fragment.
+    /// This test:
+    /// 1. Creates a valid parquet fragment using ReplicatedFragmentUploader
+    /// 2. Deletes the fragment from one storage (simulating a missing replica)
+    /// 3. Uses FragmentReader.read_fragment with read repair enabled
+    /// 4. Verifies the missing replica is repaired after the read
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_fragment_triggers_read_repair() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        // Upload a valid fragment to both storages.
+        let storages = Arc::new(vec![wrapper1.clone(), wrapper2.clone()]);
+        let uploader = ReplicatedFragmentUploader::new(
+            make_test_options(2),
+            LogWriterOptions::default(),
+            0,
+            Arc::clone(&storages),
+        );
+        let pointer = FragmentUuid::generate();
+        let messages = vec![vec![1, 2, 3, 4, 5]];
+        let upload_result = uploader
+            .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
+            .await
+            .expect("upload should succeed");
+        let fragment_path = &upload_result.path;
+
+        // Verify both storages have the fragment.
+        let full_path1 = format!("prefix1/{}", fragment_path);
+        let full_path2 = format!("prefix2/{}", fragment_path);
+        assert!(
+            storage1
+                .get(&full_path1, GetOptions::default())
+                .await
+                .is_ok(),
+            "storage1 should have the fragment"
+        );
+        assert!(
+            storage2
+                .get(&full_path2, GetOptions::default())
+                .await
+                .is_ok(),
+            "storage2 should have the fragment"
+        );
+
+        // Delete the fragment from storage1 (simulating a missing replica).
+        storage1
+            .delete(&full_path1, DeleteOptions::default())
+            .await
+            .expect("delete should succeed");
+
+        // Verify storage1 no longer has the fragment.
+        assert!(
+            storage1
+                .get(&full_path1, GetOptions::default())
+                .await
+                .is_err(),
+            "storage1 should not have the fragment after delete"
+        );
+
+        // Create FragmentReader with preferred=0 (storage1, which is now missing the fragment)
+        // and read repair enabled. Use a small semaphore so we can wait for exhaustion.
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 1,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(1));
+        let reader = FragmentReader::new(options, 0, storages, semaphore.clone());
+
+        // Read the fragment - this should succeed via fallback to storage2 and trigger read repair.
+        let result = reader
+            .read_fragment(fragment_path, crate::LogPosition::from_offset(0))
+            .await;
+        assert!(
+            result.is_ok(),
+            "read_fragment should succeed via fallback: {:?}",
+            result.err()
+        );
+        let fragment = result.unwrap();
+        assert!(fragment.is_some(), "fragment should exist");
+
+        // Wait for the semaphore to be released, indicating repair task completed.
+        let _ = semaphore.acquire().await.expect("should acquire permit");
+
+        // Verify storage1 now has the fragment from read repair.
+        let repaired = storage1.get(&full_path1, GetOptions::default()).await;
+        assert!(
+            repaired.is_ok(),
+            "storage1 should have the fragment after read repair: {:?}",
+            repaired.err()
+        );
+
+        println!("read_fragment_triggers_read_repair: passed");
+    }
+
+    /// Verifies that read_fragment does not trigger read repair when enable_read_repair is false.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_fragment_no_repair_when_disabled() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+
+        // Upload a valid fragment to both storages.
+        let storages = Arc::new(vec![wrapper1.clone(), wrapper2.clone()]);
+        let uploader = ReplicatedFragmentUploader::new(
+            make_test_options(2),
+            LogWriterOptions::default(),
+            0,
+            Arc::clone(&storages),
+        );
+        let pointer = FragmentUuid::generate();
+        let messages = vec![vec![10, 20, 30]];
+        let upload_result = uploader
+            .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
+            .await
+            .expect("upload should succeed");
+        let fragment_path = &upload_result.path;
+
+        // Delete the fragment from storage1.
+        let full_path1 = format!("prefix1/{}", fragment_path);
+        storage1
+            .delete(&full_path1, DeleteOptions::default())
+            .await
+            .expect("delete should succeed");
+
+        // Create FragmentReader with read repair disabled.
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(options.max_concurrent_read_repairs));
+        let reader = FragmentReader::new(options, 0, storages, semaphore.clone());
+
+        // Read the fragment.
+        let result = reader
+            .read_fragment(fragment_path, crate::LogPosition::from_offset(0))
+            .await;
+        assert!(result.is_ok(), "read_fragment should succeed via fallback");
+        assert!(result.unwrap().is_some(), "fragment should exist");
+
+        // With read repair disabled, no permits should have been acquired.
+        // All 16 permits should still be available immediately.
+        assert_eq!(
+            semaphore.available_permits(),
+            16,
+            "semaphore should not have been used when read repair is disabled"
+        );
+
+        // Verify storage1 still does not have the fragment (no read repair).
+        let get_result = storage1.get(&full_path1, GetOptions::default()).await;
+        assert!(
+            get_result.is_err(),
+            "storage1 should not have fragment when read repair is disabled"
+        );
+
+        println!("read_fragment_no_repair_when_disabled: passed");
+    }
+
+    /// Verifies that read_fragment read repair works with multiple missing replicas.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_read_fragment_repairs_multiple_missing() {
+        let storage1 = s3_client_for_test_with_new_bucket().await;
+        let storage2 = s3_client_for_test_with_new_bucket().await;
+        let storage3 = s3_client_for_test_with_new_bucket().await;
+
+        let wrapper1 = make_storage_wrapper(storage1.clone(), "prefix1");
+        let wrapper2 = make_storage_wrapper(storage2.clone(), "prefix2");
+        let wrapper3 = make_storage_wrapper(storage3.clone(), "prefix3");
+
+        // Upload a valid fragment to all three storages.
+        let storages = Arc::new(vec![wrapper1.clone(), wrapper2.clone(), wrapper3.clone()]);
+        let uploader = ReplicatedFragmentUploader::new(
+            make_test_options(3),
+            LogWriterOptions::default(),
+            0,
+            Arc::clone(&storages),
+        );
+        let pointer = FragmentUuid::generate();
+        let messages = vec![vec![100, 101, 102, 103]];
+        let upload_result = uploader
+            .upload_parquet(&pointer, messages, None, TEST_EPOCH_MICROS)
+            .await
+            .expect("upload should succeed");
+        let fragment_path = &upload_result.path;
+
+        // Delete the fragment from storage1 and storage2 (keeping only storage3).
+        let full_path1 = format!("prefix1/{}", fragment_path);
+        let full_path2 = format!("prefix2/{}", fragment_path);
+        storage1
+            .delete(&full_path1, DeleteOptions::default())
+            .await
+            .expect("delete failed");
+        storage2
+            .delete(&full_path2, DeleteOptions::default())
+            .await
+            .expect("delete failed");
+
+        // Create FragmentReader with preferred=0 (storage1).
+        // Use 2 permits so both repairs can proceed, and we can wait for both to complete.
+        let options = ReplicatedFragmentOptions {
+            enable_read_repair: true,
+            max_concurrent_read_repairs: 2,
+            ..ReplicatedFragmentOptions::default()
+        };
+        let semaphore = Arc::new(Semaphore::new(2));
+        let reader = FragmentReader::new(options, 0, storages, semaphore.clone());
+
+        // Read the fragment - should succeed via storage3 and repair storage1 and storage2.
+        let result = reader
+            .read_fragment(fragment_path, crate::LogPosition::from_offset(0))
+            .await;
+        assert!(result.is_ok(), "read_fragment should succeed");
+        assert!(result.unwrap().is_some(), "fragment should exist");
+
+        // Wait for both repair tasks to complete by acquiring all permits.
+        let _permit1 = semaphore.acquire().await.expect("should acquire permit 1");
+        let _permit2 = semaphore.acquire().await.expect("should acquire permit 2");
+
+        // Verify both storage1 and storage2 now have the fragment.
+        let repaired1 = storage1.get(&full_path1, GetOptions::default()).await;
+        assert!(
+            repaired1.is_ok(),
+            "storage1 should have fragment after repair: {:?}",
+            repaired1.err()
+        );
+
+        let repaired2 = storage2.get(&full_path2, GetOptions::default()).await;
+        assert!(
+            repaired2.is_ok(),
+            "storage2 should have fragment after repair: {:?}",
+            repaired2.err()
+        );
+
+        println!("read_fragment_repairs_multiple_missing: passed");
     }
 }
