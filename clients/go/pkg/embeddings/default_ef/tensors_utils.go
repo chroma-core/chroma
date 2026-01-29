@@ -1,3 +1,5 @@
+//go:build unix
+
 package defaultef
 
 import (
@@ -158,7 +160,7 @@ func clipValue[T Number](x, min, max T) T {
 
 // divide performs element-wise division of tensor a by tensor b
 // It supports broadcasting and handles division by zero similar to NumPy
-func divide[T Number](a, b Tensor2D[T]) Tensor2D[T] {
+func divide[T ~float32 | ~float64](a, b Tensor2D[T]) Tensor2D[T] {
 	rowsA, colsA := len(a), len(a[0])
 	rowsB, colsB := len(b), len(b[0])
 
@@ -182,7 +184,7 @@ func divide[T Number](a, b Tensor2D[T]) Tensor2D[T] {
 }
 
 // divideValues performs division for a single pair of values
-func divideValues[T Number](a, b T) T {
+func divideValues[T ~float32 | ~float64](a, b T) T {
 	if b == 0 {
 		switch {
 		case a > 0:
