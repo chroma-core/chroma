@@ -1259,6 +1259,25 @@ impl Where {
             },
         }
     }
+
+    /// Returns a masked copy suitable for logging.
+    /// Sensitive values are replaced with placeholders while preserving structure.
+    pub fn masked(&self) -> Self {
+        match self {
+            Where::Composite(expr) => Where::Composite(CompositeExpression {
+                operator: expr.operator.clone(),
+                children: expr.children.iter().map(|c| c.masked()).collect(),
+            }),
+            Where::Document(expr) => Where::Document(DocumentExpression {
+                operator: expr.operator.clone(),
+                pattern: format!("<len:{}>", expr.pattern.len()),
+            }),
+            Where::Metadata(expr) => Where::Metadata(MetadataExpression {
+                key: expr.key.clone(),
+                comparison: expr.comparison.masked(),
+            }),
+        }
+    }
 }
 
 impl BitAnd for Where {
@@ -1599,6 +1618,41 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
+}
+
+impl MetadataComparison {
+    /// Returns a masked copy suitable for logging.
+    /// Sensitive values are replaced with placeholders while preserving type information.
+    pub fn masked(&self) -> Self {
+        match self {
+            MetadataComparison::Primitive(op, value) => {
+                let masked_value = match value {
+                    MetadataValue::Bool(_) => MetadataValue::Bool(false),
+                    MetadataValue::Int(_) => MetadataValue::Int(0),
+                    MetadataValue::Float(_) => MetadataValue::Float(0.0),
+                    MetadataValue::Str(_) => MetadataValue::Str("<m>".to_string()),
+                    MetadataValue::SparseVector(sv) => MetadataValue::SparseVector(SparseVector {
+                        indices: vec![sv.indices.len() as u32],
+                        values: vec![sv.values.len() as f32],
+                        tokens: None,
+                    }),
+                };
+                MetadataComparison::Primitive(op.clone(), masked_value)
+            }
+            MetadataComparison::Set(op, set_value) => {
+                let masked_set = match set_value {
+                    // Bool can't encode length, convert to Int
+                    MetadataSetValue::Bool(v) => MetadataSetValue::Int(vec![v.len() as i64]),
+                    MetadataSetValue::Int(v) => MetadataSetValue::Int(vec![v.len() as i64]),
+                    MetadataSetValue::Float(v) => MetadataSetValue::Float(vec![v.len() as f64]),
+                    MetadataSetValue::Str(v) => {
+                        MetadataSetValue::Str(vec![format!("<len:{}>", v.len())])
+                    }
+                };
+                MetadataComparison::Set(op.clone(), masked_set)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
