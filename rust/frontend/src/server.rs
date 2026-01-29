@@ -458,6 +458,15 @@ impl FrontendServer {
     responses(
         (status = 200, description = "Success", body = String, content_type = "application/json"),
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "curl",
+                "label": "Healthcheck",
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/healthcheck'"
+            }
+        ]))
     )
 )]
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
@@ -481,6 +490,25 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
     responses(
         (status = 200, description = "Success", body = HeartbeatResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Heartbeat",
+                "source": "const timestamp = await client.heartbeat();"
+            },
+            {
+                "lang": "python",
+                "label": "Heartbeat",
+                "source": "timestamp = client.heartbeat()"
+            },
+            {
+                "lang": "curl",
+                "label": "Heartbeat",
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/heartbeat'"
+            }
+        ]))
     )
 )]
 async fn heartbeat(
@@ -781,6 +809,20 @@ pub struct CreateDatabasePayload {
     ),
     params(
         ("tenant" = String, Path, description = "Tenant UUID")
+        extensions(
+            ("x-codeSamples" = json!([
+                {
+                    "lang": "terminal",
+                    "label": "Create Database",
+                    "source": "chroma db create my-new-db"
+                },
+                {
+                    "lang": "curl",
+                    "label": "Create Database",
+                    "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my-new-db\"}'"
+                }
+            ]))
+        )
     )
 )]
 async fn create_database(
@@ -854,6 +896,20 @@ struct ListDatabasesParams {
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
         ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "terminal",
+                "label": "List Databases",
+                "source": "chroma db list"
+            }
+            {
+                "lang": "curl",
+                "label": "List Databases",
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn list_databases(
@@ -952,6 +1008,20 @@ async fn get_database(
     params(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "terminal",
+                "label": "Delete Database",
+                "source": "chroma db delete my-db"
+            },
+            {
+                "lang": "curl",
+                "label": "Delete Database",
+                "source": "curl -X DELETE 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn delete_database(
@@ -1006,6 +1076,25 @@ struct ListCollectionsParams {
         ("database" = String, Path, description = "Database name"),
         ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
         ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "List collections",
+                "source": "const collections = await client.listCollections({ limit: 10, offset: 0 });"
+            },
+            {
+                "lang": "python",
+                "label": "List collections",
+                "source": "collections = client.list_collections()"
+            },
+            {
+                "lang": "curl",
+                "label": "List collections",
+                "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn list_collections(
@@ -1073,6 +1162,25 @@ async fn list_collections(
     params(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Count collections",
+                "source": "const count: number = await client.countCollections();"
+            },
+            {
+                "lang": "python",
+                "label": "Count collections",
+                "source": "count = client.count_collections()"
+            },
+            {
+                "lang": "curl",
+                "label": "Count collections",
+                "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections_count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn count_collections(
@@ -1135,6 +1243,30 @@ async fn count_collections(
     params(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Create collection",
+                "source": "const collection = await client.createCollection({ name: 'my_collection' });"
+            },
+            {
+                "lang": "python",
+                "label": "Create collection",
+                "source": "collection = client.create_collection(name='my_collection')"
+            },
+            {
+                "lang": "rust",
+                "label": "Create collection",
+                "source": "let collection = client.get_or_create_collection(\"my_collection\", None).await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Create collection",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my_collection\"}'"
+            }
+        ]))
     )
 )]
 async fn create_collection(
@@ -1224,6 +1356,25 @@ async fn create_collection(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get collection",
+                "source": "const collection = await client.getCollection({ name: 'my_collection' });"
+            },
+            {
+                "lang": "python",
+                "label": "Get collection",
+                "source": "collection = client.get_collection(name='my_collection')"
+            },
+            {
+                "lang": "curl",
+                "label": "Get collection",
+                "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn get_collection(
@@ -1328,6 +1479,25 @@ async fn get_collection_by_crn(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Update collection",
+                "source": "await collection.modify({ name: 'new_name', metadata: { key: 'value' } });"
+            },
+            {
+                "lang": "python",
+                "label": "Update collection",
+                "source": "collection.modify(name='new_name', metadata={'key': 'value'})"
+            },
+            {
+                "lang": "curl",
+                "label": "Update collection",
+                "source": "curl -X PUT 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"new_name\", \"metadata\": {\"key\": \"value\"}}'"
+            }
+        ]))
     )
 )]
 async fn update_collection(
@@ -1550,6 +1720,25 @@ async fn fork_collection(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Add records",
+                "source": "await collection.add({ ids: ['id1', 'id2'], embeddings: [[0.1, 0.2], [0.3, 0.4]], documents: ['doc1', 'doc2'] });"
+            },
+            {
+                "lang": "python",
+                "label": "Add records",
+                "source": "collection.add(ids=['id1', 'id2'], embeddings=[[0.1, 0.2], [0.3, 0.4]], documents=['doc1', 'doc2'])"
+            },
+            {
+                "lang": "curl",
+                "label": "Add records",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
+            }
+        ]))
     )
 )]
 // NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
@@ -1664,6 +1853,25 @@ async fn collection_add(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Update records",
+                "source": "await collection.update({ ids: ['id1'], documents: ['updated doc'], metadatas: [{ key: 'value' }] });"
+            },
+            {
+                "lang": "python",
+                "label": "Update records",
+                "source": "collection.update(ids=['id1'], documents=['updated doc'], metadatas=[{'key': 'value'}])"
+            },
+            {
+                "lang": "curl",
+                "label": "Update records",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\"], \"documents\": [\"updated doc\"], \"metadatas\": [{\"key\": \"value\"}]}'"
+            }
+        ]))
     )
 )]
 // NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
@@ -1781,6 +1989,30 @@ async fn collection_update(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Upsert records",
+                "source": "await collection.upsert({ ids: ['id1', 'id2'], embeddings: [[0.1, 0.2], [0.3, 0.4]], documents: ['doc1', 'doc2'] });"
+            },
+            {
+                "lang": "python",
+                "label": "Upsert records",
+                "source": "collection.upsert(ids=['id1', 'id2'], embeddings=[[0.1, 0.2], [0.3, 0.4]], documents=['doc1', 'doc2'])"
+            },
+            {
+                "lang": "rust",
+                "label": "Upsert records",
+                "source": "collection.upsert(collection_entries, None).await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Upsert records",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
+            }
+        ]))
     )
 )]
 // NOTE(hammadb) collection_[add, upsert, update] can have large payloads, so we trace
@@ -1896,6 +2128,40 @@ async fn collection_upsert(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Delete records by IDs",
+                "source": "await collection.delete({ ids: ['id1', 'id2'] });"
+            },
+            {
+                "lang": "typescript",
+                "label": "Delete records by metadata filter",
+                "source": "await collection.delete({ where: { category: 'old' } });"
+            },
+            {
+                "lang": "python",
+                "label": "Delete records by IDs",
+                "source": "collection.delete(ids=['id1', 'id2'])"
+            },
+            {
+                "lang": "python",
+                "label": "Delete records by metadata filter",
+                "source": "collection.delete(where={'category': 'old'})"
+            },
+            {
+                "lang": "curl",
+                "label": "Delete records by IDs",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
+            },
+            {
+                "lang": "curl",
+                "label": "Delete records by metadata filter",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"old\"}}'"
+            }
+        ]))
     )
 )]
 async fn collection_delete(
@@ -1994,6 +2260,25 @@ async fn collection_delete(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Count records",
+                "source": "const count = await collection.count();"
+            },
+            {
+                "lang": "python",
+                "label": "Count records",
+                "source": "count = collection.count()"
+            },
+            {
+                "lang": "curl",
+                "label": "Count records",
+                "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn collection_count(
@@ -2186,6 +2471,45 @@ async fn indexing_status(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get records by IDs",
+                "source": "const results = await collection.get({ ids: ['id1', 'id2'] });"
+            },
+            {
+                "lang": "typescript",
+                "label": "Get records by metadata filter",
+                "source": "const results = await collection.get({ where: { category: 'science' }, limit: 10 });"
+            },
+            {
+                "lang": "python",
+                "label": "Get records by IDs",
+                "source": "results = collection.get(ids=['id1', 'id2'])"
+            },
+            {
+                "lang": "python",
+                "label": "Get records by metadata filter",
+                "source": "results = collection.get(where={'category': 'science'}, limit=10)"
+            },
+            {
+                "lang": "rust",
+                "label": "Get records",
+                "source": "let get_result: GetResult = collection.get(get_query).await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Get records by IDs",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
+            },
+            {
+                "lang": "curl",
+                "label": "Get records by metadata filter",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"science\"}, \"limit\": 10}'"
+            }
+        ]))
     )
 )]
 async fn collection_get(
@@ -2328,6 +2652,45 @@ async fn collection_get(
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("limit" = Option<u32>, Query, description = "Limit for pagination", minimum = 1, example = 10),
         ("offset" = Option<u32>, Query, description = "Offset for pagination", minimum = 0, example = 0)
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Query with embeddings",
+                "source": "const results = await collection.query({ queryEmbeddings: [[0.1, 0.2, 0.3]], nResults: 10 });"
+            },
+            {
+                "lang": "typescript",
+                "label": "Query with text",
+                "source": "const results = await collection.query({ queryTexts: ['search text'], nResults: 10 });"
+            },
+            {
+                "lang": "python",
+                "label": "Query with embeddings",
+                "source": "results = collection.query(query_embeddings=[[0.1, 0.2, 0.3]], n_results=10)"
+            },
+            {
+                "lang": "python",
+                "label": "Query with text",
+                "source": "results = collection.query(query_texts=['search text'], n_results=10)"
+            },
+            {
+                "lang": "rust",
+                "label": "Query collection",
+                "source": "let query_result: QueryResult = collection.query(query, None).await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Query with embeddings",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}'"
+            },
+            {
+                "lang": "curl",
+                "label": "Query with text",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_texts\": [\"search text\"], \"n_results\": 10}'"
+            }
+        ]))
     )
 )]
 
@@ -2472,6 +2835,25 @@ async fn collection_query(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Search with embeddings",
+                "source": "import { Search, K, Knn } from 'chromadb';\nconst results = await collection.search(new Search().rank(Knn({ query: [0.1, 0.2, 0.3], limit: 10 })));"
+            },
+            {
+                "lang": "python",
+                "label": "Search with embeddings",
+                "source": "from chromadb import Search, Knn\nsearch = Search().rank(Knn(query=[0.1, 0.2, 0.3], limit=10))\nresults = collection.search(search)"
+            },
+            {
+                "lang": "curl",
+                "label": "Search with embeddings",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"searches\": [{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}]}'"
+            }
+        ]))
     )
 )]
 async fn collection_search(
