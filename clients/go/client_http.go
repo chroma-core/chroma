@@ -23,8 +23,7 @@ type APIClientV2 struct {
 	preflightConditionsRaw map[string]interface{}
 	preflightLimits        map[string]interface{}
 	preflightCompleted     bool
-	preflightOnce          sync.Once
-	preflightErr           error
+	preflightMu            sync.Mutex
 	collectionCache        map[string]Collection
 	collectionMu           sync.RWMutex
 }
@@ -61,41 +60,42 @@ func NewHTTPClient(opts ...ClientOption) (Client, error) {
 }
 
 func (client *APIClientV2) PreFlight(ctx context.Context) error {
-	client.preflightOnce.Do(func() {
-		reqURL, err := url.JoinPath(client.BaseURL(), "pre-flight-checks")
-		if err != nil {
-			client.preflightErr = err
-			return
+	client.preflightMu.Lock()
+	defer client.preflightMu.Unlock()
+
+	if client.preflightCompleted {
+		return nil
+	}
+
+	reqURL, err := url.JoinPath(client.BaseURL(), "pre-flight-checks")
+	if err != nil {
+		return err
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.SendRequest(httpReq)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var preflightLimits map[string]interface{}
+	if json.NewDecoder(resp.Body).Decode(&preflightLimits) != nil {
+		return errors.New("error decoding preflight response")
+	}
+	client.preflightConditionsRaw = preflightLimits
+	if mbs, ok := preflightLimits["max_batch_size"]; ok {
+		if maxBatchSize, ok := mbs.(float64); ok {
+			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationCreate))] = int(maxBatchSize)
+			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationGet))] = int(maxBatchSize)
+			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationQuery))] = int(maxBatchSize)
+			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationUpdate))] = int(maxBatchSize)
+			client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationDelete))] = int(maxBatchSize)
 		}
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-		if err != nil {
-			client.preflightErr = err
-			return
-		}
-		resp, err := client.SendRequest(httpReq)
-		if err != nil {
-			client.preflightErr = err
-			return
-		}
-		defer func() { _ = resp.Body.Close() }()
-		var preflightLimits map[string]interface{}
-		if json.NewDecoder(resp.Body).Decode(&preflightLimits) != nil {
-			client.preflightErr = errors.New("error decoding preflight response")
-			return
-		}
-		client.preflightConditionsRaw = preflightLimits
-		if mbs, ok := preflightLimits["max_batch_size"]; ok {
-			if maxBatchSize, ok := mbs.(float64); ok {
-				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationCreate))] = int(maxBatchSize)
-				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationGet))] = int(maxBatchSize)
-				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationQuery))] = int(maxBatchSize)
-				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationUpdate))] = int(maxBatchSize)
-				client.preflightLimits[fmt.Sprintf("%s#%s", string(ResourceCollection), string(OperationDelete))] = int(maxBatchSize)
-			}
-		}
-		client.preflightCompleted = true
-	})
-	return client.preflightErr
+	}
+	client.preflightCompleted = true
+	return nil
 }
 
 func (client *APIClientV2) GetVersion(ctx context.Context) (string, error) {
