@@ -650,7 +650,7 @@ async fn create_tenant(
         ("ApiKeyAuth" = [])
     ),
     params(
-        ("tenant_name" = String, Path, description = "Tenant name")
+        ("tenant_name" = String, Path, description = "Tenant UUID")
     ),
     responses(
         (status = 200, description = "Tenant found", body = GetTenantResponse,
@@ -703,7 +703,7 @@ pub struct UpdateTenantPayload {
         ("ApiKeyAuth" = [])
     ),
     params(
-        ("tenant_name" = String, Path, description = "Tenant name")
+        ("tenant_name" = String, Path, description = "Tenant UUID")
     ),
     request_body = UpdateTenantPayload,
     responses(
