@@ -1,3 +1,9 @@
+//go:build unix
+
+// This package currently supports Unix systems only (Linux, macOS).
+// The file locking mechanism uses Unix signals to detect stale locks.
+// Windows support may be added in a future release.
+
 package defaultef
 
 import (
@@ -7,6 +13,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -113,8 +120,17 @@ func isLockStale(lockPath string) bool {
 }
 
 func downloadFile(filepath string, url string) error {
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: (&net.Dialer{
+				Timeout: 30 * time.Second,
+			}).DialContext,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 30 * time.Second,
+		},
+	}
 
-	resp, err := http.Get(url)
+	resp, err := client.Get(url)
 	if err != nil {
 		return errors.Wrap(err, "failed to make HTTP request")
 	}
