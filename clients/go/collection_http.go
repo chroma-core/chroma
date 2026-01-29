@@ -111,12 +111,16 @@ func (c *CollectionImpl) Add(ctx context.Context, opts ...CollectionAddOption) e
 	}
 	if sbe, ok := c.client.GetPreFlightConditionsRaw()["supports_base64_encoding"]; ok {
 		if supportsBase64, ok := sbe.(bool); ok && supportsBase64 {
-			// encode embeddings
 			packedEmbeddings := make([]any, 0)
 			for _, e := range addObject.Embeddings {
 				f32Emb, ok := e.(*embeddings.Float32Embedding)
 				if !ok {
-					return errors.New("unsupported embedding type: expected Float32Embedding for base64 encoding")
+					// Fallback to JSON encoding for non-Float32 embeddings
+					if c.client.logger.IsDebugEnabled() {
+						c.client.logger.Debug("base64 encoding not supported for embedding type, falling back to JSON")
+					}
+					packedEmbeddings = append(packedEmbeddings, e)
+					continue
 				}
 				packedE := packEmbeddingSafely(f32Emb.ContentAsFloat32())
 				packedEmbeddings = append(packedEmbeddings, packedE)
@@ -158,12 +162,16 @@ func (c *CollectionImpl) Upsert(ctx context.Context, opts ...CollectionAddOption
 	}
 	if sbe, ok := c.client.GetPreFlightConditionsRaw()["supports_base64_encoding"]; ok {
 		if supportsBase64, ok := sbe.(bool); ok && supportsBase64 {
-			// encode embeddings
 			packedEmbeddings := make([]any, 0)
 			for _, e := range upsertObject.Embeddings {
 				f32Emb, ok := e.(*embeddings.Float32Embedding)
 				if !ok {
-					return errors.New("unsupported embedding type: expected Float32Embedding for base64 encoding")
+					// Fallback to JSON encoding for non-Float32 embeddings
+					if c.client.logger.IsDebugEnabled() {
+						c.client.logger.Debug("base64 encoding not supported for embedding type, falling back to JSON")
+					}
+					packedEmbeddings = append(packedEmbeddings, e)
+					continue
 				}
 				packedE := packEmbeddingSafely(f32Emb.ContentAsFloat32())
 				packedEmbeddings = append(packedEmbeddings, packedE)
@@ -204,12 +212,16 @@ func (c *CollectionImpl) Update(ctx context.Context, opts ...CollectionUpdateOpt
 	}
 	if sbe, ok := c.client.GetPreFlightConditionsRaw()["supports_base64_encoding"]; ok {
 		if supportsBase64, ok := sbe.(bool); ok && supportsBase64 {
-			// encode embeddings
 			packedEmbeddings := make([]any, 0)
 			for _, e := range updateObject.Embeddings {
 				f32Emb, ok := e.(*embeddings.Float32Embedding)
 				if !ok {
-					return errors.New("unsupported embedding type: expected Float32Embedding for base64 encoding")
+					// Fallback to JSON encoding for non-Float32 embeddings
+					if c.client.logger.IsDebugEnabled() {
+						c.client.logger.Debug("base64 encoding not supported for embedding type, falling back to JSON")
+					}
+					packedEmbeddings = append(packedEmbeddings, e)
+					continue
 				}
 				packedE := packEmbeddingSafely(f32Emb.ContentAsFloat32())
 				packedEmbeddings = append(packedEmbeddings, packedE)
@@ -421,12 +433,86 @@ func (c *CollectionImpl) Search(ctx context.Context, opts ...SearchCollectionOpt
 	return &result, nil
 }
 
-// embedTextQueries embeds any text queries in the search request
+// embedTextQueries embeds any text queries in the search request.
+// It clones the rank tree first to avoid mutating the user's original rank objects,
+// which allows safe reuse of rank definitions across multiple searches.
 func (c *CollectionImpl) embedTextQueries(ctx context.Context, req *SearchRequest) error {
 	if req.Rank == nil {
 		return nil
 	}
+	req.Rank = cloneRank(req.Rank)
 	return c.embedRankTextQueries(ctx, req.Rank)
+}
+
+// cloneRank creates a deep copy of a rank tree to avoid mutating user-provided rank objects.
+func cloneRank(rank Rank) Rank {
+	if rank == nil {
+		return nil
+	}
+	switch r := rank.(type) {
+	case *KnnRank:
+		clone := *r
+		return &clone
+	case *RrfRank:
+		clone := *r
+		clone.Ranks = make([]RankWithWeight, len(r.Ranks))
+		for i, rw := range r.Ranks {
+			clone.Ranks[i] = RankWithWeight{
+				Rank:   cloneRank(rw.Rank),
+				Weight: rw.Weight,
+			}
+		}
+		return &clone
+	case *ValRank:
+		clone := *r
+		return &clone
+	case *SumRank:
+		clone := *r
+		clone.ranks = make([]Rank, len(r.ranks))
+		for i, child := range r.ranks {
+			clone.ranks[i] = cloneRank(child)
+		}
+		return &clone
+	case *SubRank:
+		return &SubRank{
+			left:  cloneRank(r.left),
+			right: cloneRank(r.right),
+		}
+	case *MulRank:
+		clone := *r
+		clone.ranks = make([]Rank, len(r.ranks))
+		for i, child := range r.ranks {
+			clone.ranks[i] = cloneRank(child)
+		}
+		return &clone
+	case *DivRank:
+		return &DivRank{
+			left:  cloneRank(r.left),
+			right: cloneRank(r.right),
+		}
+	case *AbsRank:
+		return &AbsRank{rank: cloneRank(r.rank)}
+	case *ExpRank:
+		return &ExpRank{rank: cloneRank(r.rank)}
+	case *LogRank:
+		return &LogRank{rank: cloneRank(r.rank)}
+	case *MaxRank:
+		clone := *r
+		clone.ranks = make([]Rank, len(r.ranks))
+		for i, child := range r.ranks {
+			clone.ranks[i] = cloneRank(child)
+		}
+		return &clone
+	case *MinRank:
+		clone := *r
+		clone.ranks = make([]Rank, len(r.ranks))
+		for i, child := range r.ranks {
+			clone.ranks[i] = cloneRank(child)
+		}
+		return &clone
+	default:
+		return rank
+	}
 }
 
 // embedRankTextQueries recursively embeds text queries in rank expressions.

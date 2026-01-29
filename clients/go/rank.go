@@ -1101,6 +1101,9 @@ func NewRrfRank(opts ...RffOption) (*RrfRank, error) {
 }
 
 func (r *RrfRank) Validate() error {
+	if r.K < 1 {
+		return errors.New("rrf k must be >= 1")
+	}
 	if len(r.Ranks) == 0 {
 		return errors.New("rrf requires at least one rank")
 	}
