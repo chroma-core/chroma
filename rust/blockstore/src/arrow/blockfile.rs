@@ -526,13 +526,9 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
         // TODO: These need to be separate tasks enqueued onto dispatcher.
         let mut futures = Vec::new();
         for block_id in block_ids {
-            // Don't prefetch if already cached.
-            // We do not dispatch if block is present in the block manager's cache
-            // but not present in the reader's cache (i.e. loaded_blocks). The
-            // next read for this block using this reader instance will populate it.
-            if !self.block_manager.cached(block_id).await
-                && !self.loaded_blocks.read().contains_key(block_id)
-            {
+            // Skip if already loaded in this reader's cache.
+            // The block manager's get() will handle checking its own cache.
+            if !self.loaded_blocks.read().contains_key(block_id) {
                 futures.push(self.get_block(*block_id, StorageRequestPriority::P0));
             }
         }
