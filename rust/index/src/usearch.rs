@@ -83,6 +83,9 @@ impl ChromaError for USearchError {
     }
 }
 
+// NOTE(sicheng): The reserve buffer prevents concurrent adds passing capacity check at the
+// same time and overflow the reserved space. The buffer size should be greater than the
+// number of concurrent threads working on the same index.
 const RESERVE_BUFFER: usize = 128;
 
 #[derive(Clone)]
@@ -127,7 +130,7 @@ impl USearchIndex {
     async fn save(&self) -> Result<Vec<u8>, USearchError> {
         let index = self.index.clone();
         spawn_blocking(move || {
-            let guard = index.read()?;
+            let guard = index.write()?;
             let mut buffer = vec![0u8; guard.serialized_length()];
             guard
                 .save_to_buffer(&mut buffer)
@@ -199,13 +202,12 @@ impl VectorIndex for USearchIndex {
             }
         }
 
-        let index = self.index.read()?;
         if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(vector, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            index.add(key, i8_slice)
+            self.index.read()?.add(key, i8_slice)
         } else {
-            index.add(key, vector)
+            self.index.read()?.add(key, vector)
         }
         .map_err(|e| USearchError::Index(e.to_string()))
     }
@@ -250,14 +252,12 @@ impl VectorIndex for USearchIndex {
     }
 
     fn search(&self, query: &[f32], count: usize) -> Result<SearchResult, Self::Error> {
-        let index = self.index.read()?;
-
         let matches = if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(query, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            index.search(i8_slice, count)
+            self.index.read()?.search(i8_slice, count)
         } else {
-            index.search(query, count)
+            self.index.read()?.search(query, count)
         }
         .map_err(|e| USearchError::Index(e.to_string()))?;
 
