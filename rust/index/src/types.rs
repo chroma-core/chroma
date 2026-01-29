@@ -2,8 +2,6 @@ use chroma_distance::DistanceFunction;
 use chroma_error::ChromaError;
 use uuid::Uuid;
 
-use crate::WrappedHnswError;
-
 #[derive(Clone, Debug)]
 pub struct IndexConfig {
     pub dimensionality: i32,
@@ -19,70 +17,43 @@ impl IndexConfig {
     }
 }
 
-/// The index trait.
-/// # Description
-/// This trait defines the interface for a KNN index.
-/// # Methods
-/// - `init` - Initialize the index with a given dimension and distance function.
-/// - `add` - Add a vector to the index.
-/// - `delete` - Delete a vector from the index.
-/// - `query` - Query the index for the K nearest neighbors of a given vector.
-/// - `resize` - Resize the index to a new capacity.
-pub trait Index<C> {
-    fn init(
-        index_config: &IndexConfig,
-        custom_config: Option<&C>,
-        id: IndexUuid,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
-    fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>>;
-    fn delete(&self, id: usize) -> Result<(), Box<dyn ChromaError>>;
-    fn query(
-        &self,
-        vector: &[f32],
-        k: usize,
-        allowed_ids: &[usize],
-        disallow_ids: &[usize],
-    ) -> Result<(Vec<usize>, Vec<f32>), Box<dyn ChromaError>>;
-    fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>>;
-    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>>;
-    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>>;
+/// Result of a vector search operation.
+#[derive(Clone, Debug)]
+pub struct SearchResult {
+    pub keys: Vec<u64>,
+    pub distances: Vec<f32>,
 }
 
-/// The persistent index trait.
-/// # Description
-/// This trait defines the interface for a persistent KNN index.
-/// # Methods
-/// - `save` - Save the index to a given path. Configuration of the destination is up to the implementation.
-/// - `load` - Load the index from a given path.
-/// # Notes
-/// This defines a rudimentary interface for saving and loading indices.
-/// TODO: Right now load() takes IndexConfig because we don't implement save/load of the config.
-pub trait PersistentIndex<C>: Index<C> {
-    fn save(&self) -> Result<(), Box<dyn ChromaError>>;
-    fn load(
-        path: &str,
-        index_config: &IndexConfig,
-        ef_search: usize,
-        id: IndexUuid,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
+/// Trait for dense vector indexes supporting CRUD and similarity search.
+pub trait VectorIndex {
+    type Error: ChromaError;
 
-    // This function is used to load the index from memory without using disk.
-    // TODO(tanujnay112): Replace `load` from above with this once we stablize
-    // loading HNSW via memory.
-    fn load_from_hnsw_data(
-        hnsw_data: &hnswlib::HnswData,
-        index_config: &IndexConfig,
-        ef_search: usize,
-        id: IndexUuid,
-    ) -> Result<Self, Box<dyn ChromaError>>
-    where
-        Self: Sized;
+    /// Add a vector to the index with the given key.
+    fn add(&self, key: u64, vector: &[f32]) -> Result<(), Self::Error>;
 
-    fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, WrappedHnswError>;
+    /// Returns the current capacity of the index.
+    fn capacity(&self) -> Result<usize, Self::Error>;
+
+    /// Retrieve the vector for a given key.
+    /// Returns `None` if the key doesn't exist.
+    fn get(&self, key: u64) -> Result<Option<Vec<f32>>, Self::Error>;
+
+    /// Returns true if the index contains no vectors.
+    fn is_empty(&self) -> Result<bool, Self::Error> {
+        Ok(self.len()? == 0)
+    }
+
+    /// Returns the number of vectors in the index.
+    fn len(&self) -> Result<usize, Self::Error>;
+
+    /// Remove a vector from the index by key.
+    fn remove(&self, key: u64) -> Result<(), Self::Error>;
+
+    /// Reserve capacity for at least `capacity` vectors.
+    fn reserve(&self, capacity: usize) -> Result<(), Self::Error>;
+
+    /// Search for the nearest neighbors of a query vector.
+    fn search(&self, query: &[f32], count: usize) -> Result<SearchResult, Self::Error>;
 }
 
 /// IndexUuid is a wrapper around Uuid to provide a type for the index id.
@@ -93,4 +64,38 @@ impl std::fmt::Display for IndexUuid {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+/// Mode for opening a vector index.
+#[derive(Clone, Debug)]
+pub enum OpenMode {
+    /// Create a new empty index.
+    Create,
+    /// Open an existing index by ID.
+    Open(IndexUuid),
+    /// Fork an existing index for writing (clones data, assigns new UUID).
+    Fork(IndexUuid),
+}
+
+/// Trait for managing the lifecycle of vector indexes.
+#[async_trait::async_trait]
+pub trait VectorIndexProvider {
+    type Index: VectorIndex;
+    type Config;
+    type Error: ChromaError;
+
+    /// Finalize the index and return its ID.
+    async fn commit(&self, index: &Self::Index) -> Result<IndexUuid, Self::Error>;
+
+    /// Persist the index to storage.
+    async fn flush(&self, index: &Self::Index) -> Result<(), Self::Error>;
+
+    /// Open a vector index.
+    ///
+    /// # Modes
+    /// - `Create`: Create a new empty index
+    /// - `Open(id)`: Load an existing index by ID
+    /// - `Fork(id)`: Clone an existing index for writing (new UUID)
+    async fn open(&self, config: &Self::Config, mode: OpenMode)
+        -> Result<Self::Index, Self::Error>;
 }

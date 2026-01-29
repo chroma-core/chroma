@@ -7,7 +7,7 @@ use std::{
 
 use chroma_cache::Weighted;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_index::{HnswIndex, HnswIndexConfig, Index, IndexConfig, PersistentIndex};
+use chroma_index::{HnswIndex, HnswIndexConfig, IndexConfig};
 use chroma_sqlite::{db::SqliteDb, table::MaxSeqId};
 use chroma_types::{
     operator::RecordMeasure, Chunk, Collection, HnswParametersFromSegmentError, LogRecord,

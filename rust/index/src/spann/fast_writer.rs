@@ -25,7 +25,7 @@ use crate::{
         GarbageCollectionContext, HnswGarbageCollectionPolicy, PlGarbageCollectionPolicy,
         SpannIndexFlusher, SpannIndexFlusherMetrics, SpannIndexWriterError,
     },
-    Index, IndexUuid,
+    IndexUuid,
 };
 
 use super::utils::{cluster, KMeansAlgorithmInput, KMeansError};
@@ -2234,7 +2234,6 @@ mod tests {
         config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
         hnsw_provider::HnswIndexProvider,
         spann::types::GarbageCollectionContext,
-        Index,
     };
 
     use super::{FastSpannIndexWriter, SpannMetrics};

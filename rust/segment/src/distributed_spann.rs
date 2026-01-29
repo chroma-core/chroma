@@ -617,7 +617,6 @@ mod test {
         },
         hnsw_provider::HnswIndexProvider,
         spann::types::{GarbageCollectionContext, SpannMetrics},
-        Index,
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{

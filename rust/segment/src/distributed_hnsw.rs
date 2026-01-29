@@ -7,7 +7,7 @@ use chroma_index::hnsw_provider::{
     HnswIndexProvider, HnswIndexProviderCreateError, HnswIndexProviderForkError,
     HnswIndexProviderOpenError, HnswIndexRef,
 };
-use chroma_index::{Index, IndexUuid};
+use chroma_index::IndexUuid;
 use chroma_types::{
     Cmek, Collection, HnswParametersFromSegmentError, MaterializedLogOperation, Schema,
     SchemaError, Segment, SegmentUuid,

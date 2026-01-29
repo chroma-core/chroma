@@ -1,4 +1,7 @@
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use chroma_cache::{Cache, Weighted};
 use chroma_distance::DistanceFunction;
@@ -10,12 +13,37 @@ use chroma_types::{Cmek, CollectionUuid};
 use crossbeam::sync::ShardedLock;
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
+use tokio::task::spawn_blocking;
 use tracing::Instrument;
 use usearch::{IndexOptions, MetricKind, ScalarKind};
 use uuid::Uuid;
 
-use crate::quantization::Code;
-use crate::IndexUuid;
+use crate::{
+    quantization::Code, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+};
+
+/// Configuration for opening a USearch index.
+#[derive(Clone)]
+pub struct USearchIndexConfig {
+    /// Collection ID used as cache key for fairness (one index per collection per type).
+    pub collection_id: CollectionUuid,
+    /// Customer-managed encryption key for storage.
+    pub cmek: Option<Cmek>,
+    /// S3 path prefix for storage.
+    pub prefix_path: String,
+    /// Vector dimensionality.
+    pub dimensions: usize,
+    /// Distance metric (Cosine, Euclidean, InnerProduct).
+    pub distance_function: DistanceFunction,
+    /// HNSW M parameter (number of connections per node).
+    pub connectivity: usize,
+    /// HNSW ef_construction parameter (search width during index building).
+    pub expansion_add: usize,
+    /// HNSW ef_search parameter (search width during queries).
+    pub expansion_search: usize,
+    /// If provided, use RaBitQ quantization with this center point.
+    pub quantization_center: Option<Arc<[f32]>>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CacheKey {
@@ -31,6 +59,8 @@ pub enum USearchError {
     Index(String),
     #[error("Lock poisoned")]
     Poison,
+    #[error("Cannot retrieve embeddings from quantized index")]
+    QuantizedEmbedding,
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
 }
@@ -44,106 +74,33 @@ impl<T> From<std::sync::PoisonError<T>> for USearchError {
 impl ChromaError for USearchError {
     fn code(&self) -> ErrorCodes {
         match self {
-            USearchError::Cache(_) => ErrorCodes::Internal,
+            USearchError::Cache(err) => err.code(),
             USearchError::Index(_) => ErrorCodes::Internal,
             USearchError::Poison => ErrorCodes::Internal,
+            USearchError::QuantizedEmbedding => ErrorCodes::InvalidArgument,
             USearchError::Storage(err) => err.code(),
         }
     }
 }
 
+// NOTE(sicheng): The reserve buffer prevents concurrent adds passing capacity check at the
+// same time and overflow the reserved space. The buffer size should be greater than the
+// number of concurrent threads working on the same index.
+const RESERVE_BUFFER: usize = 128;
+
 #[derive(Clone)]
 pub struct USearchIndex {
     id: IndexUuid,
     cache_key: CacheKey,
+    cmek: Option<Cmek>,
     index: Arc<ShardedLock<usearch::Index>>,
     prefix_path: String,
     quantization_center: Option<Arc<[f32]>>,
+    tombstones: Arc<AtomicUsize>,
 }
 
 impl USearchIndex {
-    /// Add a vector to the index with the given key.
-    /// For quantized indexes, the vector will be encoded internally.
-    pub fn add(&self, key: u64, vector: &[f32]) -> Result<(), USearchError> {
-        let index = self.index.read()?;
-
-        if let Some(center) = &self.quantization_center {
-            let code = Code::<_>::quantize(vector, center);
-            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            index.add(key, i8_slice)
-        } else {
-            index.add(key, vector)
-        }
-        .map_err(|e| USearchError::Index(e.to_string()))
-    }
-
-    /// Mark a key as deleted in the index.
-    pub fn delete(&self, key: u64) -> Result<(), USearchError> {
-        self.index
-            .read()?
-            .remove(key)
-            .map_err(|e| USearchError::Index(e.to_string()))?;
-        Ok(())
-    }
-
-    /// Query for k nearest neighbors.
-    /// Returns (keys, distances).
-    pub fn query(&self, vector: &[f32], k: usize) -> Result<(Vec<u64>, Vec<f32>), USearchError> {
-        let index = self.index.read()?;
-
-        let matches = if let Some(center) = &self.quantization_center {
-            let code = Code::<_>::quantize(vector, center);
-            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            index.search(i8_slice, k)
-        } else {
-            index.search(vector, k)
-        }
-        .map_err(|e| USearchError::Index(e.to_string()))?;
-
-        Ok((matches.keys, matches.distances))
-    }
-
-    /// Retrieve the vector for a given key.
-    /// Returns None if key doesn't exist or if this is a quantized index.
-    pub fn get(&self, key: u64) -> Result<Option<Vec<f32>>, USearchError> {
-        if self.quantization_center.is_some() {
-            return Ok(None);
-        }
-
-        let mut vector = Vec::new();
-        let count = self
-            .index
-            .read()?
-            .export(key, &mut vector)
-            .map_err(|e| USearchError::Index(e.to_string()))?;
-
-        Ok((count > 0).then_some(vector))
-    }
-
-    /// Number of vectors in the index.
-    pub fn len(&self) -> Result<usize, USearchError> {
-        Ok(self.index.read()?.size())
-    }
-
-    /// Check if index is empty.
-    pub fn is_empty(&self) -> Result<bool, USearchError> {
-        Ok(self.len()? == 0)
-    }
-
-    /// Current capacity of the index.
-    pub fn capacity(&self) -> Result<usize, USearchError> {
-        Ok(self.index.read()?.capacity())
-    }
-
-    /// Reserve capacity for at least `capacity` vectors.
-    /// No-op if current capacity is already sufficient.
-    pub fn reserve(&self, capacity: usize) -> Result<(), USearchError> {
-        self.index
-            .write()?
-            .reserve(capacity)
-            .map_err(|e| USearchError::Index(e.to_string()))
-    }
-
+    /// Format the storage key for this index.
     pub fn format_storage_key(prefix_path: &str, id: IndexUuid, quantized: bool) -> String {
         let kind = if quantized { "quantized" } else { "raw" };
         if prefix_path.is_empty() {
@@ -153,10 +110,42 @@ impl USearchIndex {
         }
     }
 
+    /// Load serialized data into the index.
+    async fn load(&self, data: Arc<Vec<u8>>) -> Result<(), USearchError> {
+        let index = self.index.clone();
+        let tombstones = self.tombstones.clone();
+        spawn_blocking(move || {
+            index
+                .write()?
+                .load_from_buffer(&data)
+                .map_err(|e| USearchError::Index(e.to_string()))?;
+            tombstones.store(0, Ordering::Relaxed);
+            Ok(())
+        })
+        .await
+        .map_err(|e| USearchError::Index(e.to_string()))?
+    }
+
+    /// Serialize the index to a buffer.
+    async fn save(&self) -> Result<Vec<u8>, USearchError> {
+        let index = self.index.clone();
+        spawn_blocking(move || {
+            let guard = index.write()?;
+            let mut buffer = vec![0u8; guard.serialized_length()];
+            guard
+                .save_to_buffer(&mut buffer)
+                .map_err(|e| USearchError::Index(e.to_string()))?;
+            Ok(buffer)
+        })
+        .await
+        .map_err(|e| USearchError::Index(e.to_string()))?
+    }
+
     /// Create a new empty index.
     fn new(
         id: IndexUuid,
         cache_key: CacheKey,
+        cmek: Option<Cmek>,
         prefix_path: &str,
         distance_function: DistanceFunction,
         options: IndexOptions,
@@ -183,18 +172,99 @@ impl USearchIndex {
         Ok(Self {
             id,
             cache_key,
+            cmek,
             index: Arc::new(index.into()),
             prefix_path: prefix_path.to_string(),
             quantization_center,
+            tombstones: Default::default(),
         })
     }
+}
 
-    /// Load serialized data into the index.
-    fn load(&self, data: &[u8]) -> Result<(), USearchError> {
+impl VectorIndex for USearchIndex {
+    type Error = USearchError;
+
+    fn add(&self, key: u64, vector: &[f32]) -> Result<(), Self::Error> {
+        let need_resize = {
+            let index = self.index.read()?;
+            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+            raw_size + RESERVE_BUFFER >= index.capacity()
+        };
+
+        if need_resize {
+            let index = self.index.write()?;
+            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+            if raw_size + RESERVE_BUFFER >= index.capacity() {
+                let new_capacity = (index.capacity() * 2).max(RESERVE_BUFFER);
+                index
+                    .reserve(new_capacity)
+                    .map_err(|e| USearchError::Index(e.to_string()))?;
+            }
+        }
+
+        if let Some(center) = &self.quantization_center {
+            let code = Code::<_>::quantize(vector, center);
+            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
+            self.index.read()?.add(key, i8_slice)
+        } else {
+            self.index.read()?.add(key, vector)
+        }
+        .map_err(|e| USearchError::Index(e.to_string()))
+    }
+
+    fn capacity(&self) -> Result<usize, Self::Error> {
+        Ok(self.index.read()?.capacity())
+    }
+
+    fn get(&self, key: u64) -> Result<Option<Vec<f32>>, Self::Error> {
+        if self.quantization_center.is_some() {
+            return Err(USearchError::QuantizedEmbedding);
+        }
+
+        let mut vector = Vec::new();
+        let count = self
+            .index
+            .read()?
+            .export(key, &mut vector)
+            .map_err(|e| USearchError::Index(e.to_string()))?;
+
+        Ok((count > 0).then_some(vector))
+    }
+
+    fn len(&self) -> Result<usize, Self::Error> {
+        Ok(self.index.read()?.size())
+    }
+
+    fn remove(&self, key: u64) -> Result<(), Self::Error> {
+        self.tombstones.fetch_add(1, Ordering::Relaxed);
+        self.index
+            .read()?
+            .remove(key)
+            .map_err(|e| USearchError::Index(e.to_string()))?;
+        Ok(())
+    }
+
+    fn reserve(&self, capacity: usize) -> Result<(), Self::Error> {
         self.index
             .write()?
-            .load_from_buffer(data)
+            .reserve(capacity)
             .map_err(|e| USearchError::Index(e.to_string()))
+    }
+
+    fn search(&self, query: &[f32], count: usize) -> Result<SearchResult, Self::Error> {
+        let matches = if let Some(center) = &self.quantization_center {
+            let code = Code::<_>::quantize(query, center);
+            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
+            self.index.read()?.search(i8_slice, count)
+        } else {
+            self.index.read()?.search(query, count)
+        }
+        .map_err(|e| USearchError::Index(e.to_string()))?;
+
+        Ok(SearchResult {
+            keys: matches.keys,
+            distances: matches.distances,
+        })
     }
 }
 
@@ -225,142 +295,52 @@ impl USearchIndexProvider {
         }
     }
 
-    /// Open an existing index from S3, or create a new empty index.
-    ///
-    /// - `id`: `None` to create new, `Some(id)` to load existing
-    /// - `collection_id`: Cache key for fairness (one index per collection)
-    /// - `prefix_path`: S3 path prefix for storage
-    /// - `dimensions`: Vector dimensionality
-    /// - `distance_function`: Distance metric (Cosine, Euclidean, InnerProduct)
-    /// - `connectivity`: HNSW M parameter
-    /// - `expansion_add`: HNSW ef_construction parameter
-    /// - `expansion_search`: HNSW ef_search parameter
-    /// - `quantization_center`: If provided, use I8 quantization with custom metric
-    /// - `fork`: If true, fork from existing index for writes (new UUID, clone data).
-    #[allow(clippy::too_many_arguments)]
-    pub async fn open(
+    /// Get index from cache if it matches the given ID.
+    /// If `fork` is true, returns a forked copy with a new UUID.
+    async fn get_cache(
         &self,
-        id: Option<IndexUuid>,
-        collection_id: CollectionUuid,
-        prefix_path: &str,
-        dimensions: usize,
-        distance_function: DistanceFunction,
-        connectivity: usize,
-        expansion_add: usize,
-        expansion_search: usize,
-        quantization_center: Option<Arc<[f32]>>,
+        id: IndexUuid,
+        cache_key: CacheKey,
+        config: &USearchIndexConfig,
+        options: &IndexOptions,
         fork: bool,
-    ) -> Result<USearchIndex, USearchError> {
-        let (cache_key, scalar, index_dimensions) = match &quantization_center {
-            Some(_) => (
-                CacheKey::Quantized(collection_id),
-                ScalarKind::I8,
-                Code::<&[u8]>::size(dimensions),
-            ),
-            None => (CacheKey::Raw(collection_id), ScalarKind::F32, dimensions),
+    ) -> Result<Option<USearchIndex>, USearchError> {
+        let Some(cached) = self.cache.get(&cache_key).await?.filter(|c| c.id == id) else {
+            return Ok(None);
         };
 
-        let metric = match distance_function {
-            DistanceFunction::Cosine => MetricKind::Cos,
-            DistanceFunction::Euclidean => MetricKind::L2sq,
-            DistanceFunction::InnerProduct => MetricKind::IP,
-        };
-
-        let options = IndexOptions {
-            dimensions: index_dimensions,
-            metric,
-            quantization: scalar,
-            connectivity,
-            expansion_add,
-            expansion_search,
-            multi: false,
-        };
-
-        // Check cache first for existing index
-        if let Some(id) = id {
-            if let Some(index) = self
-                .get_cache(
-                    id,
-                    cache_key,
-                    prefix_path,
-                    distance_function.clone(),
-                    options.clone(),
-                    quantization_center.clone(),
-                    fork,
-                )
-                .await?
-            {
-                return Ok(index);
-            }
+        if !fork {
+            return Ok(Some(cached));
         }
 
-        let new_id = id
-            .filter(|_| !fork)
-            .unwrap_or_else(|| IndexUuid(Uuid::new_v4()));
+        // Fork: serialize and create new index
+        let buffer = cached.save().await?;
         let index = USearchIndex::new(
-            new_id,
+            IndexUuid(Uuid::new_v4()),
             cache_key,
-            prefix_path,
-            distance_function.clone(),
+            config.cmek.clone(),
+            &config.prefix_path,
+            config.distance_function.clone(),
             options.clone(),
-            quantization_center.clone(),
+            config.quantization_center.clone(),
         )?;
+        index.load(buffer.into()).await?;
+        Ok(Some(index))
+    }
+}
 
-        // Load from S3 if existing index
-        if let Some(id) = id {
-            let key =
-                USearchIndex::format_storage_key(prefix_path, id, quantization_center.is_some());
-            let bytes = self
-                .storage
-                .get(&key, GetOptions::new(StorageRequestPriority::P0))
-                .instrument(tracing::trace_span!("fetch_usearch_index", %id, %collection_id))
-                .await?;
+#[async_trait::async_trait]
+impl VectorIndexProvider for USearchIndexProvider {
+    type Index = USearchIndex;
+    type Config = USearchIndexConfig;
+    type Error = USearchError;
 
-            // Double-check cache after fetch (another thread may have loaded it)
-            if let Some(index) = self
-                .get_cache(
-                    id,
-                    cache_key,
-                    prefix_path,
-                    distance_function,
-                    options,
-                    quantization_center,
-                    fork,
-                )
-                .await?
-            {
-                return Ok(index);
-            }
-
-            index.load(&bytes)?;
-            self.cache.insert(cache_key, index.clone()).await;
-        }
-
-        Ok(index)
+    async fn commit(&self, index: &Self::Index) -> Result<IndexUuid, Self::Error> {
+        Ok(index.id)
     }
 
-    /// Finalize the index and return its ID for later retrieval.
-    pub fn commit(&self, index: &USearchIndex) -> IndexUuid {
-        index.id
-    }
-
-    /// Flush the index to S3 and insert into cache.
-    pub async fn flush(
-        &self,
-        index: &USearchIndex,
-        cmek: Option<Cmek>,
-    ) -> Result<(), USearchError> {
-        // USearch uses the buffer directly via memcpy - no serialization/deserialization
-        // cost, just pointer arithmetic and memory copies. Safe to run on async runtime.
-        let buffer = {
-            let guard = index.index.read()?;
-            let len = guard.serialized_length();
-            let mut buffer = vec![0u8; len];
-            guard
-                .save_to_buffer(&mut buffer)
-                .map_err(|e| USearchError::Index(e.to_string()))?;
-            buffer
-        };
+    async fn flush(&self, index: &Self::Index) -> Result<(), Self::Error> {
+        let buffer = index.save().await?;
 
         let key = USearchIndex::format_storage_key(
             &index.prefix_path,
@@ -368,8 +348,8 @@ impl USearchIndexProvider {
             index.quantization_center.is_some(),
         );
         let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
-        if let Some(cmek) = cmek {
-            options = options.with_cmek(cmek);
+        if let Some(cmek) = &index.cmek {
+            options = options.with_cmek(cmek.clone());
         }
 
         self.storage
@@ -382,47 +362,105 @@ impl USearchIndexProvider {
         Ok(())
     }
 
-    /// Get index from cache, fork if requested.
-    #[allow(clippy::too_many_arguments)]
-    async fn get_cache(
+    async fn open(
         &self,
-        id: IndexUuid,
-        cache_key: CacheKey,
-        prefix_path: &str,
-        distance_function: DistanceFunction,
-        options: IndexOptions,
-        quantization_center: Option<Arc<[f32]>>,
-        fork: bool,
-    ) -> Result<Option<USearchIndex>, USearchError> {
-        let Some(cached) = self.cache.get(&cache_key).await? else {
-            return Ok(None);
-        };
-        if cached.id != id {
-            return Ok(None);
-        }
-        if !fork {
-            return Ok(Some(cached));
-        }
-
-        let buffer = {
-            let guard = cached.index.read()?;
-            let mut buffer = vec![0u8; guard.serialized_length()];
-            guard
-                .save_to_buffer(&mut buffer)
-                .map_err(|e| USearchError::Index(e.to_string()))?;
-            buffer
+        config: &Self::Config,
+        mode: OpenMode,
+    ) -> Result<Self::Index, Self::Error> {
+        let (cache_key, scalar, index_dimensions) = match &config.quantization_center {
+            Some(_) => (
+                CacheKey::Quantized(config.collection_id),
+                ScalarKind::I8,
+                Code::<&[u8]>::size(config.dimensions),
+            ),
+            None => (
+                CacheKey::Raw(config.collection_id),
+                ScalarKind::F32,
+                config.dimensions,
+            ),
         };
 
-        let index = USearchIndex::new(
-            IndexUuid(Uuid::new_v4()),
-            cache_key,
-            prefix_path,
-            distance_function,
-            options,
-            quantization_center,
-        )?;
-        index.load(&buffer)?;
-        Ok(Some(index))
+        let metric = match config.distance_function {
+            DistanceFunction::Cosine => MetricKind::Cos,
+            DistanceFunction::Euclidean => MetricKind::L2sq,
+            DistanceFunction::InnerProduct => MetricKind::IP,
+        };
+
+        let options = IndexOptions {
+            dimensions: index_dimensions,
+            metric,
+            quantization: scalar,
+            connectivity: config.connectivity,
+            expansion_add: config.expansion_add,
+            expansion_search: config.expansion_search,
+            multi: false,
+        };
+
+        match mode {
+            OpenMode::Create => USearchIndex::new(
+                IndexUuid(Uuid::new_v4()),
+                cache_key,
+                config.cmek.clone(),
+                &config.prefix_path,
+                config.distance_function.clone(),
+                options,
+                config.quantization_center.clone(),
+            ),
+            OpenMode::Open(id) | OpenMode::Fork(id) => {
+                let is_fork = matches!(mode, OpenMode::Fork(_));
+
+                // Check cache (returns forked copy if is_fork)
+                if let Some(index) = self
+                    .get_cache(id, cache_key, config, &options, is_fork)
+                    .await?
+                {
+                    return Ok(index);
+                }
+
+                // Load from S3
+                let key = USearchIndex::format_storage_key(
+                    &config.prefix_path,
+                    id,
+                    config.quantization_center.is_some(),
+                );
+                let bytes = self
+                    .storage
+                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
+                    .instrument(tracing::trace_span!("fetch_usearch_index", %id, collection_id = %config.collection_id))
+                    .await?;
+
+                // Double-check cache after fetch (another thread may have loaded it)
+                if let Some(index) = self
+                    .get_cache(id, cache_key, config, &options, is_fork)
+                    .await?
+                {
+                    return Ok(index);
+                }
+
+                // Create index
+                let new_id = if is_fork {
+                    IndexUuid(Uuid::new_v4())
+                } else {
+                    id
+                };
+                let index = USearchIndex::new(
+                    new_id,
+                    cache_key,
+                    config.cmek.clone(),
+                    &config.prefix_path,
+                    config.distance_function.clone(),
+                    options,
+                    config.quantization_center.clone(),
+                )?;
+                index.load(bytes).await?;
+
+                if !is_fork {
+                    self.cache.insert(cache_key, index.clone()).await;
+                }
+
+                Ok(index)
+            }
+        }
     }
 }
 
@@ -448,6 +486,18 @@ mod tests {
         let collection_id = CollectionUuid(Uuid::new_v4());
         const DIM: usize = 1024;
 
+        let config = USearchIndexConfig {
+            collection_id,
+            cmek: None,
+            prefix_path: String::new(),
+            dimensions: DIM,
+            distance_function: DistanceFunction::Euclidean,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            quantization_center: None,
+        };
+
         // Generate all test vectors upfront
         let mut rng = StdRng::seed_from_u64(42);
         let mut vectors: HashMap<u64, Vec<f32>> = HashMap::new();
@@ -459,27 +509,12 @@ mod tests {
         let index_a_id = {
             let provider =
                 USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
-            let index = provider
-                .open(
-                    None,
-                    collection_id,
-                    "",
-                    DIM,
-                    DistanceFunction::Euclidean,
-                    16,
-                    128,
-                    64,
-                    None,
-                    false,
-                )
-                .await
-                .unwrap();
-            index.reserve(32).unwrap();
+            let index = provider.open(&config, OpenMode::Create).await.unwrap();
             for i in 0..32 {
                 index.add(i, &vectors[&i]).unwrap();
             }
-            let id = provider.commit(&index);
-            provider.flush(&index, None).await.unwrap();
+            let id = provider.commit(&index).await.unwrap();
+            provider.flush(&index).await.unwrap();
             id
         };
 
@@ -488,21 +523,10 @@ mod tests {
             let provider =
                 USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
             let index = provider
-                .open(
-                    Some(index_a_id),
-                    collection_id,
-                    "",
-                    DIM,
-                    DistanceFunction::Euclidean,
-                    16,
-                    128,
-                    64,
-                    None,
-                    false,
-                )
+                .open(&config, OpenMode::Open(index_a_id))
                 .await
                 .unwrap();
-            assert_eq!(provider.commit(&index), index_a_id);
+            assert_eq!(provider.commit(&index).await.unwrap(), index_a_id);
             assert_eq!(index.len().unwrap(), 32);
             for i in 0..32 {
                 assert_eq!(index.get(i).unwrap().unwrap(), vectors[&i]);
@@ -510,27 +534,15 @@ mod tests {
 
             // Fork and add 32 more vectors
             let forked = provider
-                .open(
-                    Some(index_a_id),
-                    collection_id,
-                    "",
-                    DIM,
-                    DistanceFunction::Euclidean,
-                    16,
-                    128,
-                    64,
-                    None,
-                    true,
-                )
+                .open(&config, OpenMode::Fork(index_a_id))
                 .await
                 .unwrap();
-            let forked_id = provider.commit(&forked);
+            let forked_id = provider.commit(&forked).await.unwrap();
             assert_ne!(forked_id, index_a_id);
-            forked.reserve(64).unwrap();
             for i in 32..64 {
                 forked.add(i, &vectors[&i]).unwrap();
             }
-            provider.flush(&forked, None).await.unwrap();
+            provider.flush(&forked).await.unwrap();
             forked_id
         };
 
@@ -541,18 +553,7 @@ mod tests {
 
             // Original unchanged
             let index_a = provider
-                .open(
-                    Some(index_a_id),
-                    collection_id,
-                    "",
-                    DIM,
-                    DistanceFunction::Euclidean,
-                    16,
-                    128,
-                    64,
-                    None,
-                    false,
-                )
+                .open(&config, OpenMode::Open(index_a_id))
                 .await
                 .unwrap();
             assert_eq!(index_a.len().unwrap(), 32);
@@ -563,18 +564,7 @@ mod tests {
 
             // Forked has all 64 vectors
             let index_b = provider
-                .open(
-                    Some(index_b_id),
-                    collection_id,
-                    "",
-                    DIM,
-                    DistanceFunction::Euclidean,
-                    16,
-                    128,
-                    64,
-                    None,
-                    false,
-                )
+                .open(&config, OpenMode::Open(index_b_id))
                 .await
                 .unwrap();
             assert_eq!(index_b.len().unwrap(), 64);
@@ -592,6 +582,18 @@ mod tests {
             USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
         const DIM: usize = 1024;
 
+        let config = USearchIndexConfig {
+            collection_id,
+            cmek: None,
+            prefix_path: String::new(),
+            dimensions: DIM,
+            distance_function: DistanceFunction::Euclidean,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            quantization_center: None,
+        };
+
         // Generate 128 random vectors
         let mut rng = StdRng::seed_from_u64(42);
         let vectors = (0..128)
@@ -599,61 +601,48 @@ mod tests {
             .collect::<Vec<_>>();
 
         // Phase 1: Full precision index
-        let raw_index = provider
-            .open(
-                None,
-                collection_id,
-                "",
-                DIM,
-                DistanceFunction::Euclidean,
-                16,
-                128,
-                64,
-                None,
-                false,
-            )
-            .await
-            .unwrap();
-        raw_index.reserve(128).unwrap();
+        let raw_index = provider.open(&config, OpenMode::Create).await.unwrap();
         for (i, v) in vectors.iter().enumerate() {
             raw_index.add(i as u64, v).unwrap();
         }
 
         // Verify top-1 recall is 100%
         for (i, v) in vectors.iter().enumerate() {
-            let (keys, _) = raw_index.query(v, 1).unwrap();
-            assert_eq!(keys[0], i as u64, "Full precision: top-1 mismatch at {}", i);
+            let result = raw_index.search(v, 1).unwrap();
+            assert_eq!(
+                result.keys[0], i as u64,
+                "Full precision: top-1 mismatch at {}",
+                i
+            );
         }
 
         // Phase 2: Quantized index (center at origin)
         let center = Arc::from(vec![0.0f32; DIM]);
+        let quantized_config = USearchIndexConfig {
+            quantization_center: Some(center),
+            ..config
+        };
         let quantized_index = provider
-            .open(
-                None,
-                collection_id,
-                "",
-                DIM,
-                DistanceFunction::Euclidean,
-                16,
-                128,
-                64,
-                Some(center),
-                false,
-            )
+            .open(&quantized_config, OpenMode::Create)
             .await
             .unwrap();
-        quantized_index.reserve(128).unwrap();
         for (i, v) in vectors.iter().enumerate() {
             quantized_index.add(i as u64, v).unwrap();
         }
 
         // Verify top-1 recall is 100% and distance relative error < 2%
         for (i, v) in vectors.iter().enumerate() {
-            let (keys, distances) = quantized_index.query(v, 8).unwrap();
-            assert_eq!(keys[0], i as u64, "Quantized: top-1 mismatch at {}", i);
+            let result = quantized_index.search(v, 8).unwrap();
+            assert_eq!(
+                result.keys[0], i as u64,
+                "Quantized: top-1 mismatch at {}",
+                i
+            );
 
             // Check distance relative error for results 2-8 (skip first which is self-match)
-            for (&key, &quantized_dist_sq) in keys.iter().zip(distances.iter()).skip(1) {
+            for (&key, &quantized_dist_sq) in
+                result.keys.iter().zip(result.distances.iter()).skip(1)
+            {
                 let true_dist_sq =
                     f32::sqeuclidean(v, &vectors[key as usize]).unwrap_or(0.0) as f32;
                 let relative_err = (quantized_dist_sq - true_dist_sq).abs() / true_dist_sq;
