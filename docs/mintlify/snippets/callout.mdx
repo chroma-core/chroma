@@ -1,0 +1,32 @@
+export const Callout = ({ children }) => (
+  <div className="my-6">
+    <div className="relative pr-1.5 pb-1.5">
+      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-blue-500" />
+      <div className="relative border border-black dark:border-white px-5 py-4 bg-white dark:bg-neutral-900">
+        {children}
+      </div>
+    </div>
+  </div>
+);
+
+export const Warning = ({ children }) => (
+  <div className="my-6">
+    <div className="relative pr-1.5 pb-1.5">
+      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-yellow-500" />
+      <div className="relative border border-black dark:border-white px-5 py-4 bg-white dark:bg-neutral-900">
+        {children}
+      </div>
+    </div>
+  </div>
+);
+
+export const Danger = ({ children }) => (
+  <div className="my-6">
+    <div className="relative pr-1.5 pb-1.5">
+      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-red-500" />
+      <div className="relative border border-black dark:border-white px-5 py-4 bg-white dark:bg-neutral-900">
+        {children}
+      </div>
+    </div>
+  </div>
+);

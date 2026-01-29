@@ -1,0 +1,44 @@
+---
+title: "Delete Data"
+description: "Learn how to delete data from Chroma collections."
+---
+
+import { Danger } from '/snippets/callout.mdx';
+
+Chroma supports deleting items from a collection by `id` using `.delete`. The embeddings, documents, and metadata associated with each item will be deleted.
+
+<Danger>
+Naturally, this is a destructive operation, and cannot be undone.
+</Danger>
+
+<CodeGroup>
+```python Python
+collection.delete(
+    ids=["id1", "id2", "id3",...],
+)
+```
+
+```typescript TypeScript
+await collection.delete({
+    ids: ["id1", "id2", "id3",...],
+})
+```
+</CodeGroup>
+
+`.delete` also supports the `where` filter. If no `ids` are supplied, it will delete all items in the collection that match the `where` filter.
+
+<CodeGroup>
+```python Python
+collection.delete(
+    ids=["id1", "id2", "id3",...],
+	where={"chapter": "20"}
+)
+```
+
+```typescript TypeScript
+await collection.delete({
+    ids: ["id1", "id2", "id3",...], //ids
+    where: {"chapter": "20"} //where
+})
+```
+</CodeGroup>

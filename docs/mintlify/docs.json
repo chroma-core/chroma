@@ -1,0 +1,273 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "aspen",
+  "name": "Chroma Docs",
+  "colors": {
+    "primary": "#ff6446",
+    "light": "#3b82f6",
+    "dark": "#3b82f6"
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "icon": "book",
+        "pages": [
+          {
+            "group": "Overview",
+            "pages": [
+              "docs/overview/getting-started",
+              "docs/overview/architecture",
+              "docs/overview/oss",
+              "docs/overview/migration",
+              "docs/overview/troubleshooting"
+            ]
+          },
+          {
+            "group": "Run Chroma",
+            "pages": [
+              "docs/run-chroma/clients",
+              "docs/run-chroma/client-server"
+            ]
+          },
+          {
+            "group": "Collections",
+            "pages": [
+              "docs/collections/manage-collections",
+              "docs/collections/add-data",
+              "docs/collections/update-data",
+              "docs/collections/delete-data",
+              "docs/collections/configure"
+            ]
+          },
+          {
+            "group": "Querying Collections",
+            "pages": [
+              "docs/querying-collections/query-and-get",
+              "docs/querying-collections/metadata-filtering",
+              "docs/querying-collections/full-text-search"
+            ]
+          },
+          {
+            "group": "Embeddings",
+            "pages": [
+              "docs/embeddings/embedding-functions",
+              "docs/embeddings/multimodal"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "docs/cli/install",
+              "docs/cli/browse",
+              "docs/cli/copy",
+              "docs/cli/db",
+              "docs/cli/sample-apps",
+              "docs/cli/login",
+              "docs/cli/profile",
+              "docs/cli/run",
+              "docs/cli/update",
+              "docs/cli/vacuum"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chroma Cloud",
+        "icon": "cloud",
+        "pages": [
+          "cloud/getting-started",
+          "cloud/pricing",
+          "cloud/quotas-limits",
+          {
+            "group": "Features",
+            "pages": [
+              "cloud/features/collection-forking"
+            ]
+          },
+          {
+            "group": "Schema",
+            "pages": [
+              "cloud/schema/overview",
+              "cloud/schema/schema-basics",
+              "cloud/schema/sparse-vector-search",
+              "cloud/schema/index-reference"
+            ]
+          },
+          {
+            "group": "Search API",
+            "pages": [
+              "cloud/search-api/overview",
+              "cloud/search-api/search-basics",
+              "cloud/search-api/filtering",
+              "cloud/search-api/ranking",
+              "cloud/search-api/group-by",
+              "cloud/search-api/hybrid-search",
+              "cloud/search-api/pagination-selection",
+              "cloud/search-api/batch-operations",
+              "cloud/search-api/examples",
+              "cloud/search-api/migration"
+            ]
+          },
+          {
+            "group": "Sync",
+            "pages": [
+              "cloud/sync/overview",
+              "cloud/sync/github",
+              "cloud/sync/web"
+            ]
+          },
+          {
+            "group": "Package Search",
+            "pages": [
+              "cloud/package-search/mcp",
+              "cloud/package-search/registry"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "icon": "map",
+        "pages": [
+          {
+            "group": "Build",
+            "pages": [
+              "guides/build/building-with-ai",
+              "guides/build/intro-to-retrieval",
+              "guides/build/look-at-your-data",
+              "guides/build/chunking",
+              "guides/build/agentic-search",
+              "guides/build/agentic-memory"
+            ]
+          },
+          {
+            "group": "Deploy",
+            "pages": [
+              "guides/deploy/client-server-mode",
+              "guides/deploy/python-thin-client",
+              "guides/deploy/performance",
+              "guides/deploy/observability",
+              "guides/deploy/docker",
+              "guides/deploy/aws",
+              "guides/deploy/azure",
+              "guides/deploy/gcp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "icon": "code-merge",
+        "pages": [
+          "integrations/chroma-integrations",
+          {
+            "group": "Embedding Models",
+            "pages": [
+              "integrations/embedding-models/openai",
+              "integrations/embedding-models/cohere",
+              "integrations/embedding-models/google-gemini",
+              "integrations/embedding-models/hugging-face",
+              "integrations/embedding-models/hugging-face-server",
+              "integrations/embedding-models/instructor",
+              "integrations/embedding-models/jina-ai",
+              "integrations/embedding-models/mistral",
+              "integrations/embedding-models/morph",
+              "integrations/embedding-models/nomic",
+              "integrations/embedding-models/ollama",
+              "integrations/embedding-models/open-clip",
+              "integrations/embedding-models/roboflow",
+              "integrations/embedding-models/sentence-transformer",
+              "integrations/embedding-models/text2vec",
+              "integrations/embedding-models/together-ai",
+              "integrations/embedding-models/voyageai",
+              "integrations/embedding-models/cloudflare-workers-ai",
+              "integrations/embedding-models/amazon-bedrock",
+              "integrations/embedding-models/baseten",
+              "integrations/embedding-models/chroma-bm25",
+              "integrations/embedding-models/chroma-cloud-qwen",
+              "integrations/embedding-models/chroma-cloud-splade"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "pages": [
+              "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/braintrust",
+              "integrations/frameworks/contextual-ai",
+              "integrations/frameworks/deepeval",
+              "integrations/frameworks/haystack",
+              "integrations/frameworks/langchain",
+              "integrations/frameworks/llamaindex",
+              "integrations/frameworks/mem0",
+              "integrations/frameworks/openlit",
+              "integrations/frameworks/openllmetry",
+              "integrations/frameworks/streamlit",
+              "integrations/frameworks/voltagent"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "icon": "brackets-curly",
+        "openapi": "openapi.json"
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "X",
+          "href": "https://x.com/trychroma",
+          "icon": "x-twitter"
+        },
+        {
+          "anchor": "Discord",
+          "href": "https://discord.gg/MMeYNTmh3x",
+          "icon": "discord"
+        },
+        {
+          "anchor": "Changelog",
+          "href": "https://www.trychroma.com/changelog",
+          "icon": "rss"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/light-logo.svg",
+    "dark": "/dark-logo.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/chroma-core/chroma"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "x": "https://x.com/trychroma",
+      "github": "https://github.com/chroma-core/chroma",
+      "discord": "https://discord.gg/MMeYNTmh3x"
+    }
+  }
+}

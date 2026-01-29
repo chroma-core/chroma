@@ -1,0 +1,24 @@
+/* Step number customization */
+[data-component-part="step-number"] > div {
+  border-radius: 0;
+  border: 1px solid #000000;
+  background-color: #ffffff;
+  font-family: ui-monospace, monospace;
+  font-weight: 400;
+  box-shadow: 2px 2px 0 0 #000000;
+}
+
+.dark [data-component-part="step-number"] > div {
+  border-color: #f3f4f6;
+  background-color: #111827;
+  box-shadow: 2px 2px 0 0 #e5e7eb;
+}
+
+[data-component-part="step-line"] {
+  background-color: #000000;
+}
+
+.dark [data-component-part="step-line"] {
+  background-color: #ffffff;
+}
+
