@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_distance::{normalize, DistanceFunction};
@@ -13,10 +15,14 @@ use chroma_types::{
     operator::{Knn, KnnOutput, Merge, RecordMeasure},
     CollectionAndSegments,
 };
+use parking_lot::Mutex;
 use tokio::sync::oneshot::Sender;
 use tracing::Span;
 
 use crate::execution::operators::{
+    io_group_operator::{
+        IoGroupOperator, IoGroupOperatorError, IoGroupOperatorInput, IoGroupOperatorOutput,
+    },
     knn_log::{KnnLogError, KnnLogInput},
     knn_merge::{KnnMergeError, KnnMergeInput, KnnMergeOutput},
     spann_bf_pl::{SpannBfPlError, SpannBfPlInput, SpannBfPlOperator, SpannBfPlOutput},
@@ -262,9 +268,15 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
         // Set state that is used for tracking when we are ready for merging.
         self.heads_searched = true;
         self.num_outstanding_bf_pl = output.center_ids.len();
-        // Spawn fetch posting list tasks for the centers.
+
+        // If no centers found, we can skip fetching posting lists
+        if output.center_ids.is_empty() {
+            return;
+        }
+
+        // Create subtasks for fetching all posting lists
+        let mut subtasks = Vec::with_capacity(output.center_ids.len());
         for head_id in output.center_ids {
-            // Invoke Head search operator.
             let fetch_pl_task = wrap(
                 Box::new(self.fetch_pl.clone()),
                 SpannFetchPlInput {
@@ -274,9 +286,36 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
             );
-
-            self.send(fetch_pl_task, ctx, Some(Span::current())).await;
+            subtasks.push(fetch_pl_task);
         }
+
+        // Wrap all subtasks in an IoGroupOperator for better IO scheduling
+        let io_group_task = wrap(
+            Box::new(IoGroupOperator::new()),
+            IoGroupOperatorInput::new(Arc::new(Mutex::new(Some(subtasks)))),
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        let pl_span = tracing::info_span!(
+            parent: Span::current(),
+            "Fetch all posting lists in IoGroupOperator",
+        );
+        self.send(io_group_task, ctx, Some(pl_span)).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<IoGroupOperatorOutput, IoGroupOperatorError>> for SpannKnnOrchestrator {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _message: TaskResult<IoGroupOperatorOutput, IoGroupOperatorError>,
+        _ctx: &ComponentContext<Self>,
+    ) {
+        // No-op: The IoGroupOperator's subtasks send their results directly to the
+        // SpannFetchPlOutput handler. This handler exists just to receive the
+        // completion signal from the group operator itself.
     }
 }
 
