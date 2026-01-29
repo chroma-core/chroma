@@ -1,3 +1,5 @@
+//go:build unix
+
 package defaultef
 
 import (
@@ -26,12 +28,13 @@ var (
 
 type DefaultEmbeddingFunction struct {
 	tokenizer *tokenizers.Tokenizer
+	session   *ort.DynamicAdvancedSession
 	closed    int32
 	closeOnce sync.Once
 }
 
 var (
-	initLock sync.Mutex
+	initLock sync.RWMutex
 	arc      = &AtomicRefCounter{} // even with arc it is possible that someone calls ort.DestroyEnvironment() from outside, so this is not great, we need a better abstraction than this
 )
 
@@ -56,18 +59,31 @@ func NewDefaultEmbeddingFunction(opts ...Option) (*DefaultEmbeddingFunction, fun
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "failed to create tokenizer from bytes")
 	}
-	ef := &DefaultEmbeddingFunction{tokenizer: tk}
 	if !ort.IsInitialized() {
 		ort.SetSharedLibraryPath(cfg.OnnxLibPath)
 		err = ort.InitializeEnvironment()
 		if err != nil {
-			errc := ef.Close()
-			if errc != nil {
-				fmt.Printf("error while closing embedding function %v", errc.Error())
+			if errc := tk.Close(); errc != nil {
+				fmt.Printf("error while closing tokenizer: %v", errc.Error())
 			}
 			return nil, nil, err
 		}
 	}
+
+	session, err := ort.NewDynamicAdvancedSession(
+		cfg.OnnxModelPath,
+		[]string{"input_ids", "attention_mask", "token_type_ids"},
+		[]string{"last_hidden_state"},
+		nil,
+	)
+	if err != nil {
+		if errc := tk.Close(); errc != nil {
+			fmt.Printf("error while closing tokenizer: %v", errc.Error())
+		}
+		return nil, nil, errors.Wrap(err, "failed to create ONNX session")
+	}
+
+	ef := &DefaultEmbeddingFunction{tokenizer: tk, session: session}
 	arc.Increment()
 
 	return ef, ef.Close, nil
@@ -159,8 +175,6 @@ func (e *DefaultEmbeddingFunction) tokenize(documents []string) (*EmbeddingInput
 }
 
 func (e *DefaultEmbeddingFunction) encode(embeddingInput *EmbeddingInput) ([]embeddings.Embedding, error) {
-	cfg := getConfig()
-
 	outputShape := ort.NewShape(append(*embeddingInput.shape, 384)...)
 	shapeInt32 := make([]int, len(outputShape))
 
@@ -174,23 +188,13 @@ func (e *DefaultEmbeddingFunction) encode(embeddingInput *EmbeddingInput) ([]emb
 	defer func(outputTensor *ort.Tensor[float32]) {
 		err := outputTensor.Destroy()
 		if err != nil {
-			fmt.Printf("potential memory leak. Failed to destory outputTensor %v", err)
+			fmt.Printf("potential memory leak. Failed to destroy outputTensor %v", err)
 		}
 	}(outputTensor)
-	session, err := ort.NewAdvancedSession(cfg.OnnxModelPath,
-		[]string{"input_ids", "attention_mask", "token_type_ids"}, []string{"last_hidden_state"},
-		[]ort.Value{embeddingInput.inputTensor, embeddingInput.attentionTensor, embeddingInput.typeIDSTensor}, []ort.Value{outputTensor}, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "failed to create session")
-	}
-	defer func(session *ort.AdvancedSession) {
-		err := session.Destroy()
-		if err != nil {
-			fmt.Printf("potential memory leak. Failed to destory ORT session %v", err)
-		}
-	}(session)
 
-	err = session.Run()
+	inputs := []ort.Value{embeddingInput.inputTensor, embeddingInput.attentionTensor, embeddingInput.typeIDSTensor}
+	outputs := []ort.Value{outputTensor}
+	err = e.session.Run(inputs, outputs)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to run session")
 	}
@@ -229,8 +233,8 @@ func (e *DefaultEmbeddingFunction) EmbedDocuments(ctx context.Context, documents
 	if atomic.LoadInt32(&e.closed) == 1 {
 		return nil, errors.New("embedding function is closed")
 	}
-	initLock.Lock()
-	defer initLock.Unlock()
+	initLock.RLock()
+	defer initLock.RUnlock()
 	embeddingInputs, err := e.tokenize(documents)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to tokenize documents")
@@ -257,8 +261,8 @@ func (e *DefaultEmbeddingFunction) EmbedQuery(ctx context.Context, document stri
 	if atomic.LoadInt32(&e.closed) == 1 {
 		return nil, errors.New("embedding function is closed")
 	}
-	initLock.Lock()
-	defer initLock.Unlock()
+	initLock.RLock()
+	defer initLock.RUnlock()
 	embeddingInputs, err := e.tokenize([]string{document})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to tokenize query")
@@ -351,29 +355,40 @@ func (e *DefaultEmbeddingFunction) Close() error {
 	if atomic.LoadInt32(&e.closed) == 1 {
 		return nil
 	}
-	arc.Decrement()
+	initLock.Lock()
+	defer initLock.Unlock()
+
 	var closeErr error
-	if arc.GetCount() == 0 {
-		e.closeOnce.Do(func() {
-			var errs []error
-			if e.tokenizer != nil {
-				err := e.tokenizer.Close()
-				if err != nil {
-					errs = append(errs, err)
-				}
+	e.closeOnce.Do(func() {
+		var errs []error
+
+		// Destroy the per-instance session first
+		if e.session != nil {
+			if err := e.session.Destroy(); err != nil {
+				errs = append(errs, errors.Wrap(err, "failed to destroy session"))
 			}
-			if ort.IsInitialized() { // skip destroying the environment if it is not initialized
-				err := ort.DestroyEnvironment()
-				if err != nil {
-					errs = append(errs, err)
-				}
+		}
+
+		// Close the tokenizer
+		if e.tokenizer != nil {
+			if err := e.tokenizer.Close(); err != nil {
+				errs = append(errs, err)
 			}
-			if len(errs) > 0 {
-				closeErr = stderrors.Join(errs...)
+		}
+
+		// Decrement ref count and destroy environment if last instance
+		arc.Decrement()
+		if arc.GetCount() == 0 && ort.IsInitialized() {
+			if err := ort.DestroyEnvironment(); err != nil {
+				errs = append(errs, err)
 			}
-			atomic.StoreInt32(&e.closed, 1)
-		})
-	}
+		}
+
+		if len(errs) > 0 {
+			closeErr = stderrors.Join(errs...)
+		}
+		atomic.StoreInt32(&e.closed, 1)
+	})
 	return closeErr
 }
 
