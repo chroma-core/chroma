@@ -574,7 +574,7 @@ export class RecordService {
 
 }
 
-export class FunctionsService {
+export class FunctionService {
     /**
      * Detach function
      * Detaches a function from a collection.
