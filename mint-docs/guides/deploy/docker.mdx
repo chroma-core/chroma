@@ -3,13 +3,11 @@ title: Docker
 description: Run Chroma in a Docker Container
 ---
 
-<Tip>
+import {Callout} from '/snippets/callout.mdx';
 
-**Chroma Cloud**
-
+<Callout>
 Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-docker).
-
-</Tip>
+</Callout>
 
 ## Run Chroma in a Docker Container
 
@@ -35,12 +33,12 @@ chroma_client = chromadb.HttpClient(host='localhost', port=8000)
 chroma_client.heartbeat()
 ```
 
-<Tip>
+<Callout>
 
 **Client-only package**
 
 If you're using Python, you may want to use the [client-only package](/production/chroma-server/python-thin-client) for a smaller install size.
-</Tip>
+</Callout>
 </Tab>
 
 <Tab title="TypeScript" icon="js">
