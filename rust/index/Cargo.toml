@@ -33,6 +33,8 @@ hnswlib = { workspace = true }
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 simsimd = { workspace = true }
 dashmap = { workspace = true }
+usearch = { workspace = true }
+crossbeam = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
