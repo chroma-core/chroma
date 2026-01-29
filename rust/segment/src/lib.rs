@@ -8,3 +8,4 @@ pub mod spann_provider;
 pub mod sqlite_metadata;
 pub mod test;
 pub mod types;
+pub mod version_file;
