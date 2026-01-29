@@ -327,4 +327,3 @@ def test_add_large(
         )
 
     invariants.count(coll1, cast(strategies.RecordSet, normalized_record_set))
-    assert False
