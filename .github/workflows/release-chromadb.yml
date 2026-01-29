@@ -46,8 +46,17 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
-      python_versions: '["3.9", "3.10", "3.11", "3.12"]'
+      python_versions: '["3.9", "3.11"]'
       property_testing_preset: 'normal'
+      always_multi_region: false
+
+  python-tests-linux-mcmr:
+    uses: ./.github/workflows/_python-tests.yml
+    secrets: inherit
+    with:
+      python_versions: '["3.10", "3.12"]'
+      property_testing_preset: 'normal'
+      always_multi_region: true
 
   python-tests-windows:
     uses: ./.github/workflows/_python-tests.yml
