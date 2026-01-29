@@ -588,6 +588,25 @@ async fn reset(
     tag = "System",
     responses(
         (status = 200, description = "Get server version", body = String)
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get version",
+                "source": "const version = await client.version();"
+            },
+            {
+                "lang": "python",
+                "label": "Get version",
+                "source": "version = client.get_version()"
+            },
+            {
+                "lang": "curl",
+                "label": "Get version",
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/version'"
+            }
+        ]))
     )
 )]
 async fn version(State(server): State<FrontendServer>) -> Json<String> {
@@ -1090,6 +1109,11 @@ struct ListCollectionsParams {
                 "source": "collections = client.list_collections()"
             },
             {
+                "lang": "rust",
+                "label": "List collections",
+                "source": "let collections = client.list_collections(10, Some(0)).await?;"
+            },
+            {
                 "lang": "curl",
                 "label": "List collections",
                 "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
@@ -1174,6 +1198,11 @@ async fn list_collections(
                 "lang": "python",
                 "label": "Count collections",
                 "source": "count = client.count_collections()"
+            },
+            {
+                "lang": "rust",
+                "label": "Count collections",
+                "source": "let count = client.count_collections().await?;"
             },
             {
                 "lang": "curl",
@@ -1370,6 +1399,11 @@ async fn create_collection(
                 "source": "collection = client.get_collection(name='my_collection')"
             },
             {
+                "lang": "rust",
+                "label": "Get collection",
+                "source": "let collection = client.get_collection(\"my_collection\").await?;"
+            },
+            {
                 "lang": "curl",
                 "label": "Get collection",
                 "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
@@ -1424,6 +1458,25 @@ async fn get_collection(
     ),
     params(
         ("crn" = String, Path, description = "Chroma Resource Name", example = "my_tenant:my_database:my_collection")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get collection by CRN",
+                "source": "const collection = await client.getCollectionByCrn('my_tenant:my_database:my_collection');"
+            },
+            {
+                "lang": "python",
+                "label": "Get collection by CRN",
+                "source": "collection = client.get_collection_by_crn('my_tenant:my_database:my_collection')"
+            },
+            {
+                "lang": "curl",
+                "label": "Get collection by CRN",
+                "source": "curl -X GET 'https://api.example.com/api/v2/collections/my_tenant:my_database:my_collection' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn get_collection_by_crn(
@@ -1491,6 +1544,11 @@ async fn get_collection_by_crn(
                 "lang": "python",
                 "label": "Update collection",
                 "source": "collection.modify(name='new_name', metadata={'key': 'value'})"
+            },
+            {
+                "lang": "rust",
+                "label": "Update collection",
+                "source": "use chroma_types::Metadata;\nlet mut metadata = Metadata::new();\nmetadata.insert(\"key\".to_string(), \"value\".into());\ncollection.modify(Some(\"new_name\"), Some(metadata)).await?;"
             },
             {
                 "lang": "curl",
@@ -1585,6 +1643,30 @@ async fn update_collection(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Delete collection",
+                "source": "await client.deleteCollection({ name: 'my_collection' });"
+            },
+            {
+                "lang": "python",
+                "label": "Delete collection",
+                "source": "client.delete_collection(name='my_collection')"
+            },
+            {
+                "lang": "rust",
+                "label": "Delete collection",
+                "source": "client.delete_collection(\"my_collection\").await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Delete collection",
+                "source": "curl -X DELETE 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn delete_collection(
@@ -1638,6 +1720,30 @@ async fn delete_collection(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Fork collection",
+                "source": "const forked = await collection.fork({ name: 'forked_collection' });"
+            },
+            {
+                "lang": "python",
+                "label": "Fork collection",
+                "source": "forked = collection.fork(new_name='forked_collection')"
+            },
+            {
+                "lang": "rust",
+                "label": "Fork collection",
+                "source": "let forked = collection.fork(\"forked_collection\").await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Fork collection",
+                "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"new_name\": \"forked_collection\"}'"
+            }
+        ]))
     )
 )]
 async fn fork_collection(
@@ -1732,6 +1838,11 @@ async fn fork_collection(
                 "lang": "python",
                 "label": "Add records",
                 "source": "collection.add(ids=['id1', 'id2'], embeddings=[[0.1, 0.2], [0.3, 0.4]], documents=['doc1', 'doc2'])"
+            },
+            {
+                "lang": "rust",
+                "label": "Add records",
+                "source": "collection.add(\n    vec![\"id1\".to_string(), \"id2\".to_string()],\n    vec![vec![0.1, 0.2], vec![0.3, 0.4]],\n    Some(vec![Some(\"doc1\".to_string()), Some(\"doc2\".to_string())]),\n    None,\n    None\n).await?;"
             },
             {
                 "lang": "curl",
@@ -1865,6 +1976,11 @@ async fn collection_add(
                 "lang": "python",
                 "label": "Update records",
                 "source": "collection.update(ids=['id1'], documents=['updated doc'], metadatas=[{'key': 'value'}])"
+            },
+            {
+                "lang": "rust",
+                "label": "Update records",
+                "source": "use chroma_types::UpdateMetadata;\nlet mut metadata = UpdateMetadata::new();\nmetadata.insert(\"key\".to_string(), chroma_types::UpdateMetadataValue::Str(\"value\".to_string()));\ncollection.update(\n    vec![\"id1\".to_string()],\n    None,\n    Some(vec![Some(\"updated doc\".to_string())]),\n    None,\n    Some(vec![Some(metadata)])\n).await?;"
             },
             {
                 "lang": "curl",
@@ -2005,7 +2121,7 @@ async fn collection_update(
             {
                 "lang": "rust",
                 "label": "Upsert records",
-                "source": "collection.upsert(collection_entries, None).await?;"
+                "source": "collection.upsert(\n    vec![\"id1\".to_string(), \"id2\".to_string()],\n    vec![vec![0.1, 0.2], vec![0.3, 0.4]],\n    Some(vec![Some(\"doc1\".to_string()), Some(\"doc2\".to_string())]),\n    None,\n    None\n).await?;"
             },
             {
                 "lang": "curl",
@@ -2152,6 +2268,16 @@ async fn collection_upsert(
                 "source": "collection.delete(where={'category': 'old'})"
             },
             {
+                "lang": "rust",
+                "label": "Delete records by IDs",
+                "source": "collection.delete(Some(vec![\"id1\".to_string(), \"id2\".to_string()]), None).await?;"
+            },
+            {
+                "lang": "rust",
+                "label": "Delete records by metadata filter",
+                "source": "use chroma_types::{Where, MetadataExpression, MetadataComparison, MetadataValue, PrimitiveOperator};\nlet where_clause = Where::Metadata(MetadataExpression {\n    key: \"category\".to_string(),\n    comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Str(\"old\".to_string())),\n});\ncollection.delete(None, Some(where_clause)).await?;"
+            },
+            {
                 "lang": "curl",
                 "label": "Delete records by IDs",
                 "source": "curl -X POST 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
@@ -2274,6 +2400,11 @@ async fn collection_delete(
                 "source": "count = collection.count()"
             },
             {
+                "lang": "rust",
+                "label": "Count records",
+                "source": "let count = collection.count().await?;"
+            },
+            {
                 "lang": "curl",
                 "label": "Count records",
                 "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
@@ -2372,6 +2503,30 @@ async fn collection_count(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
         ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get indexing status",
+                "source": "const status: IndexingStatus = await collection.getIndexingStatus();"
+            },
+            {
+                "lang": "python",
+                "label": "Get indexing status",
+                "source": "status = collection.get_indexing_status()"
+            },
+            {
+                "lang": "rust",
+                "label": "Get indexing status",
+                "source": "let status = collection.get_indexing_status().await?;"
+            },
+            {
+                "lang": "curl",
+                "label": "Get indexing status",
+                "source": "curl -X GET 'https://api.example.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+            }
+        ]))
     )
 )]
 async fn indexing_status(
@@ -2496,8 +2651,13 @@ async fn indexing_status(
             },
             {
                 "lang": "rust",
-                "label": "Get records",
-                "source": "let get_result: GetResult = collection.get(get_query).await?;"
+                "label": "Get records by IDs",
+                "source": "use chroma_types::IncludeList;\nlet response = collection.get(\n    Some(vec![\"id1\".to_string(), \"id2\".to_string()]),\n    None,\n    None,\n    None,\n    Some(IncludeList::default_get())\n).await?;"
+            },
+            {
+                "lang": "rust",
+                "label": "Get records by metadata filter",
+                "source": "use chroma_types::{Where, MetadataExpression, MetadataComparison, MetadataValue, PrimitiveOperator, IncludeList};\nlet where_clause = Where::Metadata(MetadataExpression {\n    key: \"category\".to_string(),\n    comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Str(\"science\".to_string())),\n});\nlet response = collection.get(None, Some(where_clause), Some(10), None, None).await?;"
             },
             {
                 "lang": "curl",
@@ -2677,8 +2837,13 @@ async fn collection_get(
             },
             {
                 "lang": "rust",
-                "label": "Query collection",
-                "source": "let query_result: QueryResult = collection.query(query, None).await?;"
+                "label": "Query with embeddings",
+                "source": "let results = collection.query(\n    vec![vec![0.1, 0.2, 0.3]],\n    Some(10),\n    None,\n    None,\n    None\n).await?;"
+            },
+            {
+                "lang": "rust",
+                "label": "Query with metadata filter",
+                "source": "use chroma_types::{Where, MetadataExpression, MetadataComparison, MetadataValue, PrimitiveOperator};\nlet where_clause = Where::Metadata(MetadataExpression {\n    key: \"category\".to_string(),\n    comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Str(\"science\".to_string())),\n});\nlet results = collection.query(\n    vec![vec![0.1, 0.2, 0.3]],\n    Some(10),\n    Some(where_clause),\n    None,\n    None\n).await?;"
             },
             {
                 "lang": "curl",
@@ -2847,6 +3012,16 @@ async fn collection_query(
                 "lang": "python",
                 "label": "Search with embeddings",
                 "source": "from chromadb import Search, Knn\nsearch = Search().rank(Knn(query=[0.1, 0.2, 0.3], limit=10))\nresults = collection.search(search)"
+            },
+            {
+                "lang": "rust",
+                "label": "Search with embeddings",
+                "source": "use chroma_types::plan::{SearchPayload, ReadLevel};\nuse chroma_types::operator::{RankExpr, QueryVector, Key};\nlet search = SearchPayload::default()\n    .rank(RankExpr::Knn {\n        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),\n        key: Key::Embedding,\n        limit: 10,\n        default: None,\n        return_rank: false,\n    })\n    .limit(Some(10), 0)\n    .select([Key::Document, Key::Score]);\nlet results = collection.search(vec![search]).await?;"
+            },
+            {
+                "lang": "rust",
+                "label": "Search with metadata filter",
+                "source": "use chroma_types::plan::{SearchPayload, ReadLevel};\nuse chroma_types::operator::{RankExpr, QueryVector, Key};\nlet search = SearchPayload::default()\n    .r#where(Key::field(\"category\").eq(\"science\"))\n    .rank(RankExpr::Knn {\n        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),\n        key: Key::Embedding,\n        limit: 100,\n        default: None,\n        return_rank: false,\n    })\n    .limit(Some(10), 0)\n    .select([Key::Document, Key::Score]);\nlet results = collection.search(vec![search]).await?;"
             },
             {
                 "lang": "curl",
