@@ -1,0 +1,286 @@
+---
+title: "Getting Started"
+sidebarTitle: "Getting Started (TAB)"
+description: "Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine."
+---
+import {Callout} from '/snippets/callout.mdx';
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+<Frame>
+<iframe width="660" height="315" src="https://www.youtube.com/embed/yvsmkx-Jaj0?si=DQHS2DkZ1mI9AkjB" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+</Frame>
+
+<Callout>
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+</Callout>
+
+<Steps titleSize="h3">
+  <Step title="Install">
+    <CodeGroup>
+    ```bash pip
+    pip install chromadb
+    ```
+    ```bash poetry
+    poetry add chromadb
+    ```
+    ```bash uv
+    uv pip install chromadb
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create a Chroma Client">
+    ```python Python
+    import chromadb
+    chroma_client = chromadb.Client()
+    ```
+  </Step>
+
+  <Step title="Create a collection">
+    Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
+
+    ```python Python
+    collection = chroma_client.create_collection(name="my_collection")
+    ```
+  </Step>
+
+  <Step title="Add some text documents to the collection">
+    Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
+
+    ```python Python
+    collection.add(
+        ids=["id1", "id2"],
+        documents=[
+            "This is a document about pineapple",
+            "This is a document about oranges"
+        ]
+    )
+    ```
+  </Step>
+
+  <Step title="Query the collection">
+    You can query the collection with a list of query texts, and Chroma will return the n most similar results. It's that easy!
+
+    ```python Python
+    results = collection.query(
+        query_texts=["This is a query document about hawaii"], # Chroma will embed this for you
+        n_results=2 # how many results to return
+    )
+    print(results)
+    ```
+
+    If n\_results is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set n\_results=2.
+  </Step>
+
+  <Step title="Inspect Results">
+    From the above - you can see that our query about hawaii is semantically most similar to the document about pineapple.
+
+    ```python Python
+    {
+      'documents': [[
+          'This is a document about pineapple',
+          'This is a document about oranges'
+      ]],
+      'ids': [['id1', 'id2']],
+      'distances': [[1.0404009819030762, 1.243080496788025]],
+      'uris': None,
+      'data': None,
+      'metadatas': [[None, None]],
+      'embeddings': None,
+    }
+    ```
+  </Step>
+
+  <Step title="Try it out yourself">
+    What if we tried querying with "This is a document about florida"? Here is a full example.
+
+    ```python Python expandable
+    import chromadb
+    chroma_client = chromadb.Client()
+
+    # switch \`create_collection\` to \`get_or_create_collection\` to avoid creating a new collection every time
+    collection = chroma_client.get_or_create_collection(name="my_collection")
+
+    # switch \`add\` to \`upsert\` to avoid adding the same documents every time
+    collection.upsert(
+        documents=[
+            "This is a document about pineapple",
+            "This is a document about oranges"
+        ],
+        ids=["id1", "id2"]
+    )
+
+    results = collection.query(
+        query_texts=["This is a query document about florida"], # Chroma will embed this for you
+        n_results=2 # how many results to return
+    )
+
+    print(results)
+    ```
+  </Step>
+</Steps>
+
+## Next steps
+
+In this guide we used Chroma's [ephemeral client](https://docs.trychroma.com/docs/run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](https://docs.trychroma.com/docs/run-chroma/persistent-client) or run Chroma in [client-server mode](https://docs.trychroma.com/docs/run-chroma/client-server) if you need data persistence.
+
+- Learn how to [Deploy Chroma](https://docs.trychroma.com/guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+</Tab>
+
+<Tab title="TypeScript" icon="js">
+
+<Frame>
+<iframe width="660" height="315" src="https://www.youtube.com/embed/I1Xr1okBREc?si=yWlN4Ld9RSdM_JNx" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+</Frame>
+
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+
+<Steps titleSize="h3">
+  <Step title="Install">
+    <CodeGroup>
+    ```bash npm
+    npm install chromadb @chroma-core/default-embed
+    ```
+    ```bash pnpm
+    pnpm add chromadb @chroma-core/default-embed
+    ```
+    ```bash yarn
+    yarn add chromadb @chroma-core/default-embed
+    ```
+    ```bash bun
+    bun add chromadb @chroma-core/default-embed
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Create a Chroma Client">
+    Run the Chroma backend:
+
+    ```bash Terminal CLI
+    chroma run --path ./getting-started
+    ```
+    ```bash Terminal Docker
+    docker pull chromadb/chroma
+    docker run -p 8000:8000 chromadb/chroma
+    ```
+
+    Then create a client which connects to it:
+
+    ```typescript TypeScript ESM
+    import { ChromaClient } from "chromadb";
+    const client = new ChromaClient();
+    ```
+
+    ```typescript TypeScript CJS
+    const { ChromaClient } = require("chromadb");
+    const client = new ChromaClient();
+    ```
+  </Step>
+
+  <Step title="Create a collection">
+    Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
+
+    ```typescript TypeScript
+    const collection = await client.createCollection({
+      name: "my_collection",
+    });
+    ```
+  </Step>
+
+  <Step title="Add some text documents to the collection">
+    Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
+
+    ```typescript TypeScript
+    await collection.add({
+      ids: ["id1", "id2"],
+      documents: [
+        "This is a document about pineapple",
+        "This is a document about oranges",
+      ],
+    });
+    ```
+  </Step>
+
+  <Step title="Query the collection">
+    You can query the collection with a list of query texts, and Chroma will return the n most similar results. It's that easy!
+
+    ```typescript TypeScript
+    const results = await collection.query({
+      queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
+      nResults: 2, // how many results to return
+    });
+
+    console.log(results);
+    ```
+
+    If n\_results is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set n\_results=2.
+  </Step>
+
+  <Step title="Inspect Results">
+    From the above - you can see that our query about hawaii is semantically most similar to the document about pineapple.
+
+    ```typescript TypeScript
+    {
+        documents: [
+            [
+                'This is a document about pineapple',
+                'This is a document about oranges'
+            ]
+        ],
+        ids: [
+            ['id1', 'id2']
+        ],
+        distances: [[1.0404009819030762, 1.243080496788025]],
+        uris: null,
+        data: null,
+        metadatas: [[null, null]],
+        embeddings: null
+    }
+    ```
+  </Step>
+
+  <Step title="Try it out yourself">
+    What if we tried querying with "This is a document about florida"? Here is a full example.
+
+    ```typescript TypeScript expandable
+    import { ChromaClient } from "chromadb";
+    const client = new ChromaClient();
+
+    // switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
+    const collection = await client.getOrCreateCollection({
+      name: "my_collection",
+    });
+
+    // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
+    await collection.upsert({
+      documents: [
+        "This is a document about pineapple",
+        "This is a document about oranges",
+      ],
+      ids: ["id1", "id2"],
+    });
+
+    const results = await collection.query({
+      queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
+      nResults: 2, // how many results to return
+    });
+
+    console.log(results);
+    ```
+  </Step>
+</Steps>
+
+## Next steps
+
+- We offer [first class support](https://docs.trychroma.com/docs/embeddings/embedding-functions) for various embedding providers via our embedding function interface. Each embedding function ships in its own npm package.
+- Learn how to [Deploy Chroma](https://docs.trychroma.com/guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+</Tab>
+</Tabs>

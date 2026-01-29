@@ -1,0 +1,48 @@
+.chroma-cloud-callout {
+  background-color: #ffffff;
+  border-top: 1px solid #000000;
+  border-left: 1px solid #000000;
+  border-right: 1px solid #000000;
+  border-bottom: 1px solid #000000;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+  box-shadow: 4px 4px 0 0 #4169E1;
+  position: relative;
+}
+
+.dark .chroma-cloud-callout {
+  background-color: #121212;
+  border-top: 1px solid #ffffff;
+  border-left: 1px solid #fff;
+  border-right: 1px solid #fff;
+  border-bottom: 1px solid #ffffff;
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+  box-shadow: 4px 4px 0 0 #4169E1;
+  position: relative;
+}
+
+/* Step number customization */
+[data-component-part="step-number"] > div {
+  border-radius: 0;
+  border: 1px solid #000000;
+  background-color: #ffffff;
+  font-family: ui-monospace, monospace;
+  font-weight: 400;
+  box-shadow: 2px 2px 0 0 #000000;
+}
+
+.dark [data-component-part="step-number"] > div {
+  border-color: #f3f4f6;
+  background-color: #111827;
+  box-shadow: 2px 2px 0 0 #e5e7eb;
+}
+
+[data-component-part="step-line"] {
+  background-color: #000000;
+}
+
+.dark [data-component-part="step-line"] {
+  background-color: #ffffff;
+}
+

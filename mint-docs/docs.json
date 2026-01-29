@@ -1,0 +1,204 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "aspen",
+  "name": "Chroma Docs",
+  "colors": {
+    "primary": "#ff6446",
+    "light": "#3b82f6",
+    "dark": "#3b82f6"
+  },
+  "appearance": {
+    "default": "light"
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "favicon": "/favicon.svg",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "icon": "book",
+        "pages": [
+          {
+            "group": "Overview",
+            "pages": [
+              "docs/overview/introduction",
+              "docs/overview/getting-started",
+              "docs/overview/getting-started-tabs",
+              "docs/overview/architecture",
+              "docs/overview/data-model",
+              "docs/overview/roadmap",
+              "docs/overview/contributing"
+            ]
+          },
+          {
+            "group": "Run Chroma",
+            "pages": [
+              "docs/run-chroma/ephemeral-client",
+              "docs/run-chroma/persistent-client"
+            ]
+          },
+          {
+            "group": "Collections",
+            "pages": [
+              "docs/collections/add-data"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chroma Cloud",
+        "icon": "cloud",
+        "pages": [
+          "cloud/getting-started",
+          "cloud/pricing",
+          {
+            "group": "Features",
+            "pages": [
+              "cloud/features/collection-forking"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "icon": "code-merge",
+        "pages": [
+          "integrations/chroma-integrations",
+          {
+            "group": "Embedding Models",
+            "pages": [
+              "integrations/embedding-models/amazon-bedrock",
+              "integrations/embedding-models/baseten"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "icon": "brackets-curly",
+        "pages": [
+          {
+            "group": "Authentication",
+            "openapi": "openapi.json",
+            "pages": [
+              "GET /api/v2/auth/identity"
+            ]
+          },
+          {
+            "group": "Tenants",
+            "openapi": "openapi.json",
+            "pages": [
+              "POST /api/v2/tenants",
+              "GET /api/v2/tenants/{tenant_name}",
+              "PATCH /api/v2/tenants/{tenant_name}"
+            ]
+          },
+          {
+            "group": "Databases",
+            "openapi": "openapi.json",
+            "pages": [
+              "GET /api/v2/tenants/{tenant}/databases",
+              "POST /api/v2/tenants/{tenant}/databases",
+              "GET /api/v2/tenants/{tenant}/databases/{database}",
+              "DELETE /api/v2/tenants/{tenant}/databases/{database}"
+            ]
+          },
+          {
+            "group": "Collections",
+            "openapi": "openapi.json",
+            "pages": [
+              "GET /api/v2/tenants/{tenant}/databases/{database}/collections",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections",
+              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+              "PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+              "DELETE /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+              "GET /api/v2/tenants/{tenant}/databases/{database}/collections_count",
+              "GET /api/v2/collections/{crn}",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork"
+            ]
+          },
+          {
+            "group": "Records",
+            "openapi": "openapi.json",
+            "pages": [
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
+              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status"
+            ]
+          },
+          {
+            "group": "Query & Search",
+            "openapi": "openapi.json",
+            "pages": [
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search"
+            ]
+          },
+          {
+            "group": "Functions",
+            "openapi": "openapi.json",
+            "pages": [
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
+              "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
+              "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach"
+            ]
+          }
+        ]
+      }
+    ],
+    "global": {
+      "anchors": [
+        {
+          "anchor": "X",
+          "href": "https://x.com/trychroma",
+          "icon": "x-twitter"
+        },
+        {
+          "anchor": "Discord",
+          "href": "https://discord.gg/MMeYNTmh3x",
+          "icon": "discord"
+        },
+        {
+          "anchor": "Changelog",
+          "href": "https://www.trychroma.com/changelog",
+          "icon": "rss"
+        }
+      ]
+    }
+  },
+  "logo": {
+    "light": "/light-logo.svg",
+    "dark": "/dark-logo.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/chroma-core/chroma"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "x": "https://x.com/trychroma",
+      "github": "https://github.com/chroma-core/chroma",
+      "discord": "https://discord.gg/MMeYNTmh3x"
+    }
+  }
+}
