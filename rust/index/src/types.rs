@@ -18,7 +18,7 @@ impl IndexConfig {
 }
 
 /// Result of a vector search operation.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct SearchResult {
     pub keys: Vec<u64>,
     pub distances: Vec<f32>,
