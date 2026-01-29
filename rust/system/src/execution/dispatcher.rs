@@ -247,6 +247,7 @@ impl Configurable<DispatcherConfig> for Dispatcher {
         config: &DispatcherConfig,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        tracing::info!("Creating dispatcher with config: {:#?}", config);
         Ok(Dispatcher::new(config.clone()))
     }
 }
