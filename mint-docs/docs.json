@@ -8,7 +8,7 @@
     "dark": "#3b82f6"
   },
   "appearance": {
-    "default": "light"
+    "default": "system"
   },
   "fonts": {
     "family": "Inter"
