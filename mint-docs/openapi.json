@@ -1,0 +1,4599 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "chroma-frontend",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.trychroma.com"
+    }
+  ],
+  "paths": {
+    "/api/v2/auth/identity": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves the current user's identity, tenant, and databases.",
+        "operationId": "get_user_identity",
+        "responses": {
+          "200": {
+            "description": "Get user identity",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetUserIdentityResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/collections/{crn}": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves a collection by Chroma Resource Name.",
+        "operationId": "get_collection_by_crn",
+        "parameters": [
+          {
+            "name": "crn",
+            "in": "path",
+            "description": "Chroma Resource Name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collection found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/healthcheck": {
+      "get": {
+        "tags": [],
+        "summary": "Health check endpoint that returns 200 if the server and executor are ready",
+        "operationId": "healthcheck",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Service Unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/heartbeat": {
+      "get": {
+        "tags": [],
+        "summary": "Heartbeat endpoint that returns a nanosecond timestamp of the current time.",
+        "operationId": "heartbeat",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HeartbeatResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/pre-flight-checks": {
+      "get": {
+        "tags": [],
+        "summary": "Pre-flight checks endpoint reporting basic readiness info.",
+        "operationId": "pre_flight_checks",
+        "responses": {
+          "200": {
+            "description": "Pre flight checks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/reset": {
+      "post": {
+        "tags": [],
+        "summary": "Reset endpoint allowing authorized users to reset the database.",
+        "operationId": "reset",
+        "responses": {
+          "200": {
+            "description": "Reset successful",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "boolean"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants": {
+      "post": {
+        "tags": [],
+        "summary": "Creates a new tenant.",
+        "operationId": "create_tenant",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTenantPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Tenant created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateTenantResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant_name}": {
+      "get": {
+        "tags": [],
+        "summary": "Returns an existing tenant by name.",
+        "operationId": "get_tenant",
+        "parameters": [
+          {
+            "name": "tenant_name",
+            "in": "path",
+            "description": "Tenant to retrieve",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Tenant found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetTenantResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tenant not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [],
+        "summary": "Updates an existing tenant by name.",
+        "operationId": "update_tenant",
+        "parameters": [
+          {
+            "name": "tenant_name",
+            "in": "path",
+            "description": "Tenant to update",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateTenantPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Tenant updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateTenantResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Tenant not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Tenant resource name already set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases": {
+      "get": {
+        "tags": [],
+        "summary": "Lists all databases for a given tenant.",
+        "operationId": "list_databases",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID to list databases for",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Offset for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of databases",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [],
+        "summary": "Creates a new database for a given tenant.",
+        "operationId": "create_database",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID to associate with the new database",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDatabasePayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Database created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateDatabaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves a specific database by name.",
+        "operationId": "get_database",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Name of the database to retrieve",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Database retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Database"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [],
+        "summary": "Deletes a specific database.",
+        "operationId": "delete_database",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Name of the database to delete",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Database deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteDatabaseResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Database not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections": {
+      "get": {
+        "tags": [],
+        "summary": "Lists all collections in the specified database.",
+        "operationId": "list_collections",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name to list collections from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Offset for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of collections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Vec"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [],
+        "summary": "Creates a new collection under the specified database.",
+        "operationId": "create_collection",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name containing the new collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCollectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Collection created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves a collection by ID or name.",
+        "operationId": "get_collection",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "UUID of the collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collection found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [],
+        "summary": "Updates an existing collection's name or metadata.",
+        "operationId": "update_collection",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "UUID of the collection to update",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Collection updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCollectionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [],
+        "summary": "Deletes a collection in a given database.",
+        "operationId": "delete_collection",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "UUID of the collection to delete",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Collection deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCollectionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add": {
+      "post": {
+        "tags": [],
+        "summary": "Adds records to a collection.",
+        "operationId": "collection_add",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddCollectionRecordsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Collection added successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AddCollectionRecordsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid data for collection addition"
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach": {
+      "post": {
+        "tags": [],
+        "summary": "Detach a function",
+        "operationId": "detach_function",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Input collection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Attached function name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DetachFunctionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Function detached successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetachFunctionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves the number of records in a collection.",
+        "operationId": "collection_count",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID for the collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database containing this collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID whose records are counted",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Number of records in the collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/u32"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete": {
+      "post": {
+        "tags": [],
+        "summary": "Deletes records in a collection. Can filter by IDs or metadata.",
+        "operationId": "collection_delete",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteCollectionRecordsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Records deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteCollectionRecordsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork": {
+      "post": {
+        "tags": [],
+        "summary": "Forks an existing collection.",
+        "operationId": "fork_collection",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "UUID of the collection to update",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForkCollectionPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Collection forked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Collection"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach": {
+      "post": {
+        "tags": [],
+        "summary": "Attach a function to a collection",
+        "operationId": "attach_function",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttachFunctionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": " Function attached successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AttachFunctionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}": {
+      "get": {
+        "tags": [],
+        "summary": "Get an attached function by name",
+        "operationId": "get_attached_function",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "function_name",
+            "in": "path",
+            "description": "Attached function name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Attached function retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetAttachedFunctionResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Attached function not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get": {
+      "post": {
+        "tags": [],
+        "summary": "Retrieves records from a collection by ID or metadata filter.",
+        "operationId": "collection_get",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name for the collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID to fetch records from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GetRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Records retrieved from the collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GetResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves the indexing status of a collection.",
+        "operationId": "indexing_status",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name for the collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID to get index status for",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Index status retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IndexStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query": {
+      "post": {
+        "tags": [],
+        "summary": "Query a collection in a variety of ways, including vector search, metadata filtering, and full-text search",
+        "operationId": "collection_query",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name containing the collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID to query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Limit for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "description": "Offset for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QueryRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Records matching the query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search": {
+      "post": {
+        "tags": [],
+        "summary": "Search records from a collection with hybrid criterias.",
+        "operationId": "collection_search",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name for the collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID to search records from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SearchRequestPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Records searched from the collection",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update": {
+      "post": {
+        "tags": [],
+        "summary": "Updates records in a collection by ID.",
+        "operationId": "collection_update",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCollectionRecordsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Collection updated successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCollectionRecordsResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found"
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert": {
+      "post": {
+        "tags": [],
+        "summary": "Upserts records in a collection (create if not exists, otherwise update).",
+        "operationId": "collection_upsert",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "collection_id",
+            "in": "path",
+            "description": "Collection ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpsertCollectionRecordsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Records upserted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpsertCollectionRecordsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Collection not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/tenants/{tenant}/databases/{database}/collections_count": {
+      "get": {
+        "tags": [],
+        "summary": "Retrieves the total number of collections in a given database.",
+        "operationId": "count_collections",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "path",
+            "description": "Tenant ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database",
+            "in": "path",
+            "description": "Database name to count collections from",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Count of collections",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/u32"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v2/version": {
+      "get": {
+        "tags": [],
+        "summary": "Returns the version of the server.",
+        "operationId": "version",
+        "responses": {
+          "200": {
+            "description": "Get server version",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AddCollectionRecordsPayload": {
+        "type": "object",
+        "required": [
+          "ids",
+          "embeddings"
+        ],
+        "properties": {
+          "documents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "embeddings": {
+            "$ref": "#/components/schemas/EmbeddingsPayload"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadatas": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/HashMap"
+                }
+              ]
+            }
+          },
+          "uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "AddCollectionRecordsResponse": {
+        "type": "object"
+      },
+      "AttachFunctionRequest": {
+        "type": "object",
+        "required": [
+          "name",
+          "function_id",
+          "output_collection"
+        ],
+        "properties": {
+          "function_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "output_collection": {
+            "type": "string"
+          },
+          "params": {}
+        }
+      },
+      "AttachFunctionResponse": {
+        "type": "object",
+        "required": [
+          "attached_function",
+          "created"
+        ],
+        "properties": {
+          "attached_function": {
+            "$ref": "#/components/schemas/AttachedFunctionInfo"
+          },
+          "created": {
+            "type": "boolean",
+            "description": "True if newly created, false if already existed (idempotent request)"
+          }
+        }
+      },
+      "AttachedFunctionApiResponse": {
+        "type": "object",
+        "description": "API response struct for attached function with function_name instead of function_id",
+        "required": [
+          "id",
+          "name",
+          "function_name",
+          "input_collection_id",
+          "output_collection",
+          "tenant_id",
+          "database_id",
+          "completion_offset",
+          "min_records_for_invocation"
+        ],
+        "properties": {
+          "completion_offset": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Completion offset: the WAL position up to which the attached function has processed records",
+            "minimum": 0
+          },
+          "database_id": {
+            "type": "string",
+            "description": "Database name this attached function belongs to"
+          },
+          "function_name": {
+            "type": "string",
+            "description": "Name of the function (e.g., \"record_counter\", \"statistics\")"
+          },
+          "id": {
+            "$ref": "#/components/schemas/AttachedFunctionUuid",
+            "description": "Unique identifier for the attached function"
+          },
+          "input_collection_id": {
+            "$ref": "#/components/schemas/CollectionUuid",
+            "description": "Source collection that triggers the attached function"
+          },
+          "min_records_for_invocation": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Minimum number of new records required before the attached function runs again",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the attached function instance"
+          },
+          "output_collection": {
+            "type": "string",
+            "description": "Name of target collection where attached function output is stored"
+          },
+          "output_collection_id": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionUuid",
+                "description": "ID of the output collection (lazily filled in after creation)"
+              }
+            ]
+          },
+          "params": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Optional JSON parameters for the function"
+          },
+          "tenant_id": {
+            "type": "string",
+            "description": "Tenant name this attached function belongs to"
+          }
+        }
+      },
+      "AttachedFunctionInfo": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "function_name"
+        ],
+        "properties": {
+          "function_name": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "AttachedFunctionUuid": {
+        "type": "string",
+        "format": "uuid",
+        "description": "AttachedFunctionUuid is a wrapper around Uuid to provide a type for attached function identifiers."
+      },
+      "BoolInvertedIndexConfig": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "BoolInvertedIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/BoolInvertedIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "BoolValueType": {
+        "type": "object",
+        "description": "Boolean value type index configurations",
+        "properties": {
+          "bool_inverted_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BoolInvertedIndexType"
+              }
+            ]
+          }
+        }
+      },
+      "ChecklistResponse": {
+        "type": "object",
+        "required": [
+          "max_batch_size",
+          "supports_base64_encoding"
+        ],
+        "properties": {
+          "max_batch_size": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "supports_base64_encoding": {
+            "type": "boolean"
+          }
+        }
+      },
+      "Collection": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "configuration_json",
+          "tenant",
+          "database",
+          "log_position",
+          "version"
+        ],
+        "properties": {
+          "configuration_json": {
+            "$ref": "#/components/schemas/CollectionConfiguration"
+          },
+          "database": {
+            "type": "string"
+          },
+          "dimension": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          },
+          "id": {
+            "$ref": "#/components/schemas/CollectionUuid"
+          },
+          "log_position": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HashMap"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "schema": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Schema"
+              }
+            ]
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
+          }
+        }
+      },
+      "CollectionConfiguration": {
+        "type": "object",
+        "properties": {
+          "embedding_function": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmbeddingFunctionConfiguration"
+              }
+            ]
+          },
+          "hnsw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HnswConfiguration"
+              }
+            ]
+          },
+          "spann": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SpannConfiguration"
+              }
+            ]
+          }
+        }
+      },
+      "CollectionUuid": {
+        "type": "string",
+        "format": "uuid",
+        "description": "CollectionUuid is a wrapper around Uuid to provide a type for the collection id."
+      },
+      "CreateCollectionPayload": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "configuration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CollectionConfiguration"
+              }
+            ]
+          },
+          "get_or_create": {
+            "type": "boolean"
+          },
+          "metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HashMap"
+              }
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "schema": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Schema"
+              }
+            ]
+          }
+        }
+      },
+      "CreateDatabasePayload": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateDatabaseResponse": {
+        "type": "object"
+      },
+      "CreateTenantPayload": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateTenantResponse": {
+        "type": "object"
+      },
+      "Database": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "tenant"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "tenant": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteCollectionRecordsPayload": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RawWhereFields"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "DeleteCollectionRecordsResponse": {
+        "type": "object"
+      },
+      "DeleteDatabaseResponse": {
+        "type": "object"
+      },
+      "DetachFunctionRequest": {
+        "type": "object",
+        "properties": {
+          "delete_output": {
+            "type": "boolean",
+            "description": "Whether to delete the output collection as well"
+          }
+        }
+      },
+      "DetachFunctionResponse": {
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "EmbeddingFunctionConfiguration": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "legacy"
+                ]
+              }
+            }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/EmbeddingFunctionNewConfiguration"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "known"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "unknown"
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "EmbeddingFunctionNewConfiguration": {
+        "type": "object",
+        "required": [
+          "name",
+          "config"
+        ],
+        "properties": {
+          "config": {},
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "EmbeddingsPayload": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              }
+            }
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "FloatInvertedIndexConfig": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "FloatInvertedIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/FloatInvertedIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "FloatListValueType": {
+        "type": "object",
+        "description": "Float list value type index configurations (for vectors)",
+        "properties": {
+          "vector_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VectorIndexType"
+              }
+            ]
+          }
+        }
+      },
+      "FloatValueType": {
+        "type": "object",
+        "description": "Float value type index configurations",
+        "properties": {
+          "float_inverted_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FloatInvertedIndexType"
+              }
+            ]
+          }
+        }
+      },
+      "ForkCollectionPayload": {
+        "type": "object",
+        "required": [
+          "new_name"
+        ],
+        "properties": {
+          "new_name": {
+            "type": "string"
+          }
+        }
+      },
+      "FtsIndexConfig": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "FtsIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/FtsIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GetAttachedFunctionResponse": {
+        "type": "object",
+        "required": [
+          "attached_function"
+        ],
+        "properties": {
+          "attached_function": {
+            "$ref": "#/components/schemas/AttachedFunctionApiResponse"
+          }
+        }
+      },
+      "GetRequestPayload": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RawWhereFields"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "include": {
+                "$ref": "#/components/schemas/IncludeList"
+              },
+              "limit": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "offset": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              }
+            }
+          }
+        ]
+      },
+      "GetResponse": {
+        "type": "object",
+        "required": [
+          "ids",
+          "include"
+        ],
+        "properties": {
+          "documents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "embeddings": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number",
+                "format": "float"
+              }
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Include"
+            }
+          },
+          "metadatas": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/HashMap"
+                }
+              ]
+            }
+          },
+          "uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "GetTenantResponse": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "resource_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "GetUserIdentityResponse": {
+        "type": "object",
+        "required": [
+          "user_id",
+          "tenant",
+          "databases"
+        ],
+        "properties": {
+          "databases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "uniqueItems": true
+          },
+          "tenant": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "HashMap": {
+        "type": "object",
+        "additionalProperties": {
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "integer",
+              "format": "int64"
+            },
+            {
+              "type": "number",
+              "format": "double"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/components/schemas/SparseVector"
+            }
+          ]
+        },
+        "propertyNames": {
+          "type": "string"
+        }
+      },
+      "HeartbeatResponse": {
+        "type": "object",
+        "required": [
+          "nanosecond heartbeat"
+        ],
+        "properties": {
+          "nanosecond heartbeat": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "HnswConfiguration": {
+        "type": "object",
+        "properties": {
+          "ef_construction": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "ef_search": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_neighbors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "resize_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "space": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Space"
+              }
+            ]
+          },
+          "sync_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "HnswIndexConfig": {
+        "type": "object",
+        "description": "Configuration for HNSW vector index algorithm parameters",
+        "properties": {
+          "batch_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "ef_construction": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "ef_search": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_neighbors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "num_threads": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "resize_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "sync_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "Include": {
+        "type": "string",
+        "enum": [
+          "distances",
+          "documents",
+          "embeddings",
+          "metadatas",
+          "uris"
+        ]
+      },
+      "IncludeList": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/Include"
+        }
+      },
+      "IndexStatusResponse": {
+        "type": "object",
+        "required": [
+          "op_indexing_progress",
+          "num_unindexed_ops",
+          "num_indexed_ops",
+          "total_ops"
+        ],
+        "properties": {
+          "num_indexed_ops": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "num_unindexed_ops": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "op_indexing_progress": {
+            "type": "number",
+            "format": "float"
+          },
+          "total_ops": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "IntInvertedIndexConfig": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "IntInvertedIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/IntInvertedIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "IntValueType": {
+        "type": "object",
+        "description": "Integer value type index configurations",
+        "properties": {
+          "int_inverted_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IntInvertedIndexType"
+              }
+            ]
+          }
+        }
+      },
+      "Key": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "Document"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Embedding"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Metadata"
+            ]
+          },
+          {
+            "type": "string",
+            "enum": [
+              "Score"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "MetadataField"
+            ],
+            "properties": {
+              "MetadataField": {
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "Represents a field key in search queries.\n\nUsed for both selecting fields to return and building filter expressions.\nPredefined keys access special fields, while custom keys access metadata.\n\n# Predefined Keys\n\n- `Key::Document` - Document text content (`#document`)\n- `Key::Embedding` - Vector embeddings (`#embedding`)\n- `Key::Metadata` - All metadata fields (`#metadata`)\n- `Key::Score` - Search scores (`#score`)\n\n# Custom Keys\n\nUse `Key::field()` or `Key::from()` to reference metadata fields:\n\n```\nuse chroma_types::operator::Key;\n\nlet key = Key::field(\"author\");\nlet key = Key::from(\"title\");\n```\n\n# Examples\n\n## Building filters\n\n```\nuse chroma_types::operator::Key;\n\n// Equality\nlet filter = Key::field(\"status\").eq(\"published\");\n\n// Comparisons\nlet filter = Key::field(\"year\").gte(2020);\nlet filter = Key::field(\"score\").lt(0.9);\n\n// Set operations\nlet filter = Key::field(\"category\").is_in(vec![\"tech\", \"science\"]);\nlet filter = Key::field(\"status\").not_in(vec![\"deleted\", \"archived\"]);\n\n// Document content\nlet filter = Key::Document.contains(\"machine learning\");\nlet filter = Key::Document.regex(r\"\\bAPI\\b\");\n\n// Combining filters\nlet filter = Key::field(\"status\").eq(\"published\")\n    & Key::field(\"year\").gte(2020);\n```\n\n## Selecting fields\n\n```\nuse chroma_types::plan::SearchPayload;\nuse chroma_types::operator::Key;\n\nlet search = SearchPayload::default()\n    .select([\n        Key::Document,\n        Key::Score,\n        Key::field(\"title\"),\n        Key::field(\"author\"),\n    ]);\n```"
+      },
+      "QueryRequestPayload": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/RawWhereFields"
+          },
+          {
+            "type": "object",
+            "required": [
+              "query_embeddings"
+            ],
+            "properties": {
+              "ids": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              },
+              "include": {
+                "$ref": "#/components/schemas/IncludeList"
+              },
+              "n_results": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int32",
+                "minimum": 0
+              },
+              "query_embeddings": {
+                "type": "array",
+                "items": {
+                  "type": "array",
+                  "items": {
+                    "type": "number",
+                    "format": "float"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      },
+      "QueryResponse": {
+        "type": "object",
+        "required": [
+          "ids",
+          "include"
+        ],
+        "properties": {
+          "distances": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "float"
+              }
+            }
+          },
+          "documents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "embeddings": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                }
+              }
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "include": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Include"
+            }
+          },
+          "metadatas": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/HashMap"
+                  }
+                ]
+              }
+            }
+          },
+          "uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "array",
+              "items": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "RawWhereFields": {
+        "type": "object",
+        "properties": {
+          "where": {},
+          "where_document": {}
+        }
+      },
+      "ReadLevel": {
+        "type": "string",
+        "enum": [
+          "index_and_wal",
+          "index_only"
+        ]
+      },
+      "Schema": {
+        "type": "object",
+        "description": "Schema representation for collection index configurations\n\nThis represents the server-side schema structure used for index management",
+        "required": [
+          "defaults",
+          "keys"
+        ],
+        "properties": {
+          "cmek": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "Customer-managed encryption key for collection data"
+          },
+          "defaults": {
+            "$ref": "#/components/schemas/ValueTypes",
+            "description": "Default index configurations for each value type"
+          },
+          "keys": {
+            "type": "object",
+            "description": "Key-specific index overrides\nTODO(Sanket): Needed for backwards compatibility. Should remove after deploy.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ValueTypes"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "source_attached_function_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "ID of the attached function that created this output collection (if applicable)"
+          }
+        }
+      },
+      "SearchPayload": {
+        "type": "object",
+        "properties": {
+          "filter": {
+            "type": "object",
+            "properties": {
+              "query_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "where_clause": {
+                "type": "object"
+              }
+            }
+          },
+          "group_by": {
+            "type": "object",
+            "properties": {
+              "aggregate": {
+                "type": "object"
+              },
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "limit": {
+            "type": "object",
+            "properties": {
+              "limit": {
+                "type": "integer"
+              },
+              "offset": {
+                "type": "integer"
+              }
+            }
+          },
+          "rank": {
+            "type": "object"
+          },
+          "select": {
+            "type": "object",
+            "properties": {
+              "keys": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "SearchRequestPayload": {
+        "type": "object",
+        "required": [
+          "searches"
+        ],
+        "properties": {
+          "read_level": {
+            "$ref": "#/components/schemas/ReadLevel",
+            "description": "Specifies the read level for consistency vs performance tradeoffs.\nDefaults to IndexAndWal (full consistency)."
+          },
+          "searches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchPayload"
+            }
+          }
+        }
+      },
+      "SearchResponse": {
+        "type": "object",
+        "required": [
+          "ids",
+          "documents",
+          "embeddings",
+          "metadatas",
+          "scores",
+          "select"
+        ],
+        "properties": {
+          "documents": {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          },
+          "embeddings": {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "number",
+                  "format": "float"
+                }
+              }
+            }
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "metadatas": {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/HashMap"
+                  }
+                ]
+              }
+            }
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "format": "float"
+              }
+            }
+          },
+          "select": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Key"
+              }
+            }
+          }
+        }
+      },
+      "Space": {
+        "type": "string",
+        "enum": [
+          "l2",
+          "cosine",
+          "ip"
+        ]
+      },
+      "SpannConfiguration": {
+        "type": "object",
+        "properties": {
+          "ef_construction": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "ef_search": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_neighbors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "merge_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "reassign_neighbor_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "search_nprobe": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "space": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Space"
+              }
+            ]
+          },
+          "split_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "write_nprobe": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "SpannIndexConfig": {
+        "type": "object",
+        "description": "Configuration for SPANN vector index algorithm parameters",
+        "properties": {
+          "ef_construction": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "ef_search": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "initial_lambda": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "max_neighbors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "merge_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "nreplica_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "num_centers_to_merge_to": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "num_samples_kmeans": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "reassign_neighbor_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "search_nprobe": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "search_rng_epsilon": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "search_rng_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "split_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "write_nprobe": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "write_rng_epsilon": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          },
+          "write_rng_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "float"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SparseVector": {
+        "type": "object",
+        "description": "Represents a sparse vector using parallel arrays for indices and values.\n\nOn deserialization: accepts both old format `{\"indices\": [...], \"values\": [...]}`\nand new format `{\"#type\": \"sparse_vector\", \"indices\": [...], \"values\": [...]}`.\n\nOn serialization: always includes `#type` field with value `\"sparse_vector\"`.",
+        "required": [
+          "indices",
+          "values"
+        ],
+        "properties": {
+          "indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            },
+            "description": "Dimension indices"
+          },
+          "tokens": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Tokens corresponding to each index"
+          },
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "number",
+              "format": "float"
+            },
+            "description": "Values corresponding to each index"
+          }
+        }
+      },
+      "SparseVectorIndexConfig": {
+        "type": "object",
+        "properties": {
+          "bm25": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether this embedding is BM25"
+          },
+          "embedding_function": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmbeddingFunctionConfiguration",
+                "description": "Embedding function configuration"
+              }
+            ]
+          },
+          "source_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Key to source the sparse vector from"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SparseVectorIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/SparseVectorIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "SparseVectorValueType": {
+        "type": "object",
+        "description": "Sparse vector value type index configurations",
+        "properties": {
+          "sparse_vector_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SparseVectorIndexType"
+              }
+            ]
+          }
+        }
+      },
+      "StringInvertedIndexConfig": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "StringInvertedIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/StringInvertedIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "StringValueType": {
+        "type": "object",
+        "description": "String value type index configurations",
+        "properties": {
+          "fts_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FtsIndexType"
+              }
+            ]
+          },
+          "string_inverted_index": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StringInvertedIndexType"
+              }
+            ]
+          }
+        }
+      },
+      "UpdateCollectionConfiguration": {
+        "type": "object",
+        "properties": {
+          "embedding_function": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmbeddingFunctionConfiguration"
+              }
+            ]
+          },
+          "hnsw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpdateHnswConfiguration"
+              }
+            ]
+          },
+          "spann": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpdateSpannConfiguration"
+              }
+            ]
+          }
+        }
+      },
+      "UpdateCollectionPayload": {
+        "type": "object",
+        "properties": {
+          "new_configuration": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpdateCollectionConfiguration"
+              }
+            ]
+          },
+          "new_metadata": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HashMap"
+              }
+            ]
+          },
+          "new_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "UpdateCollectionRecordsPayload": {
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "documents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "embeddings": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/UpdateEmbeddingsPayload"
+              }
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadatas": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/HashMap"
+                }
+              ]
+            }
+          },
+          "uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "UpdateCollectionRecordsResponse": {
+        "type": "object"
+      },
+      "UpdateCollectionResponse": {
+        "type": "object"
+      },
+      "UpdateEmbeddingsPayload": {
+        "oneOf": [
+          {
+            "type": "array",
+            "items": {
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "number",
+                "format": "float"
+              }
+            }
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ]
+      },
+      "UpdateHnswConfiguration": {
+        "type": "object",
+        "properties": {
+          "batch_size": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "ef_search": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "max_neighbors": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "num_threads": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "resize_factor": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "sync_threshold": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateSpannConfiguration": {
+        "type": "object",
+        "properties": {
+          "ef_search": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "search_nprobe": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateTenantPayload": {
+        "type": "object",
+        "required": [
+          "resource_name"
+        ],
+        "properties": {
+          "resource_name": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateTenantResponse": {
+        "type": "object"
+      },
+      "UpsertCollectionRecordsPayload": {
+        "type": "object",
+        "required": [
+          "ids",
+          "embeddings"
+        ],
+        "properties": {
+          "documents": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "embeddings": {
+            "$ref": "#/components/schemas/EmbeddingsPayload"
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadatas": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/HashMap"
+                }
+              ]
+            }
+          },
+          "uris": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "UpsertCollectionRecordsResponse": {
+        "type": "object"
+      },
+      "ValueTypes": {
+        "type": "object",
+        "description": "Strongly-typed value type configurations\nContains optional configurations for each supported value type",
+        "properties": {
+          "bool": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/BoolValueType"
+              }
+            ]
+          },
+          "float": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FloatValueType"
+              }
+            ]
+          },
+          "float_list": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/FloatListValueType"
+              }
+            ]
+          },
+          "int": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IntValueType"
+              }
+            ]
+          },
+          "sparse_vector": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SparseVectorValueType"
+              }
+            ]
+          },
+          "string": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/StringValueType"
+              }
+            ]
+          }
+        }
+      },
+      "Vec": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "id",
+            "name",
+            "configuration_json",
+            "tenant",
+            "database",
+            "log_position",
+            "version"
+          ],
+          "properties": {
+            "configuration_json": {
+              "$ref": "#/components/schemas/CollectionConfiguration"
+            },
+            "database": {
+              "type": "string"
+            },
+            "dimension": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "format": "int32"
+            },
+            "id": {
+              "$ref": "#/components/schemas/CollectionUuid"
+            },
+            "log_position": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "metadata": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/HashMap"
+                }
+              ]
+            },
+            "name": {
+              "type": "string"
+            },
+            "schema": {
+              "oneOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "$ref": "#/components/schemas/Schema"
+                }
+              ]
+            },
+            "tenant": {
+              "type": "string"
+            },
+            "version": {
+              "type": "integer",
+              "format": "int32"
+            }
+          }
+        }
+      },
+      "VectorIndexConfig": {
+        "type": "object",
+        "properties": {
+          "embedding_function": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/EmbeddingFunctionConfiguration",
+                "description": "Embedding function configuration"
+              }
+            ]
+          },
+          "hnsw": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/HnswIndexConfig",
+                "description": "HNSW algorithm configuration"
+              }
+            ]
+          },
+          "source_key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Key to source the vector from"
+          },
+          "space": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Space",
+                "description": "Vector space for similarity calculation (cosine, l2, ip)"
+              }
+            ]
+          },
+          "spann": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SpannIndexConfig",
+                "description": "SPANN algorithm configuration"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "VectorIndexType": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "config"
+        ],
+        "properties": {
+          "config": {
+            "$ref": "#/components/schemas/VectorIndexConfig"
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "u32": {
+        "type": "integer",
+        "format": "int32",
+        "minimum": 0
+      }
+    },
+    "securitySchemes": {
+      "ApiKeyAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-chroma-token"
+      }
+    }
+  },
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ]
+}
