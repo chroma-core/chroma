@@ -3,6 +3,8 @@ title: Search Basics
 description: Learn how to construct and use the Search class for querying your Chroma collections.
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 This page covers the basics of Search construction. For detailed usage of specific components, see:
 - [Filtering with Where](./filtering) - Complex filter expressions with `K()` and `.where()`
 - [Ranking and Scoring](./ranking) - Using `Knn` and `.rank()` for vector search
@@ -410,9 +412,9 @@ const result2 = await collection.search(search2);
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 When no limit is specified, Chroma Cloud will apply a default limit based on your quota to prevent returning excessive results. For production use, it's recommended to always specify an explicit limit.
-</Info>
+</Callout>
 
 ## Common Initialization Patterns
 

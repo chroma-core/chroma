@@ -65,9 +65,9 @@ const result2 = await collection.search(search.rank(Knn({ query: queryText })));
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 When passing text to `Knn()`, the embedding is automatically created using the collection's schema configuration. By default, `Knn` uses the `#embedding` key, which corresponds to the default vector index. You can specify a different key with the `key` parameter (e.g., `Knn(query=query_text, key="my_custom_embedding")`). If the specified key doesn't have an embedding configuration in the collection schema, an error will be thrown.
-</Info>
+</Callout>
 
 ## Feature Comparison
 
@@ -213,9 +213,9 @@ The Search API provides the same performance as existing Chroma query endpoints,
 
 ## Feedback
 
-<Info>
+<Callout>
 Please report issues or feedback through the [Chroma GitHub repository](https://github.com/chroma-core/chroma/issues).
-</Info>
+</Callout>
 
 ## What's Next?
 

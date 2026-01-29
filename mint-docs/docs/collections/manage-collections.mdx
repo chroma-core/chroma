@@ -3,6 +3,8 @@ title: "Manage Collections"
 description: "Learn how to create, get, modify, and delete Chroma collections."
 ---
 
+import { Danger } from '/snippets/callout.mdx';
+
 Chroma lets you manage collections of embeddings, using the **collection** primitive. Collections are the fundamental unit of storage and querying in Chroma.
 
 ## Creating Collections
@@ -290,9 +292,9 @@ await collection.modify({
 
 You can delete a collection by name. This action will delete a collection, all of its embeddings, and associated documents and records' metadata.
 
-<Warning>
+<Danger>
 Deleting collections is destructive and not reversible
-</Warning>
+</Danger>
 
 <CodeGroup>
 ```python Python

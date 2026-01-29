@@ -3,6 +3,8 @@ title: "Configure Collections"
 description: "Learn how to configure Chroma collection index settings and embedding functions."
 ---
 
+import { Warning } from '/snippets/callout.mdx';
+
 Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box.
 
 The [embedding function](../embeddings/embedding-functions) you choose to use in your collection also affects its index construction, and is included in the configuration.
@@ -30,9 +32,9 @@ The HNSW index parameters include:
 | Inner product     |   `ip`    |                                                                                     $d = 1.0 - \sum\left(A_i \times B_i\right)$ |             focuses on vector alignment and magnitude, often used for recommendation systems where larger values indicate stronger preferences              |
 | Cosine similarity | `cosine`  | $d = 1.0 - \frac{\sum\left(A_i \times B_i\right)}{\sqrt{\sum\left(A_i^2\right)} \cdot \sqrt{\sum\left(B_i^2\right)}}$ | measures only the angle between vectors (ignoring magnitude), making it ideal for text embeddings or cases where you care about direction rather than scale |
 
-<Note>
+<Warning>
 You should make sure that the `space` you choose is supported by your collection's embedding function. Every Chroma embedding function specifies its default space and a list of supported spaces.
-</Note>
+</Warning>
 
 - `ef_construction` determines the size of the candidate list used to select neighbors during index creation. A higher value improves index quality at the cost of more memory and time, while a lower value speeds up construction with reduced accuracy. The default value is `100`.
 - `ef_search` determines the size of the dynamic candidate list used while searching for the nearest neighbors. A higher value improves recall and accuracy by exploring more potential neighbors but increases query time and computational cost, while a lower value results in faster but less accurate searches. The default value is `100`. This field can be modified after creation.
@@ -120,9 +122,9 @@ In Distributed Chroma and Chroma Cloud collections, we use a SPANN (Spacial Appr
 A SPANN index is a data structure used to efficiently find approximate nearest neighbors in large sets of high-dimensional vectors. It works by dividing the set into broad clusters (so we can ignore most of the data during search) and then building efficient, smaller indexes within each cluster for fast local lookups. This two-level approach helps reduce both memory use and search time, making it practical to search billions of vectors stored even on hard drives or separate machines in a distributed system.
 </Accordion>
 
-<Note>
+<Warning>
 We currently don't allow customization or modification of SPANN configuration. If you set these values they will be ignored by the server.
-</Note>
+</Warning>
 
 The SPANN index parameters include:
 

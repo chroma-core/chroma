@@ -3,15 +3,17 @@ title: Observability
 description: Monitor and trace your Chroma deployment with OpenTelemetry.
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 ## Backend Observability
 
 Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability.
 
-<Info>
+<Callout>
 **Telemetry vs Observability**
 
 "[Telemetry](../../docs/overview/telemetry)" refers to anonymous product usage statistics we collect. "Observability" refers to metrics, logging, and tracing which can be used by anyone operating a Chroma deployment. Observability features listed on this page are **never** sent back to Chroma; they are for end-users to better understand how their Chroma deployment is behaving.
-</Info>
+</Callout>
 
 ### Available Observability
 

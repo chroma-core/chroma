@@ -3,7 +3,7 @@ title: GCP
 description: Deploy Chroma on Google Cloud Platform using Terraform.
 ---
 
-import { Callout } from '/snippets/callout.mdx';
+import { Callout, Danger } from '/snippets/callout.mdx';
 
 <Callout>
 Chroma Cloud, our fully managed hosted service is here. [Sign up for free](https://trychroma.com/signup?utm_source=docs-gcp).
@@ -18,7 +18,7 @@ For convenience, we have
 provided a very simple Terraform configuration to experiment with
 deploying Chroma to Google Compute Engine.
 
-<Warning>
+<Danger>
 
 Chroma and its underlying database [need at least 2GB of RAM](./performance#results-summary),
 which means it won't fit on the instances provided as part of the
@@ -26,9 +26,9 @@ GCP "always free" tier. This template uses an [`e2-small`](https://cloud.google.
 costs about two cents an hour, or $15 for a full month, and gives you 2GiB of memory. If you follow these
 instructions, GCP will bill you accordingly.
 
-</Warning>
+</Danger>
 
-<Warning>
+<Danger>
 
 In this guide we show you how to secure your endpoint using [Chroma's
 native authentication support](./gcp#authentication-with-gcp). Alternatively, you can put it behind
@@ -37,9 +37,9 @@ authenticating proxy. This basic stack doesn't support any kind of authenticatio
 anyone who knows your server IP will be able to add and query for
 embeddings.
 
-</Warning>
+</Danger>
 
-<Warning>
+<Danger>
 
 By default, this template saves all data on a single
 volume. When you delete or replace it, the data will disappear. For
@@ -47,7 +47,7 @@ serious production use (with high availability, backups, etc.) please
 read and understand the Terraform template and use it as a basis
 for what you need, or reach out to the Chroma team for assistance.
 
-</Warning>
+</Danger>
 
 ### Step 1: Set up your GCP credentials
 
@@ -160,10 +160,10 @@ chromaClient.heartbeat();
 
 To destroy the stack and remove all GCP resources, use the `terraform destroy` command.
 
-<Warning>
+<Danger>
 This will destroy all the data in your Chroma database,
 unless you've taken a snapshot or otherwise backed it up.
-</Warning>
+</Danger>
 
 ```terminal
 terraform destroy -var-file chroma.tfvars

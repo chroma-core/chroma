@@ -3,7 +3,7 @@ title: Ranking and Scoring
 description: Learn how to use ranking expressions to score and order your search results. In Chroma, lower scores indicate better matches (distance-based scoring).
 ---
 
-import { Callout } from '/snippets/callout.mdx';
+import { Callout, Warning } from '/snippets/callout.mdx';
 
 ## How Ranking Works
 
@@ -132,9 +132,9 @@ Knn({ query: "machine learning", key: "sparse_embedding" });
 | `default` | float or None | `None` | Score for documents not in KNN results |
 | `return_rank` | bool | `False` | If `True`, return rank position (0, 1, 2...) instead of distance |
 
-<Info>
+<Callout>
 `"#embedding"` (or `K.EMBEDDING`) refers to the default embedding field where Chroma stores dense embeddings. Sparse embeddings must be stored in metadata under a consistent key.
-</Info>
+</Callout>
 
 ## Query Formats
 
@@ -249,9 +249,9 @@ Knn({ query: "machine learning", key: "sparse_embedding" });  // Search sparse e
 Currently, dense embeddings can only be stored in the default embedding field (`#embedding`). Only sparse vector embeddings can be stored in metadata, and they must be stored consistently under the same key across all documents. Additionally, only one sparse vector index is allowed per collection in metadata.
 </Warning>
 
-<Info>
+<Callout>
 Support for multiple dense embedding fields and multiple sparse vector indices is coming in a future release. This will allow you to store and query multiple embeddings per document, with optimized indexing for each field.
-</Info>
+</Callout>
 
 ## Arithmetic Operations
 
@@ -302,9 +302,9 @@ const finalScore = Knn({ query: "deep learning" }).multiply(0.5)
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 Numbers in expressions are automatically converted to `Val` constants. For example, `Knn(query=v) * 0.5` is equivalent to `Knn(query=v) * Val(0.5)`.
-</Info>
+</Callout>
 
 ## Mathematical Functions
 
@@ -437,9 +437,9 @@ const finalScore = baseScore.multiply(Val(1).add(Val(0.1)));  // Fixed 10% boost
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 For advanced hybrid search combining multiple ranking strategies, consider using [RRF (Reciprocal Rank Fusion)](./hybrid-search) which is specifically designed for this purpose.
-</Info>
+</Callout>
 
 ## Dictionary Syntax
 

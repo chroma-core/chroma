@@ -2,6 +2,8 @@
 title: Hugging Face Server
 ---
 
+import { Warning } from '/snippets/callout.mdx';
+
 Chroma provides a convenient wrapper for HuggingFace Text Embedding Server, a standalone server that provides text embeddings via a REST API. You can read more about it [**here**](https://github.com/huggingface/text-embeddings-inference).
 
 ## Setting Up The Server
@@ -18,9 +20,9 @@ or
 docker run -p 8001:80 -d -rm --name huggingface-embedding-server ghcr.io/huggingface/text-embeddings-inference:cpu-0.3.0 --model-id BAAI/bge-small-en-v1.5 --revision -main
 ```
 
-<Info>
+<Warning>
 The above docker command will run the server with the `BAAI/bge-small-en-v1.5` model. You can find more information about running the server in docker [**here**](https://github.com/huggingface/text-embeddings-inference#docker).
-</Info>
+</Warning>
 
 ## Usage
 

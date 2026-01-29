@@ -3,11 +3,13 @@ title: "Delete Data"
 description: "Learn how to delete data from Chroma collections."
 ---
 
+import { Danger } from '/snippets/callout.mdx';
+
 Chroma supports deleting items from a collection by `id` using `.delete`. The embeddings, documents, and metadata associated with each item will be deleted.
 
-<Warning>
+<Danger>
 Naturally, this is a destructive operation, and cannot be undone.
-</Warning>
+</Danger>
 
 <CodeGroup>
 ```python Python

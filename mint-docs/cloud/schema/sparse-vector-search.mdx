@@ -3,6 +3,8 @@ title: Sparse Vector Search Setup
 description: Learn how to configure and use sparse vectors for keyword-based search, and combine them with dense embeddings for powerful hybrid search capabilities.
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 ## What are Sparse Vectors?
 
 Sparse vectors are high-dimensional vectors with mostly zero values, designed for keyword-based retrieval. Unlike dense embeddings which capture semantic meaning, sparse vectors excel at:
@@ -57,9 +59,9 @@ schema.createIndex(
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 The `source_key` specifies which field to generate sparse embeddings from (typically `K.DOCUMENT` for document text), and `embedding_function` specifies the function to generate the sparse embeddings. This example uses `ChromaCloudSpladeEmbeddingFunction`, but you can also use other sparse embedding functions like `HuggingFaceSparseEmbeddingFunction` or `FastembedSparseEmbeddingFunction`. The sparse embeddings are automatically generated and stored in the metadata field you specify as the `key`.
-</Info>
+</Callout>
 
 ## Create Collection and Add Data
 
@@ -259,9 +261,9 @@ for (const row of results.rows()[0]) {
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 For comprehensive details on RRF parameters, weight tuning, and advanced hybrid search strategies, see the [Search API Hybrid Search documentation](../search-api/hybrid-search).
-</Info>
+</Callout>
 
 ## Next Steps
 

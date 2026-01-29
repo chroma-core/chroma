@@ -3,6 +3,8 @@ title: Filtering with Where
 description: Learn how to filter search results using Where expressions and the Key/K class to narrow down your search to specific documents, IDs, or metadata values.
 ---
 
+import { Callout, Warning } from '/snippets/callout.mdx';
+
 ## The Key/K Class
 
 The `Key` class (aliased as `K` for brevity) provides a fluent interface for building filter expressions. Use `K` to reference document fields, IDs, and metadata properties.
@@ -83,9 +85,9 @@ K("discount").lte(0.25);         // Less than or equal
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 Chroma supports three data types for metadata: strings, numbers (int/float), and booleans. Order comparison operators (`>`, `<`, `>=`, `<=`) currently only work with numeric types.
-</Info>
+</Callout>
 
 ## Set and String Operators
 
@@ -131,9 +133,9 @@ K.DOCUMENT.regex("\\bAPI\\b");                 // Match whole word "API" in docu
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 String operations like `contains()` and `regex()` are case-sensitive by default. The `is_in()` operator is efficient even with large lists.
-</Info>
+</Callout>
 
 ## Logical Operators
 
@@ -314,9 +316,9 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 Each dictionary can only contain one field or one logical operator (`$and`/`$or`). For field dictionaries, only one operator is allowed per field.
-</Info>
+</Callout>
 
 ## Common Filtering Patterns
 
@@ -488,9 +490,9 @@ K.DOCUMENT.regex("\\d+");                // No literal characters - may give inc
 String pattern matching currently only works on `K.DOCUMENT`. Support for metadata fields is not yet available. Also, patterns with fewer than 3 literal characters may return incorrect results.
 </Warning>
 
-<Info>
+<Callout>
 String pattern matching on metadata fields is not currently supported. Full support is coming in a future release, which will allow users to opt-in to additional indexes for string pattern matching on specific metadata fields.
-</Info>
+</Callout>
 
 ## Complete Example
 

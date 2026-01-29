@@ -4,6 +4,8 @@ description: Control how many results to return and which fields to include in y
 sidebarTitle: Pagination & Selection
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 ## Pagination with Limit
 
 Use `limit()` to control how many results to return and `offset` to skip results for pagination.
@@ -43,9 +45,9 @@ const search3 = new Search();  // Be careful with large collections!
 | `limit` | int or None | `None` | Maximum results to return (`None` = no limit) |
 | `offset` | int | `0` | Number of results to skip (for pagination) |
 
-<Info>
+<Callout>
 For Chroma Cloud users: The actual number of results returned will be capped by your quota limits, regardless of the `limit` value specified. This applies even when no limit is set.
-</Info>
+</Callout>
 
 ## Pagination Patterns
 
@@ -88,9 +90,9 @@ function getPage(pageNumber: number, pageSize = 10) {
 ```
 </CodeGroup>
 
-<Info>
+<Callout>
 Pagination uses 0-based indexing. The first page is page 0, not page 1.
-</Info>
+</Callout>
 
 ## Field Selection with Select
 
@@ -149,11 +151,11 @@ const search5 = new Search().selectAll();
 | `K.SCORE` | `#score` | `.select(K.SCORE)` | Search scores (when ranking is used) |
 | `"field_name"` | (user-defined) | `.select("title", "author")` | Specific metadata fields |
 
-<Info>
+<Callout>
 **Field constants:** `K.*` constants (e.g., `K.DOCUMENT`, `K.EMBEDDING`, `K.ID`) correspond to internal keys with `#` prefix (e.g., `#document`, `#embedding`, `#id`). Use the `K.*` constants in queries. Internal keys like `#document` and `#embedding` are used in schema configuration, while `#metadata` and `#score` are query-only fields not used in schema.
 
 When selecting specific metadata fields (e.g., "title"), they appear directly in the metadata dict. Using `K.METADATA` returns ALL metadata fields at once.
-</Info>
+</Callout>
 
 ## Performance Considerations
 

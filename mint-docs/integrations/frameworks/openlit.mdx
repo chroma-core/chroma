@@ -2,6 +2,8 @@
 title: OpenLIT
 ---
 
+import { Callout } from '/snippets/callout.mdx';
+
 [OpenLIT](https://github.com/openlit/openlit) is an OpenTelemetry-native LLM Application Observability tool and includes OpenTelemetry auto-instrumention for Chroma with just a single line of code helping you ensure your applications are monitored seamlessly, providing critical insights to improve performance, operations and reliability.
 
 For more information on how to use OpenLIT, see the [OpenLIT docs](https://docs.openlit.io/).
@@ -27,9 +29,9 @@ openlit.init()
 
 To forward telemetry data to an HTTP OTLP endpoint, such as the OpenTelemetry Collector, set the `otlp_endpoint` parameter with the desired endpoint. Alternatively, you can configure the endpoint by setting the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable as recommended in the OpenTelemetry documentation.
 
-<Info>
+<Callout>
 If you don't provide `otlp_endpoint` function argument or set the `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable, OpenLIT directs the trace directly to your console, which can be useful during development.
-</Info>
+</Callout>
 
 To send telemetry to OpenTelemetry backends requiring authentication, set the `otlp_headers` parameter with its desired value. Alternatively, you can configure the endpoint by setting the `OTEL_EXPORTER_OTLP_HEADERS` environment variable as recommended in the OpenTelemetry documentation.
 
