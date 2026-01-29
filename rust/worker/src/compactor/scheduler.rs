@@ -41,12 +41,14 @@ impl SchedulerMetrics {
 
 struct InProgressJob {
     expires_at: SystemTime,
+    database_name: DatabaseName,
 }
 
 impl InProgressJob {
-    fn new(job_expiry_seconds: u64) -> Self {
+    fn new(job_expiry_seconds: u64, database_name: DatabaseName) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
+            database_name,
         }
     }
 
@@ -254,6 +256,7 @@ impl Scheduler {
 
                     collection_records.push(CollectionRecord {
                         collection_id: collection[0].collection_id,
+                        database_name: DatabaseName::new(&collection[0].database).unwrap(),
                         tenant_id: collection[0].tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
@@ -318,6 +321,7 @@ impl Scheduler {
                 );
                 self.job_queue.push(CompactionJob {
                     collection_id: record.collection_id,
+                    database_name: record.database_name.clone(),
                 });
                 self.oneoff_collections.remove(&record.collection_id);
                 if self.job_queue.len() == self.max_concurrent_jobs {
@@ -346,9 +350,13 @@ impl Scheduler {
         // At this point, nobody should modify the job queue and every collection
         // in the job queue will definitely be compacted. It is now safe to add
         // them to the in-progress set.
-        let job_ids: Vec<_> = self.job_queue.iter().map(|j| j.collection_id).collect();
-        for collection_id in job_ids {
-            self.add_in_progress(collection_id);
+        let job_ids: Vec<_> = self
+            .job_queue
+            .iter()
+            .map(|j| (j.collection_id, j.database_name.clone()))
+            .collect();
+        for (collection_id, database_name) in job_ids {
+            self.add_in_progress(collection_id, database_name);
         }
     }
 
@@ -367,10 +375,10 @@ impl Scheduler {
         }
     }
 
-    fn add_in_progress(&mut self, collection_id: CollectionUuid) {
+    fn add_in_progress(&mut self, collection_id: CollectionUuid, database_name: DatabaseName) {
         self.in_progress_jobs.insert(
             collection_id.into(),
-            InProgressJob::new(self.job_expiry_seconds),
+            InProgressJob::new(self.job_expiry_seconds, database_name),
         );
     }
 
@@ -385,11 +393,21 @@ impl Scheduler {
 
     /// Marks a job as failed and persists the failure count to sysdb.
     pub(crate) async fn fail_job(&mut self, job_id: JobId) {
-        if self.in_progress_jobs.remove(&job_id).is_none() {
+        // Get the database_name and remove the job in one operation
+        let database_name = self
+            .in_progress_jobs
+            .remove(&job_id)
+            .map(|job| job.database_name);
+
+        if database_name.is_none() {
             tracing::warn!(
                 "Expired compaction for {} just unsuccessfully finished.",
                 job_id
             );
+
+            // Don't have database name here so can't increment failure count.
+            // But it's fine because we just had a successful compaction.
+            return;
         }
 
         // Record the failure in metrics
@@ -397,15 +415,23 @@ impl Scheduler {
 
         // Increment failure count in sysdb for persistent tracking across nodes
         let collection_id = CollectionUuid(job_id.0);
-        if let Err(e) = self
-            .sysdb
-            .increment_compaction_failure_count(collection_id)
-            .await
-        {
+
+        if let Some(database_name) = database_name {
+            if let Err(e) = self
+                .sysdb
+                .increment_compaction_failure_count(collection_id, &database_name)
+                .await
+            {
+                tracing::warn!(
+                    "Failed to increment compaction failure count in sysdb for {}: {:?}.",
+                    job_id,
+                    e
+                );
+            }
+        } else {
             tracing::warn!(
-                "Failed to increment compaction failure count in sysdb for {}: {:?}.",
-                job_id,
-                e
+                "Could not find database_name for collection {} in in_progress_jobs when trying to increment failure count.",
+                collection_id
             );
         }
     }

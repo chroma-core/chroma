@@ -13,6 +13,7 @@ use std::fmt::Debug;
 #[derive(Clone, Debug)]
 pub struct CollectionRecord {
     pub collection_id: CollectionUuid,
+    pub database_name: DatabaseName,
     pub tenant_id: String,
     pub last_compaction_time: i64,
     #[allow(dead_code)]

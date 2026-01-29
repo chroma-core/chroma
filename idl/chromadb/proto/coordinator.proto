@@ -234,6 +234,10 @@ message CheckCollectionsResponse {
   repeated int64 log_position = 2;
 }
 
+message UpdateCollectionCursor {
+  optional uint32 compaction_failure_count = 1;
+}
+
 message UpdateCollectionRequest {
   string id = 1;
   optional string database = 2;
@@ -244,6 +248,7 @@ message UpdateCollectionRequest {
     bool reset_metadata = 6;
   }
   optional string configuration_json_str = 7;
+  optional UpdateCollectionCursor cursor_updates = 8;
 }
 
 message UpdateCollectionResponse {

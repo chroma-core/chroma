@@ -431,6 +431,11 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct UpdateCollectionCursor {
+    pub compaction_failure_count: Option<u32>,
+}
+
 /// Internal request for updating a collection.
 #[derive(Debug, Clone)]
 pub struct UpdateCollectionRequest {
@@ -448,6 +453,8 @@ pub struct UpdateCollectionRequest {
     pub reset_metadata: bool,
     // New configuration to set (optional - None means don't change)
     pub new_configuration: Option<UpdateCollectionConfiguration>,
+    // Cursor updates (optional - None means don't change)
+    pub cursor_updates: Option<UpdateCollectionCursor>,
 }
 
 impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
@@ -500,6 +507,14 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             None => None,
         };
 
+        // Parse cursor updates if provided
+        let cursor_updates: Option<UpdateCollectionCursor> = match req.cursor_updates {
+            Some(cursor_updates_proto) => Some(UpdateCollectionCursor {
+                compaction_failure_count: cursor_updates_proto.compaction_failure_count,
+            }),
+            None => None,
+        };
+
         Ok(Self {
             database_name,
             id,
@@ -508,6 +523,7 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             metadata,
             reset_metadata,
             new_configuration,
+            cursor_updates,
         })
     }
 }

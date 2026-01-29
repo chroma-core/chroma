@@ -24,7 +24,8 @@ use crate::types::{
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantRequest,
     GetTenantResponse, SetTenantResourceNameRequest, SetTenantResourceNameResponse, SpannerRow,
-    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
+    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionCursor, UpdateCollectionRequest,
+    UpdateCollectionResponse,
 };
 use chroma_types::{
     Collection, Database, DatabaseUuid, InternalCollectionConfiguration, RegionName, Segment,
@@ -711,7 +712,7 @@ impl SpannerBackend {
                 ORDER BY c.created_at ASC
                 {pagination}
             )
-            SELECT 
+            SELECT
                 c.collection_id,
                 c.name,
                 c.dimension,
@@ -736,7 +737,7 @@ impl SpannerBackend {
             FROM filtered_collections fc
             JOIN collections c ON c.collection_id = fc.collection_id
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors ccc 
+            LEFT JOIN collection_compaction_cursors ccc
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
             ORDER BY c.created_at ASC
             "#,
@@ -807,7 +808,7 @@ impl SpannerBackend {
         // 3-way LEFT JOIN to get collection, metadata, and compaction cursor fields
         let mut fetch_stmt = Statement::new(
             r#"
-            SELECT 
+            SELECT
                 c.collection_id,
                 c.name,
                 c.dimension,
@@ -830,7 +831,7 @@ impl SpannerBackend {
                 cursors.compaction_failure_count
             FROM collections c
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors cursors 
+            LEFT JOIN collection_compaction_cursors cursors
                 ON cursors.collection_id = c.collection_id AND cursors.region = @region
             WHERE c.collection_id = @collection_id
             "#,
@@ -873,7 +874,7 @@ impl SpannerBackend {
         // 4-way JOIN query: collection + metadata + compaction cursor + segments
         // Note: Segment columns are aliased with "segment_" prefix to match TryFrom<Row> for Segment
         let query = r#"
-            SELECT 
+            SELECT
                 c.collection_id,
                 c.name,
                 c.dimension,
@@ -901,9 +902,9 @@ impl SpannerBackend {
                 cs.file_paths as segment_file_paths
             FROM collections c
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
-            LEFT JOIN collection_compaction_cursors ccc 
+            LEFT JOIN collection_compaction_cursors ccc
                 ON ccc.collection_id = c.collection_id AND ccc.region = @region
-            LEFT JOIN collection_segments cs 
+            LEFT JOIN collection_segments cs
                 ON cs.collection_id = c.collection_id AND cs.region = @region
             WHERE c.collection_id = @collection_id AND c.is_deleted = FALSE
         "#;
@@ -987,7 +988,8 @@ impl SpannerBackend {
             metadata,
             reset_metadata,
             new_configuration,
-            ..
+            cursor_updates,
+            database_name: _, // Ignore database_name as it's only used for routing
         } = req;
 
         let collection_id = id.0.to_string();
@@ -999,6 +1001,8 @@ impl SpannerBackend {
                 let name = name.clone();
                 let metadata = metadata.clone();
                 let new_configuration = new_configuration.clone();
+                let cursor_updates = cursor_updates.clone();
+                let local_region = self.local_region.clone();
 
                 Box::pin(async move {
                     // First, verify the collection exists and get tenant/database info for name uniqueness check
@@ -1185,6 +1189,25 @@ impl SpannerBackend {
                                 &["collection_id", "region", "index_schema", "updated_at"],
                                 &[&collection_id, &region, &new_schema_json, &commit_ts],
                             ));
+                        }
+                    }
+
+                    // Handle cursor updates - increment compaction failure count
+                    if let Some(ref _cursor_update) = cursor_updates {
+                        let region = &local_region;
+
+                        let mut increment_stmt = Statement::new(
+                            "UPDATE collection_compaction_cursors SET compaction_failure_count = compaction_failure_count + 1 WHERE collection_id = @collection_id AND region = @region"
+                        );
+                        increment_stmt.add_param("collection_id", &collection_id);
+                        increment_stmt.add_param("region", &region.as_str());
+
+                        let rows_affected = tx.update(increment_stmt).await?;
+                        if rows_affected == 0 {
+                            return Err(SysDbError::NotFound(format!(
+                                "collection_compaction_cursor for collection '{}' in region '{}' not found",
+                                collection_id, region
+                            )));
                         }
                     }
 
@@ -6381,6 +6404,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6427,6 +6451,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6480,6 +6505,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6549,6 +6575,7 @@ mod tests {
             metadata: Some(new_metadata.clone()),
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6611,6 +6638,7 @@ mod tests {
             metadata: None,
             reset_metadata: true,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6663,6 +6691,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6711,6 +6740,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6763,6 +6793,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6828,6 +6859,7 @@ mod tests {
             metadata: Some(new_metadata.clone()),
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6877,6 +6909,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6936,6 +6969,7 @@ mod tests {
                 spann: None,
                 embedding_function: None,
             }),
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6985,6 +7019,7 @@ mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7042,6 +7077,7 @@ mod tests {
                 spann: None,
                 embedding_function: Some(new_ef.clone()),
             }),
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7116,6 +7152,7 @@ mod tests {
                 spann: Some(spann_update.clone()),
                 embedding_function: None,
             }),
+            cursor_updates: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7147,5 +7184,316 @@ mod tests {
             None,
             Some(&expected_schema),
         );
+    }
+
+    // ============================================================
+    // Cursor Update Tests (increment_compaction_failure_count)
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema (which creates compaction cursors)
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Verify initial compaction failure count is 0 for all regions
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 0);
+
+        // Update collection to increment compaction failure count for us region
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count: Some(1), // This field indicates intent to increment
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to increment compaction failure count: {:?}",
+            result.err()
+        );
+
+        // Verify compaction failure count was incremented for us region
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_multiple_times(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_multi_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Increment compaction failure count 3 times
+        for i in 1..=3 {
+            let update_req = UpdateCollectionRequest {
+                database_name: db_name.clone(),
+                id: collection_id,
+                name: None,
+                dimension: None,
+                metadata: None,
+                reset_metadata: false,
+                new_configuration: None,
+                cursor_updates: Some(UpdateCollectionCursor {
+                    compaction_failure_count: Some(1),
+                }),
+            };
+
+            let result = backend.update_collection(update_req).await;
+            assert!(
+                result.is_ok(),
+                "Failed to increment compaction failure count (iteration {}): {:?}",
+                i,
+                result.err()
+            );
+
+            // Verify the count
+            let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+            assert_eq!(collection.compaction_failure_count, i);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_local_region(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_regions_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Increment compaction failure count (uses local_region automatically)
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count: Some(1),
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to increment compaction failure count for local region: {:?}",
+            result.err()
+        );
+
+        // Verify count was incremented for local region
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 1); // Local region should have count 1
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_hnsw_collection(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_hnsw_{}", Uuid::new_v4());
+
+        // Create collection with HNSW schema
+        let hnsw_schema = Schema::new_default(chroma_types::KnnIndex::Hnsw);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            hnsw_schema.clone(),
+        )
+        .await;
+
+        // Increment compaction failure count - should work for HNSW collections too
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count: Some(1),
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Should succeed to increment compaction failure count for HNSW collection: {:?}",
+            result.err()
+        );
+
+        // Verify the count was incremented
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_with_other_updates(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let original_name = format!("test_coll_mixed_{}", Uuid::new_v4());
+        let new_name = format!("test_coll_mixed_updated_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &original_name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Update name and increment compaction failure count in same request
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: Some(new_name.clone()),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count: Some(1),
+            }),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection with mixed changes: {:?}",
+            result.err()
+        );
+
+        // Verify both changes were applied
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.name, new_name);
+        assert_eq!(collection.compaction_failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_cursor_updates_none(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_none_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Update collection without cursor_updates (should not affect compaction failure count)
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: Some(256),
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: None, // No cursor updates
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection without cursor updates: {:?}",
+            result.err()
+        );
+
+        // Verify compaction failure count is unchanged
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 0);
+        assert_eq!(collection.dimension, Some(256));
     }
 }

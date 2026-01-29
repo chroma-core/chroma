@@ -7,6 +7,7 @@ use crate::{
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
+use chroma_types::chroma_proto;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
     AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
@@ -559,8 +560,32 @@ impl SysDb for SysdbService {
 
     async fn increment_compaction_failure_count(
         &self,
-        _request: Request<IncrementCompactionFailureCountRequest>,
+        request: Request<IncrementCompactionFailureCountRequest>,
     ) -> Result<Response<IncrementCompactionFailureCountResponse>, Status> {
-        todo!()
+        let proto_req = request.into_inner();
+
+        // Create an UpdateCollectionRequest with cursor_updates to increment failure count
+        let update_req = chroma_proto::UpdateCollectionRequest {
+            id: proto_req.collection_id,
+            database: None, // Will be resolved by the backend
+            name: None,
+            dimension: None,
+            metadata_update: None,
+            configuration_json_str: None,
+            cursor_updates: Some(chroma_proto::UpdateCollectionCursor {
+                compaction_failure_count: Some(1), // Increment by 1
+            }),
+        };
+
+        // Convert to internal request
+        let internal_req: internal::UpdateCollectionRequest = update_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        // Execute the update
+        let backend = internal_req.assign(&self.backends);
+        let _internal_resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(IncrementCompactionFailureCountResponse {}))
     }
 }
