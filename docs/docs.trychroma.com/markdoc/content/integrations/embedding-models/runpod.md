@@ -42,13 +42,13 @@ embeddings = runpod_ef(input=["This is my first text to embed", "This is my seco
 This embedding function relies on the `runpod-sdk` package, which you can install with `npm install runpod-sdk`.
 
 ```typescript
-import { RunPodEmbeddingFunction } from 'chromadb';
+import { RunPodEmbeddingFunction } from '@chroma-core/runpod';
 
 const embeddingFunction = new RunPodEmbeddingFunction({
-    runpod_api_key: "YOUR_API_KEY",
-    runpod_endpoint_id: "your-endpoint-id-here",
-    runpod_model_name: "sentence-transformers/all-MiniLM-L6-v2",
-    runpod_timeout: 300 // Optional, defaults to 300 seconds
+    apiKey: "YOUR_API_KEY",
+    endpointId: "your-endpoint-id-here",
+    modelName: "sentence-transformers/all-MiniLM-L6-v2",
+    timeout: 300 // Optional, defaults to 300 seconds
 });
 
 // use directly
@@ -71,12 +71,12 @@ collection = await client.getCollection({
 
 ## Configuration
 
-| Parameter | Description | Default |
+| Parameter (Python / TypeScript) | Description | Default |
 |-----------|-------------|---------|
-| `api_key` / `runpod_api_key` | Your RunPod API key | `RUNPOD_API_KEY` environment variable |
-| `endpoint_id` / `runpod_endpoint_id` | The endpoint ID of your deployed embedding model | Required |
-| `model_name` / `runpod_model_name` | The name of the embedding model | Required |
-| `timeout` / `runpod_timeout` | Request timeout in seconds | 300 |
+| `api_key` / `apiKey` | Your RunPod API key | `RUNPOD_API_KEY` environment variable |
+| `endpoint_id` / `endpointId` | The endpoint ID of your deployed embedding model | Required |
+| `model_name` / `modelName` | The name of the embedding model | Required |
+| `timeout` / `timeout` | Request timeout in seconds | 300 |
 
 ## Getting Started with RunPod
 

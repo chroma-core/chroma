@@ -261,7 +261,7 @@ export class RunPodEmbeddingFunction implements IEmbeddingFunction {
     }
   }
 
-  buildFromConfig(config: StoredConfig): RunPodEmbeddingFunction {
+  static buildFromConfig(config: StoredConfig): RunPodEmbeddingFunction {
     return new RunPodEmbeddingFunction({
       runpod_api_key_env_var: config.api_key_env_var,
       runpod_endpoint_id: config.endpoint_id,
@@ -288,7 +288,7 @@ export class RunPodEmbeddingFunction implements IEmbeddingFunction {
     }
   }
 
-  validateConfig(config: StoredConfig): void {
+  static validateConfig(config: StoredConfig): void {
     validateConfigSchema(config, "runpod");
   }
 
