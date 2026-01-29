@@ -23,12 +23,9 @@
           {
             "group": "Overview",
             "pages": [
-              "docs/overview/introduction",
               "docs/overview/getting-started",
               "docs/overview/architecture",
-              "docs/overview/data-model",
-              "docs/overview/roadmap",
-              "docs/overview/contributing",
+              "docs/overview/oss",
               "docs/overview/migration",
               "docs/overview/troubleshooting"
             ]
@@ -36,8 +33,7 @@
           {
             "group": "Run Chroma",
             "pages": [
-              "docs/run-chroma/ephemeral-client",
-              "docs/run-chroma/persistent-client",
+              "docs/run-chroma/clients",
               "docs/run-chroma/client-server"
             ]
           },

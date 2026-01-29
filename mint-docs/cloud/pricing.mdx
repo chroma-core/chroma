@@ -1,6 +1,6 @@
 ---
 title: "Pricing"
-description: "Chroma Cloud uses a simple, transparent, usage-based pricing model. You pay for what you use across **writes**, **reads**, and **storage**—with no hidden fees or tiered feature gating."
+description: "Chroma Cloud uses a simple, transparent, usage-based pricing model. You pay for what you use across **writes**, **reads**, and **storage**-with no hidden fees or tiered feature gating."
 ---
 
 Need an estimate? Try our [pricing calculator](https://trychroma.com/pricing).
@@ -9,7 +9,7 @@ Need an estimate? Try our [pricing calculator](https://trychroma.com/pricing).
 
 Chroma Cloud charges **$2.50 per logical GiB** written via an add, update, or upsert.
 
-- A *logical GiB* is the raw, uncompressed size of the data you send to Chroma—regardless of how it's stored or indexed internally.
+- A *logical GiB* is the raw, uncompressed size of the data you send to Chroma-regardless of how it's stored or indexed internally.
 - You are only billed once per write, not for background compactions or reindexing.
 
 ## Forking
@@ -29,7 +29,7 @@ Read costs are based on both the amount of data scanned and the volume of data r
 
 - A single vector similarity query counts as one query.
 - Each metadata or full-text predicate in a query counts as an additional query.
-- Full-text and regex filters are billed as *(N – 2)* queries, where *N* is the number of characters in the search string.
+- Full-text and regex filters are billed as *(N - 2)* queries, where *N* is the number of characters in the search string.
 
 **Example:**
 
@@ -76,6 +76,6 @@ Storage is billed at **$0.33 per GiB per month**, prorated by the hour:
     Yes. We offer a BYOC (bring your own cloud) option for single-tenant deployments. [Contact us](https://docs.trychroma.com/cloud/) for more details.
     </Accordion>
     <Accordion title="Do I get charged for background indexing?">
-    No. You’re only billed for the logical data you write and the storage you consume. Background jobs like compaction or reindexing do not generate additional write or read charges.
+    No. You're only billed for the logical data you write and the storage you consume. Background jobs like compaction or reindexing do not generate additional write or read charges.
     </Accordion>
 </AccordionGroup>

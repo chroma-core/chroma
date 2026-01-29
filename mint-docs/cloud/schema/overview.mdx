@@ -62,13 +62,13 @@ except Exception as e:
 ```
 
 ```typescript TypeScript
-import { ChromaClient, Schema, StringInvertedIndexConfig } from 'chromadb';
+import { CloudClient, Schema, StringInvertedIndexConfig } from 'chromadb';
 
 // Connect to Chroma Cloud
-const client = new ChromaClient({
+const client = new CloudClient({
   tenant: "your-tenant",
   database: "your-database",
-  auth: { provider: "token", credentials: "your-api-key" }
+  apiKey: "your-api-key"
 });
 
 // Create a schema and disable string indexing globally
