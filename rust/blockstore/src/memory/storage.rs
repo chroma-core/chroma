@@ -1,6 +1,6 @@
 use crate::key::{CompositeKey, KeyWrapper};
 use chroma_error::ChromaError;
-use chroma_types::{DataRecord, SpannPostingList};
+use chroma_types::{DataRecord, QuantizedCluster, SpannPostingList};
 use parking_lot::RwLock;
 use roaring::RoaringBitmap;
 use std::{
@@ -610,6 +610,15 @@ impl Writeable for &SpannPostingList<'_> {
     }
 }
 
+// QuantizedCluster only supports Arrow blockfiles, not memory storage.
+// These no-op implementations exist to satisfy trait bounds on BlockfileWriter/BlockfileReader,
+// which require both Writeable/Readable and ArrowWriteableValue/ArrowReadableValue traits.
+impl Writeable for QuantizedCluster<'_> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
 impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
     fn read_from_storage(
         prefix: &str,
@@ -716,6 +725,36 @@ impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_dat
 
     fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
         todo!()
+    }
+}
+
+impl<'referred_data> Readable<'referred_data> for QuantizedCluster<'referred_data> {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
     }
 }
 
