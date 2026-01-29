@@ -5,7 +5,7 @@ description: Agentic Memory
 
 # Agentic Memory
 
-We've seen how tool calling and iterative searches over a Chroma collection can build context for an agent. While this works well for individual runs, agents start fresh each time—repeating expensive computations, re-learning user preferences, and rediscovering effective strategies they've already found.
+We've seen how tool calling and iterative searches over a Chroma collection can build context for an agent. While this works well for individual runs, agents start fresh each time-repeating expensive computations, re-learning user preferences, and rediscovering effective strategies they've already found.
 
 Agentic memory solves this by persisting data from agent runs that can be leveraged in the future. This reduces cost on LLM interactions, personalizes user experience, and improves agent performance over time.
 
@@ -206,7 +206,7 @@ How you write memories should be guided by how the agent will access them. A wel
 
 **Real-time** extraction writes memories as the conversation progresses. This makes memories immediately available for the current run, but risks storing information that later turns out to be incorrect or irrelevant.
 
-**Async** extraction queues memory writing as a background job. This keeps the agent responsive but introduces complexity around consistency—the agent might not have access to memories from very recent runs.
+**Async** extraction queues memory writing as a background job. This keeps the agent responsive but introduces complexity around consistency-the agent might not have access to memories from very recent runs.
 
 In practice, a hybrid approach often works best: extract high-confidence facts in real-time, and defer nuanced evaluation to end-of-run processing. You can also save memories identified in one step in the agent's context, so they are available for downstream or long-running parallel steps.
 
@@ -223,7 +223,7 @@ Not everything is worth remembering. Storing too much creates noise that degrade
 
 Tag memories at write time to enable filtered retrieval. Key dimensions include:
 * **Type**: Is this a fact (semantic), an instruction (procedural), or a past result (episodic)?
-* **Phase relevance**: When should this memory surface—during planning, execution, or evaluation?
+* **Phase relevance**: When should this memory surface-during planning, execution, or evaluation?
 * **Scope**: Is this user-specific, or does it apply globally across all users?
 * **Confidence**: How certain is the agent about this memory's accuracy?
 * **Source**: Did this come from the user directly, from a tool result, or from agent inference?
@@ -237,7 +237,7 @@ New information sometimes contradicts existing memories. Your strategy might:
 * **Version**: Keep both memories with timestamps, surfacing the most recent.
 * **Merge**: Combine old and new into a single updated memory. Requires careful prompting to avoid losing important nuance.
 * **Flag for review**: Mark conflicting memories for human review before resolution.
-* **Fork**: Taking advantage of Chroma's [collection forking](../../cloud/features/collection-forking), create a branch of the memory collection with the new information, keeping the original intact. This is particularly useful when you're uncertain which version will perform better — so you can run both branches and measure outcomes. Forking also enables rollback if new memories degrade agent performance, and can support A/B testing different memory strategies across user segments.
+* **Fork**: Taking advantage of Chroma's [collection forking](../../cloud/features/collection-forking), create a branch of the memory collection with the new information, keeping the original intact. This is particularly useful when you're uncertain which version will perform better - so you can run both branches and measure outcomes. Forking also enables rollback if new memories degrade agent performance, and can support A/B testing different memory strategies across user segments.
 
 The right approach depends on your domain. User preferences might safely override ("actually, I prefer concise responses now"), while factual corrections might warrant versioning for auditability.
 

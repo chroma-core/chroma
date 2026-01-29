@@ -15,6 +15,58 @@ import {Callout} from '/snippets/callout.mdx';
 For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
 </Callout>
 
+## Install with AI
+
+Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI agent. It will quickly set you up with Chroma.
+
+<CodeGroup>
+```prompt Chroma Cloud
+In this directory create a new Python project with Chroma set up.
+Use a virtual environment.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+First, install `chromadb`.
+
+The project should be set up with Chroma Cloud. When you install `chromadb`,
+you get access to the Chroma CLI. You can run `chroma login` to authenticate.
+This will open a browser for authentication and save a connection profile
+locally.
+
+You can also use `chroma profile show` to see if the user already has an
+active profile saved locally. If so, you can skip the login step.
+
+Then create a DB using the CLI with `chroma db create chroma-getting-started`.
+This will create a DB with this name.
+
+Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
+This will create a .env file in the current directory with the connection
+variables for this DB and account, so the CloudClient can be instantiated
+with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
+```
+
+```text OSS
+In this directory create a new Python project with Chroma set up.
+Use a virtual environment.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+Use Chroma's in-memory client: `chromadb.Client()`
+```
+</CodeGroup>
+
+## Install Manually
+
 <Steps titleSize="h3">
   <Step title="Install">
     <CodeGroup>
@@ -123,7 +175,7 @@ For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_so
 
 ## Next steps
 
-In this guide we used Chroma's [ephemeral client](https://docs.trychroma.com/docs/run-chroma/ephemeral-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](https://docs.trychroma.com/docs/run-chroma/persistent-client) or run Chroma in [client-server mode](https://docs.trychroma.com/docs/run-chroma/client-server) if you need data persistence.
+In this guide we used Chroma's [in-memory client](/docs/run-chroma/clients#in-memory-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](/docs/run-chroma/clients#persistent-client) or run Chroma in [client-server mode](/docs/run-chroma/client-server) if you need data persistence.
 
 - Learn how to [Deploy Chroma](https://docs.trychroma.com/guides/deploy/client-server-mode) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
@@ -138,6 +190,61 @@ In this guide we used Chroma's [ephemeral client](https://docs.trychroma.com/doc
 </Frame>
 
 For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+
+## Install with AI
+
+Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI agent. It will quickly set you up with Chroma.
+
+<CodeGroup>
+```prompt Chroma Cloud
+In this directory create a new Typescript project with Chroma set up.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+First, install `chromadb`.
+
+The project should be set up with Chroma Cloud. When you install `chromadb`,
+you get access to the Chroma CLI. You can run `chroma login` to authenticate.
+This will open a browser for authentication and save a connection profile
+locally.
+
+You can also use `chroma profile show` to see if the user already has an
+active profile saved locally. If so, you can skip the login step.
+
+Then create a DB using the CLI with `chroma db create chroma-getting-started`.
+This will create a DB with this name.
+
+Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
+This will create a .env file in the current directory with the connection
+variables for this DB and account, so the CloudClient can be instantiated
+with: new CloudClient().
+```
+
+```prompt OSS
+In this directory create a new Typescript project with Chroma set up.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+You will have to run a local Chroma server to make this work. When you install
+`chromadb` you get access to the Chroma CLI, which can start a local server
+for you with `chroma run`.
+
+Make sure to instruct the user on how to start a local Chroma server in your
+summary.
+```
+</CodeGroup>
+
+## Install Manually
 
 <Steps titleSize="h3">
   <Step title="Install">

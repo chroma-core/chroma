@@ -13,7 +13,7 @@ information rather than its training data alone.
 
 But here's the problem: we can't just throw entire documents at the model. For example, a single PDF from our data might contain 50 pages. A codebase might span
 thousands of files. Even a modest knowledge base can exceed what fits in a
-context window — and even when documents do fit, including entire files is
+context window - and even when documents do fit, including entire files is
 wasteful. If someone asks "What's the default timeout?", we don't want to
 retrieve a 20-page configuration guide; we want the specific paragraph that
 answers the question.
@@ -24,7 +24,7 @@ exceeding this limit, the resulting embedding will not represent the parts of th
 beyond the model's limit. Additionally, Chroma limits each record document size to
 16KB.
 
-This is why RAG systems work with **chunks** — smaller pieces of documents
+This is why RAG systems work with **chunks** - smaller pieces of documents
 that can be independently retrieved based on relevance to a query.
 
 A common **ingestion pipeline** works as follows: we split data into chunks, collect metadata fields we can attach to each chunk, and insert the resulting records into our Chroma collection. Chroma will automatically embed the chunks using the collection's embedding function.
@@ -49,7 +49,7 @@ Now a user asks:
 
 > How long is the connection timeout?
 
-Chunk 2 contains "The default value is 30 seconds"—but it never mentions "connection timeout." That phrase only appears in Chunk 1.
+Chunk 2 contains "The default value is 30 seconds"-but it never mentions "connection timeout." That phrase only appears in Chunk 1.
 When we issue this query to the collection, we have no guarantee that both chunks will be retrieved so an LLM can compile the correct answer.
 
 A better approach keeps full paragraphs together, so the answer and its context share the same embedding and get retrieved as a unit.
@@ -58,12 +58,12 @@ The right boundaries depend on what we're chunking. A novel has different natura
 Poor chunking creates a chain of problems through your pipeline:
 
 1. Retrieval returns partial matches. In the example above, searching for "default connection timeout" might rank Chunk 1 highest (it mentions "connection timeout") even though Chunk 2 has the actual answer. Your relevance scores look reasonable, but the retrieved content doesn't actually answer the question.
-2. You compensate by increasing top-k. When individual chunks don't contain complete information, you retrieve 10 or 20 results instead of 3 or 4. This increases token costs, and dilutes the prompt with marginally relevant text—hurting the LLM's ability to focus on what matters.
+2. You compensate by increasing top-k. When individual chunks don't contain complete information, you retrieve 10 or 20 results instead of 3 or 4. This increases token costs, and dilutes the prompt with marginally relevant text-hurting the LLM's ability to focus on what matters.
 3. The LLM produces degraded answers. The model can only synthesize what you provide. Fragmentary context leads to hedged answers ("The default value appears to be 30 seconds, but I'm not certain what parameter this refers to..."), hallucinated details, or outright errors.
 
 ## Chunking Strategies
 
-**Recursive splitting** — Try to split at the largest structural unit first
+**Recursive splitting** - Try to split at the largest structural unit first
 (e.g., double newlines for paragraphs), but if a resulting chunk exceeds your
 size limit (token and/or document limit), recursively split it using smaller
 units (single newlines, then sentences, then words). This balances
@@ -77,13 +77,13 @@ Chunk-2 contains the second paragraph and the last sentence of the first paragra
 The overlap creates redundancy that helps preserve context across boundaries.
 The downside: you're storing and embedding duplicate content.
 
-**Structure-aware splitting** — Parse the document's explicit structure:
+**Structure-aware splitting** - Parse the document's explicit structure:
 Markdown headers, HTML DOM, or code ASTs. Split at structural boundaries and
 optionally include hierarchical context in the chunk's content itself. For example,
 when splitting the code for a class by instance methods, include at the top of
 each chunk a code comment mentioning the encompassing class, file name, etc.
 
-**Semantic splitting** — Embed sentences or paragraphs, compute similarity
+**Semantic splitting** - Embed sentences or paragraphs, compute similarity
 between adjacent segments, and place chunk boundaries where similarity
 drops (indicating a topic shift). This process can also be driven by an LLM
 alternatively. This method is more computationally expensive but can produce
@@ -189,7 +189,7 @@ function contextualize(chunk: Document): string {
 ## Chunking Code
 
 When chunking text-based files, our split boundaries are often obvious - paragraphs, sentences, Markdown headers, etc.
-Code is trickier — there's no single obvious unit. Functions? Classes? Files? Instance methods can be too granular, files too large, and the right choice often depends on the codebase and the types of queries you want to answer.
+Code is trickier - there's no single obvious unit. Functions? Classes? Files? Instance methods can be too granular, files too large, and the right choice often depends on the codebase and the types of queries you want to answer.
 
 Using the same idea that chunks should be self-contained units of our data, we
 will choose classes and functions as our chunking boundaries, and treat them as
@@ -457,7 +457,7 @@ function recallAtK(results: string[], expected: string[], k: number): number {
 ```
 </CodeGroup>
 
-* **Mean Reciprocal Rank (MRR)** — Where does the first correct chunk appear? (Higher is better)
+* **Mean Reciprocal Rank (MRR)** - Where does the first correct chunk appear? (Higher is better)
 
 <CodeGroup>
 ```python Python
