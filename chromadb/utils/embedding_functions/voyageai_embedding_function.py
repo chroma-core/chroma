@@ -18,6 +18,9 @@ import importlib
 
 # Token limits for different VoyageAI models
 VOYAGE_TOTAL_TOKEN_LIMITS = {
+    "voyage-4": 320_000,
+    "voyage-4-lite": 1_000_000,
+    "voyage-4-large": 120_000,
     "voyage-context-3": 32_000,
     "voyage-3.5-lite": 1_000_000,
     "voyage-3.5": 320_000,

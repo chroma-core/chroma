@@ -388,3 +388,204 @@ def test_multimodal_3_5_text_batching() -> None:
     embeddings = ef(texts)
     assert len(embeddings) == 5
     assert all(len(emb) > 0 for emb in embeddings)
+
+
+def test_voyage_4_family_token_limits() -> None:
+    """Test getting token limit for voyage-4 family models."""
+    with patch("voyageai.Client") as mock_client_class:
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+
+        # Test voyage-4 model
+        ef = VoyageAIEmbeddingFunction(
+            api_key="test-key",
+            model_name="voyage-4",
+        )
+        assert ef.get_token_limit() == 320_000
+
+        # Test voyage-4-lite model
+        ef_lite = VoyageAIEmbeddingFunction(
+            api_key="test-key",
+            model_name="voyage-4-lite",
+        )
+        assert ef_lite.get_token_limit() == 1_000_000
+
+        # Test voyage-4-large model
+        ef_large = VoyageAIEmbeddingFunction(
+            api_key="test-key",
+            model_name="voyage-4-large",
+        )
+        assert ef_large.get_token_limit() == 120_000
+
+
+def test_voyage_4_build_batches() -> None:
+    """Test batching behavior for voyage-4 model through the public API."""
+    with patch("voyageai.Client") as mock_client_class:
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+
+        mock_client.tokenize.return_value = [[1, 2], [3, 4], [5, 6]]
+
+        def mock_embed(
+            texts: list[str],
+            model: str,
+            input_type: Optional[str] = None,
+            truncation: bool = True,
+            output_dimension: Optional[int] = None,
+        ) -> Mock:
+            result = Mock()
+            result.embeddings = [[0.1] * 1024 for _ in texts]
+            return result
+
+        mock_client.embed.side_effect = mock_embed
+
+        ef = VoyageAIEmbeddingFunction(
+            api_key="test-key",
+            model_name="voyage-4",
+            batch_size=2,
+        )
+
+        texts = ["text1", "text2", "text3"]
+        embeddings = ef(texts)
+
+        assert len(embeddings) == 3
+        assert all(len(emb) == 1024 for emb in embeddings)
+        assert mock_client.embed.call_count == 2
+
+
+def test_voyage_4_family_not_context_or_multimodal() -> None:
+    """Test that voyage-4 family models are not detected as context or multimodal."""
+    with patch("voyageai.Client") as mock_client_class:
+        mock_client = Mock()
+        mock_client_class.return_value = mock_client
+
+        for model_name in ["voyage-4", "voyage-4-lite", "voyage-4-large"]:
+            ef = VoyageAIEmbeddingFunction(
+                api_key="test-key",
+                model_name=model_name,
+            )
+            assert ef._is_context_model() is False
+            assert ef._is_multimodal_model() is False
+
+
+def test_with_voyage_4_embeddings() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4",
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 1024
+
+
+def test_with_voyage_4_custom_dimensions() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4",
+        dimensions=2048,
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 2048
+
+
+def test_voyage_4_batching() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4",
+        batch_size=2,
+    )
+    texts = ["text1", "text2", "text3", "text4", "text5"]
+    embeddings = ef(texts)
+    assert len(embeddings) == 5
+    assert all(len(emb) == 1024 for emb in embeddings)
+
+
+def test_with_voyage_4_lite_embeddings() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4-lite",
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 1024
+
+
+def test_with_voyage_4_lite_custom_dimensions() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4-lite",
+        dimensions=512,
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 512
+
+
+def test_voyage_4_lite_batching() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4-lite",
+        batch_size=2,
+    )
+    texts = ["text1", "text2", "text3", "text4", "text5"]
+    embeddings = ef(texts)
+    assert len(embeddings) == 5
+    assert all(len(emb) == 1024 for emb in embeddings)
+
+
+def test_with_voyage_4_large_embeddings() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4-large",
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 1024
+
+
+def test_with_voyage_4_large_custom_dimensions() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4-large",
+        dimensions=256,
+    )
+    embeddings = ef(["hello world"])
+    assert embeddings is not None
+    assert len(embeddings) == 1
+    assert len(embeddings[0]) == 256
+
+
+def test_voyage_4_large_batching() -> None:
+    if os.environ.get("CHROMA_VOYAGE_API_KEY") is None:
+        pytest.skip("CHROMA_VOYAGE_API_KEY not set")
+    ef = VoyageAIEmbeddingFunction(
+        api_key=os.environ["CHROMA_VOYAGE_API_KEY"],
+        model_name="voyage-4-large",
+        batch_size=2,
+    )
+    texts = ["text1", "text2", "text3", "text4", "text5"]
+    embeddings = ef(texts)
+    assert len(embeddings) == 5
+    assert all(len(emb) == 1024 for emb in embeddings)
