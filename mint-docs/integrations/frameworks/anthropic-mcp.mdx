@@ -39,9 +39,9 @@ Before setting up the Chroma MCP server, ensure you have:
 
 1. Open Claude Desktop
 2. Click on the Claude menu and select "Settings..."
-![mcp-settings](/mcp-settings.png)
+![mcp-settings](/images/mcp-settings.png)
 3. Click on "Developer" in the left sidebar
-![mcp-developer](/mcp-developer.png)
+![mcp-developer](/images/mcp-developer.png)
 4. Click "Edit Config" to open your configuration file
 
 Add the following configuration:
@@ -71,9 +71,9 @@ Replace `/path/to/your/data/directory` with where you want Chroma to store its d
 
 1. Restart Claude Desktop completely
 2. Look for the hammer icon in the bottom right of your chat input
-![mcp-hammer](/mcp-hammer.png)
+![mcp-hammer](/images/mcp-hammer.png)
 3. Click it to see available Chroma tools
-![mcp-tools](/mcp-tools.png)
+![mcp-tools](/images/mcp-tools.png)
 
 If you don't see the tools, check the logs at:
 - macOS: `~/Library/Logs/Claude/mcp*.log`
@@ -280,7 +280,7 @@ At any point if the user references previous chats or memory, check chroma for s
 Try to use retrieved information where possible.
 ```
 
-![mcp-instructions](/mcp-instructions.png)
+![mcp-instructions](/images/mcp-instructions.png)
 
 This prompt instructs Claude to:
 - Proactively check Chroma when memory-related topics come up
@@ -302,7 +302,7 @@ Claude will:
 3. Add metadata like timestamps and detected topics
 4. Store everything in your Chroma collection
 
-![mcp-store](/mcp-store.png)
+![mcp-store](/images/mcp-store.png)
 
 Later, you can access past conversations naturally:
 ```
@@ -314,7 +314,7 @@ Claude will:
 2. Filter by timestamp metadata for last week's discussions
 3. Incorporate the relevant historical context into its response
 
-![mcp-search](/mcp-search.png)
+![mcp-search](/images/mcp-search.png)
 
 This setup is particularly useful for:
 - Long-running projects where context gets lost

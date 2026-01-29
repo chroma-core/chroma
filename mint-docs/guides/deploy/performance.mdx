@@ -66,11 +66,11 @@ As collections get larger and the size of the index grows, inserts and queries b
 
 ### Query Latency
 
-![Query latency performance](/query_latency_1_0_10.png)
+![Query latency performance](/images/query_latency_1_0_10.png)
 
 ### Insert Latency
 
-![Insert latency performance](/insert_latency_1_0_10.png)
+![Insert latency performance](/images/insert_latency_1_0_10.png)
 
 <Tip>
 If you're using multiple collections, performance looks quite similar, based on the total number of embeddings across collections. Splitting collections into multiple smaller collections doesn't help, but it doesn't hurt, either, as long as they all fit in memory at once.
@@ -80,15 +80,15 @@ If you're using multiple collections, performance looks quite similar, based on 
 
 The system can handle concurrent operations in parallel. For inserts, since writes are written to a log and flushed every N operations, the mean latency does not fluctuate as the number of writers increases, but does increase as batch size increases since larger batches are more likely to hit the flush threshold. The queries parallelize up to the number of vCPUs available in the instance, after which it begins queueing, thus causing a linear increase in latency.
 
-![Concurrent writes](/concurrent_writes_1_0_10.png)
+![Concurrent writes](/images/concurrent_writes_1_0_10.png)
 
-![Concurrent queries](/concurrent_queries_1_0_10.png)
+![Concurrent queries](/images/concurrent_queries_1_0_10.png)
 
 See the [Insert Throughput](./performance#insert-throughput) section below for a discussion of optimizing user count for maximum throughput when the concurrency is under your control, such as when inserting bulk data.
 
 # CPU speed, core count & type
 
-![CPU mean query latency](/cpu_mean_query_latency_1_0_10.png)
+![CPU mean query latency](/images/cpu_mean_query_latency_1_0_10.png)
 
 # Insert Throughput
 
@@ -100,7 +100,7 @@ As mentioned in the [Concurrency](./performance#concurrency) section above, inse
 
 Experimentation confirms this: overall throughput (total number of embeddings inserted, across batch size and request count) remains fairly flat between batch sizes of 100-500:
 
-![Concurrent inserts](/concurrent_inserts_1_0_10.png)
+![Concurrent inserts](/images/concurrent_inserts_1_0_10.png)
 
 Given that smaller batches have lower, more consistent latency and are less likely to lead to timeout errors, we recommend batches on the smaller side of this curve: anything between 50 and 250 is a reasonable choice.
 
