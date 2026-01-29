@@ -66,15 +66,15 @@
             "group": "CLI",
             "pages": [
               "docs/cli/install",
-              "docs/cli/login",
-              "docs/cli/run",
               "docs/cli/browse",
               "docs/cli/copy",
               "docs/cli/db",
+              "docs/cli/sample-apps",
+              "docs/cli/login",
               "docs/cli/profile",
+              "docs/cli/run",
               "docs/cli/update",
-              "docs/cli/vacuum",
-              "docs/cli/sample-apps"
+              "docs/cli/vacuum"
             ]
           }
         ]
@@ -97,8 +97,8 @@
             "pages": [
               "cloud/schema/overview",
               "cloud/schema/schema-basics",
-              "cloud/schema/index-reference",
-              "cloud/schema/sparse-vector-search"
+              "cloud/schema/sparse-vector-search",
+              "cloud/schema/index-reference"
             ]
           },
           {
@@ -108,9 +108,9 @@
               "cloud/search-api/search-basics",
               "cloud/search-api/filtering",
               "cloud/search-api/ranking",
-              "cloud/search-api/pagination-selection",
               "cloud/search-api/group-by",
               "cloud/search-api/hybrid-search",
+              "cloud/search-api/pagination-selection",
               "cloud/search-api/batch-operations",
               "cloud/search-api/examples",
               "cloud/search-api/migration"
@@ -142,23 +142,23 @@
             "pages": [
               "guides/build/building-with-ai",
               "guides/build/intro-to-retrieval",
+              "guides/build/look-at-your-data",
               "guides/build/chunking",
               "guides/build/agentic-search",
-              "guides/build/agentic-memory",
-              "guides/build/look-at-your-data"
+              "guides/build/agentic-memory"
             ]
           },
           {
             "group": "Deploy",
             "pages": [
-              "guides/deploy/docker",
               "guides/deploy/client-server-mode",
               "guides/deploy/python-thin-client",
+              "guides/deploy/performance",
+              "guides/deploy/observability",
+              "guides/deploy/docker",
               "guides/deploy/aws",
               "guides/deploy/azure",
-              "guides/deploy/gcp",
-              "guides/deploy/observability",
-              "guides/deploy/performance"
+              "guides/deploy/gcp"
             ]
           }
         ]
