@@ -25,24 +25,60 @@
             "pages": [
               "docs/overview/introduction",
               "docs/overview/getting-started",
-              "docs/overview/getting-started-tabs",
               "docs/overview/architecture",
               "docs/overview/data-model",
               "docs/overview/roadmap",
-              "docs/overview/contributing"
+              "docs/overview/contributing",
+              "docs/overview/migration",
+              "docs/overview/troubleshooting"
             ]
           },
           {
             "group": "Run Chroma",
             "pages": [
               "docs/run-chroma/ephemeral-client",
-              "docs/run-chroma/persistent-client"
+              "docs/run-chroma/persistent-client",
+              "docs/run-chroma/client-server"
             ]
           },
           {
             "group": "Collections",
             "pages": [
-              "docs/collections/add-data"
+              "docs/collections/manage-collections",
+              "docs/collections/add-data",
+              "docs/collections/update-data",
+              "docs/collections/delete-data",
+              "docs/collections/configure"
+            ]
+          },
+          {
+            "group": "Querying Collections",
+            "pages": [
+              "docs/querying-collections/query-and-get",
+              "docs/querying-collections/metadata-filtering",
+              "docs/querying-collections/full-text-search"
+            ]
+          },
+          {
+            "group": "Embeddings",
+            "pages": [
+              "docs/embeddings/embedding-functions",
+              "docs/embeddings/multimodal"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "docs/cli/install",
+              "docs/cli/login",
+              "docs/cli/run",
+              "docs/cli/browse",
+              "docs/cli/copy",
+              "docs/cli/db",
+              "docs/cli/profile",
+              "docs/cli/update",
+              "docs/cli/vacuum",
+              "docs/cli/sample-apps"
             ]
           }
         ]
@@ -53,10 +89,80 @@
         "pages": [
           "cloud/getting-started",
           "cloud/pricing",
+          "cloud/quotas-limits",
           {
             "group": "Features",
             "pages": [
               "cloud/features/collection-forking"
+            ]
+          },
+          {
+            "group": "Schema",
+            "pages": [
+              "cloud/schema/overview",
+              "cloud/schema/schema-basics",
+              "cloud/schema/index-reference",
+              "cloud/schema/sparse-vector-search"
+            ]
+          },
+          {
+            "group": "Search API",
+            "pages": [
+              "cloud/search-api/overview",
+              "cloud/search-api/search-basics",
+              "cloud/search-api/filtering",
+              "cloud/search-api/ranking",
+              "cloud/search-api/pagination-selection",
+              "cloud/search-api/group-by",
+              "cloud/search-api/hybrid-search",
+              "cloud/search-api/batch-operations",
+              "cloud/search-api/examples",
+              "cloud/search-api/migration"
+            ]
+          },
+          {
+            "group": "Sync",
+            "pages": [
+              "cloud/sync/overview",
+              "cloud/sync/github",
+              "cloud/sync/web"
+            ]
+          },
+          {
+            "group": "Package Search",
+            "pages": [
+              "cloud/package-search/mcp",
+              "cloud/package-search/registry"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "icon": "map",
+        "pages": [
+          {
+            "group": "Build",
+            "pages": [
+              "guides/build/building-with-ai",
+              "guides/build/intro-to-retrieval",
+              "guides/build/chunking",
+              "guides/build/agentic-search",
+              "guides/build/agentic-memory",
+              "guides/build/look-at-your-data"
+            ]
+          },
+          {
+            "group": "Deploy",
+            "pages": [
+              "guides/deploy/docker",
+              "guides/deploy/client-server-mode",
+              "guides/deploy/python-thin-client",
+              "guides/deploy/aws",
+              "guides/deploy/azure",
+              "guides/deploy/gcp",
+              "guides/deploy/observability",
+              "guides/deploy/performance"
             ]
           }
         ]
@@ -69,8 +175,46 @@
           {
             "group": "Embedding Models",
             "pages": [
+              "integrations/embedding-models/openai",
+              "integrations/embedding-models/cohere",
+              "integrations/embedding-models/google-gemini",
+              "integrations/embedding-models/hugging-face",
+              "integrations/embedding-models/hugging-face-server",
+              "integrations/embedding-models/instructor",
+              "integrations/embedding-models/jina-ai",
+              "integrations/embedding-models/mistral",
+              "integrations/embedding-models/morph",
+              "integrations/embedding-models/nomic",
+              "integrations/embedding-models/ollama",
+              "integrations/embedding-models/open-clip",
+              "integrations/embedding-models/roboflow",
+              "integrations/embedding-models/sentence-transformer",
+              "integrations/embedding-models/text2vec",
+              "integrations/embedding-models/together-ai",
+              "integrations/embedding-models/voyageai",
+              "integrations/embedding-models/cloudflare-workers-ai",
               "integrations/embedding-models/amazon-bedrock",
-              "integrations/embedding-models/baseten"
+              "integrations/embedding-models/baseten",
+              "integrations/embedding-models/chroma-bm25",
+              "integrations/embedding-models/chroma-cloud-qwen",
+              "integrations/embedding-models/chroma-cloud-splade"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "pages": [
+              "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/braintrust",
+              "integrations/frameworks/contextual-ai",
+              "integrations/frameworks/deepeval",
+              "integrations/frameworks/haystack",
+              "integrations/frameworks/langchain",
+              "integrations/frameworks/llamaindex",
+              "integrations/frameworks/mem0",
+              "integrations/frameworks/openlit",
+              "integrations/frameworks/openllmetry",
+              "integrations/frameworks/streamlit",
+              "integrations/frameworks/voltagent"
             ]
           }
         ]

@@ -1,0 +1,303 @@
+---
+title: "Metadata Filtering"
+description: "Learn how to filter query results by metadata in Chroma collections."
+---
+
+The `where` argument in `get` and `query` is used to filter records by their metadata. For example, in this `query` operation, Chroma will only query records that have the `page` metadata field with the value `10`:
+
+<CodeGroup>
+```python Python
+collection.query(
+    query_texts=["first query", "second query"],
+    where={"page": 10}
+)
+```
+
+```typescript TypeScript
+await collection.query({
+  queryTexts: ["first query", "second query"],
+  where: { page: 10 },
+});
+```
+</CodeGroup>
+
+In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
+
+<CodeGroup>
+```python Python
+{
+    "metadata_field": {
+        <Operator>: <Value>
+    }
+}
+```
+
+```typescript TypeScript
+{
+    metadata_field: {
+        <Operator>: <Value>
+    }
+}
+```
+</CodeGroup>
+
+Using the `$eq` operator is equivalent to using the metadata field directly in your `where` filter.
+
+<CodeGroup>
+```python Python
+{
+    "metadata_field": "search_string"
+}
+
+# is equivalent to
+
+{
+    "metadata_field": {
+        "$eq": "search_string"
+    }
+}
+```
+
+```typescript TypeScript
+{
+    metadata_field: "search_string"
+}
+
+// is equivalent to
+
+{
+    metadata_field: {
+        "$eq":"search_string"
+    }
+}
+```
+</CodeGroup>
+
+For example, here we query all records whose `page` metadata field is greater than 10:
+
+<CodeGroup>
+```python Python
+collection.query(
+    query_texts=["first query", "second query"],
+    where={"page": { "$gt": 10 }}
+)
+```
+
+```typescript TypeScript
+await collection.query({
+  queryTexts: ["first query", "second query"],
+  where: { page: { $gt: 10 } },
+});
+```
+</CodeGroup>
+
+## Using Logical Operators
+
+You can also use the logical operators `$and` and `$or` to combine multiple filters.
+
+An `$and` operator will return results that match all the filters in the list.
+
+<CodeGroup>
+```python Python
+{
+    "$and": [
+        {
+            "metadata_field": {
+                <Operator>: <Value>
+            }
+        },
+        {
+            "metadata_field": {
+                <Operator>: <Value>
+            }
+        }
+    ]
+}
+```
+
+```typescript TypeScript
+{
+    "$and": [
+        {
+            metadata_field: { <Operator>: <Value> }
+        },
+        {
+            metadata_field: { <Operator>: <Value> }
+        }
+    ]
+}
+```
+</CodeGroup>
+
+For example, here we query all records whose `page` metadata field is between 5 and 10:
+
+<CodeGroup>
+```python Python
+collection.query(
+    query_texts=["first query", "second query"],
+    where={
+        "$and": [
+            {"page": {"$gte": 5 }},
+            {"page": {"$lte": 10 }},
+        ]
+    }
+)
+```
+
+```typescript TypeScript
+await collection.query({
+  queryTexts: ["first query", "second query"],
+  where: {
+    $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
+  },
+});
+```
+</CodeGroup>
+
+An `$or` operator will return results that match any of the filters in the list.
+
+<CodeGroup>
+```python Python
+{
+    "$or": [
+        {
+            "metadata_field": {
+                <Operator>: <Value>
+            }
+        },
+        {
+            "metadata_field": {
+                <Operator>: <Value>
+            }
+        }
+    ]
+}
+```
+
+```typescript TypeScript
+{
+    "$or": [
+        {
+            metadata_field: { <Operator>: <Value> }
+        },
+        {
+            metadata_field: { <Operator>: <Value> }
+        }
+    ]
+}
+```
+</CodeGroup>
+
+For example, here we get all records whose `color` metadata field is `red` or `blue`:
+
+<CodeGroup>
+```python Python
+collection.get(
+    where={
+        "or": [
+            {"color": "red"},
+            {"color": "blue"},
+        ]
+    }
+)
+```
+
+```typescript TypeScript
+await collection.get({
+  where: {
+    or: [{ color: "red" }, { color: "blue" }],
+  },
+});
+```
+</CodeGroup>
+
+## Using Inclusion Operators
+
+The following inclusion operators are supported:
+
+- `$in` - a value is in predefined list (string, int, float, bool)
+- `$nin` - a value is not in predefined list (string, int, float, bool)
+
+An `$in` operator will return results where the metadata attribute is part of a provided list:
+
+<CodeGroup>
+```python Python
+{
+  "metadata_field": {
+    "$in": ["value1", "value2", "value3"]
+  }
+}
+```
+
+```typescript TypeScript
+{
+    metadata_field: {
+        "$in": ["value1", "value2", "value3"]
+    }
+}
+```
+</CodeGroup>
+
+An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
+
+<CodeGroup>
+```python Python
+{
+  "metadata_field": {
+    "$nin": ["value1", "value2", "value3"]
+  }
+}
+```
+
+```typescript TypeScript
+{
+    metadata_field: {
+        "$nin": ["value1", "value2", "value3"]
+    }
+}
+```
+</CodeGroup>
+
+For example, here we get all records whose `author` metadata field is in a list of possible values:
+
+<CodeGroup>
+```python Python
+collection.get(
+    where={
+       "author": {"$in": ["Rowling", "Fitzgerald", "Herbert"]}
+    }
+)
+```
+
+```typescript TypeScript
+await collection.get({
+  where: {
+    author: { $in: ["Rowling", "Fitzgerald", "Herbert"] },
+  },
+});
+```
+</CodeGroup>
+
+## Combining with Document Search
+
+`.get` and `.query` can handle metadata filtering combined with [document search](./full-text-search):
+
+<CodeGroup>
+```python Python
+collection.query(
+    query_texts=["doc10", "thus spake zarathustra", ...],
+    n_results=10,
+    where={"metadata_field": "is_equal_to_this"},
+    where_document={"$contains":"search_string"}
+)
+```
+
+```typescript TypeScript
+await collection.query({
+    queryTexts: ["doc10", "thus spake zarathustra", ...],
+    nResults: 10,
+    where: { metadata_field: "is_equal_to_this" },
+    whereDocument: { "$contains": "search_string" }
+})
+```
+</CodeGroup>
