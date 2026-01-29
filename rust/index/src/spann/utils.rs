@@ -2,10 +2,12 @@ use std::{cmp::min, collections::HashMap, sync::Arc};
 
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
+use chroma_types::QuantizedCluster;
 use rand::{seq::SliceRandom, Rng};
+use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
-use crate::hnsw_provider::HnswIndexRef;
+use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
 
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.
@@ -596,6 +598,45 @@ pub async fn rng_query(
     }
 
     Ok((res_ids, res_distances, res_embeddings))
+}
+
+/// Query a quantized cluster, returning all points sorted by estimated distance.
+///
+/// Uses RaBitQ distance estimation between the query and each quantized point.
+pub fn query_quantized_cluster(
+    cluster: &QuantizedCluster<'_>,
+    query: &[f32],
+    distance_function: &DistanceFunction,
+) -> SearchResult {
+    let dim = cluster.center.len();
+    if cluster.ids.is_empty() || dim == 0 {
+        return SearchResult::default();
+    }
+
+    // Precompute query-related values
+    let c_norm = (f32::dot(cluster.center, cluster.center).unwrap_or(0.0) as f32).sqrt();
+    let c_dot_q = f32::dot(cluster.center, query).unwrap_or(0.0) as f32;
+    let q_norm = (f32::dot(query, query).unwrap_or(0.0) as f32).sqrt();
+    let r_q = query
+        .iter()
+        .zip(cluster.center.iter())
+        .map(|(q, c)| q - c)
+        .collect::<Vec<_>>();
+
+    // Compute distances for each point
+    let code_size = cluster.codes.len() / cluster.ids.len().max(1);
+    let (keys, distances) = cluster
+        .ids
+        .iter()
+        .zip(cluster.codes.chunks(code_size))
+        .map(|(id, code_bytes)| {
+            let code = Code::<&[u8]>::new(code_bytes);
+            let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
+            (*id, distance)
+        })
+        .unzip();
+
+    SearchResult { keys, distances }
 }
 
 #[cfg(test)]

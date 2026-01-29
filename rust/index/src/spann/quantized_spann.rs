@@ -6,12 +6,14 @@ use std::sync::{
 use chroma_blockstore::BlockfileReader;
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Cmek, QuantizedCluster, QuantizedClusterOwned};
+use chroma_types::{Cmek, DataRecord, QuantizedCluster, QuantizedClusterOwned};
 use dashmap::DashMap;
 use faer::{col::ColRef, Mat};
 use thiserror::Error;
 
 use crate::{quantization::Code, SearchResult, VectorIndex};
+
+use super::utils::query_quantized_cluster;
 
 /// In-memory staging for a quantized cluster head.
 struct QuantizedDelta {
@@ -82,8 +84,12 @@ pub struct MutableQuantizedSpannIndex<I: VectorIndex> {
     embeddings: Arc<DashMap<u64, Arc<[f32]>>>,
     versions: Arc<DashMap<u64, u64>>,
 
-    // === Blockfile Reader ===
-    reader: Option<BlockfileReader<'static, u64, QuantizedCluster<'static>>>,
+    // === Blockfile Readers ===
+    quantized_cluster_reader: Option<BlockfileReader<'static, u64, QuantizedCluster<'static>>>,
+    // NOTE: This is the record segment's id_to_data blockfile reader.
+    // This is a temporary solution for loading raw embeddings; a dedicated
+    // raw embedding store may be introduced in the future.
+    raw_embedding_reader: Option<BlockfileReader<'static, u32, DataRecord<'static>>>,
 }
 
 impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
@@ -183,7 +189,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     /// Load cluster data from reader into deltas (reconciliation).
     async fn load(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
         // Load from reader if available
-        let Some(reader) = &self.reader else {
+        let Some(reader) = &self.quantized_cluster_reader else {
             return Ok(());
         };
 
@@ -213,6 +219,40 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                 {
                     delta.cluster.append(*id, *version, code);
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load raw embeddings for all points in a cluster into the embeddings cache.
+    async fn load_raw(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
+        let Some(reader) = &self.raw_embedding_reader else {
+            return Ok(());
+        };
+
+        // Get ids from the cluster (only valid, non-cached entries)
+        let ids = {
+            let Some(delta) = self.deltas.get(&cluster_id) else {
+                return Ok(());
+            };
+            delta
+                .cluster
+                .ids
+                .iter()
+                .zip(delta.cluster.versions.iter())
+                .filter(|(id, version)| {
+                    self.is_valid(**id, **version) && !self.embeddings.contains_key(id)
+                })
+                .map(|(id, _)| *id)
+                .collect::<Vec<_>>()
+        };
+
+        // Load embeddings for each id not already cached
+        for id in ids {
+            if let Some(data_record) = reader.get("", id as u32).await? {
+                let embedding = Arc::from(data_record.embedding);
+                self.embeddings.insert(id, embedding);
             }
         }
 
@@ -278,6 +318,85 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         rotated.iter().copied().collect()
     }
 
+    /// Merge a small cluster into a nearby cluster.
+    async fn merge(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
+        // Load raw embeddings for points in the cluster
+        self.load_raw(cluster_id).await?;
+
+        // Get source centroid
+        let Some(source_center) = self.cluster_centroid(cluster_id) else {
+            return Ok(());
+        };
+
+        // Find nearest neighbor (excluding self)
+        let neighbors = self.navigate(&source_center)?;
+        let Some(&target_id) = neighbors.keys.iter().find(|&&id| id != cluster_id) else {
+            return Ok(());
+        };
+
+        // Get target centroid
+        let Some(target_center) = self.cluster_centroid(target_id) else {
+            return Ok(());
+        };
+
+        // Remove source from deltas (take ownership)
+        let Some((_, source_delta)) = self.deltas.remove(&cluster_id) else {
+            return Ok(());
+        };
+
+        // Remove source from centroid index
+        self.centroid
+            .remove(cluster_id)
+            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+
+        // Query source cluster against both centers to get estimated distances
+        let source_borrowed: QuantizedCluster<'_> = (&source_delta.cluster).into();
+        let dists_to_target = query_quantized_cluster(
+            &source_borrowed,
+            &target_center,
+            &self.config.distance_function,
+        );
+        let dists_to_source = query_quantized_cluster(
+            &source_borrowed,
+            &source_center,
+            &self.config.distance_function,
+        );
+
+        // For each point with valid embedding, decide: append to target or re-insert
+        for (((id, version), dist_to_target), dist_to_source) in source_borrowed
+            .ids
+            .iter()
+            .zip(source_borrowed.versions.iter())
+            .zip(dists_to_target.distances.iter())
+            .zip(dists_to_source.distances.iter())
+        {
+            // Embedding is required (loaded by load_raw)
+            let Some(embedding) = self.embeddings.get(id).map(|e| e.clone()) else {
+                continue;
+            };
+
+            if dist_to_target <= dist_to_source {
+                // Closer to target: re-quantize and append with same version from source
+                let code = Code::<Vec<u8>>::quantize(&embedding, &target_center);
+                self.append(target_id, *id, *version, code.as_ref());
+            } else {
+                // Closer to source (which is gone): re-insert
+                Box::pin(self.insert(*id, embedding)).await?;
+            }
+        }
+
+        // Scrub target if over threshold
+        if self
+            .deltas
+            .get(&target_id)
+            .is_some_and(|d| d.length > self.config.spann_split_threshold)
+        {
+            Box::pin(self.scrub(target_id)).await?;
+        }
+
+        Ok(())
+    }
+
     /// Scrub a cluster: load from reader, remove invalid entries, trigger split/merge if needed.
     async fn scrub(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
         // Load from reader
@@ -300,7 +419,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         if new_len > self.config.spann_split_threshold {
             // TODO: self.split(cluster_id).await?;
         } else if new_len > 0 && new_len < self.config.spann_merge_threshold {
-            // TODO: self.merge(cluster_id).await?;
+            self.merge(cluster_id).await?;
         }
 
         Ok(())
