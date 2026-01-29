@@ -809,20 +809,20 @@ pub struct CreateDatabasePayload {
     ),
     params(
         ("tenant" = String, Path, description = "Tenant UUID")
-        extensions(
-            ("x-codeSamples" = json!([
-                {
-                    "lang": "terminal",
-                    "label": "Create Database",
-                    "source": "chroma db create my-new-db"
-                },
-                {
-                    "lang": "curl",
-                    "label": "Create Database",
-                    "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my-new-db\"}'"
-                }
-            ]))
-        )
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "terminal",
+                "label": "Create Database",
+                "source": "chroma db create my-new-db"
+            },
+            {
+                "lang": "curl",
+                "label": "Create Database",
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my-new-db\"}'"
+            }
+        ]))
     )
 )]
 async fn create_database(
@@ -903,7 +903,7 @@ struct ListDatabasesParams {
                 "lang": "terminal",
                 "label": "List Databases",
                 "source": "chroma db list"
-            }
+            },
             {
                 "lang": "curl",
                 "label": "List Databases",
