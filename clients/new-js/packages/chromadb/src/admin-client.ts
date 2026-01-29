@@ -1,6 +1,6 @@
 import { defaultAdminClientArgs, HttpMethod, normalizeMethod } from "./utils";
 import { createClient, createConfig } from "@hey-api/client-fetch";
-import { Database, DefaultService as Api } from "./api";
+import { Database, DatabaseService, TenantService } from "./api";
 import { chromaFetch } from "./chroma-fetch";
 
 /**
@@ -72,7 +72,7 @@ export class AdminClient {
     name: string;
     tenant: string;
   }): Promise<void> {
-    await Api.createDatabase({
+    await DatabaseService.createDatabase({
       client: this.apiClient,
       path: { tenant },
       body: { name },
@@ -93,7 +93,7 @@ export class AdminClient {
     name: string;
     tenant: string;
   }): Promise<Database> {
-    const { data } = await Api.getDatabase({
+    const { data } = await DatabaseService.getDatabase({
       client: this.apiClient,
       path: { tenant, database: name },
     });
@@ -115,7 +115,7 @@ export class AdminClient {
     name: string;
     tenant: string;
   }): Promise<void> {
-    await Api.deleteDatabase({
+    await DatabaseService.deleteDatabase({
       client: this.apiClient,
       path: { tenant, database: name },
     });
@@ -128,7 +128,7 @@ export class AdminClient {
    */
   public async listDatabases(args: ListDatabasesArgs): Promise<Database[]> {
     const { limit = 100, offset = 0, tenant } = args;
-    const { data } = await Api.listDatabases({
+    const { data } = await DatabaseService.listDatabases({
       client: this.apiClient,
       path: { tenant },
       query: { limit, offset },
@@ -143,7 +143,7 @@ export class AdminClient {
    * @param options.name - Name of the tenant to create
    */
   public async createTenant({ name }: { name: string }): Promise<void> {
-    await Api.createTenant({
+    await TenantService.createTenant({
       client: this.apiClient,
       body: { name },
     });
@@ -156,7 +156,7 @@ export class AdminClient {
    * @returns Promise resolving to the tenant name
    */
   public async getTenant({ name }: { name: string }): Promise<string> {
-    const { data } = await Api.getTenant({
+    const { data } = await TenantService.getTenant({
       client: this.apiClient,
       path: { tenant_name: name },
     });
