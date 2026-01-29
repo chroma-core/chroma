@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use arrow::{
     array::{
-        Array, ArrayRef, Float32Builder, ListArray, ListBuilder, PrimitiveArray, StructArray,
-        UInt64Builder, UInt8Builder,
+        Array, ArrayRef, FixedSizeListArray, FixedSizeListBuilder, Float32Array, Float32Builder,
+        ListArray, ListBuilder, PrimitiveArray, StructArray, UInt64Builder, UInt8Array,
+        UInt8Builder,
     },
-    datatypes::{ArrowPrimitiveType, DataType, Field, Fields, Float32Type, UInt64Type, UInt8Type},
+    datatypes::{ArrowPrimitiveType, DataType, Field, Fields, UInt64Type},
 };
 use chroma_types::{QuantizedCluster, QuantizedClusterOwned};
 
@@ -36,6 +37,14 @@ fn get_list_slice<T: ArrowPrimitiveType>(list_arr: &ListArray, index: usize) -> 
     &values.values()[start..end]
 }
 
+fn get_fixed_size_list_array(struct_array: &StructArray, column: usize) -> &FixedSizeListArray {
+    struct_array
+        .column(column)
+        .as_any()
+        .downcast_ref::<FixedSizeListArray>()
+        .expect("expected fixed size list array")
+}
+
 fn get_list_array(struct_array: &StructArray, column: usize) -> &ListArray {
     struct_array
         .column(column)
@@ -53,8 +62,8 @@ pub struct QuantizedClusterSizeTracker {
 }
 
 pub struct QuantizedClusterArrowBuilder {
-    center: ListBuilder<Float32Builder>,
-    codes: ListBuilder<UInt8Builder>,
+    center: FixedSizeListBuilder<Float32Builder>,
+    codes: ListBuilder<FixedSizeListBuilder<UInt8Builder>>,
     ids: ListBuilder<UInt64Builder>,
     versions: ListBuilder<UInt64Builder>,
 }
@@ -93,12 +102,17 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
 
     fn get_arrow_builder(tracker: Self::SizeTracker) -> Self::ArrowBuilder {
         QuantizedClusterArrowBuilder {
-            center: ListBuilder::with_capacity(
+            center: FixedSizeListBuilder::with_capacity(
                 Float32Builder::with_capacity(tracker.cluster_count * tracker.dimension),
+                tracker.dimension as i32,
                 tracker.cluster_count,
             ),
             codes: ListBuilder::with_capacity(
-                UInt8Builder::with_capacity(tracker.vector_count * tracker.code_length),
+                FixedSizeListBuilder::with_capacity(
+                    UInt8Builder::with_capacity(tracker.vector_count * tracker.code_length),
+                    tracker.code_length as i32,
+                    tracker.vector_count,
+                ),
                 tracker.cluster_count,
             ),
             ids: ListBuilder::with_capacity(
@@ -120,7 +134,12 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
         builder.center.values().append_slice(&value.center);
         builder.center.append(true);
 
-        builder.codes.values().append_slice(&value.codes);
+        let code_length = value.codes.len() / value.ids.len();
+        let inner_codes = builder.codes.values();
+        for chunk in value.codes.chunks(code_length) {
+            inner_codes.values().append_slice(chunk);
+            inner_codes.append(true);
+        }
         builder.codes.append(true);
 
         builder.ids.values().append_slice(&value.ids);
@@ -132,16 +151,26 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
 
     fn finish(
         mut builder: Self::ArrowBuilder,
-        _size_tracker: &Self::SizeTracker,
+        size_tracker: &Self::SizeTracker,
     ) -> (Field, Arc<dyn Array>) {
         let center_field = Field::new(
             "center",
-            DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
+            DataType::FixedSizeList(
+                Arc::new(Field::new("item", DataType::Float32, true)),
+                size_tracker.dimension as i32,
+            ),
             true,
         );
         let codes_field = Field::new(
             "codes",
-            DataType::List(Arc::new(Field::new("item", DataType::UInt8, true))),
+            DataType::List(Arc::new(Field::new(
+                "item",
+                DataType::FixedSizeList(
+                    Arc::new(Field::new("item", DataType::UInt8, true)),
+                    size_tracker.code_length as i32,
+                ),
+                true,
+            ))),
             true,
         );
         let ids_field = Field::new(
@@ -203,37 +232,49 @@ impl<'data> ArrowReadableValue<'data> for QuantizedCluster<'data> {
             .downcast_ref::<StructArray>()
             .expect("expected struct array");
 
-        let center_arr = get_list_array(struct_array, CENTER_COLUMN);
+        let center_arr = get_fixed_size_list_array(struct_array, CENTER_COLUMN);
         let codes_arr = get_list_array(struct_array, CODES_COLUMN);
         let ids_arr = get_list_array(struct_array, IDS_COLUMN);
         let versions_arr = get_list_array(struct_array, VERSIONS_COLUMN);
 
+        // center: FixedSizeList<Float32>
+        let center_start = center_arr.value_offset(index) as usize;
+        let center_end = center_arr.value_offset(index + 1) as usize;
+        let center_values = center_arr
+            .values()
+            .as_any()
+            .downcast_ref::<Float32Array>()
+            .expect("expected float32 array");
+        let center = &center_values.values()[center_start..center_end];
+
+        // codes: List<FixedSizeList<UInt8>>
+        let codes_outer_start = codes_arr.value_offsets()[index] as usize;
+        let codes_outer_end = codes_arr.value_offsets()[index + 1] as usize;
+        let codes_inner = codes_arr
+            .values()
+            .as_any()
+            .downcast_ref::<FixedSizeListArray>()
+            .expect("expected fixed size list array");
+        let codes_start = codes_inner.value_offset(codes_outer_start) as usize;
+        let codes_end = codes_inner.value_offset(codes_outer_end) as usize;
+        let codes_values = codes_inner
+            .values()
+            .as_any()
+            .downcast_ref::<UInt8Array>()
+            .expect("expected uint8 array");
+        let codes = &codes_values.values()[codes_start..codes_end];
+
         QuantizedCluster {
-            center: get_list_slice::<Float32Type>(center_arr, index),
-            codes: get_list_slice::<UInt8Type>(codes_arr, index),
+            center,
+            codes,
             ids: get_list_slice::<UInt64Type>(ids_arr, index),
             versions: get_list_slice::<UInt64Type>(versions_arr, index),
         }
     }
 
     fn get_range(array: &'data Arc<dyn Array>, offset: usize, length: usize) -> Vec<Self> {
-        let struct_array = array
-            .as_any()
-            .downcast_ref::<StructArray>()
-            .expect("expected struct array");
-
-        let center_arr = get_list_array(struct_array, CENTER_COLUMN);
-        let codes_arr = get_list_array(struct_array, CODES_COLUMN);
-        let ids_arr = get_list_array(struct_array, IDS_COLUMN);
-        let versions_arr = get_list_array(struct_array, VERSIONS_COLUMN);
-
         (offset..offset + length)
-            .map(|i| QuantizedCluster {
-                center: get_list_slice::<Float32Type>(center_arr, i),
-                codes: get_list_slice::<UInt8Type>(codes_arr, i),
-                ids: get_list_slice::<UInt64Type>(ids_arr, i),
-                versions: get_list_slice::<UInt64Type>(versions_arr, i),
-            })
+            .map(|i| Self::get(array, i))
             .collect()
     }
 

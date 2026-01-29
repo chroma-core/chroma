@@ -101,12 +101,17 @@ impl QuantizedClusterDelta {
             .map(|v| (v.center.len(), v.codes.len() / v.ids.len()))
             .unwrap_or((0, 0));
 
+        // Size breakdown:
+        // - center: FixedSizeList has no offsets, just data
+        // - codes: outer List has offsets, inner FixedSizeList has no offsets
+        // - ids/versions: List has offsets
+        // Total offset arrays: 3 (codes outer, ids, versions)
         bit_util::round_upto_multiple_of_64(inner.prefix_size)
             + bit_util::round_upto_multiple_of_64(inner.key_size)
             + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>())
             + bit_util::round_upto_multiple_of_64(inner.vector_count * code_length)
             + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u64>()) * 2
-            + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 5
+            + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3
             + K::offset_size(cluster_count)
     }
 
@@ -166,12 +171,13 @@ impl QuantizedClusterDelta {
             vector_count += v.ids.len();
             cluster_count += 1;
 
+            // Same size calculation as get_size()
             let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
                 + bit_util::round_upto_multiple_of_64(key_size)
                 + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>())
                 + bit_util::round_upto_multiple_of_64(vector_count * code_length)
                 + bit_util::round_upto_multiple_of_64(vector_count * size_of::<u64>()) * 2
-                + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 5
+                + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3
                 + K::offset_size(cluster_count);
 
             if total_size > split_size {
