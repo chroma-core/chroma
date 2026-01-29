@@ -34,7 +34,7 @@ Forking lets you create a new collection from an existing one instantly, using c
 source_collection = client.get_collection(name="main-repo-index")
 
 # Create a forked collection. Name must be unique within the database.
-forked_collection = source_collection.fork(name="main-repo-index-pr-1234")
+forked_collection = source_collection.fork(new_name="main-repo-index-pr-1234")
 
 # Forked collection is immediately queryable; changes are isolated
 forked_collection.add(documents=["new content"], ids=["doc-pr-1"])  # billed as incremental storage
