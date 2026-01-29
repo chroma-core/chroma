@@ -173,9 +173,9 @@ func (e *MistralEmbeddingFunction) EmbedDocuments(ctx context.Context, documents
 	if len(documents) == 0 {
 		return embeddings.NewEmptyEmbeddings(), nil
 	}
-	var model = e.apiClient.DefaultModel
-	if ctx.Value(ModelContextVar) != nil {
-		model = ctx.Value(ModelContextVar).(string)
+	model := e.apiClient.DefaultModel
+	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+		model = m
 	}
 	req := CreateEmbeddingRequest{
 		Model: model,
@@ -189,9 +189,9 @@ func (e *MistralEmbeddingFunction) EmbedDocuments(ctx context.Context, documents
 }
 
 func (e *MistralEmbeddingFunction) EmbedQuery(ctx context.Context, document string) (embeddings.Embedding, error) {
-	var model = e.apiClient.DefaultModel
-	if ctx.Value(ModelContextVar) != nil {
-		model = ctx.Value(ModelContextVar).(string)
+	model := e.apiClient.DefaultModel
+	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+		model = m
 	}
 	req := CreateEmbeddingRequest{
 		Model: model,

@@ -68,12 +68,11 @@ func NewGeminiClient(opts ...Option) (*Client, error) {
 }
 
 func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embeddings.Embedding, error) {
-	var em *genai.EmbeddingModel
-	if ctx.Value(ModelContextVar) != nil {
-		em = c.Client.EmbeddingModel(ctx.Value(ModelContextVar).(string))
-	} else {
-		em = c.Client.EmbeddingModel(string(c.DefaultModel))
+	model := string(c.DefaultModel)
+	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+		model = m
 	}
+	em := c.Client.EmbeddingModel(model)
 	b := em.NewBatch()
 	for _, t := range req {
 		b.AddContent(genai.Text(t))
@@ -90,14 +89,13 @@ func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embedding
 	return embeddings.NewEmbeddingsFromFloat32(embs)
 }
 
-// close closes the underlying client
-//
-//nolint:unused
-func (c *Client) close() error {
+// Close closes the underlying client.
+func (c *Client) Close() error {
 	return c.Client.Close()
 }
 
 var _ embeddings.EmbeddingFunction = (*GeminiEmbeddingFunction)(nil)
+var _ embeddings.Closeable = (*GeminiEmbeddingFunction)(nil)
 
 type GeminiEmbeddingFunction struct {
 	apiClient *Client
@@ -112,11 +110,9 @@ func NewGeminiEmbeddingFunction(opts ...Option) (*GeminiEmbeddingFunction, error
 	return &GeminiEmbeddingFunction{apiClient: client}, nil
 }
 
-// close closes the underlying client
-//
-//nolint:unused
-func (e *GeminiEmbeddingFunction) close() error {
-	return e.apiClient.close()
+// Close closes the underlying client and implements the Closeable interface.
+func (e *GeminiEmbeddingFunction) Close() error {
+	return e.apiClient.Close()
 }
 
 func (e *GeminiEmbeddingFunction) EmbedDocuments(ctx context.Context, documents []string) ([]embeddings.Embedding, error) {
