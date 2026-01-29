@@ -1,4 +1,4 @@
-use std::mem::size_of_val;
+use std::{mem::size_of_val, sync::Arc};
 
 #[derive(Clone, Debug)]
 pub struct QuantizedCluster<'data> {
@@ -19,7 +19,7 @@ impl QuantizedCluster<'_> {
 
 #[derive(Clone, Debug)]
 pub struct QuantizedClusterOwned {
-    pub center: Vec<f32>,
+    pub center: Arc<[f32]>,
     pub codes: Vec<u8>,
     pub ids: Vec<u64>,
     pub versions: Vec<u64>,
@@ -28,7 +28,7 @@ pub struct QuantizedClusterOwned {
 impl From<QuantizedCluster<'_>> for QuantizedClusterOwned {
     fn from(value: QuantizedCluster<'_>) -> Self {
         Self {
-            center: value.center.to_vec(),
+            center: value.center.into(),
             codes: value.codes.to_vec(),
             ids: value.ids.to_vec(),
             versions: value.versions.to_vec(),

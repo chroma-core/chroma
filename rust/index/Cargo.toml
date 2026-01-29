@@ -39,6 +39,7 @@ simsimd = { workspace = true }
 dashmap = { workspace = true }
 usearch = { workspace = true, optional = true }
 crossbeam = { workspace = true }
+faer = { workspace = true }
 
 chroma-error = { workspace = true }
 chroma-types = { workspace = true }
