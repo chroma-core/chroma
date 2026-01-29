@@ -133,6 +133,7 @@ jobs:
           - "chromadb/test/api/test_limit_offset.py"
           - "chromadb/test/property/test_collections.py"
           - "chromadb/test/property/test_add.py"
+          - "chromadb/test/property/test_add_mcmr.py"
           - "chromadb/test/property/test_filtering.py"
           - "chromadb/test/property/test_fork.py"
           - "chromadb/test/property/test_embeddings.py"
@@ -147,6 +148,8 @@ jobs:
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: false
+          - test-glob: "chromadb/test/property/test_add_mcmr.py"
+            multi_region: true
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
           # Tests that create tenants need MULTI_REGION for spanner instance
