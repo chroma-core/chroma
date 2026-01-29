@@ -9,6 +9,7 @@ use crate::{
 use arrow::{
     array::{
         Array, ArrayRef, BooleanBuilder, Float32Builder, RecordBatch, StringBuilder, UInt32Builder,
+        UInt64Builder,
     },
     datatypes::Field,
 };
@@ -56,6 +57,7 @@ pub enum BlockKeyArrowBuilder {
     String((StringBuilder, StringBuilder)),
     Float32((StringBuilder, Float32Builder)),
     UInt32((StringBuilder, UInt32Builder)),
+    UInt64((StringBuilder, UInt64Builder)),
 }
 
 impl BlockKeyArrowBuilder {
@@ -96,6 +98,16 @@ impl BlockKeyArrowBuilder {
                     BlockKeyArrowBuilder::UInt32(builder) => builder,
                     _ => {
                         unreachable!("Invariant violation. BlockKeyArrowBuilder should be UInt32.")
+                    }
+                };
+                builder.0.append_value(key.prefix);
+                builder.1.append_value(value);
+            }
+            KeyWrapper::Uint64(value) => {
+                let builder = match self {
+                    BlockKeyArrowBuilder::UInt64(builder) => builder,
+                    _ => {
+                        unreachable!("Invariant violation. BlockKeyArrowBuilder should be UInt64.")
                     }
                 };
                 builder.0.append_value(key.prefix);
@@ -145,6 +157,18 @@ impl BlockKeyArrowBuilder {
             BlockKeyArrowBuilder::UInt32((ref mut prefix_builder, ref mut key_builder)) => {
                 let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
                 let key_field = Field::new("key", arrow::datatypes::DataType::UInt32, false);
+                let prefix_arr = prefix_builder.finish();
+                let key_arr = key_builder.finish();
+                (
+                    prefix_field,
+                    (&prefix_arr as &dyn Array).slice(0, prefix_arr.len()),
+                    key_field,
+                    (&key_arr as &dyn Array).slice(0, key_arr.len()),
+                )
+            }
+            BlockKeyArrowBuilder::UInt64((ref mut prefix_builder, ref mut key_builder)) => {
+                let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
+                let key_field = Field::new("key", arrow::datatypes::DataType::UInt64, false);
                 let prefix_arr = prefix_builder.finish();
                 let key_arr = key_builder.finish();
                 (

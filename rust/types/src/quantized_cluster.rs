@@ -64,4 +64,25 @@ impl QuantizedClusterOwned {
         self.versions.push(version);
         self.codes.extend_from_slice(code);
     }
+
+    /// Remove invalid entries, compact in-place. Returns new length.
+    pub fn scrub(&mut self, is_valid: impl Fn(u64, u64) -> bool) -> usize {
+        let code_size = self.codes.len() / self.ids.len().max(1);
+        let mut write = 0;
+        for read in 0..self.ids.len() {
+            if is_valid(self.ids[read], self.versions[read]) {
+                if write != read {
+                    self.ids[write] = self.ids[read];
+                    self.versions[write] = self.versions[read];
+                    self.codes
+                        .copy_within(read * code_size..(read + 1) * code_size, write * code_size);
+                }
+                write += 1;
+            }
+        }
+        self.ids.truncate(write);
+        self.versions.truncate(write);
+        self.codes.truncate(write * code_size);
+        write
+    }
 }
