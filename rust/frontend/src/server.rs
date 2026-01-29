@@ -605,7 +605,7 @@ struct CreateTenantPayload {
     path = "/api/v2/tenants",
     summary = "Create tenant",
     description = "Creates a new tenant.",
-    tag = "Tenants",
+    tag = "Tenant",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -645,7 +645,7 @@ async fn create_tenant(
     path = "/api/v2/tenants/{tenant_name}",
     summary = "Get tenant",
     description = "Returns an existing tenant by name.",
-    tag = "Tenants",
+    tag = "Tenant",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -698,7 +698,7 @@ pub struct UpdateTenantPayload {
     path = "/api/v2/tenants/{tenant_name}",
     summary = "Update tenant",
     description = "Updates an existing tenant by name.",
-    tag = "Tenants",
+    tag = "Tenant",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -769,7 +769,7 @@ pub struct CreateDatabasePayload {
     path = "/api/v2/tenants/{tenant}/databases",
     summary = "Create database",
     description = "Creates a new database for a tenant.",
-    tag = "Databases",
+    tag = "Database",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -841,7 +841,7 @@ struct ListDatabasesParams {
     path = "/api/v2/tenants/{tenant}/databases",
     summary = "List databases",
     description = "Lists all databases for a tenant.",
-    tag = "Databases",
+    tag = "Database",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -889,7 +889,7 @@ async fn list_databases(
     path = "/api/v2/tenants/{tenant}/databases/{database}",
     summary = "Get database",
     description = "Returns a database by name.",
-    tag = "Databases",
+    tag = "Database",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -939,7 +939,7 @@ async fn get_database(
     path = "/api/v2/tenants/{tenant}/databases/{database}",
     summary = "Delete database",
     description = "Deletes a database by name.",
-    tag = "Databases",
+    tag = "Database",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -992,7 +992,7 @@ struct ListCollectionsParams {
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections",
     summary = "List collections",
     description = "Lists all collections in a database.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1061,7 +1061,7 @@ async fn list_collections(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections_count",
     summary = "Get number of collections",
     description = "Returns the total number of collections in a database.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1112,7 +1112,7 @@ async fn count_collections(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections",
     summary = "Create collection",
     description = "Creates a new collection in a database.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1210,7 +1210,7 @@ async fn create_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     summary = "Get collection",
     description = "Returns a collection by ID or name.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1261,7 +1261,7 @@ async fn get_collection(
     path = "/api/v2/collections/{crn}",
     summary = "Get collection by CRN",
     description = "Returns a collection by Chroma Resource Name.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1305,7 +1305,7 @@ async fn get_collection_by_crn(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     summary = "Update collection",
     description = "Updates an existing collection's name or metadata.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1401,7 +1401,7 @@ async fn update_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
     summary = "Delete collection",
     description = "Deletes a collection in a database.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1453,7 +1453,7 @@ async fn delete_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
     summary = "Fork collection",
     description = "Creates a fork of an existing collection.",
-    tag = "Collections",
+    tag = "Collection",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1537,7 +1537,7 @@ async fn fork_collection(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
     summary = "Add records",
     description = "Adds records to a collection.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1651,7 +1651,7 @@ async fn collection_add(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
     summary = "Update records",
     description = "Updates records in a collection by ID.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1766,7 +1766,7 @@ async fn collection_update(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert",
     summary = "Upsert records",
     description = "Upserts records in a collection (create if not exists, otherwise update).",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1881,7 +1881,7 @@ async fn collection_upsert(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
     summary = "Delete records",
     description = "Deletes records in a collection. Can filter by IDs or metadata.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -1980,7 +1980,7 @@ async fn collection_delete(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
     summary = "Get number of records",
     description = "Returns the number of records in a collection.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2073,7 +2073,7 @@ async fn collection_count(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
     summary = "Get indexing status",
     description = "Returns the indexing status of a collection.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2162,7 +2162,7 @@ async fn indexing_status(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
     summary = "Get records",
     description = "Returns records from a collection by ID or metadata filter.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2303,7 +2303,7 @@ async fn collection_get(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
     summary = "Query collection",
     description = "Queries a collection using dense vector search with metadata and full-text search filtering.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2447,7 +2447,7 @@ async fn collection_query(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
     summary = "Search records",
     description = "Searches records from a collection with dense, sparse, or hybrid vector search.",
-    tag = "Records",
+    tag = "Record",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2582,7 +2582,7 @@ async fn collection_search(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
     summary = "Attach function",
     description = "Attaches a function to a collection.",
-    tag = "Functions",
+    tag = "Function",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2649,7 +2649,7 @@ async fn attach_function(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
     summary = "Get attached function",
     description = "Returns an attached function by name.",
-    tag = "Functions",
+    tag = "Function",
     security(
         ("ApiKeyAuth" = [])
     ),
@@ -2711,7 +2711,7 @@ async fn get_attached_function(
     path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach",
     summary = "Detach function",
     description = "Detaches a function from a collection.",
-    tag = "Functions",
+    tag = "Function",
     security(
         ("ApiKeyAuth" = [])
     ),
