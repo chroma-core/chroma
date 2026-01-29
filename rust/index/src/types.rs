@@ -26,7 +26,7 @@ pub struct SearchResult {
 
 /// Trait for dense vector indexes supporting CRUD and similarity search.
 pub trait VectorIndex {
-    type Error: ChromaError;
+    type Error: ChromaError + 'static;
 
     /// Add a vector to the index with the given key.
     fn add(&self, key: u64, vector: &[f32]) -> Result<(), Self::Error>;
