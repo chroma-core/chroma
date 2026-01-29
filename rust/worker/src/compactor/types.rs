@@ -1,9 +1,10 @@
-use chroma_types::{CollectionUuid, JobId};
+use chroma_types::{CollectionUuid, DatabaseName, JobId};
 use tokio::sync::oneshot;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct CompactionJob {
     pub(crate) collection_id: CollectionUuid,
+    pub(crate) database_name: DatabaseName,
 }
 
 #[derive(Clone, Debug)]

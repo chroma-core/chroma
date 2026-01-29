@@ -1175,7 +1175,7 @@ mod tests {
         sysdb
             .create_collection(
                 tenant.clone(),
-                database,
+                database.clone(),
                 root_collection_id,
                 "Root Collection".to_string(),
                 vec![segment],
@@ -1192,6 +1192,7 @@ mod tests {
         sysdb
             .flush_compaction(
                 tenant.clone(),
+                database.clone(),
                 root_collection_id,
                 0,
                 0,
@@ -1210,6 +1211,7 @@ mod tests {
         sysdb
             .flush_compaction(
                 tenant.clone(),
+                database.clone(),
                 root_collection_id,
                 0,
                 1,
@@ -1231,6 +1233,7 @@ mod tests {
         sysdb
             .flush_compaction(
                 tenant,
+                database.clone(),
                 root_collection_id,
                 0,
                 2,

@@ -135,6 +135,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         let result = sysdb
             .flush_compaction(
                 input.tenant.clone(),
+                input.database_name.clone(),
                 input.collection_id,
                 input.log_position,
                 input.collection_version,
