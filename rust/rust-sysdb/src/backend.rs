@@ -67,10 +67,10 @@ use crate::spanner::SpannerBackend;
 use crate::types::SysDbError;
 use crate::types::{
     CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
+    FlushCompactionResponse, GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse,
+    GetCollectionsRequest, GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse,
+    GetTenantsRequest, GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -336,6 +336,16 @@ impl Backend {
     ) -> Result<UpdateCollectionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.update_collection(req).await,
+        }
+    }
+
+    /// Flush collection compaction results to the database.
+    pub async fn flush_collection_compaction(
+        &self,
+        req: FlushCompactionRequest,
+    ) -> Result<FlushCompactionResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.flush_collection_compaction(req).await,
         }
     }
 

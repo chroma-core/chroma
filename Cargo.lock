@@ -1948,6 +1948,7 @@ name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "chroma-blockstore",
  "chroma-cache",
  "chroma-config",
@@ -1958,6 +1959,7 @@ dependencies = [
  "chroma-sqlite",
  "chroma-storage",
  "chroma-types",
+ "chrono",
  "futures",
  "opentelemetry",
  "proptest",
@@ -7213,6 +7215,7 @@ dependencies = [
  "async-trait",
  "chroma-config",
  "chroma-error",
+ "chroma-segment",
  "chroma-storage",
  "chroma-tracing",
  "chroma-types",
@@ -7226,6 +7229,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",

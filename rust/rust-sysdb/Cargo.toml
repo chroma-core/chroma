@@ -32,3 +32,5 @@ serde_json = { workspace = true }
 chrono = { workspace = true }
 prost-types = { workspace = true }
 futures = { workspace = true }
+chroma-segment = { workspace = true }
+tempfile = "3.8"
