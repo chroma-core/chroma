@@ -22,7 +22,7 @@ Forking lets you create a new collection from an existing one instantly, using c
 ## Try it
 
 - **Cloud UI**: Open any collection and click the "Fork" button.
-- **SDKs**: Use the fork API from Python or JavaScript.
+- **SDKs**: Use the fork API from Python, JavaScript, or Go.
 
 ### Examples
 
@@ -58,6 +58,36 @@ await forkedCollection.add({
   ids: ["doc-pr-1"],
   documents: ["new content"], // billed as incremental storage
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+import (
+    "context"
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+ctx := context.Background()
+
+sourceCollection, err := client.GetCollection(ctx, "main-repo-index")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Create a forked collection. Name must be unique within the database.
+forkedCollection, err := sourceCollection.Fork(ctx, "main-repo-index-pr-1234")
+if err != nil {
+    log.Fatal(err)
+}
+
+// Forked collection is immediately queryable; changes are isolated
+_, err = forkedCollection.Add(ctx,
+    chroma.WithIDs("doc-pr-1"),
+    chroma.WithDocuments("new content"), // billed as incremental storage
+)
 ```
 
 {% /Tab %}

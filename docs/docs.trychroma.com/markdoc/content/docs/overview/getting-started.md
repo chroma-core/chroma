@@ -238,6 +238,14 @@ bun add chromadb @chroma-core/default-embed
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```terminal
+go get github.com/chroma-core/chroma/clients/go
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 {% /Step %}
@@ -305,6 +313,54 @@ const client = new ChromaClient();
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+Run the Chroma backend:
+
+{% TabbedUseCaseCodeBlock language="Terminal" %}
+
+{% Tab label="CLI" %}
+
+```terminal
+chroma run --path ./getting-started
+```
+
+{% /Tab %}
+
+{% Tab label="Docker" %}
+
+```terminal
+docker pull chromadb/chroma
+docker run -p 8000:8000 chromadb/chroma
+```
+
+{% /Tab %}
+
+{% /TabbedUseCaseCodeBlock %}
+
+Then create a client which connects to it:
+
+```go
+package main
+
+import (
+    "context"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+func main() {
+    ctx := context.Background()
+    client, err := chroma.NewHTTPClient(ctx, chroma.WithHost("localhost"), chroma.WithPort(8000))
+    if err != nil {
+        panic(err)
+    }
+    defer client.Close()
+}
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 {% /Step %}
@@ -329,6 +385,17 @@ collection = chroma_client.create_collection(name="my_collection")
 const collection = await client.createCollection({
   name: "my_collection",
 });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+collection, err := client.CreateCollection(ctx, "my_collection")
+if err != nil {
+    panic(err)
+}
 ```
 
 {% /Tab %}
@@ -371,6 +438,23 @@ await collection.add({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+err = collection.Add(ctx,
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithTexts(
+        "This is a document about pineapple",
+        "This is a document about oranges",
+    ),
+)
+if err != nil {
+    panic(err)
+}
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% /Step %}
@@ -402,6 +486,21 @@ const results = await collection.query({
 });
 
 console.log(results);
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("This is a query document about hawaii"), // Chroma will embed this for you
+    chroma.WithNResults(2), // how many results to return
+)
+if err != nil {
+    panic(err)
+}
+fmt.Printf("%+v\n", results)
 ```
 
 {% /Tab %}
@@ -456,6 +555,22 @@ From the above - you can see that our query about `hawaii` is semantically most 
     metadatas: [[null, null]],
     embeddings: null
 }
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+// Access results using the QueryResult interface methods
+ids := results.GetIDGroups()         // [][]DocumentID
+docs := results.GetDocumentsGroups() // [][]string
+distances := results.GetDistancesGroups() // [][]float32
+
+// First query group results:
+// ids[0] = ["id1", "id2"]
+// docs[0] = ["This is a document about pineapple", "This is a document about oranges"]
+// distances[0] = [1.0404009819030762, 1.243080496788025]
 ```
 
 {% /Tab %}
@@ -528,6 +643,58 @@ console.log(results);
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+)
+
+func main() {
+    ctx := context.Background()
+    client, err := chroma.NewHTTPClient(ctx, chroma.WithHost("localhost"), chroma.WithPort(8000))
+    if err != nil {
+        panic(err)
+    }
+    defer client.Close()
+
+    // switch `CreateCollection` to `GetOrCreateCollection` to avoid creating a new collection every time
+    collection, err := client.GetOrCreateCollection(ctx, "my_collection")
+    if err != nil {
+        panic(err)
+    }
+
+    // switch `Add` to `Upsert` to avoid adding the same documents every time
+    err = collection.Upsert(ctx,
+        chroma.WithIDs("id1", "id2"),
+        chroma.WithTexts(
+            "This is a document about pineapple",
+            "This is a document about oranges",
+        ),
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    results, err := collection.Query(ctx,
+        chroma.WithQueryTexts("This is a query document about florida"), // Chroma will embed this for you
+        chroma.WithNResults(2), // how many results to return
+    )
+    if err != nil {
+        panic(err)
+    }
+
+    fmt.Printf("%+v\n", results)
+}
+```
+
+{% /Tab %}
+
 {% /TabbedCodeBlock %}
 
 {% /Step %}
@@ -551,6 +718,15 @@ In this guide we used Chroma's [ephemeral client](../run-chroma/ephemeral-client
 {% Tab label="typescript" %}
 
 - We offer [first class support](/docs/embeddings/embedding-functions) for various embedding providers via our embedding function interface. Each embedding function ships in its own npm package.
+- Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+- Check out the [Go client reference](/reference/clients/go) for the full API documentation
 - Learn how to [Deploy Chroma](../../guides/deploy/client-server-mode) to a server
 - Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
 - Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates

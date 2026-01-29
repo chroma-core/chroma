@@ -48,6 +48,34 @@ const collectionGet = await client.getCollection({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/voyage"
+)
+
+// Create VoyageAI embedding function
+ef, err := voyage.NewVoyageEmbeddingFunction(
+    os.Getenv("VOYAGE_API_KEY"),
+    voyage.WithModel("voyage-3-large"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 ### Multilingual model example
@@ -93,6 +121,33 @@ multilingual_texts = [
 ];
 
 const embeddings = embedder.generate(multilingual_texts);
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+import "github.com/chroma-core/chroma/clients/go/pkg/embeddings/voyage"
+
+ef, err := voyage.NewVoyageEmbeddingFunction(
+    os.Getenv("VOYAGE_API_KEY"),
+    voyage.WithModel("voyage-3-large"),
+)
+
+multilingualTexts := []string{
+    "Hello from VoyageAI!",
+    "مرحباً من VoyageAI!!",
+    "Hallo von VoyageAI!",
+    "Bonjour de VoyageAI!",
+    "¡Hola desde VoyageAI!",
+    "Olá do VoyageAI!",
+    "Ciao da VoyageAI!",
+    "您好，来自 VoyageAI！",
+    "कोहिअर से VoyageAI!",
+}
+
+embeddings, err := ef.EmbedDocuments(ctx, multilingualTexts)
 ```
 
 {% /Tab %}

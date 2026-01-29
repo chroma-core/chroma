@@ -9,19 +9,19 @@ Embeddings are the way to represent any kind of data, making them the perfect fi
 
 Chroma provides lightweight wrappers around popular embedding providers, making it easy to use them in your apps. You can set an embedding function when you [create](../collections/manage-collections) a Chroma collection, to be automatically used when adding and querying data, or you can call them directly yourself.
 
-|                                                                                          | Python | Typescript |
-| ---------------------------------------------------------------------------------------- | ------ | ---------- |
-| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)       | ✓      | ✓          |
-| [Cohere](../../integrations/embedding-models/cohere)                                     | ✓      | ✓          |
-| [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          |
-| [Hugging Face](../../integrations/embedding-models/hugging-face)                         | ✓      | -          |
-| [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
-| [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
-| [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
-| [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          |
-| [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          |
-| [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
-| [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
+|                                                                                          | Python | Typescript | Go |
+| ---------------------------------------------------------------------------------------- | ------ | ---------- | -- |
+| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)       | ✓      | ✓          | ✓  |
+| [Cohere](../../integrations/embedding-models/cohere)                                     | ✓      | ✓          | ✓  |
+| [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          | ✓  |
+| [Hugging Face](../../integrations/embedding-models/hugging-face)                         | ✓      | -          | -  |
+| [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          | ✓  |
+| [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          | -  |
+| [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          | ✓  |
+| [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          | ✓  |
+| [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          | ✓  |
+| [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          | ✓  |
+| [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          | ✓  |
 
 
 For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships will all embedding functions included.
@@ -105,6 +105,29 @@ Create a collection without providing an embedding function. It will automatical
 
 ```typescript
 const collection = await client.createCollection({ name: "my-collection" });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+Collections created without an embedding function will use the server's default. For custom embedding functions:
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+// Use OpenAI embeddings
+ef, _ := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
 ```
 
 {% /Tab %}
@@ -200,6 +223,33 @@ await collection.add({
 
 {% /Tab %}
 
+{% Tab label="go" %}
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+// Create OpenAI embedding function
+ef, _ := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+
+// Chroma will use OpenAI to embed your documents
+err = collection.Add(ctx,
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithTexts("doc1", "doc2"),
+)
+```
+
+{% /Tab %}
+
 {% /Tabs %}
 
 You can also use embedding functions directly which can be handy for debugging.
@@ -230,6 +280,26 @@ const embeddings = await defaultEF.generate(["foo"]);
 console.log(embeddings); // [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
 
 await collection.query({ queryEmbeddings: embeddings });
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+import "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+
+ef, _ := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+// Use embedding function directly
+embeddings, _ := ef.EmbedDocuments(ctx, []string{"foo"})
+fmt.Println(embeddings) // [[0.05035809800028801, 0.0626462921500206, -0.061827320605516434...]]
+
+// Use in query
+results, _ := collection.Query(ctx, chroma.WithQueryEmbeddings(embeddings[0]))
 ```
 
 {% /Tab %}
@@ -272,6 +342,46 @@ class MyEmbeddingFunction implements EmbeddingFunction {
     return embeddings;
   }
 }
+```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+import (
+    "context"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings"
+)
+
+// MyEmbeddingFunction implements the EmbeddingFunction interface
+type MyEmbeddingFunction struct {
+    apiKey string
+}
+
+func NewMyEmbeddingFunction(apiKey string) *MyEmbeddingFunction {
+    return &MyEmbeddingFunction{apiKey: apiKey}
+}
+
+func (ef *MyEmbeddingFunction) EmbedDocuments(ctx context.Context, docs []string) (embeddings.Embeddings, error) {
+    // Implement your embedding logic here
+    result := make(embeddings.Embeddings, len(docs))
+    for i := range docs {
+        result[i] = embeddings.NewFloat32Embedding([]float32{0.1, 0.2, 0.3}) // placeholder
+    }
+    return result, nil
+}
+
+func (ef *MyEmbeddingFunction) EmbedQuery(ctx context.Context, query string) (embeddings.Embedding, error) {
+    results, err := ef.EmbedDocuments(ctx, []string{query})
+    if err != nil {
+        return nil, err
+    }
+    return results[0], nil
+}
+
+// Ensure it implements the interface
+var _ embeddings.EmbeddingFunction = (*MyEmbeddingFunction)(nil)
 ```
 
 {% /Tab %}
