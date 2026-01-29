@@ -24,7 +24,7 @@ func Test_gemini_client(t *testing.T) {
 	client, err := NewGeminiClient(WithEnvAPIKey())
 	require.NoError(t, err)
 	defer func(client *Client) {
-		err := client.close()
+		err := client.Close()
 		if err != nil {
 
 		}
@@ -51,7 +51,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 	t.Run("Test EmbedDocuments with env-based api key", func(t *testing.T) {
 		embeddingFunction, err := NewGeminiEmbeddingFunction(WithEnvAPIKey())
 		defer func(embeddingFunction *GeminiEmbeddingFunction) {
-			err := embeddingFunction.close()
+			err := embeddingFunction.Close()
 			if err != nil {
 
 			}
@@ -68,7 +68,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 	t.Run("Test EmbedDocuments with provided API key", func(t *testing.T) {
 		embeddingFunction, err := NewGeminiEmbeddingFunction(WithAPIKey(apiKey))
 		defer func(embeddingFunction *GeminiEmbeddingFunction) {
-			err := embeddingFunction.close()
+			err := embeddingFunction.Close()
 			if err != nil {
 
 			}
@@ -86,7 +86,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 	t.Run("Test EmbedDocuments with provided model", func(t *testing.T) {
 		embeddingFunction, err := NewGeminiEmbeddingFunction(WithEnvAPIKey(), WithDefaultModel(DefaultEmbeddingModel))
 		defer func(embeddingFunction *GeminiEmbeddingFunction) {
-			err := embeddingFunction.close()
+			err := embeddingFunction.Close()
 			if err != nil {
 
 			}
@@ -104,7 +104,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 	t.Run("Test EmbedQuery", func(t *testing.T) {
 		embeddingFunction, err := NewGeminiEmbeddingFunction(WithEnvAPIKey(), WithDefaultModel(DefaultEmbeddingModel))
 		defer func(embeddingFunction *GeminiEmbeddingFunction) {
-			err := embeddingFunction.close()
+			err := embeddingFunction.Close()
 			if err != nil {
 
 			}
@@ -119,7 +119,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 	t.Run("Test wrong model", func(t *testing.T) {
 		embeddingFunction, err := NewGeminiEmbeddingFunction(WithEnvAPIKey(), WithDefaultModel("model-does-not-exist"))
 		defer func(embeddingFunction *GeminiEmbeddingFunction) {
-			err := embeddingFunction.close()
+			err := embeddingFunction.Close()
 			if err != nil {
 
 			}
@@ -133,7 +133,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 	t.Run("Test wrong API key", func(t *testing.T) {
 		embeddingFunction, err := NewGeminiEmbeddingFunction(WithAPIKey("wrong-api-key"))
 		defer func(embeddingFunction *GeminiEmbeddingFunction) {
-			err := embeddingFunction.close()
+			err := embeddingFunction.Close()
 			if err != nil {
 
 			}
