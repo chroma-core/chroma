@@ -1,23 +1,34 @@
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
     GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError, ListDatabasesResponse,
-    Segment, SegmentFlushInfo, SegmentScope, SegmentType, Tenant, UpdateTenantError,
-    UpdateTenantResponse,
+    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
+    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+    Tenant, UpdateTenantError, UpdateTenantResponse,
 };
-use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
+use thiserror::Error;
 
 use super::sysdb::json_to_prost_value;
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
 use crate::sysdb::VERSION_FILE_S3_PREFIX;
-use crate::GetCollectionsOptions;
+use crate::{DatabaseOrTopology, GetCollectionsOptions};
 use chroma_storage::PutOptions;
+
+#[derive(Error, Debug)]
+#[error("MCMR not supported: {0}")]
+struct McmrNotSupportedError(String);
+
+impl ChromaError for McmrNotSupportedError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::CollectionInfoImmutable;
 use chroma_types::chroma_proto::CollectionSegmentInfo;
@@ -168,10 +179,20 @@ impl TestSysDb {
             include_soft_deleted: _,
             name,
             tenant,
-            database,
+            database_or_topology,
             limit: _,
             offset: _,
         } = options;
+
+        let database_string = match database_or_topology {
+            Some(DatabaseOrTopology::Database(db)) => Some(db.into_string()),
+            Some(DatabaseOrTopology::Topology(topology)) => {
+                return Err(GetCollectionsError::Internal(Box::new(
+                    McmrNotSupportedError(topology.to_string()),
+                )));
+            }
+            None => None,
+        };
 
         let inner = self.inner.lock();
         let mut collections = Vec::new();
@@ -181,7 +202,7 @@ impl TestSysDb {
                 collection_id,
                 name.clone(),
                 tenant.clone(),
-                database.clone().map(|d| d.into_string()),
+                database_string.clone(),
             ) {
                 continue;
             }

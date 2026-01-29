@@ -11,12 +11,21 @@ use chroma_types::{
     chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseName,
     DatabaseUuid, InternalCollectionConfiguration, Metadata, MetadataValue,
     MetadataValueConversionError, Schema, Segment, SegmentConversionError, SegmentScope,
-    SegmentType, SegmentUuid, Tenant, UpdateCollectionConfiguration,
+    SegmentType, SegmentUuid, Tenant, TopologyName, UpdateCollectionConfiguration,
 };
 use prost_types::Timestamp;
 use uuid::Uuid;
 
 use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
+
+// DatabaseOrTopology enum for rust-sysdb
+// Note: This is intentionally duplicated from chroma-sysdb since these are separate crates
+// TODO: Consider moving shared types to a common location like chroma-types in the future
+#[derive(Debug, Clone)]
+pub enum DatabaseOrTopology {
+    Database(DatabaseName),
+    Topology(TopologyName),
+}
 
 use std::collections::HashMap;
 use std::num::TryFromIntError;
@@ -278,6 +287,10 @@ pub struct CollectionFilter {
     pub limit: Option<u32>,
     /// Number of results to skip
     pub offset: Option<u32>,
+    /// Filter by topology name
+    /// Technically the spanner layer should not be aware of this field
+    /// but it's needed here so that assign() can route properly.
+    pub topology_name: Option<String>,
 }
 
 impl CollectionFilter {
@@ -302,6 +315,12 @@ impl CollectionFilter {
     /// Filter by database name
     pub fn database_name(mut self, name: DatabaseName) -> Self {
         self.database_name = Some(name);
+        self
+    }
+
+    /// Filter by topology name
+    pub fn topology_name(mut self, name: impl Into<String>) -> Self {
+        self.topology_name = Some(name.into());
         self
     }
 
@@ -364,6 +383,27 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
         if !req.tenant.is_empty() {
             filter = filter.tenant_id(req.tenant);
         }
+
+        // Handle database and topology_name fields - topology_name takes priority
+        let topology_name = if !req.topology_name.as_deref().unwrap_or("").is_empty() {
+            // Explicit topology_name takes priority
+            req.topology_name
+        } else if !req.database.is_empty() {
+            // Derive topology from database name if no explicit topology
+            DatabaseName::new(&req.database)
+                .ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "invalid database name: '{}'",
+                        req.database
+                    ))
+                })?
+                .topology()
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        // Handle database field
         if !req.database.is_empty() {
             let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
                 SysDbError::InvalidArgument(format!(
@@ -372,6 +412,11 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
                 ))
             })?;
             filter = filter.database_name(database_name);
+        }
+
+        // Add topology_name to filter if present
+        if let Some(topology_name) = topology_name {
+            filter = filter.topology_name(topology_name);
         }
 
         // Handle limit and offset
@@ -587,6 +632,12 @@ impl Assignable for GetCollectionsRequest {
     type Output = Backend;
 
     fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology name if available (explicit topology takes priority)
+        if let Some(ref topology_name) = self.filter.topology_name {
+            if let Ok(topology) = TopologyName::new(topology_name) {
+                return factory.backend_from_topo_name(&topology);
+            }
+        }
         // Route by topology prefix in database name if available
         if let Some(ref db_name) = self.filter.database_name {
             return factory.backend_from_database_name(db_name);

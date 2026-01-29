@@ -1,4 +1,10 @@
-use chroma_types::{CollectionUuid, DatabaseName};
+use chroma_types::{CollectionUuid, DatabaseName, TopologyName};
+
+#[derive(Debug, Clone)]
+pub enum DatabaseOrTopology {
+    Database(DatabaseName),
+    Topology(TopologyName),
+}
 
 #[derive(Default, Debug)]
 pub struct GetCollectionsOptions {
@@ -7,7 +13,7 @@ pub struct GetCollectionsOptions {
     pub include_soft_deleted: bool,
     pub name: Option<String>,
     pub tenant: Option<String>,
-    pub database: Option<DatabaseName>,
+    pub database_or_topology: Option<DatabaseOrTopology>,
     pub limit: Option<u32>,
     pub offset: u32,
 }
