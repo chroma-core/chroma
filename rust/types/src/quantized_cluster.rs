@@ -46,3 +46,22 @@ impl<'data> From<&'data QuantizedClusterOwned> for QuantizedCluster<'data> {
         }
     }
 }
+
+impl QuantizedClusterOwned {
+    /// Create a new empty cluster with the given centroid.
+    pub fn new(center: Arc<[f32]>) -> Self {
+        Self {
+            center,
+            codes: Vec::new(),
+            ids: Vec::new(),
+            versions: Vec::new(),
+        }
+    }
+
+    /// Append a point to the cluster.
+    pub fn append(&mut self, id: u64, version: u64, code: &[u8]) {
+        self.ids.push(id);
+        self.versions.push(version);
+        self.codes.extend_from_slice(code);
+    }
+}
