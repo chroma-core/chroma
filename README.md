@@ -2,8 +2,8 @@
 ![Chroma](./docs/docs.trychroma.com/public/chroma-wordmark-white.png#gh-dark-mode-only)
 
 <p align="center">
-    <b>Chroma - the open-source embedding database</b>. <br />
-    The fastest way to build Python or JavaScript LLM apps with memory!
+    <b>Chroma - the open-source search engine for AI</b>. <br />
+    The fastest way to build Python or JavaScript LLM apps that search over your data!
 </p>
 
 <p align="center">
@@ -29,7 +29,7 @@ pip install chromadb # python client
 
 ## Chroma Cloud
 
-Our hosted service, Chroma Cloud, powers serverless vector and full-text search. It's extremely fast, cost-effective, scalable and painless. Create a DB and try it out in under 30 seconds with $5 of free credits.
+Our hosted service, Chroma Cloud, powers serverless vector, hybrid, and full-text search. It's extremely fast, cost-effective, scalable and painless. Create a DB and try it out in under 30 seconds with $5 of free credits.
 
 [Get started with Chroma Cloud](https://trychroma.com/signup)
 
@@ -87,7 +87,7 @@ What are embeddings?
 - __Technical__: An embedding is the latent-space position of a document at a layer of a deep neural network. For models trained specifically to embed data, this is the last layer.
 - __A small example__: If you search your photos for "famous bridge in San Francisco". By embedding this query and comparing it to the embeddings of your photos and their metadata - it should return photos of the Golden Gate Bridge.
 
-Embeddings databases (also known as **vector databases**) store embeddings and allow you to search by nearest neighbors rather than by substrings like a traditional database. By default, Chroma uses [Sentence Transformers](https://docs.trychroma.com/guides/embeddings#default:-all-minilm-l6-v2) to embed for you but you can also use OpenAI embeddings, Cohere (multilingual) embeddings, or your own.
+Chroma allows you to store these vectors or embeddings and search by nearest neighbors rather than by substrings like a traditional database. By default, Chroma uses [Sentence Transformers](https://docs.trychroma.com/guides/embeddings#default:-all-minilm-l6-v2) to embed for you but you can also use OpenAI embeddings, Cohere (multilingual) embeddings, or your own.
 
 ## Get involved
 

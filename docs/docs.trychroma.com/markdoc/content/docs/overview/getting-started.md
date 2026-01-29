@@ -5,7 +5,7 @@ name: Getting Started
 
 # Getting Started
 
-Chroma is an AI-native open-source vector database. It comes with everything you need to get started built-in, and runs on your machine.
+Chroma is an open-source search engine for AI. It comes with everything you need to get started built-in, and runs on your machine.
 
 {% Tabs %}
 
@@ -38,32 +38,32 @@ Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI age
 {% Tab label="Chroma Cloud" %}
 
 ```prompt
-In this directory create a new Python project with Chroma set up. 
+In this directory create a new Python project with Chroma set up.
 Use a virtual environment.
 
-Write a small example that adds some data to a collection and queries it. 
-Do not delete the data from the collection when it's complete. 
-Run the script when you are done setting up the environment and writing the 
-script. The output should show what data was ingested, what was the query, 
-and the results. 
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
 Your own summary should include this output so the user can see it.
 
 First, install `chromadb`.
 
-The project should be set up with Chroma Cloud. When you install `chromadb`, 
-you get access to the Chroma CLI. You can run `chroma login` to authenticate. 
-This will open a browser for authentication and save a connection profile 
-locally. 
+The project should be set up with Chroma Cloud. When you install `chromadb`,
+you get access to the Chroma CLI. You can run `chroma login` to authenticate.
+This will open a browser for authentication and save a connection profile
+locally.
 
-You can also use `chroma profile show` to see if the user already has an 
+You can also use `chroma profile show` to see if the user already has an
 active profile saved locally. If so, you can skip the login step.
 
-Then create a DB using the CLI with `chroma db create chroma-getting-started`. 
-This will create a DB with this name. 
+Then create a DB using the CLI with `chroma db create chroma-getting-started`.
+This will create a DB with this name.
 
 Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
-This will create a .env file in the current directory with the connection 
-variables for this DB and account, so the CloudClient can be instantiated 
+This will create a .env file in the current directory with the connection
+variables for this DB and account, so the CloudClient can be instantiated
 with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
 
 ```
@@ -99,31 +99,31 @@ Use Chroma's in-memory client: `chromadb.Client()`
 {% Tab label="Chroma Cloud" %}
 
 ```prompt
-In this directory create a new Typescript project with Chroma set up. 
+In this directory create a new Typescript project with Chroma set up.
 
-Write a small example that adds some data to a collection and queries it. 
-Do not delete the data from the collection when it's complete. 
-Run the script when you are done setting up the environment and writing the 
-script. The output should show what data was ingested, what was the query, 
-and the results. 
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
 Your own summary should include this output so the user can see it.
 
 First, install `chromadb`.
 
-The project should be set up with Chroma Cloud. When you install `chromadb`, 
-you get access to the Chroma CLI. You can run `chroma login` to authenticate. 
-This will open a browser for authentication and save a connection profile 
-locally. 
+The project should be set up with Chroma Cloud. When you install `chromadb`,
+you get access to the Chroma CLI. You can run `chroma login` to authenticate.
+This will open a browser for authentication and save a connection profile
+locally.
 
-You can also use `chroma profile show` to see if the user already has an 
+You can also use `chroma profile show` to see if the user already has an
 active profile saved locally. If so, you can skip the login step.
 
-Then create a DB using the CLI with `chroma db create chroma-getting-started`. 
-This will create a DB with this name. 
+Then create a DB using the CLI with `chroma db create chroma-getting-started`.
+This will create a DB with this name.
 
 Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
-This will create a .env file in the current directory with the connection 
-variables for this DB and account, so the CloudClient can be instantiated 
+This will create a .env file in the current directory with the connection
+variables for this DB and account, so the CloudClient can be instantiated
 with: new CloudClient().
 
 ```
@@ -142,11 +142,11 @@ script. The output should show what data was ingested, what was the query,
 and the results.
 Your own summary should include this output so the user can see it.
 
-You will have to run a local Chroma server to make this work. When you install 
-`chromadb` you get access to the Chroma CLI, which can start a local server 
+You will have to run a local Chroma server to make this work. When you install
+`chromadb` you get access to the Chroma CLI, which can start a local server
 for you with `chroma run`.
 
-Make sure to instruct the user on how to start a local Chroma server in your 
+Make sure to instruct the user on how to start a local Chroma server in your
 summary.
 ```
 
