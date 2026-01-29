@@ -35,7 +35,6 @@ use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
