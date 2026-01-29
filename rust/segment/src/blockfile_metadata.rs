@@ -641,15 +641,17 @@ impl<'me> MetadataSegmentWriter<'me> {
         Ok(self.set_metadata(key, new_value, offset_id).await?)
     }
 
-    pub async fn apply_materialized_log_chunk(
+    async fn apply_fts_logs(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
-        schema: Option<Schema>,
-    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
-        let mut count = 0u64;
-        let mut schema = schema;
-        let mut schema_modified = false;
+        schema: &Option<Schema>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        // Skip FTS indexing if disabled in schema (default to enabled for backwards compatibility)
+        let fts_enabled = schema.as_ref().is_none_or(|s| s.is_fts_enabled());
+        if !fts_enabled {
+            return Ok(());
+        }
 
         let mut full_text_writer_batch = vec![];
         for record in materialized {
@@ -698,6 +700,22 @@ impl<'me> MetadataSegmentWriter<'me> {
             .unwrap()
             .handle_batch(full_text_writer_batch)
             .map_err(ApplyMaterializedLogError::FullTextIndex)?;
+
+        Ok(())
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &MaterializeLogsResult,
+        schema: Option<Schema>,
+    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
+        let mut count = 0u64;
+        let mut schema = schema;
+        let mut schema_modified = false;
+
+        self.apply_fts_logs(record_segment_reader, materialized, &schema)
+            .await?;
 
         for record in materialized {
             count += 1;
