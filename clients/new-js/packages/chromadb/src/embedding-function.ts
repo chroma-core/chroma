@@ -1,6 +1,5 @@
 import { EmbeddingFunctionConfiguration, SparseVector } from "./api";
 import { ChromaValueError } from "./errors";
-import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 import { ChromaClient } from "./chroma-client";
 
 /**
