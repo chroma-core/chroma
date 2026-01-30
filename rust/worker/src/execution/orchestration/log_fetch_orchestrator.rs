@@ -711,10 +711,10 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                 );
             }
             None => {
-                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
                 let collection_info = match self.context.get_collection_info() {
                     Ok(info) => info,
                     Err(err) => {
+                        tracing::warn!(error =? err, "No logs were pulled from the log service, and get_collection_info returned an error.");
                         self.terminate_with_result(Err(err.into()), ctx).await;
                         return;
                     }
@@ -724,6 +724,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                 ) {
                     Some(name) => name,
                     None => {
+                        tracing::warn!("No logs were pulled from the log service, and the database name returned was invalid.");
                         self.terminate_with_result(
                             Err(LogFetchOrchestratorError::InvalidDatabaseName),
                             ctx,
@@ -732,6 +733,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                         return;
                     }
                 };
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behind the sysdb.  Repairing.");
                 self.terminate_with_result(
                     Ok(RequireCompactionOffsetRepair::new(
                         collection_info.collection_id.into(),
