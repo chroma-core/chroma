@@ -32,12 +32,14 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
+          predicate-quantifier: 'every'
           filters: |
             # documentation changes
             docs:
               - 'docs/**'
             # Outside docs
             outside-docs:
+              - '**'
               - '!docs/**'
               - '!**/*.md'
             # Helm chart changes
