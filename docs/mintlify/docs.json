@@ -219,6 +219,27 @@
         "tab": "API Reference",
         "icon": "brackets-curly",
         "openapi": "openapi.json"
+      },
+      {
+        "tab": "Client Reference",
+        "hidden": true,
+        "pages": [
+          "reference/chroma-reference",
+          {
+            "group": "Python",
+            "pages": [
+              "reference/python/client",
+              "reference/python/collection"
+            ]
+          },
+          {
+            "group": "Typescript",
+            "pages": [
+              "reference/js/client",
+              "reference/js/collection"
+            ]
+          }
+        ]
       }
     ],
     "global": {
