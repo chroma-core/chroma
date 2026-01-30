@@ -20,7 +20,7 @@ impl IndexConfig {
 /// Result of a vector search operation.
 #[derive(Clone, Debug, Default)]
 pub struct SearchResult {
-    pub keys: Vec<u64>,
+    pub keys: Vec<u32>,
     pub distances: Vec<f32>,
 }
 
@@ -29,14 +29,14 @@ pub trait VectorIndex {
     type Error: ChromaError + 'static;
 
     /// Add a vector to the index with the given key.
-    fn add(&self, key: u64, vector: &[f32]) -> Result<(), Self::Error>;
+    fn add(&self, key: u32, vector: &[f32]) -> Result<(), Self::Error>;
 
     /// Returns the current capacity of the index.
     fn capacity(&self) -> Result<usize, Self::Error>;
 
     /// Retrieve the vector for a given key.
     /// Returns `None` if the key doesn't exist.
-    fn get(&self, key: u64) -> Result<Option<Vec<f32>>, Self::Error>;
+    fn get(&self, key: u32) -> Result<Option<Vec<f32>>, Self::Error>;
 
     /// Returns true if the index contains no vectors.
     fn is_empty(&self) -> Result<bool, Self::Error> {
@@ -47,7 +47,7 @@ pub trait VectorIndex {
     fn len(&self) -> Result<usize, Self::Error>;
 
     /// Remove a vector from the index by key.
-    fn remove(&self, key: u64) -> Result<(), Self::Error>;
+    fn remove(&self, key: u32) -> Result<(), Self::Error>;
 
     /// Reserve capacity for at least `capacity` vectors.
     fn reserve(&self, capacity: usize) -> Result<(), Self::Error>;

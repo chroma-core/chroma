@@ -1,4 +1,4 @@
-use std::{mem::size_of_val, sync::Arc};
+use std::mem::size_of_val;
 
 #[derive(Clone, Debug)]
 pub struct QuantizedCluster<'data> {
@@ -19,7 +19,7 @@ impl QuantizedCluster<'_> {
 
 #[derive(Clone, Debug)]
 pub struct QuantizedClusterOwned {
-    pub center: Arc<[f32]>,
+    pub center: Vec<f32>,
     pub codes: Vec<u8>,
     pub ids: Vec<u64>,
     pub versions: Vec<u64>,
@@ -28,7 +28,7 @@ pub struct QuantizedClusterOwned {
 impl From<QuantizedCluster<'_>> for QuantizedClusterOwned {
     fn from(value: QuantizedCluster<'_>) -> Self {
         Self {
-            center: value.center.into(),
+            center: value.center.to_vec(),
             codes: value.codes.to_vec(),
             ids: value.ids.to_vec(),
             versions: value.versions.to_vec(),
@@ -44,45 +44,5 @@ impl<'data> From<&'data QuantizedClusterOwned> for QuantizedCluster<'data> {
             ids: &value.ids,
             versions: &value.versions,
         }
-    }
-}
-
-impl QuantizedClusterOwned {
-    /// Create a new empty cluster with the given centroid.
-    pub fn new(center: Arc<[f32]>) -> Self {
-        Self {
-            center,
-            codes: Vec::new(),
-            ids: Vec::new(),
-            versions: Vec::new(),
-        }
-    }
-
-    /// Append a point to the cluster.
-    pub fn append(&mut self, id: u64, version: u64, code: &[u8]) {
-        self.ids.push(id);
-        self.versions.push(version);
-        self.codes.extend_from_slice(code);
-    }
-
-    /// Remove invalid entries, compact in-place. Returns new length.
-    pub fn scrub(&mut self, is_valid: impl Fn(u64, u64) -> bool) -> usize {
-        let code_size = self.codes.len() / self.ids.len().max(1);
-        let mut write = 0;
-        for read in 0..self.ids.len() {
-            if is_valid(self.ids[read], self.versions[read]) {
-                if write != read {
-                    self.ids[write] = self.ids[read];
-                    self.versions[write] = self.versions[read];
-                    self.codes
-                        .copy_within(read * code_size..(read + 1) * code_size, write * code_size);
-                }
-                write += 1;
-            }
-        }
-        self.ids.truncate(write);
-        self.versions.truncate(write);
-        self.codes.truncate(write * code_size);
-        write
     }
 }
