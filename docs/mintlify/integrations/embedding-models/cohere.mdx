@@ -31,12 +31,12 @@ const embeddings = embedder.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
 const collection = await client.createCollection({
-  name: "name",
-  embeddingFunction: embedder,
+    name: "name",
+    embeddingFunction: embedder,
 });
 const collectionGet = await client.getCollection({
-  name: "name",
-  embeddingFunction: embedder,
+    name: "name",
+    embeddingFunction: embedder,
 });
 ```
 
@@ -52,14 +52,17 @@ You can pass in an optional `model_name` argument, which lets you choose which C
 
 ```python Python
 cohere_ef  = embedding_functions.CohereEmbeddingFunction(
-        api_key="YOUR_API_KEY",
-        model_name="multilingual-22-12")
+    api_key="YOUR_API_KEY",
+    model_name="multilingual-22-12"
+)
 
-multilingual_texts  = [ 'Hello from Cohere!', 'مرحبًا من كوهير!',
-        'Hallo von Cohere!', 'Bonjour de Cohere!',
-        '¡Hola desde Cohere!', 'Olá do Cohere!',
-        'Ciao da Cohere!', '您好，来自 Cohere！',
-        'कोहिअर से नमस्ते!'  ]
+multilingual_texts  = [
+    'Hello from Cohere!', 'مرحبًا من كوهير!',
+    'Hallo von Cohere!', 'Bonjour de Cohere!',
+    '¡Hola desde Cohere!', 'Olá do Cohere!',
+    'Ciao da Cohere!', '您好，来自 Cohere！',
+    'कोहिअर से नमस्ते!'
+]
 
 cohere_ef(input=multilingual_texts)
 
@@ -71,15 +74,15 @@ import { CohereEmbeddingFunction } from "chromadb";
 const embedder = new CohereEmbeddingFunction("apiKey");
 
 multilingual_texts = [
-  "Hello from Cohere!",
-  "مرحبًا من كوهير!",
-  "Hallo von Cohere!",
-  "Bonjour de Cohere!",
-  "¡Hola desde Cohere!",
-  "Olá do Cohere!",
-  "Ciao da Cohere!",
-  "您好，来自 Cohere！",
-  "कोहिअर से नमस्ते!",
+    "Hello from Cohere!",
+    "مرحبًا من كوهير!",
+    "Hallo von Cohere!",
+    "Bonjour de Cohere!",
+    "¡Hola desde Cohere!",
+    "Olá do Cohere!",
+    "Ciao da Cohere!",
+    "您好，来自 Cohere！",
+    "कोहिअर से नमस्ते!",
 ];
 
 const embeddings = embedder.generate(multilingual_texts);

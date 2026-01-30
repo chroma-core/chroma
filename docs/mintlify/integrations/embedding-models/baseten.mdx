@@ -17,9 +17,9 @@ import os
 import chromadb.utils.embedding_functions as embedding_functions
 
 baseten_ef = embedding_functions.BasetenEmbeddingFunction(
-                api_key=os.environ["BASETEN_API_KEY"],
-                api_base="https://model-xxxxxxxx.api.baseten.co/environments/production/sync/v1",
-            )
+    api_key=os.environ["BASETEN_API_KEY"],
+    api_base="https://model-xxxxxxxx.api.baseten.co/environments/production/sync/v1",
+)
 
 baseten_ef(input=["This is my first text to embed", "This is my second document"])
 ```
