@@ -55,6 +55,12 @@ impl Value for u32 {
     }
 }
 
+impl Value for u64 {
+    fn get_size(&self) -> usize {
+        8
+    }
+}
+
 impl Value for RoaringBitmap {
     fn get_size(&self) -> usize {
         self.serialized_size()

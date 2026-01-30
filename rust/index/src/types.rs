@@ -84,11 +84,8 @@ pub trait VectorIndexProvider {
     type Config;
     type Error: ChromaError;
 
-    /// Finalize the index and return its ID.
-    async fn commit(&self, index: &Self::Index) -> Result<IndexUuid, Self::Error>;
-
-    /// Persist the index to storage.
-    async fn flush(&self, index: &Self::Index) -> Result<(), Self::Error>;
+    /// Persist the index to storage and return its ID.
+    async fn flush(&self, index: &Self::Index) -> Result<IndexUuid, Self::Error>;
 
     /// Open a vector index.
     ///

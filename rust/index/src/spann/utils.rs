@@ -76,6 +76,8 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 
 /// The output from kmeans.
 /// - cluster_centers: The embeddings of the centers of the clusters.
+/// - cluster_center_vector_ids: The point index (into input.embeddings) whose embedding is the center.
+///   -1 if no points assigned to the cluster.
 /// - cluster_counts: The number of points in each cluster.
 /// - cluster_labels: The mapping of each point to the cluster it belongs to. Clusters are
 ///   identified by unsigned integers starting from 0. These ids are also indexes in the
@@ -84,6 +86,7 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 #[derive(Debug)]
 pub struct KMeansAlgorithmOutput {
     pub cluster_centers: Vec<Arc<[f32]>>,
+    pub cluster_center_vector_ids: Vec<i32>,
     pub cluster_counts: Vec<usize>,
     pub cluster_labels: HashMap<usize, i32>,
     pub num_clusters: usize,
@@ -462,6 +465,7 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
     let kmeans_assign =
         kmeansassign_finish(input, &previous_centers, /* generate_labels */ false)?;
     let mut final_centers = Vec::with_capacity(input.k);
+    let mut final_center_vector_ids = Vec::with_capacity(input.k);
     #[allow(clippy::needless_range_loop)]
     for center_ids in 0..input.k {
         if kmeans_assign.cluster_nearest_point_idx[center_ids] >= 0 {
@@ -469,9 +473,11 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
                 input.embeddings[kmeans_assign.cluster_nearest_point_idx[center_ids] as usize]
                     .clone(),
             );
+            final_center_vector_ids.push(kmeans_assign.cluster_nearest_point_idx[center_ids]);
         } else {
             // Arc::from(Vec) = takes ownership of Vec's buffer, zero data copy
             final_centers.push(Arc::from(std::mem::take(&mut previous_centers[center_ids])));
+            final_center_vector_ids.push(-1);
         }
     }
     // Finally assign points to these nearest points in the cluster.
@@ -488,6 +494,7 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
 
     Ok(KMeansAlgorithmOutput {
         cluster_centers: final_centers,
+        cluster_center_vector_ids: final_center_vector_ids,
         cluster_counts: previous_counts,
         cluster_labels: kmeans_assign.cluster_labels,
         num_clusters: total_non_zero_clusters,
