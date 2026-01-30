@@ -51,7 +51,7 @@ const sourceCollection = await client.getCollection({
 
 // Create a forked collection. Name must be unique within the database.
 const forkedCollection = await sourceCollection.fork({
-  name: "main-repo-index-pr-1234",
+  newName: "main-repo-index-pr-1234",
 });
 
 await forkedCollection.add({
