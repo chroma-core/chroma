@@ -809,6 +809,7 @@ impl Configurable<(GrpcSysDbConfig, Option<GrpcSysDbConfig>)> for GrpcSysDb {
         let mcmr_client = if let Some(mcmr_config) = &config.1 {
             let host = &mcmr_config.host;
             let port = &mcmr_config.port;
+            tracing::info!("Connecting to mcmr sysdb at {}:{}", host, port);
             let connection_string = format!("http://{}:{}", host, port);
             let endpoint = match Endpoint::from_shared(connection_string) {
                 Ok(endpoint) => endpoint,
