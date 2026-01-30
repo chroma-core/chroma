@@ -513,15 +513,14 @@ impl FragmentConsumer for FragmentReader {
     ) -> Result<Option<Fragment>, Error> {
         let mut err: Option<Error> = None;
         let mut missing_indices: Vec<usize> = Vec::new();
-        let mut success_index: Option<usize> = None;
-        let mut result: Option<Fragment> = None;
+        let mut result: Option<(Fragment, Arc<Vec<u8>>)> = None;
         // Try the preferred storage first, then fall back to others.
         let indices: Vec<usize> = std::iter::once(self.preferred)
             .chain((0..self.storages.len()).filter(|&i| i != self.preferred))
             .collect();
         for i in &indices {
             let storage = &self.storages[*i];
-            match read_fragment_uuid(
+            match read_fragment_uuid_with_bytes(
                 &storage.storage,
                 &storage.prefix,
                 path,
@@ -529,9 +528,8 @@ impl FragmentConsumer for FragmentReader {
             )
             .await
             {
-                Ok(Some(fragment)) => {
-                    result = Some(fragment);
-                    success_index = Some(*i);
+                Ok(Some((fragment, bytes))) => {
+                    result = Some((fragment, bytes));
                     break;
                 }
                 Ok(None) => {
@@ -549,39 +547,11 @@ impl FragmentConsumer for FragmentReader {
             }
         }
 
-        // If we found the fragment, trigger read repair for missing replicas
-        if let Some(ref fragment) = result {
-            if self.options.enable_read_repair && !missing_indices.is_empty() {
-                if let Some(success_idx) = success_index {
-                    let success_storage = &self.storages[success_idx];
-                    // Read the raw bytes from the successful storage for repair
-                    match crate::interfaces::s3::read_bytes(
-                        &success_storage.storage,
-                        &success_storage.prefix,
-                        path,
-                    )
-                    .await
-                    {
-                        Ok(Some(bytes)) => {
-                            self.read_repair_bytes(path, bytes, missing_indices);
-                        }
-                        Ok(None) => {
-                            tracing::warn!(
-                                "Could not read bytes for read repair from region {}",
-                                success_storage.region
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to read bytes for read repair from region {}: {:?}",
-                                success_storage.region,
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-            return Ok(Some(fragment.clone()));
+        // If we found the fragment, trigger read repair for missing replicas.
+        // Use the bytes we already fetched instead of re-reading.
+        if let Some((fragment, bytes)) = result {
+            self.read_repair_bytes(path, bytes, missing_indices);
+            return Ok(Some(fragment));
         }
 
         if let Some(err) = err {
@@ -599,44 +569,48 @@ impl FragmentConsumer for FragmentReader {
 }
 
 /// Read a fragment with a UUID-based path (for repl storage).
-async fn read_fragment_uuid(
+/// Returns the Fragment and the raw bytes (for use in read repair).
+async fn read_fragment_uuid_with_bytes(
     storage: &Storage,
     prefix: &str,
     path: &str,
     starting_log_position: Option<LogPosition>,
-) -> Result<Option<Fragment>, Error> {
+) -> Result<Option<(Fragment, Arc<Vec<u8>>)>, Error> {
     let seq_no = crate::parse_fragment_path(path)
         .ok_or_else(|| Error::MissingFragmentSequenceNumber(path.to_string()))?;
     let FragmentIdentifier::Uuid(_) = seq_no else {
         return Err(Error::internal(file!(), line!()));
     };
-    let (setsum, data, num_bytes) =
-        match crate::interfaces::s3::read_parquet(storage, prefix, path, starting_log_position)
-            .await
-        {
-            Ok((setsum, data, num_bytes, _)) => (setsum, data, num_bytes),
-            Err(Error::StorageError(storage_err)) => {
-                if matches!(&*storage_err, StorageError::NotFound { .. }) {
-                    return Ok(None);
-                }
-                return Err(Error::StorageError(storage_err));
+    // Read the raw bytes first.
+    let bytes = match crate::interfaces::s3::read_bytes(storage, prefix, path).await {
+        Ok(Some(bytes)) => bytes,
+        Ok(None) => return Ok(None),
+        Err(Error::StorageError(storage_err)) => {
+            if matches!(&*storage_err, StorageError::NotFound { .. }) {
+                return Ok(None);
             }
-            Err(e) => return Err(e),
-        };
+            return Err(Error::StorageError(storage_err));
+        }
+        Err(e) => return Err(e),
+    };
+    // Parse the parquet data.
+    let (setsum, data, num_bytes, _) =
+        crate::interfaces::s3::parse_parquet(&bytes, starting_log_position).await?;
     if data.is_empty() {
         return Err(Error::CorruptFragment(path.to_string()));
     }
     let start = LogPosition::from_offset(data.iter().map(|(p, _)| p.offset()).min().unwrap_or(0));
     let limit =
         LogPosition::from_offset(data.iter().map(|(p, _)| p.offset() + 1).max().unwrap_or(0));
-    Ok(Some(Fragment {
+    let fragment = Fragment {
         path: path.to_string(),
         seq_no,
         start,
         limit,
         num_bytes,
         setsum,
-    }))
+    };
+    Ok(Some((fragment, bytes)))
 }
 
 #[cfg(test)]
@@ -2726,7 +2700,7 @@ mod tests {
         );
 
         // Create FragmentReader with preferred=0 (storage1, which is now missing the fragment)
-        // and read repair enabled. Use a small semaphore so we can wait for exhaustion.
+        // and read repair enabled. Use 1 permit for the write task.
         let options = ReplicatedFragmentOptions {
             enable_read_repair: true,
             max_concurrent_read_repairs: 1,
@@ -2747,8 +2721,8 @@ mod tests {
         let fragment = result.unwrap();
         assert!(fragment.is_some(), "fragment should exist");
 
-        // Wait for the semaphore to be released, indicating repair task completed.
-        let _ = semaphore.acquire().await.expect("should acquire permit");
+        // Wait for the write permit to be released, indicating repair task completed.
+        let _permit = semaphore.acquire().await.expect("should acquire permit");
 
         // Verify storage1 now has the fragment from read repair.
         let repaired = storage1.get(&full_path1, GetOptions::default()).await;
@@ -2867,7 +2841,7 @@ mod tests {
             .expect("delete failed");
 
         // Create FragmentReader with preferred=0 (storage1).
-        // Use 2 permits so both repairs can proceed, and we can wait for both to complete.
+        // Use 2 permits for writes (one to each missing storage).
         let options = ReplicatedFragmentOptions {
             enable_read_repair: true,
             max_concurrent_read_repairs: 2,
@@ -2883,7 +2857,7 @@ mod tests {
         assert!(result.is_ok(), "read_fragment should succeed");
         assert!(result.unwrap().is_some(), "fragment should exist");
 
-        // Wait for both repair tasks to complete by acquiring all permits.
+        // Wait for all write permits to be released, indicating repair tasks completed.
         let _permit1 = semaphore.acquire().await.expect("should acquire permit 1");
         let _permit2 = semaphore.acquire().await.expect("should acquire permit 2");
 
