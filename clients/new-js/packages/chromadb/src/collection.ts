@@ -19,7 +19,7 @@ import {
   WhereDocument,
 } from "./types";
 import { Include, SparseVector, SearchPayload } from "./api";
-import { DefaultService as Api } from "./api";
+import { CollectionService, RecordService } from "./api";
 import {
   validateRecordSetLengthConsistency,
   validateIDs,
@@ -747,7 +747,7 @@ export class CollectionImpl implements Collection {
   }
 
   public async count(): Promise<number> {
-    const { data } = await Api.collectionCount({
+    const { data } = await RecordService.collectionCount({
       client: this.apiClient,
       path: await this.path(),
     });
@@ -778,7 +778,7 @@ export class CollectionImpl implements Collection {
 
     const preparedRecordSet = await this.prepareRecords({ recordSet });
 
-    await Api.collectionAdd({
+    await RecordService.collectionAdd({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -812,7 +812,7 @@ export class CollectionImpl implements Collection {
 
     this.validateGet(include, ids, where, whereDocument);
 
-    const { data } = await Api.collectionGet({
+    const { data } = await RecordService.collectionGet({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -875,7 +875,7 @@ export class CollectionImpl implements Collection {
       nResults,
     );
 
-    const { data } = await Api.collectionQuery({
+    const { data } = await RecordService.collectionQuery({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -923,7 +923,7 @@ export class CollectionImpl implements Collection {
       }),
     );
 
-    const { data } = await Api.collectionSearch({
+    const { data } = await RecordService.collectionSearch({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -953,12 +953,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-          collectionName: this.name,
-          currentConfiguration: this.configuration,
-          newConfiguration: configuration,
-          currentEmbeddingFunction: this.embeddingFunction,
-          client: this.chromaClient,
-        })
+        collectionName: this.name,
+        currentConfiguration: this.configuration,
+        newConfiguration: configuration,
+        currentEmbeddingFunction: this.embeddingFunction,
+        client: this.chromaClient,
+      })
       : {};
 
     if (updateEmbeddingFunction) {
@@ -973,7 +973,7 @@ export class CollectionImpl implements Collection {
       };
     }
 
-    await Api.updateCollection({
+    await CollectionService.updateCollection({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -985,7 +985,7 @@ export class CollectionImpl implements Collection {
   }
 
   public async fork({ name }: { name: string }): Promise<Collection> {
-    const { data } = await Api.forkCollection({
+    const { data } = await CollectionService.forkCollection({
       client: this.apiClient,
       path: await this.path(),
       body: { new_name: name },
@@ -1030,7 +1030,7 @@ export class CollectionImpl implements Collection {
       update: true,
     });
 
-    await Api.collectionUpdate({
+    await RecordService.collectionUpdate({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -1068,7 +1068,7 @@ export class CollectionImpl implements Collection {
       recordSet,
     });
 
-    await Api.collectionUpsert({
+    await RecordService.collectionUpsert({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -1092,7 +1092,7 @@ export class CollectionImpl implements Collection {
   }): Promise<void> {
     this.validateDelete(ids, where, whereDocument);
 
-    await Api.collectionDelete({
+    await RecordService.collectionDelete({
       client: this.apiClient,
       path: await this.path(),
       body: {
@@ -1104,7 +1104,7 @@ export class CollectionImpl implements Collection {
   }
 
   public async getIndexingStatus(): Promise<IndexingStatus> {
-    const { data } = await Api.indexingStatus({
+    const { data } = await RecordService.indexingStatus({
       client: this.apiClient,
       path: await this.path(),
     });

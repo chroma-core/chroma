@@ -7,7 +7,12 @@ import {
   deserializeMetadata,
   serializeMetadata,
 } from "./utils";
-import { DefaultService as Api, ChecklistResponse } from "./api";
+import {
+  AuthenticationService,
+  CollectionService,
+  SystemService,
+  ChecklistResponse,
+} from "./api";
 import { CollectionMetadata, UserIdentity } from "./types";
 import { Collection, CollectionImpl } from "./collection";
 import { EmbeddingFunction, getEmbeddingFunction } from "./embedding-function";
@@ -207,7 +212,7 @@ export class ChromaClient {
    * @returns Promise resolving to user identity data
    */
   public async getUserIdentity(): Promise<UserIdentity> {
-    const { data } = await Api.getUserIdentity({
+    const { data } = await AuthenticationService.getUserIdentity({
       client: this.apiClient,
     });
     return data;
@@ -218,7 +223,7 @@ export class ChromaClient {
    * @returns Promise resolving to the server's nanosecond heartbeat timestamp
    */
   public async heartbeat(): Promise<number> {
-    const { data } = await Api.heartbeat({
+    const { data } = await SystemService.heartbeat({
       client: this.apiClient,
     });
     return data["nanosecond heartbeat"];
@@ -239,7 +244,7 @@ export class ChromaClient {
   ): Promise<Collection[]> {
     const { limit = 100, offset = 0 } = args || {};
 
-    const { data } = await Api.listCollections({
+    const { data } = await CollectionService.listCollections({
       client: this.apiClient,
       path: await this._path(),
       query: { limit, offset },
@@ -282,7 +287,7 @@ export class ChromaClient {
    * @returns Promise resolving to the collection count
    */
   public async countCollections(): Promise<number> {
-    const { data } = await Api.countCollections({
+    const { data } = await CollectionService.countCollections({
       client: this.apiClient,
       path: await this._path(),
     });
@@ -320,7 +325,7 @@ export class ChromaClient {
       schema,
     });
 
-    const { data } = await Api.createCollection({
+    const { data } = await CollectionService.createCollection({
       client: this.apiClient,
       path: await this._path(),
       body: {
@@ -376,7 +381,7 @@ export class ChromaClient {
     name: string;
     embeddingFunction?: EmbeddingFunction;
   }): Promise<Collection> {
-    const { data } = await Api.getCollection({
+    const { data } = await CollectionService.getCollection({
       client: this.apiClient,
       path: { ...(await this._path()), collection_id: name },
     });
@@ -413,7 +418,7 @@ export class ChromaClient {
    * @throws Error if the collection does not exist
    */
   public async getCollectionByCrn(crn: string): Promise<Collection> {
-    const { data } = await Api.getCollectionByCrn({
+    const { data } = await CollectionService.getCollectionByCrn({
       client: this.apiClient,
       path: { crn },
     });
@@ -497,7 +502,7 @@ export class ChromaClient {
       schema,
     });
 
-    const { data } = await Api.createCollection({
+    const { data } = await CollectionService.createCollection({
       client: this.apiClient,
       path: await this._path(),
       body: {
@@ -544,7 +549,7 @@ export class ChromaClient {
    * @param options.name - The name of the collection to delete
    */
   public async deleteCollection({ name }: { name: string }): Promise<void> {
-    await Api.deleteCollection({
+    await CollectionService.deleteCollection({
       client: this.apiClient,
       path: { ...(await this._path()), collection_id: name },
     });
@@ -556,7 +561,7 @@ export class ChromaClient {
    * @warning This operation is irreversible and will delete all data
    */
   public async reset(): Promise<void> {
-    await Api.reset({
+    await SystemService.reset({
       client: this.apiClient,
     });
   }
@@ -566,7 +571,7 @@ export class ChromaClient {
    * @returns Promise resolving to the server version string
    */
   public async version(): Promise<string> {
-    const { data } = await Api.version({
+    const { data } = await SystemService.version({
       client: this.apiClient,
     });
     return data;
@@ -578,7 +583,7 @@ export class ChromaClient {
    */
   public async getPreflightChecks(): Promise<ChecklistResponse> {
     if (!this.preflightChecks) {
-      const { data } = await Api.preFlightChecks({
+      const { data } = await SystemService.preFlightChecks({
         client: this.apiClient,
       });
       this.preflightChecks = data;

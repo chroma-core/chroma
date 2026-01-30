@@ -1,6 +1,6 @@
 import { expect, test, jest } from "@jest/globals";
 import { ChromaClient } from "../src";
-import { DefaultService as Api } from "../src/api";
+import { SystemService } from "../src/api";
 
 test("preflight", async () => {
   const client = new ChromaClient({
@@ -13,7 +13,7 @@ test("preflight", async () => {
 });
 
 test("legacy preflight", async () => {
-  jest.spyOn(Api, "preFlightChecks").mockResolvedValue({
+  jest.spyOn(SystemService, "preFlightChecks").mockResolvedValue({
     data: {
       max_batch_size: 100,
     },
@@ -31,7 +31,7 @@ test("legacy preflight", async () => {
 });
 
 test("preflight with no values", async () => {
-  jest.spyOn(Api, "preFlightChecks").mockResolvedValue({
+  jest.spyOn(SystemService, "preFlightChecks").mockResolvedValue({
     data: {},
   } as any);
 
