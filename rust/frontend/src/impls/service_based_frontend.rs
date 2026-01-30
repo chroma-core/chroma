@@ -537,6 +537,10 @@ impl ServiceBasedFrontend {
                         if schema.get_internal_spann_config().is_some() {
                             vector_segment_type = SegmentType::Spann;
                         }
+                        // Use QuantizedSpann when quantization is enabled
+                        if schema.enable_quantization.unwrap_or(false) {
+                            vector_segment_type = SegmentType::QuantizedSpann;
+                        }
                     }
                 }
                 if let Some(config) = configuration.as_ref() {

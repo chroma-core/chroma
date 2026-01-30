@@ -64,6 +64,7 @@ pub enum SegmentType {
     HnswLocalPersisted,
     Sqlite,
     Spann,
+    QuantizedSpann,
 }
 
 impl From<SegmentType> for String {
@@ -81,6 +82,7 @@ impl From<SegmentType> for String {
                 "urn:chroma:segment/vector/hnsw-local-persisted".to_string()
             }
             SegmentType::Spann => "urn:chroma:segment/vector/spann".to_string(),
+            SegmentType::QuantizedSpann => "urn:chroma:segment/vector/quantized-spann".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
         }
     }
@@ -97,6 +99,7 @@ impl TryFrom<&str> for SegmentType {
             "urn:chroma:segment/vector/hnsw-local-memory" => Ok(SegmentType::HnswLocalMemory),
             "urn:chroma:segment/vector/hnsw-local-persisted" => Ok(Self::HnswLocalPersisted),
             "urn:chroma:segment/vector/spann" => Ok(SegmentType::Spann),
+            "urn:chroma:segment/vector/quantized-spann" => Ok(SegmentType::QuantizedSpann),
             "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
             _ => Err(SegmentConversionError::InvalidSegmentType),
         }
