@@ -290,5 +290,11 @@
       "github": "https://github.com/chroma-core/chroma",
       "discord": "https://discord.gg/MMeYNTmh3x"
     }
+  },
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_M1NrBVW8hgvKCGYxVtYusnbBvpVq9sKpE7FJMew9suK",
+      "sessionRecording": false
+    }
   }
 }
