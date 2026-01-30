@@ -4,6 +4,7 @@ description: "Learn how to configure Chroma collection index settings and embedd
 ---
 
 import { Warning } from '/snippets/callout.mdx';
+import { YouTube } from '/snippets/youtube.jsx';
 
 Chroma collections have a `configuration` that determines how their embeddings index is constructed and used. We use default values for these index configurations that should give you great performance for most use cases out-of-the-box.
 
@@ -114,9 +115,15 @@ In this example, when querying with the test embedding (`id=1`), the first colle
 
 In Distributed Chroma and Chroma Cloud collections, we use a SPANN (Spacial Approximate Nearest Neighbors) index to perform approximate nearest neighbor (ANN) search.
 
-<Frame>
-<iframe width="660" height="315" src="https://www.youtube.com/embed/1QdwYWd3S1g" title="SPANN Video" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
-</Frame>
+<div className="w-full aspect-video">
+  <YouTube
+    src="https://www.youtube.com/embed/1QdwYWd3S1g"
+    title="SPANN Video"
+    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+    referrerPolicy="strict-origin-when-cross-origin"
+    allowFullScreen
+  />
+</div>
 
 <Accordion title="What is a SPANN index?">
 A SPANN index is a data structure used to efficiently find approximate nearest neighbors in large sets of high-dimensional vectors. It works by dividing the set into broad clusters (so we can ignore most of the data during search) and then building efficient, smaller indexes within each cluster for fast local lookups. This two-level approach helps reduce both memory use and search time, making it practical to search billions of vectors stored even on hard drives or separate machines in a distributed system.
