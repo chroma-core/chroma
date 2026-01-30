@@ -632,14 +632,14 @@ pub fn query_quantized_cluster(
 
     // Compute distances for each point
     let code_size = cluster.codes.len() / cluster.ids.len().max(1);
-    let (keys, distances) = cluster
+    let (keys, distances): (Vec<u32>, Vec<f32>) = cluster
         .ids
         .iter()
         .zip(cluster.codes.chunks(code_size))
         .map(|(id, code_bytes)| {
             let code = Code::<&[u8]>::new(code_bytes);
             let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
-            (*id, distance)
+            (*id as u32, distance)
         })
         .unzip();
 

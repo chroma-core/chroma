@@ -619,6 +619,43 @@ impl Writeable for QuantizedCluster<'_> {
     fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
 }
 
+// Vec<f32> only supports Arrow blockfiles, not memory storage.
+impl Writeable for Vec<f32> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
+impl<'referred_data> Readable<'referred_data> for &'referred_data [f32] {
+    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
+        None
+    }
+
+    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
+        _: PrefixRange,
+        _: KeyRange,
+        _: &'referred_data Storage,
+    ) -> Vec<(&'referred_data CompositeKey, Self)>
+    where
+        PrefixRange: std::ops::RangeBounds<&'prefix str>,
+        KeyRange: std::ops::RangeBounds<KeyWrapper>,
+    {
+        vec![]
+    }
+
+    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
+        Ok(0)
+    }
+
+    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
+        false
+    }
+
+    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
+        0
+    }
+}
+
 impl<'referred_data> Readable<'referred_data> for DataRecord<'referred_data> {
     fn read_from_storage(
         prefix: &str,
@@ -729,83 +766,6 @@ impl<'referred_data> Readable<'referred_data> for SpannPostingList<'referred_dat
 }
 
 impl<'referred_data> Readable<'referred_data> for QuantizedCluster<'referred_data> {
-    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
-        None
-    }
-
-    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
-        _: PrefixRange,
-        _: KeyRange,
-        _: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>
-    where
-        PrefixRange: std::ops::RangeBounds<&'prefix str>,
-        KeyRange: std::ops::RangeBounds<KeyWrapper>,
-    {
-        vec![]
-    }
-
-    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
-        Ok(0)
-    }
-
-    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
-        false
-    }
-
-    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
-        0
-    }
-}
-
-// Vec<f32> only supports Arrow blockfiles, not memory storage.
-impl Writeable for Vec<f32> {
-    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
-
-    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
-}
-
-impl<'referred_data> Readable<'referred_data> for &'referred_data [f32] {
-    fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
-        None
-    }
-
-    fn read_range_from_storage<'prefix, PrefixRange, KeyRange>(
-        _: PrefixRange,
-        _: KeyRange,
-        _: &'referred_data Storage,
-    ) -> Vec<(&'referred_data CompositeKey, Self)>
-    where
-        PrefixRange: std::ops::RangeBounds<&'prefix str>,
-        KeyRange: std::ops::RangeBounds<KeyWrapper>,
-    {
-        vec![]
-    }
-
-    fn count(_: &Storage) -> Result<usize, Box<dyn ChromaError>> {
-        Ok(0)
-    }
-
-    fn contains(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> bool {
-        false
-    }
-
-    fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
-        0
-    }
-}
-
-impl Writeable for u64 {
-    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {
-        unimplemented!("u64 memory storage not implemented")
-    }
-
-    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {
-        unimplemented!("u64 memory storage not implemented")
-    }
-}
-
-impl<'referred_data> Readable<'referred_data> for u64 {
     fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
         None
     }

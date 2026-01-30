@@ -184,7 +184,7 @@ impl USearchIndex {
 impl VectorIndex for USearchIndex {
     type Error = USearchError;
 
-    fn add(&self, key: u64, vector: &[f32]) -> Result<(), Self::Error> {
+    fn add(&self, key: u32, vector: &[f32]) -> Result<(), Self::Error> {
         let need_resize = {
             let index = self.index.read()?;
             let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
@@ -205,9 +205,9 @@ impl VectorIndex for USearchIndex {
         if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(vector, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            self.index.read()?.add(key, i8_slice)
+            self.index.read()?.add(key as u64, i8_slice)
         } else {
-            self.index.read()?.add(key, vector)
+            self.index.read()?.add(key as u64, vector)
         }
         .map_err(|e| USearchError::Index(e.to_string()))
     }
@@ -216,7 +216,7 @@ impl VectorIndex for USearchIndex {
         Ok(self.index.read()?.capacity())
     }
 
-    fn get(&self, key: u64) -> Result<Option<Vec<f32>>, Self::Error> {
+    fn get(&self, key: u32) -> Result<Option<Vec<f32>>, Self::Error> {
         if self.quantization_center.is_some() {
             return Err(USearchError::QuantizedEmbedding);
         }
@@ -225,7 +225,7 @@ impl VectorIndex for USearchIndex {
         let count = self
             .index
             .read()?
-            .export(key, &mut vector)
+            .export(key as u64, &mut vector)
             .map_err(|e| USearchError::Index(e.to_string()))?;
 
         Ok((count > 0).then_some(vector))
@@ -235,11 +235,11 @@ impl VectorIndex for USearchIndex {
         Ok(self.index.read()?.size())
     }
 
-    fn remove(&self, key: u64) -> Result<(), Self::Error> {
+    fn remove(&self, key: u32) -> Result<(), Self::Error> {
         self.tombstones.fetch_add(1, Ordering::Relaxed);
         self.index
             .read()?
-            .remove(key)
+            .remove(key as u64)
             .map_err(|e| USearchError::Index(e.to_string()))?;
         Ok(())
     }
@@ -262,7 +262,7 @@ impl VectorIndex for USearchIndex {
         .map_err(|e| USearchError::Index(e.to_string()))?;
 
         Ok(SearchResult {
-            keys: matches.keys,
+            keys: matches.keys.into_iter().map(|k| k as u32).collect(),
             distances: matches.distances,
         })
     }
@@ -497,7 +497,7 @@ mod tests {
 
         // Generate all test vectors upfront
         let mut rng = StdRng::seed_from_u64(42);
-        let mut vectors: HashMap<u64, Vec<f32>> = HashMap::new();
+        let mut vectors = HashMap::new();
         for i in 0..64 {
             vectors.insert(i, random_vector(&mut rng, DIM));
         }
@@ -596,14 +596,14 @@ mod tests {
         // Phase 1: Full precision index
         let raw_index = provider.open(&config, OpenMode::Create).await.unwrap();
         for (i, v) in vectors.iter().enumerate() {
-            raw_index.add(i as u64, v).unwrap();
+            raw_index.add(i as u32, v).unwrap();
         }
 
         // Verify top-1 recall is 100%
         for (i, v) in vectors.iter().enumerate() {
             let result = raw_index.search(v, 1).unwrap();
             assert_eq!(
-                result.keys[0], i as u64,
+                result.keys[0], i as u32,
                 "Full precision: top-1 mismatch at {}",
                 i
             );
@@ -620,14 +620,14 @@ mod tests {
             .await
             .unwrap();
         for (i, v) in vectors.iter().enumerate() {
-            quantized_index.add(i as u64, v).unwrap();
+            quantized_index.add(i as u32, v).unwrap();
         }
 
         // Verify top-1 recall is 100% and distance relative error < 2%
         for (i, v) in vectors.iter().enumerate() {
             let result = quantized_index.search(v, 8).unwrap();
             assert_eq!(
-                result.keys[0], i as u64,
+                result.keys[0], i as u32,
                 "Quantized: top-1 mismatch at {}",
                 i
             );

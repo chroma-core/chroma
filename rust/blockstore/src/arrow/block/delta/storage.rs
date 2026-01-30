@@ -9,7 +9,6 @@ use crate::{
 use arrow::{
     array::{
         Array, ArrayRef, BooleanBuilder, Float32Builder, RecordBatch, StringBuilder, UInt32Builder,
-        UInt64Builder,
     },
     datatypes::Field,
 };
@@ -26,7 +25,6 @@ pub enum BlockStorage {
     VecFloat32(SingleColumnStorage<Vec<f32>>),
     Float32(SingleColumnStorage<f32>),
     UInt32(SingleColumnStorage<u32>),
-    UInt64(SingleColumnStorage<u64>),
     RoaringBitmap(SingleColumnStorage<RoaringBitmap>),
     DataRecord(DataRecordStorage),
     QuantizedClusterDelta(QuantizedClusterDelta),
@@ -41,7 +39,6 @@ impl Debug for BlockStorage {
             BlockStorage::VecFloat32(_) => f.debug_struct("VecFloat32").finish(),
             BlockStorage::Float32(_) => f.debug_struct("Float32").finish(),
             BlockStorage::UInt32(_) => f.debug_struct("UInt32").finish(),
-            BlockStorage::UInt64(_) => f.debug_struct("UInt64").finish(),
             BlockStorage::RoaringBitmap(_) => f.debug_struct("RoaringBitmap").finish(),
             BlockStorage::DataRecord(_) => f.debug_struct("DataRecord").finish(),
             BlockStorage::QuantizedClusterDelta(_) => {
@@ -59,7 +56,6 @@ pub enum BlockKeyArrowBuilder {
     String((StringBuilder, StringBuilder)),
     Float32((StringBuilder, Float32Builder)),
     UInt32((StringBuilder, UInt32Builder)),
-    UInt64((StringBuilder, UInt64Builder)),
 }
 
 impl BlockKeyArrowBuilder {
@@ -100,16 +96,6 @@ impl BlockKeyArrowBuilder {
                     BlockKeyArrowBuilder::UInt32(builder) => builder,
                     _ => {
                         unreachable!("Invariant violation. BlockKeyArrowBuilder should be UInt32.")
-                    }
-                };
-                builder.0.append_value(key.prefix);
-                builder.1.append_value(value);
-            }
-            KeyWrapper::Uint64(value) => {
-                let builder = match self {
-                    BlockKeyArrowBuilder::UInt64(builder) => builder,
-                    _ => {
-                        unreachable!("Invariant violation. BlockKeyArrowBuilder should be UInt64.")
                     }
                 };
                 builder.0.append_value(key.prefix);
@@ -168,18 +154,6 @@ impl BlockKeyArrowBuilder {
                     (&key_arr as &dyn Array).slice(0, key_arr.len()),
                 )
             }
-            BlockKeyArrowBuilder::UInt64((ref mut prefix_builder, ref mut key_builder)) => {
-                let prefix_field = Field::new("prefix", arrow::datatypes::DataType::Utf8, false);
-                let key_field = Field::new("key", arrow::datatypes::DataType::UInt64, false);
-                let prefix_arr = prefix_builder.finish();
-                let key_arr = key_builder.finish();
-                (
-                    prefix_field,
-                    (&prefix_arr as &dyn Array).slice(0, prefix_arr.len()),
-                    key_field,
-                    (&key_arr as &dyn Array).slice(0, key_arr.len()),
-                )
-            }
         }
     }
 }
@@ -190,7 +164,6 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_prefix_size(),
             BlockStorage::Float32(builder) => builder.get_prefix_size(),
             BlockStorage::UInt32(builder) => builder.get_prefix_size(),
-            BlockStorage::UInt64(builder) => builder.get_prefix_size(),
             BlockStorage::DataRecord(builder) => builder.get_prefix_size(),
             BlockStorage::VecUInt32(builder) => builder.get_prefix_size(),
             BlockStorage::VecFloat32(builder) => builder.get_prefix_size(),
@@ -205,7 +178,6 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_key_size(),
             BlockStorage::Float32(builder) => builder.get_key_size(),
             BlockStorage::UInt32(builder) => builder.get_key_size(),
-            BlockStorage::UInt64(builder) => builder.get_key_size(),
             BlockStorage::DataRecord(builder) => builder.get_key_size(),
             BlockStorage::VecUInt32(builder) => builder.get_key_size(),
             BlockStorage::VecFloat32(builder) => builder.get_key_size(),
@@ -220,7 +192,6 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_min_key(),
             BlockStorage::Float32(builder) => builder.get_min_key(),
             BlockStorage::UInt32(builder) => builder.get_min_key(),
-            BlockStorage::UInt64(builder) => builder.get_min_key(),
             BlockStorage::DataRecord(builder) => builder.get_min_key(),
             BlockStorage::VecUInt32(builder) => builder.get_min_key(),
             BlockStorage::VecFloat32(builder) => builder.get_min_key(),
@@ -236,7 +207,6 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.get_size::<K>(),
             BlockStorage::Float32(builder) => builder.get_size::<K>(),
             BlockStorage::UInt32(builder) => builder.get_size::<K>(),
-            BlockStorage::UInt64(builder) => builder.get_size::<K>(),
             BlockStorage::DataRecord(builder) => builder.get_size::<K>(),
             BlockStorage::VecUInt32(builder) => builder.get_size::<K>(),
             BlockStorage::VecFloat32(builder) => builder.get_size::<K>(),
@@ -259,10 +229,6 @@ impl BlockStorage {
             BlockStorage::UInt32(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
                 (split_key, BlockStorage::UInt32(storage))
-            }
-            BlockStorage::UInt64(builder) => {
-                let (split_key, storage) = builder.split::<K>(split_size);
-                (split_key, BlockStorage::UInt64(storage))
             }
             BlockStorage::DataRecord(builder) => {
                 let (split_key, storage) = builder.split::<K>(split_size);
@@ -296,7 +262,6 @@ impl BlockStorage {
             BlockStorage::String(builder) => builder.len(),
             BlockStorage::Float32(builder) => builder.len(),
             BlockStorage::UInt32(builder) => builder.len(),
-            BlockStorage::UInt64(builder) => builder.len(),
             BlockStorage::DataRecord(builder) => builder.len(),
             BlockStorage::VecUInt32(builder) => builder.len(),
             BlockStorage::VecFloat32(builder) => builder.len(),
@@ -324,11 +289,6 @@ impl BlockStorage {
                 RecordBatch::try_new(schema, columns).unwrap()
             }
             BlockStorage::UInt32(builder) => {
-                // TODO: handle error
-                let (schema, columns) = builder.into_arrow(key_builder, metadata);
-                RecordBatch::try_new(schema, columns).unwrap()
-            }
-            BlockStorage::UInt64(builder) => {
                 // TODO: handle error
                 let (schema, columns) = builder.into_arrow(key_builder, metadata);
                 RecordBatch::try_new(schema, columns).unwrap()
