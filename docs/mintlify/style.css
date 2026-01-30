@@ -16,6 +16,7 @@
 
 [data-component-part="step-line"] {
   background-color: #000000;
+  background-image: none !important;
 }
 
 .dark [data-component-part="step-line"] {
