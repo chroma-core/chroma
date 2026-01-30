@@ -939,12 +939,15 @@ impl GrpcSysDb {
         let req = chroma_proto::GetTenantRequest {
             name: tenant_name.clone(),
         };
-        match self.client.get_tenant(req).await {
+
+        // NOTE(tanujnay112): Only checking single region sysdb for now until
+        // we figure out what to do tenant repair scenarios.
+        match self.client.get_tenant(req.clone()).await {
             Ok(resp) => {
                 let tenant = resp
                     .into_inner()
                     .tenant
-                    .ok_or(GetTenantError::NotFound(tenant_name))?;
+                    .ok_or(GetTenantError::NotFound(tenant_name.clone()))?;
                 Ok(GetTenantResponse {
                     name: tenant.name,
                     resource_name: tenant.resource_name,
@@ -1698,25 +1701,63 @@ impl GrpcSysDb {
         &mut self,
         tenant_ids: Vec<String>,
     ) -> Result<Vec<Tenant>, GetLastCompactionTimeError> {
-        let res = self
-            .client
-            .get_last_compaction_time_for_tenant(
-                chroma_proto::GetLastCompactionTimeForTenantRequest {
-                    tenant_id: tenant_ids,
-                },
-            )
-            .await;
-        match res {
-            Ok(res) => {
-                let last_compaction_times = res.into_inner().tenant_last_compaction_time;
-                let last_compaction_times = last_compaction_times
-                    .into_iter()
-                    .map(|proto_tenant| proto_tenant.try_into())
-                    .collect::<Result<Vec<Tenant>, ()>>();
-                Ok(last_compaction_times.unwrap())
-            }
-            Err(e) => Err(GetLastCompactionTimeError::FailedToGetLastCompactionTime(e)),
+        let mut results: HashMap<String, Tenant> = HashMap::new();
+
+        let mut clients = vec![&mut self.client];
+        if let Some(ref mut mcmr_client) = self._mcmr_client {
+            clients.push(mcmr_client);
         }
+
+        for client in clients {
+            match client
+                .get_last_compaction_time_for_tenant(
+                    chroma_proto::GetLastCompactionTimeForTenantRequest {
+                        tenant_id: tenant_ids.clone(),
+                    },
+                )
+                .await
+            {
+                Ok(res) => {
+                    let tenant_results = res
+                        .into_inner()
+                        .tenant_last_compaction_time
+                        .into_iter()
+                        .filter_map(|proto_tenant| proto_tenant.try_into().ok())
+                        .collect::<Vec<Tenant>>();
+
+                    for new_tenant in tenant_results {
+                        let tenant_id = new_tenant.id.clone();
+                        let entry = results.entry(tenant_id);
+
+                        entry
+                            .and_modify(|existing_tenant| {
+                                if new_tenant.last_compaction_time
+                                    > existing_tenant.last_compaction_time
+                                {
+                                    *existing_tenant = new_tenant.clone();
+                                }
+                            })
+                            .or_insert(new_tenant);
+                    }
+                }
+                Err(e) => {
+                    // Log the error but continue with other clients
+                    // This allows partial results when tenants are distributed across backends
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to get last compaction time from one client, continuing with other clients"
+                    );
+                }
+            }
+        }
+
+        let results: Vec<Tenant> = results.into_values().collect();
+
+        if results.is_empty() {
+            return Err(GetLastCompactionTimeError::TenantNotFound);
+        }
+
+        Ok(results)
     }
 
     #[allow(clippy::too_many_arguments)]

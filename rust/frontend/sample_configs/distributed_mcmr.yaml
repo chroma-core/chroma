@@ -12,6 +12,11 @@ sysdb:
     port: 50051
     connect_timeout_ms: 60000
     request_timeout_ms: 60000
+mcmr_sysdb:
+  host: "rust-sysdb-service.chroma"
+  port: 50051
+  connect_timeout_ms: 60000
+  request_timeout_ms: 60000
 collections_with_segments_provider:
   cache:
     lru:
@@ -43,17 +48,6 @@ executor:
     assignment:
       rendezvous_hashing:
         hasher: Murmur3
-    tiers:
-      - tier: 0
-        capacity: 4
-        patterns:
-          - tenant_id: "premium_tenant"
-      - tier: 1
-        capacity: 5
-        patterns:
-          - collection_size:
-              min: 0
-              max: 10000
     memberlist_provider:
       custom_resource:
         kube_namespace: "chroma"

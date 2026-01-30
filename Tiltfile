@@ -184,7 +184,7 @@ k8s_yaml(
   ['k8s/distributed-chroma/crds/memberlist_crd.yaml'],
 )
 
-rfe_config_file = os.environ.get('RFE_CONFIG_FILE') or "rust/frontend/sample_configs/distributed.yaml"
+rfe_config_file = os.environ.get('RFE_CONFIG_FILE') or ("rust/frontend/sample_configs/distributed_mcmr.yaml" if os.environ.get('MULTI_REGION') == 'true' else "rust/frontend/sample_configs/distributed.yaml")
 worker_config_file = 'rust/worker/chroma_mcmr.yaml' if os.environ.get('MULTI_REGION') == 'true' else 'rust/worker/chroma_config.yaml'
 
 distributed_chroma_values = "k8s/distributed-chroma/values.yaml,k8s/distributed-chroma/values.dev.yaml"
@@ -211,6 +211,7 @@ k8s_yaml(
 )
 
 watch_file('rust/frontend/sample_configs/distributed.yaml')
+watch_file('rust/frontend/sample_configs/distributed_mcmr.yaml')
 watch_file('rust/frontend/sample_configs/distributed2.yaml')
 watch_file('rust/worker/chroma_config.yaml')
 watch_file('rust/worker/chroma_config2.yaml')
