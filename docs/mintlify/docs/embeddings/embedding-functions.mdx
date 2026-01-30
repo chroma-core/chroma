@@ -96,12 +96,30 @@ collection.query(query_embeddings=embeddings)
 You can create your own embedding function to use with Chroma; it just needs to implement `EmbeddingFunction`.
 
 ```python
+from typing import Dict, Any
 from chromadb import Documents, EmbeddingFunction, Embeddings
+from chromadb.utils.embedding_functions import register_embedding_function
 
+@register_embedding_function
 class MyEmbeddingFunction(EmbeddingFunction):
+
+    def __init__(self, model):
+        self.model = model
+
     def __call__(self, input: Documents) -> Embeddings:
         # embed the documents somehow
         return embeddings
+
+    @staticmethod
+    def name() -> str:
+        return "my-ef"
+
+    def get_config(self) -> Dict[str, Any]:
+        return dict(model=self.model)
+
+    @staticmethod
+    def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction":
+        return MyEmbeddingFunction(config['model'])
 ```
 
 We welcome contributions! If you create an embedding function that you think would be useful to others, please consider [submitting a pull request](https://github.com/chroma-core/chroma).
@@ -201,18 +219,40 @@ await collection.query({ queryEmbeddings: embeddings });
 You can create your own embedding function to use with Chroma; it just needs to implement `EmbeddingFunction`.
 
 ```typescript
-import { EmbeddingFunction } from "chromadb";
+export interface MyEmbeddingConfig {
+  model: string;
+}
 
-class MyEmbeddingFunction implements EmbeddingFunction {
-  private api_key: string;
+export class MyEmbeddingFunction implements EmbeddingFunction {
+  public readonly name = "my-embedding-function";
+  private readonly model: string;
 
-  constructor(api_key: string) {
-    this.api_key = api_key;
+  constructor(args: { model: string }) {
+    this.model = args.model;
   }
 
-  public async generate(texts: string[]): Promise<number[][]> {
-    // do things to turn texts into embeddings with an api_key perhaps
-    return embeddings;
+  async generate(texts: string[]): Promise<number[][]> {
+    // embed the documents somehow
+    return [];
+  }
+
+  getConfig(): MyEmbeddingConfig {
+    return {
+      model: this.model,
+    };
+  }
+
+  validateConfigUpdate(config: Record<string, any>) {
+    if ("model" in config) {
+      throw new ChromaValueError("Model cannot be updated");
+    }
+  }
+
+  static buildFromConfig(
+    config: MyEmbeddingConfig,
+    _client?: ChromaClient,
+  ): MyEmbeddingFunction {
+    return new MyEmbeddingFunction(config);
   }
 }
 ```
