@@ -25,7 +25,7 @@ use chroma_types::{Chunk, CollectionUuid, JobId, LogRecord, SegmentType};
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
-use tracing::Span;
+use tracing::{Level, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::{
@@ -711,10 +711,10 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                 );
             }
             None => {
-                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.");
                 let collection_info = match self.context.get_collection_info() {
                     Ok(info) => info,
                     Err(err) => {
+                        tracing::event!(Level::WARN, name = "No logs were pulled from the log service, and get_collection_info returned an error.", error =? err);
                         self.terminate_with_result(Err(err.into()), ctx).await;
                         return;
                     }
@@ -724,6 +724,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                 ) {
                     Some(name) => name,
                     None => {
+                        tracing::warn!("No logs were pulled from the log service, and the database name returned was invalid.");
                         self.terminate_with_result(
                             Err(LogFetchOrchestratorError::InvalidDatabaseName),
                             ctx,
@@ -732,6 +733,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                         return;
                     }
                 };
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.  Repairing.");
                 self.terminate_with_result(
                     Ok(RequireCompactionOffsetRepair::new(
                         collection_info.collection_id.into(),
