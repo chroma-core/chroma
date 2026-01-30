@@ -733,7 +733,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for LogFetchOrchestrator
                         return;
                     }
                 };
-                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behing the sysdb.  Repairing.");
+                tracing::warn!("No logs were pulled from the log service, this can happen when the log compaction offset is behind the sysdb.  Repairing.");
                 self.terminate_with_result(
                     Ok(RequireCompactionOffsetRepair::new(
                         collection_info.collection_id.into(),
