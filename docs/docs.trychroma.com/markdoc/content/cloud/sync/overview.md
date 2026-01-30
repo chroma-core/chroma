@@ -15,7 +15,7 @@ Chroma Sync has three primary concepts: **source types**, **sources** and **invo
 
 A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. An example of a source type—and notably the only currently supported one—is a GitHub repository. Each source type defines its own schema for configuring sources of its type. For example, the sources of the GitHub repository type allow developers to define a parameter `include_globs`, which is an array of glob patterns for which matching files will be synced.
 
-Other examples of (future) source types may be S3 buckets, web pages, Notion workspaces, or any other corpus of continually updated content. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+Other examples of (future) source types may be S3 buckets, Notion workspaces, or any other corpus of continually updated content. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
 ## GitHub Repositories
 
