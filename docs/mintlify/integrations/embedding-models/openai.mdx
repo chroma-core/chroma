@@ -26,9 +26,9 @@ You can pass in an optional `model_name` argument, which lets you choose which O
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-                api_key="YOUR_API_KEY",
-                model_name="text-embedding-3-small"
-            )
+    api_key_env_var="OPENAI_API_KEY",
+    model_name="text-embedding-3-small"
+)
 ```
 
 To use the OpenAI embedding models on other platforms such as Azure, you can use the `api_base` and `api_type` parameters:
@@ -36,12 +36,12 @@ To use the OpenAI embedding models on other platforms such as Azure, you can use
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-                api_key="YOUR_API_KEY",
-                api_base="YOUR_API_BASE_PATH",
-                api_type="azure",
-                api_version="YOUR_API_VERSION",
-                model_name="text-embedding-3-small"
-            )
+    api_key_env_var="OPENAI_API_KEY",
+    api_base="YOUR_API_BASE_PATH",
+    api_type="azure",
+    api_version="YOUR_API_VERSION",
+    model_name="text-embedding-3-small"
+)
 ```
 
 </Tab>
@@ -56,7 +56,7 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-  apiKey: "apiKey",
+  apiKeyEnvVar: "OPENAI_API_KEY",
   modelName: "text-embedding-3-small",
   // Optional: specify API base (e.g. for Azure OpenAI)
   apiBase: "your-api-base"
