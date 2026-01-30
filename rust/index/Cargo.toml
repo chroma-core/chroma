@@ -60,6 +60,8 @@ regex = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
+hf-hub = { version = "0.4" }
+dirs = "5"
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
 
@@ -73,4 +75,8 @@ harness = false
 
 [[bench]]
 name = "fts_regex"
+harness = false
+
+[[bench]]
+name = "quantized_spann"
 harness = false
