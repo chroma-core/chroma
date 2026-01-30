@@ -31,8 +31,10 @@ rustls = ["reqwest/rustls-tls"]
 ollama = []
 
 [dev-dependencies]
+clap.workspace = true
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
+rand.workspace = true
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true
 uuid.workspace = true
