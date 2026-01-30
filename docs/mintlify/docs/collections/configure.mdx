@@ -242,7 +242,7 @@ import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 import { CohereEmbeddingFunction } from "@chroma-core/cohere";
 
 // Using the `embedding_function` argument
-const openAICollection = client.createCollection({
+const openAICollection = await client.createCollection({
   name: "my_openai_collection",
   embedding_function: new OpenAIEmbeddingFunction({
     model_name: "text-embedding-3-small",
