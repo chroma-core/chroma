@@ -20,6 +20,12 @@ pre-commit install # install the precommit hooks
 Install protobuf:
 for MacOS `brew install protobuf`
 
+Generate the protobuf files (required before running tests):
+
+```bash
+cd idl && make proto_python
+```
+
 You can also install `chromadb` the `pypi` package locally and in editable mode with `pip install -e .`.
 
 ## Local dev setup for distributed chroma
