@@ -115,8 +115,8 @@ pub struct MutableQuantizedSpannIndex<I: VectorIndex> {
 
     // === In-Memory State ===
     deltas: Arc<DashMap<u64, QuantizedDelta>>,
-    deleted_clusters: Arc<DashSet<u64>>,
     embeddings: Arc<DashMap<u64, Arc<[f32]>>>,
+    tombstones: Arc<DashSet<u64>>,
     versions: Arc<DashMap<u64, u64>>,
 
     // === Blockfile Readers ===
@@ -348,7 +348,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         self.centroid
             .remove(cluster_id)
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-        self.deleted_clusters.insert(cluster_id);
+        self.tombstones.insert(cluster_id);
 
         let source_borrowed = QuantizedCluster::from(&source_cluster);
         let dists_to_target = query_quantized_cluster(
@@ -613,74 +613,137 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             self.centroid
                 .remove(cluster_id)
                 .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-            self.deleted_clusters.insert(cluster_id);
+            self.tombstones.insert(cluster_id);
         }
 
-        // Collect points to reassign
+        // Dedup set for examined IDs
+        let examined = DashSet::new();
+        // Candidates for reassignment: (id, version, prev_cluster_id, embedding)
         let mut reassignable = Vec::new();
 
-        // Points in new clusters that prefer old center
-        for &new_id in &new_cluster_ids {
-            reassignable.extend(self.trim(new_id, &old_center).await?);
+        // Examine points in the new split clusters first
+        for new_id in new_cluster_ids {
+            let (points, new_center) = {
+                let Some(delta) = self.deltas.get(&new_id) else {
+                    continue;
+                };
+                let points = delta
+                    .cluster
+                    .ids
+                    .iter()
+                    .zip(delta.cluster.versions.iter())
+                    .filter_map(|(id, version)| {
+                        self.is_valid(*id, *version).then_some((*id, *version))
+                    })
+                    .collect::<Vec<_>>();
+                (points, delta.cluster.center.clone())
+            };
+
+            for (id, version) in points {
+                if !examined.insert(id) {
+                    continue;
+                }
+                let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) else {
+                    continue;
+                };
+                // Check if point prefers old center over its new assigned center
+                let dist_to_old = self.distance(&embedding, &old_center);
+                let dist_to_new = self.distance(&embedding, &new_center);
+                if dist_to_old < dist_to_new {
+                    reassignable.push((id, version, new_id, embedding));
+                }
+            }
         }
 
-        // Points in nearby clusters that prefer new centers
+        // Find nearby clusters and examine their points
         let neighbors = self.navigate(&old_center)?;
-        for &neighbor_id in &neighbors.keys {
+        // Collect neighbor points: (id, version, neighbor_id, neighbor_center)
+        let mut neighbor_points = Vec::new();
+        for neighbor_id in neighbors.keys {
+            // Skip the new clusters and the original cluster
             if new_cluster_ids.contains(&neighbor_id) || neighbor_id == cluster_id {
                 continue;
             }
-            for new_center in new_centers {
-                reassignable.extend(self.trim(neighbor_id, new_center).await?);
+            self.scrub(neighbor_id).await?;
+
+            let (points, neighbor_center) = {
+                let Some(delta) = self.deltas.get(&neighbor_id) else {
+                    continue;
+                };
+                let points = delta
+                    .cluster
+                    .ids
+                    .iter()
+                    .zip(delta.cluster.versions.iter())
+                    .filter_map(|(id, version)| {
+                        self.is_valid(*id, *version).then_some((*id, *version))
+                    })
+                    .collect::<Vec<_>>();
+                (points, delta.cluster.center.clone())
+            };
+
+            for (id, version) in points {
+                if !examined.insert(id) {
+                    continue;
+                }
+                neighbor_points.push((id, version, neighbor_id, neighbor_center.clone()));
             }
         }
 
-        reassignable.sort_unstable();
-        reassignable.dedup();
+        // Load raw embeddings for neighbor points
+        let neighbor_ids = neighbor_points
+            .iter()
+            .map(|(id, _, _, _)| *id)
+            .collect::<Vec<_>>();
+        self.load_raw(&neighbor_ids).await?;
 
-        self.load_raw(&reassignable).await?;
-        for id in reassignable {
-            if let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) {
-                self.insert(id, embedding).await?;
+        // Check each neighbor point
+        for (id, version, neighbor_id, neighbor_center) in neighbor_points {
+            let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) else {
+                continue;
+            };
+            let dist_to_current = self.distance(&embedding, &neighbor_center);
+            let dist_to_new_0 = self.distance(&embedding, &new_centers[0]);
+            let dist_to_new_1 = self.distance(&embedding, &new_centers[1]);
+
+            // Skip if point is closer to current center than BOTH new centers
+            if dist_to_current <= dist_to_new_0 && dist_to_current <= dist_to_new_1 {
+                continue;
+            }
+            // Skip if point is closer to old center than BOTH new centers
+            let dist_to_old = self.distance(&embedding, &old_center);
+            if dist_to_old <= dist_to_new_0 && dist_to_old <= dist_to_new_1 {
+                continue;
+            }
+            reassignable.push((id, version, neighbor_id, embedding));
+        }
+
+        // Reassign points
+        for (id, version, prev_cluster_id, embedding) in reassignable {
+            // Check version is still valid before reassigning
+            if !self.is_valid(id, version) {
+                continue;
+            }
+
+            let candidates = self.navigate(&embedding)?;
+            let rng_clusters = self.rng_select(&candidates);
+
+            // Skip if previous cluster is in RNG results (point is already well-placed)
+            if rng_clusters.keys.contains(&prev_cluster_id) {
+                continue;
+            }
+
+            // Bump version and append to selected clusters (no balance)
+            let new_version = self.upgrade(id);
+            for cluster_id in rng_clusters.keys {
+                if let Some(centroid) = self.cluster_centroid(cluster_id) {
+                    let code = Code::<Vec<u8>>::quantize(&embedding, &centroid);
+                    self.append(cluster_id, id, new_version, code.as_ref());
+                }
             }
         }
 
         Ok(())
-    }
-
-    /// Returns ids of points closer to candidate_center than their current center.
-    async fn trim(
-        &self,
-        cluster_id: u64,
-        candidate_center: &[f32],
-    ) -> Result<Vec<u64>, QuantizedSpannError> {
-        self.scrub(cluster_id).await?;
-
-        let Some(delta) = self.deltas.get(&cluster_id) else {
-            return Ok(Vec::new());
-        };
-
-        let current_center = &delta.cluster.center;
-        let cluster_ref = QuantizedCluster::from(&delta.cluster);
-
-        let dists_to_candidate = query_quantized_cluster(
-            &cluster_ref,
-            candidate_center,
-            &self.config.distance_function,
-        );
-        let dists_to_current =
-            query_quantized_cluster(&cluster_ref, current_center, &self.config.distance_function);
-
-        Ok(cluster_ref
-            .ids
-            .iter()
-            .zip(cluster_ref.versions.iter())
-            .zip(dists_to_candidate.distances.iter())
-            .zip(dists_to_current.distances.iter())
-            .filter_map(|(((id, version), d_cand), d_curr)| {
-                (self.is_valid(*id, *version) && d_cand < d_curr).then_some(*id)
-            })
-            .collect())
     }
 
     /// Increment and return the next version for a key.
@@ -891,7 +954,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             next_cluster_id: AtomicU64::new(next_cluster_id).into(),
             rotation,
             deltas: deltas.into(),
-            deleted_clusters: DashSet::new().into(),
+            tombstones: DashSet::new().into(),
             embeddings: embeddings.into(),
             versions: versions.into(),
             quantized_cluster_reader,
@@ -921,7 +984,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             }
 
             // Add deleted cluster ids
-            for cluster_id in self.deleted_clusters.iter() {
+            for cluster_id in self.tombstones.iter() {
                 cluster_ids.push(*cluster_id);
             }
 
