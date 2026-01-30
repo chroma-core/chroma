@@ -128,12 +128,20 @@ impl TestSysDb {
     fn filter_collections(
         collection: &Collection,
         collection_id: Option<CollectionUuid>,
+        collection_ids: Option<&Vec<CollectionUuid>>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
     ) -> bool {
+        // Filter by collection_id (singular) if provided
         if collection_id.is_some() && collection_id.unwrap() != collection.collection_id {
             return false;
+        }
+        // Filter by collection_ids (plural) if provided
+        if let Some(ids) = collection_ids {
+            if !ids.contains(&collection.collection_id) {
+                return false;
+            }
         }
         if name.is_some() && name.unwrap() != collection.name {
             return false;
@@ -175,7 +183,7 @@ impl TestSysDb {
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         let GetCollectionsOptions {
             collection_id,
-            collection_ids: _,
+            collection_ids,
             include_soft_deleted: _,
             name,
             tenant,
@@ -200,6 +208,7 @@ impl TestSysDb {
             if !TestSysDb::filter_collections(
                 collection,
                 collection_id,
+                collection_ids.as_ref(),
                 name.clone(),
                 tenant.clone(),
                 database_string.clone(),

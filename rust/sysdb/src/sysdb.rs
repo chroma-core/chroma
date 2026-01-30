@@ -607,6 +607,7 @@ impl SysDb {
     pub async fn flush_compaction(
         &mut self,
         tenant_id: String,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
@@ -619,6 +620,7 @@ impl SysDb {
             SysDb::Grpc(grpc) => {
                 grpc.flush_compaction(
                     tenant_id,
+                    database_name,
                     collection_id,
                     log_position,
                     collection_version,
@@ -1792,6 +1794,7 @@ impl GrpcSysDb {
     async fn flush_compaction(
         &mut self,
         tenant_id: String,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
@@ -1833,11 +1836,13 @@ impl GrpcSysDb {
             total_records_post_compaction,
             size_bytes_post_compaction,
             schema_str,
-            // TODO(tanujnay112): Add database name later
-            database_name: None,
+            database_name: Some(database_name.clone().into_string()),
         };
 
-        let res = self.client.flush_collection_compaction(req).await;
+        let res = self
+            .client(&database_name)?
+            .flush_collection_compaction(req)
+            .await;
         match res {
             Ok(res) => {
                 let res = res.into_inner();
@@ -2334,6 +2339,8 @@ pub enum FlushCompactionError {
     SegmentNotFound,
     #[error("Failed to serialize schema")]
     Schema(#[from] SchemaError),
+    #[error("Failed to get client for database")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for FlushCompactionError {
@@ -2352,6 +2359,7 @@ impl ChromaError for FlushCompactionError {
             FlushCompactionError::CollectionNotFound => ErrorCodes::Internal,
             FlushCompactionError::SegmentNotFound => ErrorCodes::Internal,
             FlushCompactionError::Schema(e) => e.code(),
+            FlushCompactionError::ClientResolutionError(e) => e.code(),
         }
     }
 
