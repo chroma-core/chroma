@@ -14,9 +14,9 @@ from chromadb.utils.embedding_functions import CloudflareWorkersAIEmbeddingFunct
 os.environ["CHROMA_CLOUDFLARE_API_KEY"] = "<INSERT API KEY HERE>"
 
 ef = CloudflareWorkersAIEmbeddingFunction(
-                account_id="<INSERT ACCOUNTID HERE>",
-                model_name="@cf/baai/bge-m3",
-            )
+    account_id="<INSERT ACCOUNTID HERE>",
+    model_name="@cf/baai/bge-m3",
+)
 ef(input=["This is my first text to embed", "This is my second document"])
 ```
 

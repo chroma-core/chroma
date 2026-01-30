@@ -43,9 +43,9 @@ For a full list of available models, visit [Hugging Face Sentence Transformers](
 import { SentenceTransformersEmbeddingFunction } from "@chroma-core/sentence-transformer";
 
 const sentenceTransformerEF = new SentenceTransformersEmbeddingFunction({
-  modelName: "all-MiniLM-L6-v2",
-  device: "cpu",
-  normalizeEmbeddings: false,
+    modelName: "all-MiniLM-L6-v2",
+    device: "cpu",
+    normalizeEmbeddings: false,
 });
 
 const texts = ["Hello, world!", "How are you?"];

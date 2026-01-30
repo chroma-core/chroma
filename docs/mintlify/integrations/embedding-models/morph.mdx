@@ -29,24 +29,24 @@ morph_ef(input=["def calculate_sum(a, b):\n    return a + b", "class User:\n    
 import { MorphEmbeddingFunction } from "@chroma-core/morph";
 
 const embedder = new MorphEmbeddingFunction({
-  api_key: "apiKey", // or set MORPH_API_KEY environment variable
-  model_name: "morph-embedding-v2",
+    api_key: "apiKey", // or set MORPH_API_KEY environment variable
+    model_name: "morph-embedding-v2",
 });
 
 // use directly
 const embeddings = embedder.generate([
-  "function calculate(a, b) { return a + b; }",
-  "class User { constructor(name) { this.name = name; } }",
+    "function calculate(a, b) { return a + b; }",
+    "class User { constructor(name) { this.name = name; } }",
 ]);
 
 // pass documents to the .add and .query methods
 const collection = await client.createCollection({
-  name: "name",
-  embeddingFunction: embedder,
+    name: "name",
+    embeddingFunction: embedder,
 });
 const collectionGet = await client.getCollection({
-  name: "name",
-  embeddingFunction: embedder,
+    name: "name",
+    embeddingFunction: embedder,
 });
 ```
 

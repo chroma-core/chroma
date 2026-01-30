@@ -11,9 +11,9 @@ Chroma provides a convenient wrapper around JinaAI's embedding API. This embeddi
 ```python Python
 from chromadb.utils.embedding_functions import JinaEmbeddingFunction
 jinaai_ef = JinaEmbeddingFunction(
-                api_key="YOUR_API_KEY",
-                model_name="jina-embeddings-v2-base-en",
-            )
+    api_key="YOUR_API_KEY",
+    model_name="jina-embeddings-v2-base-en",
+)
 jinaai_ef(input=["This is my first text to embed", "This is my second document"])
 ```
 
@@ -23,8 +23,8 @@ jinaai_ef(input=["This is my first text to embed", "This is my second document"]
 import { JinaEmbeddingFunction } from '@chroma-core/jina';
 
 const embedder = new JinaEmbeddingFunction({
-  jinaai_api_key: 'jina_****',
-  model_name: 'jina-embeddings-v2-base-en',
+    jinaai_api_key: 'jina_****',
+    model_name: 'jina-embeddings-v2-base-en',
 });
 
 // use directly
@@ -50,11 +50,11 @@ jina-embeddings-v3 supports [Late Chunking](https://jina.ai/news/late-chunking-i
 ```python
 from chromadb.utils.embedding_functions import JinaEmbeddingFunction
 jinaai_ef = JinaEmbeddingFunction(
-                api_key="YOUR_API_KEY",
-                model_name="jina-embeddings-v3",
-                late_chunking=True,
-                task="text-matching",
-            )
+    api_key="YOUR_API_KEY",
+    model_name="jina-embeddings-v3",
+    late_chunking=True,
+    task="text-matching",
+)
 
 collection = client.create_collection(name="late_chunking", embedding_function=jinaai_ef)
 

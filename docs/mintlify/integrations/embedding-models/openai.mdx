@@ -56,10 +56,10 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-  apiKeyEnvVar: "OPENAI_API_KEY",
-  modelName: "text-embedding-3-small",
-  // Optional: specify API base (e.g. for Azure OpenAI)
-  apiBase: "your-api-base"
+    apiKeyEnvVar: "OPENAI_API_KEY",
+    modelName: "text-embedding-3-small",
+    // Optional: specify API base (e.g. for Azure OpenAI)
+    apiBase: "your-api-base"
 });
 
 // use directly
@@ -67,12 +67,12 @@ const embeddings = embeddingFunction.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
 let collection = await client.createCollection({
-  name: "name",
-  embeddingFunction: embeddingFunction,
+    name: "name",
+    embeddingFunction: embeddingFunction,
 });
 collection = await client.getCollection({
-  name: "name",
-  embeddingFunction: embeddingFunction,
+    name: "name",
+    embeddingFunction: embeddingFunction,
 });
 ```
 

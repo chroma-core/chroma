@@ -12,8 +12,8 @@ from chromadb.utils.embedding_functions import TogetherAIEmbeddingFunction
 os.environ["CHROMA_TOGETHER_AI_API_KEY"] = "<INSERT API KEY HERE>"
 
 ef = TogetherAIEmbeddingFunction(
-                model_name="togethercomputer/m2-bert-80M-32k-retrieval",
-            )
+    model_name="togethercomputer/m2-bert-80M-32k-retrieval",
+)
 ef(input=["This is my first text to embed", "This is my second document"])
 ```
 

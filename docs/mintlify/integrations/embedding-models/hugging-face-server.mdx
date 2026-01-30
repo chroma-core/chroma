@@ -39,7 +39,7 @@ huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed")
 import { HuggingFaceEmbeddingServerFunction } from "@chroma-core/huggingface-server";
 
 const embedder = new HuggingFaceEmbeddingServerFunction({
-  url: "http://localhost:8001/embed",
+    url: "http://localhost:8001/embed",
 });
 
 // use directly
@@ -47,12 +47,12 @@ const embeddings = embedder.generate(["document1", "document2"]);
 
 // pass documents to query for .add and .query
 let collection = await client.createCollection({
-  name: "name",
-  embeddingFunction: embedder,
+    name: "name",
+    embeddingFunction: embedder,
 });
 collection = await client.getCollection({
-  name: "name",
-  embeddingFunction: embedder,
+    name: "name",
+    embeddingFunction: embedder,
 });
 ```
 
@@ -75,8 +75,8 @@ huggingface_ef = HuggingFaceEmbeddingServer(url="http://localhost:8001/embed", a
 ```typescript TypeScript
 import { HuggingFaceEmbeddingServerFunction } from "chromadb";
 const embedder = new HuggingFaceEmbeddingServerFunction({
-  url: "http://localhost:8001/embed",
-  apiKey: "your secret key",
+    url: "http://localhost:8001/embed",
+    apiKey: "your secret key",
 });
 ```
 
