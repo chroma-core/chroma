@@ -25,7 +25,7 @@ use chroma_types::{Chunk, CollectionUuid, JobId, LogRecord, SegmentType};
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
-use tracing::{Level, Span};
+use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use crate::execution::{
