@@ -229,7 +229,7 @@
           {
             "group": "Chroma Sync API",
             "openapi": {
-              "source": "http://sync.trychroma.com/openapi.json",
+              "source": "https://sync.trychroma.com/openapi.json",
               "directory": "sync-api-reference"
             }
           }
