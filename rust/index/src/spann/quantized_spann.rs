@@ -148,6 +148,21 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         Some(delta.length)
     }
 
+    /// Balance a cluster: scrub then trigger split/merge if needed.
+    async fn balance(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
+        let Some(len) = self.scrub(cluster_id).await? else {
+            return Ok(());
+        };
+
+        if len > self.config.spann_split_threshold {
+            self.split(cluster_id).await?;
+        } else if len > 0 && len < self.config.spann_merge_threshold {
+            self.merge(cluster_id).await?;
+        }
+
+        Ok(())
+    }
+
     /// Get the centroid for a cluster, cloning to release the lock.
     fn cluster_centroid(&self, cluster_id: u64) -> Option<Arc<[f32]>> {
         self.deltas
@@ -198,35 +213,6 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         self.load_raw(&ids).await?;
 
         Ok(Some((delta.cluster, delta.center_vector_id)))
-    }
-
-    /// Load raw embeddings for given ids into the embeddings cache.
-    async fn load_raw(&self, ids: &[u64]) -> Result<(), QuantizedSpannError> {
-        let Some(reader) = &self.raw_embedding_reader else {
-            return Ok(());
-        };
-
-        let missing_ids = ids
-            .iter()
-            .copied()
-            .filter(|id| !self.embeddings.contains_key(id))
-            .collect::<Vec<_>>();
-
-        reader
-            .load_data_for_keys(missing_ids.iter().map(|id| (String::new(), *id as u32)))
-            .await;
-
-        for id in missing_ids {
-            if let Some(record) = reader
-                .get("", id as u32)
-                .await
-                .map_err(QuantizedSpannError::Blockfile)?
-            {
-                self.embeddings.insert(id, Arc::from(record.embedding));
-            }
-        }
-
-        Ok(())
     }
 
     /// Compute distance between two vectors using the configured distance function.
@@ -305,6 +291,35 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                 {
                     delta.cluster.append(*id, *version, code);
                 }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load raw embeddings for given ids into the embeddings cache.
+    async fn load_raw(&self, ids: &[u64]) -> Result<(), QuantizedSpannError> {
+        let Some(reader) = &self.raw_embedding_reader else {
+            return Ok(());
+        };
+
+        let missing_ids = ids
+            .iter()
+            .copied()
+            .filter(|id| !self.embeddings.contains_key(id))
+            .collect::<Vec<_>>();
+
+        reader
+            .load_data_for_keys(missing_ids.iter().map(|id| (String::new(), *id as u32)))
+            .await;
+
+        for id in missing_ids {
+            if let Some(record) = reader
+                .get("", id as u32)
+                .await
+                .map_err(QuantizedSpannError::Blockfile)?
+            {
+                self.embeddings.insert(id, Arc::from(record.embedding));
             }
         }
 
@@ -453,21 +468,6 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         Ok(new_len)
     }
 
-    /// Balance a cluster: scrub then trigger split/merge if needed.
-    async fn balance(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
-        let Some(len) = self.scrub(cluster_id).await? else {
-            return Ok(());
-        };
-
-        if len > self.config.spann_split_threshold {
-            self.split(cluster_id).await?;
-        } else if len > 0 && len < self.config.spann_merge_threshold {
-            self.merge(cluster_id).await?;
-        }
-
-        Ok(())
-    }
-
     /// Split a large cluster into two smaller clusters using 2-means clustering.
     async fn split(&self, cluster_id: u64) -> Result<(), QuantizedSpannError> {
         let Some(old_center) = self.cluster_centroid(cluster_id) else {
@@ -511,8 +511,8 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         }
 
-        let embeddings: Vec<Arc<[f32]>> = valid_points.iter().map(|(_, _, e)| e.clone()).collect();
-        let mut indices: Vec<usize> = (0..valid_points.len()).collect();
+        let embeddings = valid_points.iter().map(|(_, _, e)| e.clone()).collect();
+        let mut indices = (0..valid_points.len()).collect::<Vec<_>>();
         indices.shuffle(&mut ThreadRng::default());
         let mut kmeans_input = KMeansAlgorithmInput::new(
             indices,
@@ -654,9 +654,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         cluster_id: u64,
         candidate_center: &[f32],
     ) -> Result<Vec<u64>, QuantizedSpannError> {
-        if self.scrub(cluster_id).await?.is_none() {
-            return Ok(Vec::new());
-        }
+        self.scrub(cluster_id).await?;
 
         let Some(delta) = self.deltas.get(&cluster_id) else {
             return Ok(Vec::new());
@@ -696,13 +694,12 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 impl MutableQuantizedSpannIndex<USearchIndex> {
     /// Open or create a quantized SPANN index.
     ///
-    /// If `centroid_id` is `None`, creates a new centroid index.
-    /// If `centroid_id` is `Some(id)`, forks from the existing centroid index.
-    /// Similarly, blockfile IDs in config control create vs fork for each blockfile.
+    /// If `config.centroid_id` is `None`, creates a new centroid index.
+    /// If `config.centroid_id` is `Some(id)`, forks from the existing centroid index.
+    /// Similarly, other blockfile IDs in config control create vs fork for each blockfile.
     pub async fn open(
         config: QuantizedSpannConfig,
         usearch_config: USearchIndexConfig,
-        centroid_id: Option<IndexUuid>,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannError> {
@@ -805,7 +802,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             };
 
         // Open centroid index
-        let mode = match centroid_id {
+        let mode = match config.centroid_id {
             Some(id) => OpenMode::Fork(id),
             None => OpenMode::Create,
         };
@@ -912,18 +909,15 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
         usearch_provider: USearchIndexProvider,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
         // === Step 1: quantized_cluster blockfile ===
-        // Scrub non-empty deltas, collect ids to write/delete, apply in sorted order
         let quantized_cluster_flusher = {
-            // Collect cluster ids to write/delete
-            let mut cluster_ids = Vec::new();
+            let mut cluster_ids = self
+                .deltas
+                .iter()
+                .filter_map(|e| (!e.value().cluster.ids.is_empty()).then_some(*e.key()))
+                .collect::<Vec<_>>();
 
-            // Iterate over deltas, scrub non-empty ones
-            for entry in self.deltas.iter() {
-                let cluster_id = *entry.key();
-                if !entry.value().cluster.ids.is_empty() {
-                    self.scrub(cluster_id).await?;
-                    cluster_ids.push(cluster_id);
-                }
+            for cluster_id in &cluster_ids {
+                self.scrub(*cluster_id).await?;
             }
 
             // Add deleted cluster ids
