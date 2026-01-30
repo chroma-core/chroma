@@ -403,12 +403,17 @@ impl FragmentReader {
     /// Perform read repair by writing the data to storages that are missing it.
     /// This spawns background tasks to repair missing replicas without blocking the read.
     /// If the semaphore has no available permits, the repair is skipped.
-    fn read_repair_bytes(&self, path: &str, data: Arc<Vec<u8>>, missing_indices: Vec<usize>) {
-        if !self.options.enable_read_repair || missing_indices.is_empty() {
+    fn read_repair_bytes(
+        &self,
+        path: &str,
+        data: Arc<Vec<u8>>,
+        missing_storage_indices: Vec<usize>,
+    ) {
+        if !self.options.enable_read_repair || missing_storage_indices.is_empty() {
             return;
         }
 
-        for idx in missing_indices {
+        for idx in missing_storage_indices {
             // Try to acquire a permit without blocking. If unavailable, skip this repair.
             let permit = match self.read_repair_semaphore.clone().try_acquire_owned() {
                 Ok(permit) => permit,
@@ -455,7 +460,7 @@ impl FragmentReader {
 impl FragmentConsumer for FragmentReader {
     async fn read_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, Error> {
         let mut err: Option<Error> = None;
-        let mut missing_indices: Vec<usize> = Vec::new();
+        let mut missing_storage_indices: Vec<usize> = Vec::new();
         let mut result: Option<Arc<Vec<u8>>> = None;
         // Try the preferred storage first, then fall back to others.
         let indices: Vec<usize> = std::iter::once(self.preferred)
@@ -469,11 +474,11 @@ impl FragmentConsumer for FragmentReader {
                     break;
                 }
                 Ok(None) => {
-                    missing_indices.push(*i);
+                    missing_storage_indices.push(*i);
                     continue;
                 }
                 Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
-                    missing_indices.push(*i);
+                    missing_storage_indices.push(*i);
                     continue;
                 }
                 Err(e) => {
@@ -485,7 +490,7 @@ impl FragmentConsumer for FragmentReader {
 
         // If we found the data, trigger read repair for missing replicas
         if let Some(ref data) = result {
-            self.read_repair_bytes(path, Arc::clone(data), missing_indices);
+            self.read_repair_bytes(path, Arc::clone(data), missing_storage_indices);
             return Ok(Arc::clone(data));
         }
 
@@ -512,7 +517,7 @@ impl FragmentConsumer for FragmentReader {
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error> {
         let mut err: Option<Error> = None;
-        let mut missing_indices: Vec<usize> = Vec::new();
+        let mut missing_storage_indices: Vec<usize> = Vec::new();
         let mut result: Option<(Fragment, Arc<Vec<u8>>)> = None;
         // Try the preferred storage first, then fall back to others.
         let indices: Vec<usize> = std::iter::once(self.preferred)
@@ -533,11 +538,11 @@ impl FragmentConsumer for FragmentReader {
                     break;
                 }
                 Ok(None) => {
-                    missing_indices.push(*i);
+                    missing_storage_indices.push(*i);
                     continue;
                 }
                 Err(Error::StorageError(e)) if matches!(&*e, StorageError::NotFound { .. }) => {
-                    missing_indices.push(*i);
+                    missing_storage_indices.push(*i);
                     continue;
                 }
                 Err(e) => {
@@ -550,7 +555,7 @@ impl FragmentConsumer for FragmentReader {
         // If we found the fragment, trigger read repair for missing replicas.
         // Use the bytes we already fetched instead of re-reading.
         if let Some((fragment, bytes)) = result {
-            self.read_repair_bytes(path, bytes, missing_indices);
+            self.read_repair_bytes(path, bytes, missing_storage_indices);
             return Ok(Some(fragment));
         }
 
