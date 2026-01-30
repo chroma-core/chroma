@@ -164,6 +164,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		TotalRecordsPostCompaction uint64     `gorm:"column:total_records_post_compaction"`
 		SizeBytesPostCompaction    uint64     `gorm:"column:size_bytes_post_compaction"`
 		LastCompactionTimeSecs     uint64     `gorm:"column:last_compaction_time_secs"`
+		CompactionFailureCount     int32      `gorm:"column:compaction_failure_count"`
 		DatabaseName               string     `gorm:"column:database_name"`
 		TenantID                   string     `gorm:"column:db_tenant_id"`
 		Tenant                     string     `gorm:"column:tenant"`
@@ -198,7 +199,8 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 		"NULLIF(collections.lineage_file_name, '') AS lineage_file_name, " +
 		"collections.total_records_post_compaction, " +
 		"collections.size_bytes_post_compaction, " +
-		"collections.last_compaction_time_secs, "
+		"collections.last_compaction_time_secs, " +
+		"collections.compaction_failure_count, "
 	db_targets := "databases.name as database_name, databases.tenant_id as db_tenant_id, "
 	collection_tenant := "collections.tenant as tenant"
 
@@ -305,6 +307,7 @@ func (s *collectionDb) getCollections(ids []string, name *string, tenantID strin
 				TotalRecordsPostCompaction: r.TotalRecordsPostCompaction,
 				SizeBytesPostCompaction:    r.SizeBytesPostCompaction,
 				LastCompactionTimeSecs:     r.LastCompactionTimeSecs,
+				CompactionFailureCount:     r.CompactionFailureCount,
 				Tenant:                     r.Tenant,
 				UpdatedAt:                  *r.CollectionUpdatedAt,
 				CreatedAt:                  *r.CollectionCreatedAt,
