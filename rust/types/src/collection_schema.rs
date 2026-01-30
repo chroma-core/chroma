@@ -239,6 +239,9 @@ pub struct Schema {
     /// ID of the attached function that created this output collection (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_attached_function_id: Option<String>,
+    /// Enable quantization for vector search (cloud-only feature)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enable_quantization: Option<bool>,
 }
 
 impl Schema {
@@ -535,6 +538,7 @@ impl Default for Schema {
             keys,
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         }
     }
 }
@@ -915,6 +919,7 @@ impl Schema {
             keys,
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         }
     }
 
@@ -1027,6 +1032,9 @@ impl Schema {
                         .source_attached_function_id
                         .clone()
                         .or(default_schema.source_attached_function_id.clone()),
+                    enable_quantization: user
+                        .enable_quantization
+                        .or(default_schema.enable_quantization),
                 })
             }
             None => Ok(default_schema),
@@ -1058,6 +1066,7 @@ impl Schema {
                 .source_attached_function_id
                 .clone()
                 .or(self.source_attached_function_id.clone()),
+            enable_quantization: other.enable_quantization.or(self.enable_quantization),
         })
     }
 
@@ -2942,6 +2951,7 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         };
 
         let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
@@ -2957,6 +2967,7 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -2994,6 +3005,7 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -3045,6 +3057,7 @@ mod tests {
                 keys: merged_keys,
                 cmek: None,
                 source_attached_function_id: None,
+                enable_quantization: None,
             }
         };
 
@@ -3083,6 +3096,7 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         };
 
         // Add a custom key override
@@ -3132,6 +3146,7 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         };
 
         // Override the #embedding key with custom settings
@@ -3655,6 +3670,7 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
+            enable_quantization: None,
         };
 
         // Set up complex user defaults
@@ -3733,6 +3749,7 @@ mod tests {
                 keys: merged_keys,
                 cmek: None,
                 source_attached_function_id: None,
+                enable_quantization: None,
             }
         };
 
@@ -6403,6 +6420,7 @@ mod tests {
                             keys: extra_keys,
                             cmek: None,
                             source_attached_function_id: None,
+                            enable_quantization: None,
                         }
                     },
                 )

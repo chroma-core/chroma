@@ -252,10 +252,17 @@ type ValueTypes struct {
 	Boolean      *BoolValueType         `json:"bool,omitempty"`
 }
 
+// Cmek represents a customer-managed encryption key configuration
+type Cmek struct {
+	Gcp *string `json:"gcp,omitempty"`
+}
+
 type Schema struct {
 	Defaults                 ValueTypes            `json:"defaults"`
 	Keys                     map[string]ValueTypes `json:"keys"`
+	Cmek                     *Cmek                 `json:"cmek,omitempty"`
 	SourceAttachedFunctionID *string               `json:"source_attached_function_id,omitempty"`
+	EnableQuantization       *bool                 `json:"enable_quantization,omitempty"`
 }
 
 // GetSourceAttachedFunctionIDFromSchema parses a schema string and returns the source attached function ID if present
