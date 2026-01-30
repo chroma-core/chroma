@@ -251,7 +251,7 @@ openAICollection = client.createCollection({
 });
 
 // Setting `embedding_function` in the collection's `configuration`
-cohereCollection = client.getOrCreateCollection({
+cohereCollection = await client.getOrCreateCollection({
   name: "my_cohere_collection",
   configuration: {
     embeddingFunction: new CohereEmbeddingFunction({
