@@ -901,8 +901,47 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
 /// Flusher for persisting a quantized SPANN index to storage.
 pub struct QuantizedSpannFlusher {
     config: QuantizedSpannConfig,
+    centroid: USearchIndex,
+    embedding_metadata_flusher: BlockfileFlusher,
     quantized_cluster_flusher: BlockfileFlusher,
     scalar_metadata_flusher: BlockfileFlusher,
-    embedding_metadata_flusher: BlockfileFlusher,
-    centroid: USearchIndex,
+    usearch_provider: USearchIndexProvider,
+}
+
+impl QuantizedSpannFlusher {
+    /// Flush all data to storage and return updated config with IDs.
+    pub async fn flush(self) -> Result<QuantizedSpannConfig, QuantizedSpannError> {
+        // Get IDs before flushing
+        let embedding_metadata_id = self.embedding_metadata_flusher.id();
+        let quantized_cluster_id = self.quantized_cluster_flusher.id();
+        let scalar_metadata_id = self.scalar_metadata_flusher.id();
+
+        // Flush blockfiles
+        self.embedding_metadata_flusher
+            .flush::<u64, Vec<f32>>()
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?;
+        self.quantized_cluster_flusher
+            .flush::<u64, QuantizedCluster<'_>>()
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?;
+        self.scalar_metadata_flusher
+            .flush::<u64, u64>()
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?;
+
+        // Flush centroid index
+        self.usearch_provider
+            .flush(&self.centroid)
+            .await
+            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+
+        // Return updated config with all IDs
+        Ok(QuantizedSpannConfig {
+            embedding_metadata_id: Some(embedding_metadata_id),
+            quantized_cluster_id: Some(quantized_cluster_id),
+            scalar_metadata_id: Some(scalar_metadata_id),
+            ..self.config
+        })
+    }
 }

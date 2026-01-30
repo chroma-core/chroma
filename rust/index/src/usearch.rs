@@ -281,6 +281,7 @@ impl Weighted for USearchIndex {
 /// Cache key ensures fairness: at most one index per collection per type
 /// (raw vs quantized) in cache, preventing a single hot collection from
 /// monopolizing cache space.
+#[derive(Clone)]
 pub struct USearchIndexProvider {
     cache: Arc<dyn Cache<CacheKey, USearchIndex>>,
     storage: Storage,

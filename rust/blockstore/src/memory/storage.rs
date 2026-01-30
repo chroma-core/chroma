@@ -758,6 +758,13 @@ impl<'referred_data> Readable<'referred_data> for QuantizedCluster<'referred_dat
     }
 }
 
+// Vec<f32> only supports Arrow blockfiles, not memory storage.
+impl Writeable for Vec<f32> {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {}
+
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {}
+}
+
 impl<'referred_data> Readable<'referred_data> for &'referred_data [f32] {
     fn read_from_storage(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> Option<Self> {
         None
@@ -785,6 +792,16 @@ impl<'referred_data> Readable<'referred_data> for &'referred_data [f32] {
 
     fn rank(_: &str, _: KeyWrapper, _: &'referred_data Storage) -> usize {
         0
+    }
+}
+
+impl Writeable for u64 {
+    fn write_to_storage(_: &str, _: KeyWrapper, _: Self, _: &StorageBuilder) {
+        unimplemented!("u64 memory storage not implemented")
+    }
+
+    fn remove_from_storage(_: &str, _: KeyWrapper, _: &StorageBuilder) {
+        unimplemented!("u64 memory storage not implemented")
     }
 }
 
