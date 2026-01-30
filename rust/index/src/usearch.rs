@@ -335,11 +335,7 @@ impl VectorIndexProvider for USearchIndexProvider {
     type Config = USearchIndexConfig;
     type Error = USearchError;
 
-    async fn commit(&self, index: &Self::Index) -> Result<IndexUuid, Self::Error> {
-        Ok(index.id)
-    }
-
-    async fn flush(&self, index: &Self::Index) -> Result<(), Self::Error> {
+    async fn flush(&self, index: &Self::Index) -> Result<IndexUuid, Self::Error> {
         let buffer = index.save().await?;
 
         let key = USearchIndex::format_storage_key(
@@ -359,7 +355,7 @@ impl VectorIndexProvider for USearchIndexProvider {
 
         self.cache.insert(index.cache_key, index.clone()).await;
 
-        Ok(())
+        Ok(index.id)
     }
 
     async fn open(
@@ -513,9 +509,7 @@ mod tests {
             for i in 0..32 {
                 index.add(i, &vectors[&i]).unwrap();
             }
-            let id = provider.commit(&index).await.unwrap();
-            provider.flush(&index).await.unwrap();
-            id
+            provider.flush(&index).await.unwrap()
         };
 
         // Phase 2: Recreate provider, verify persistence, fork, add 32 more, flush
@@ -526,7 +520,6 @@ mod tests {
                 .open(&config, OpenMode::Open(index_a_id))
                 .await
                 .unwrap();
-            assert_eq!(provider.commit(&index).await.unwrap(), index_a_id);
             assert_eq!(index.len().unwrap(), 32);
             for i in 0..32 {
                 assert_eq!(index.get(i).unwrap().unwrap(), vectors[&i]);
@@ -537,13 +530,12 @@ mod tests {
                 .open(&config, OpenMode::Fork(index_a_id))
                 .await
                 .unwrap();
-            let forked_id = provider.commit(&forked).await.unwrap();
+            let forked_id = forked.id;
             assert_ne!(forked_id, index_a_id);
             for i in 32..64 {
                 forked.add(i, &vectors[&i]).unwrap();
             }
-            provider.flush(&forked).await.unwrap();
-            forked_id
+            provider.flush(&forked).await.unwrap()
         };
 
         // Phase 3: Recreate provider, verify isolation
