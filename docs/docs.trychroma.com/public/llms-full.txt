@@ -9234,7 +9234,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
 
 
-For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships will all embedding functions included.
+For TypeScript users, Chroma provides packages for a number of embedding model providers. The Chromadb python package ships with all embedding functions included.
 
 | Provider                    | Embedding Function Package
 | ----------                  | -------------------------
