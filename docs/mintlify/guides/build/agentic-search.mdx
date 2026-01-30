@@ -4,18 +4,16 @@ description: Build agents that iteratively search and refine results to answer c
 ---
 
 import { Callout } from '/snippets/callout.mdx';
+import YouTube from '/snippets/youtube.jsx';
 
-<Frame>
-  <iframe
+<div className="w-full aspect-video">
+  <YouTube
     src="https://www.youtube.com/embed/_VAPVcdow-Q"
     title="Framework-less Agentic Search"
-    width="100%"
-    height="400"
-    frameBorder="0"
     allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
     allowFullScreen
   />
-</Frame>
+</div>
 
 We've seen how retrieval enables LLMs to answer questions over private data and maintain state for AI applications. While this approach works well for simple lookups, it falls short in most real-world scenarios.
 
