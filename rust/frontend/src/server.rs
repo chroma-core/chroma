@@ -1116,7 +1116,7 @@ struct ListCollectionsParams {
             {
                 "lang": "curl",
                 "label": "List collections",
-                "source": "curl -X GET 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1207,7 +1207,7 @@ async fn list_collections(
             {
                 "lang": "curl",
                 "label": "Count collections",
-                "source": "curl -X GET 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections_count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections_count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1293,7 +1293,7 @@ async fn count_collections(
             {
                 "lang": "curl",
                 "label": "Create collection",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my_collection\"}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my_collection\"}'"
             }
         ]))
     )
@@ -1406,7 +1406,7 @@ async fn create_collection(
             {
                 "lang": "curl",
                 "label": "Get collection",
-                "source": "curl -X GET 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1474,7 +1474,7 @@ async fn get_collection(
             {
                 "lang": "curl",
                 "label": "Get collection by CRN",
-                "source": "curl -X GET 'https://api.trychroma.com.com/api/v2/collections/my_tenant:my_database:my_collection' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/collections/my_tenant:my_database:my_collection' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1553,7 +1553,7 @@ async fn get_collection_by_crn(
             {
                 "lang": "curl",
                 "label": "Update collection",
-                "source": "curl -X PUT 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"new_name\", \"metadata\": {\"key\": \"value\"}}'"
+                "source": "curl -X PUT 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"new_name\", \"metadata\": {\"key\": \"value\"}}'"
             }
         ]))
     )
@@ -1664,7 +1664,7 @@ async fn update_collection(
             {
                 "lang": "curl",
                 "label": "Delete collection",
-                "source": "curl -X DELETE 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X DELETE 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1741,7 +1741,7 @@ async fn delete_collection(
             {
                 "lang": "curl",
                 "label": "Fork collection",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"new_name\": \"forked_collection\"}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"new_name\": \"forked_collection\"}'"
             }
         ]))
     )
@@ -1847,7 +1847,7 @@ async fn fork_collection(
             {
                 "lang": "curl",
                 "label": "Add records",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
             }
         ]))
     )
@@ -1985,7 +1985,7 @@ async fn collection_add(
             {
                 "lang": "curl",
                 "label": "Update records",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\"], \"documents\": [\"updated doc\"], \"metadatas\": [{\"key\": \"value\"}]}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\"], \"documents\": [\"updated doc\"], \"metadatas\": [{\"key\": \"value\"}]}'"
             }
         ]))
     )
@@ -2126,7 +2126,7 @@ async fn collection_update(
             {
                 "lang": "curl",
                 "label": "Upsert records",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
             }
         ]))
     )
@@ -2280,12 +2280,12 @@ async fn collection_upsert(
             {
                 "lang": "curl",
                 "label": "Delete records by IDs",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
             },
             {
                 "lang": "curl",
                 "label": "Delete records by metadata filter",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"old\"}}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"old\"}}'"
             }
         ]))
     )
@@ -2407,7 +2407,7 @@ async fn collection_delete(
             {
                 "lang": "curl",
                 "label": "Count records",
-                "source": "curl -X GET 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -2524,7 +2524,7 @@ async fn collection_count(
             {
                 "lang": "curl",
                 "label": "Get indexing status",
-                "source": "curl -X GET 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
+                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -2662,12 +2662,12 @@ async fn indexing_status(
             {
                 "lang": "curl",
                 "label": "Get records by IDs",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
             },
             {
                 "lang": "curl",
                 "label": "Get records by metadata filter",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"science\"}, \"limit\": 10}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"science\"}, \"limit\": 10}'"
             }
         ]))
     )
@@ -2848,12 +2848,12 @@ async fn collection_get(
             {
                 "lang": "curl",
                 "label": "Query with embeddings",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}'"
             },
             {
                 "lang": "curl",
                 "label": "Query with text",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_texts\": [\"search text\"], \"n_results\": 10}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_texts\": [\"search text\"], \"n_results\": 10}'"
             }
         ]))
     )
@@ -3026,7 +3026,7 @@ async fn collection_query(
             {
                 "lang": "curl",
                 "label": "Search with embeddings",
-                "source": "curl -X POST 'https://api.trychroma.com.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"searches\": [{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}]}'"
+                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"searches\": [{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}]}'"
             }
         ]))
     )
