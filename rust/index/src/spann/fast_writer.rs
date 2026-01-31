@@ -14,18 +14,18 @@ use chroma_blockstore::{
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_tracing::util::Stopwatch;
 use chroma_types::{Cmek, CollectionUuid, InternalSpannConfiguration, SpannPostingList};
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use opentelemetry::global;
 use rand::seq::SliceRandom;
 use uuid::Uuid;
 
 use crate::{
-    hnsw_provider::{HnswIndexFlusher, HnswIndexProvider, HnswIndexRef},
     spann::types::{
-        GarbageCollectionContext, HnswGarbageCollectionPolicy, PlGarbageCollectionPolicy,
-        SpannIndexFlusher, SpannIndexFlusherMetrics, SpannIndexWriterError,
+        FastSpannIndexFlusher, GarbageCollectionContext, PlGarbageCollectionPolicy,
+        SpannIndexFlusherMetrics, SpannIndexWriterError,
     },
-    IndexUuid,
+    usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
+    IndexUuid, OpenMode, VectorIndex, VectorIndexProvider,
 };
 
 use super::utils::{cluster, KMeansAlgorithmInput, KMeansError};
@@ -151,10 +151,10 @@ pub struct HeadData {
 #[derive(Clone)]
 // Note: Fields of this struct are public for testing.
 pub struct FastSpannIndexWriter {
-    // HNSW index and its provider for centroid search.
-    pub hnsw_index: HnswIndexRef,
-    pub cleaned_up_hnsw_index: Option<HnswIndexRef>,
-    hnsw_provider: HnswIndexProvider,
+    // USearch centroid indexes and provider.
+    pub raw_centroid: USearchIndex,
+    pub quantized_centroid: USearchIndex,
+    usearch_provider: USearchIndexProvider,
     blockfile_provider: BlockfileProvider,
     pub posting_list_writer: BlockfileWriter,
     pub next_head_id: Arc<AtomicU32>,
@@ -170,7 +170,7 @@ pub struct FastSpannIndexWriter {
     pub heads: Arc<DashMap<u32, HeadData, RandomState>>,
     pub versions: Arc<DashMap<u32, u32, RandomState>>,
     pub posting_list_reader: Option<BlockfileReader<'static, u32, SpannPostingList<'static>>>,
-    pub deleted_heads: Arc<DashMap<u32, (), RandomState>>,
+    pub deleted_heads: Arc<DashSet<u32, RandomState>>,
 }
 
 const MAX_HEAD_OFFSET_ID: &str = "max_head_offset_id";
@@ -201,8 +201,9 @@ struct NearbyHeadsResult {
 impl FastSpannIndexWriter {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        hnsw_index: HnswIndexRef,
-        hnsw_provider: HnswIndexProvider,
+        raw_centroid: USearchIndex,
+        quantized_centroid: USearchIndex,
+        usearch_provider: USearchIndexProvider,
         blockfile_provider: BlockfileProvider,
         posting_list_writer: BlockfileWriter,
         next_head_id: u32,
@@ -218,9 +219,9 @@ impl FastSpannIndexWriter {
         posting_list_reader: Option<BlockfileReader<'static, u32, SpannPostingList<'static>>>,
     ) -> Self {
         FastSpannIndexWriter {
-            hnsw_index,
-            cleaned_up_hnsw_index: None,
-            hnsw_provider,
+            raw_centroid,
+            quantized_centroid,
+            usearch_provider,
             blockfile_provider,
             posting_list_writer,
             next_head_id: Arc::new(AtomicU32::new(next_head_id)),
@@ -236,75 +237,7 @@ impl FastSpannIndexWriter {
             heads: Arc::new(heads),
             versions: Arc::new(versions),
             posting_list_reader,
-            deleted_heads: Arc::new(DashMap::new()),
-        }
-    }
-
-    async fn hnsw_index_from_id(
-        hnsw_provider: &HnswIndexProvider,
-        id: &IndexUuid,
-        collection_id: &CollectionUuid,
-        distance_function: DistanceFunction,
-        dimensionality: usize,
-        ef_search: usize,
-        prefix_path: &str,
-    ) -> Result<HnswIndexRef, SpannIndexWriterError> {
-        match hnsw_provider
-            .fork(
-                id,
-                collection_id,
-                dimensionality as i32,
-                distance_function,
-                ef_search,
-                prefix_path,
-            )
-            .await
-        {
-            Ok(index) => Ok(index),
-            Err(e) => {
-                tracing::error!(
-                    "Error forking hnsw index from id {:?} for collection {:?}: {:?}",
-                    id,
-                    collection_id,
-                    e
-                );
-                Err(SpannIndexWriterError::HnswIndexForkError(*e))
-            }
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn create_hnsw_index(
-        hnsw_provider: &HnswIndexProvider,
-        collection_id: &CollectionUuid,
-        distance_function: DistanceFunction,
-        dimensionality: usize,
-        m: usize,
-        ef_construction: usize,
-        ef_search: usize,
-        prefix_path: &str,
-    ) -> Result<HnswIndexRef, SpannIndexWriterError> {
-        match hnsw_provider
-            .create(
-                collection_id,
-                m,
-                ef_construction,
-                ef_search,
-                dimensionality as i32,
-                distance_function,
-                prefix_path,
-            )
-            .await
-        {
-            Ok(index) => Ok(index),
-            Err(e) => {
-                tracing::error!(
-                    "Error creating hnsw index for collection {:?}: {:?}",
-                    collection_id,
-                    e
-                );
-                Err(SpannIndexWriterError::HnswIndexCreateError(*e))
-            }
+            deleted_heads: Arc::new(DashSet::new()),
         }
     }
 
@@ -312,7 +245,7 @@ impl FastSpannIndexWriter {
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
-        hnsw_index: &HnswIndexRef,
+        raw_centroid: &USearchIndex,
     ) -> Result<(DashMap<u32, u32>, DashMap<u32, HeadData>), SpannIndexWriterError> {
         let reader_options = BlockfileReaderOptions::new(*blockfile_id, prefix_path.to_string());
         let reader = match blockfile_provider.read::<u32, u32>(reader_options).await {
@@ -336,28 +269,16 @@ impl FastSpannIndexWriter {
         })?;
         let versions = DashMap::default();
         let heads = DashMap::default();
-        let read_guard = hnsw_index.inner.read();
         for (prefix, key, value) in versions_data {
             // Empty prefix means its a point.
             // Non-empty prefix means its a head.
             if prefix.is_empty() {
                 versions.insert(key, value);
             } else {
-                let embedding = read_guard
-                    .hnsw_index
-                    .get(key as usize)
-                    .map_err(|e| {
-                        tracing::error!(
-                            "Error getting embedding from hnsw index for id {}: {}",
-                            key,
-                            e
-                        );
-                        SpannIndexWriterError::HnswIndexSearchError(e)
-                    })?
-                    .ok_or_else(|| {
-                        tracing::error!("Embedding not found in hnsw index for id {}", key);
-                        SpannIndexWriterError::HeadNotFound
-                    })?;
+                let embedding = raw_centroid.get(key)?.ok_or_else(|| {
+                    tracing::error!("Embedding not found in raw centroid index for id {}", key);
+                    SpannIndexWriterError::HeadNotFound
+                })?;
 
                 heads.insert(
                     key,
@@ -449,8 +370,9 @@ impl FastSpannIndexWriter {
 
     #[allow(clippy::too_many_arguments)]
     pub async fn from_id(
-        hnsw_provider: &HnswIndexProvider,
-        hnsw_id: Option<&IndexUuid>,
+        usearch_provider: &USearchIndexProvider,
+        raw_centroid_id: Option<IndexUuid>,
+        quantized_centroid_id: Option<IndexUuid>,
         versions_map_id: Option<&Uuid>,
         posting_list_id: Option<&Uuid>,
         max_head_id_bf_id: Option<&Uuid>,
@@ -465,34 +387,44 @@ impl FastSpannIndexWriter {
         cmek: Option<Cmek>,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
-        // Create the HNSW index.
-        let hnsw_index = match hnsw_id {
-            Some(hnsw_id) => {
-                Self::hnsw_index_from_id(
-                    hnsw_provider,
-                    hnsw_id,
-                    collection_id,
-                    distance_function.clone(),
-                    dimensionality,
-                    params.ef_search,
-                    prefix_path,
-                )
-                .await?
-            }
-            None => {
-                Self::create_hnsw_index(
-                    hnsw_provider,
-                    collection_id,
-                    distance_function.clone(),
-                    dimensionality,
-                    params.max_neighbors,
-                    params.ef_construction,
-                    params.ef_search,
-                    prefix_path,
-                )
-                .await?
-            }
+
+        // Create the raw centroid index config.
+        let raw_usearch_config = USearchIndexConfig {
+            collection_id: *collection_id,
+            cmek: cmek.clone(),
+            prefix_path: prefix_path.to_string(),
+            dimensions: dimensionality,
+            distance_function: distance_function.clone(),
+            connectivity: params.max_neighbors,
+            expansion_add: params.ef_construction,
+            expansion_search: params.ef_search,
+            quantization_center: None,
         };
+
+        // Open/create raw centroid index.
+        let raw_centroid_mode = match raw_centroid_id {
+            Some(id) => OpenMode::Fork(id),
+            None => OpenMode::Create,
+        };
+        let raw_centroid = usearch_provider
+            .open(&raw_usearch_config, raw_centroid_mode)
+            .await?;
+
+        // Create the quantized centroid index config (with zero center for now).
+        let quantization_center: Arc<[f32]> = vec![0.0; dimensionality].into();
+        let quantized_usearch_config = USearchIndexConfig {
+            quantization_center: Some(quantization_center),
+            ..raw_usearch_config.clone()
+        };
+
+        // Open/create quantized centroid index.
+        let quantized_centroid_mode = match quantized_centroid_id {
+            Some(id) => OpenMode::Fork(id),
+            None => OpenMode::Create,
+        };
+        let quantized_centroid = usearch_provider
+            .open(&quantized_usearch_config, quantized_centroid_mode)
+            .await?;
 
         // Load the versions map and heads.
         let (versions, heads) = match versions_map_id {
@@ -501,7 +433,7 @@ impl FastSpannIndexWriter {
                     versions_map_id,
                     blockfile_provider,
                     prefix_path,
-                    &hnsw_index,
+                    &raw_centroid,
                 )
                 .await?
             }
@@ -552,8 +484,9 @@ impl FastSpannIndexWriter {
             None => 1,
         };
         Ok(Self::new(
-            hnsw_index,
-            hnsw_provider.clone(),
+            raw_centroid,
+            quantized_centroid,
+            usearch_provider.clone(),
             blockfile_provider.clone(),
             posting_list_writer,
             max_head_id,
@@ -589,29 +522,25 @@ impl FastSpannIndexWriter {
         let mut nearby_ids: Vec<usize> = Vec::with_capacity(k);
         let mut nearby_distances: Vec<f32> = Vec::with_capacity(k);
         let mut embeddings: Vec<Arc<[f32]>> = Vec::with_capacity(k);
-        {
-            let read_guard = self.hnsw_index.inner.read();
-            let (ids, distances) =
-                read_guard
-                    .hnsw_index
-                    .query(query, k, &[], &[])
-                    .map_err(|e| {
-                        tracing::error!("Error querying hnsw index: {:?}", e);
-                        SpannIndexWriterError::HnswIndexSearchError(e)
-                    })?;
-            for (id, distance) in ids.iter().zip(distances.iter()) {
-                let within_epsilon = if distances[0] < 0.0 && *distance < 0.0 {
-                    // Both negative: reverse the comparison
-                    *distance >= (1_f32 + rng_epsilon) * distances[0]
-                } else {
-                    // At least one is non-negative: use normal comparison
-                    *distance <= (1_f32 + rng_epsilon) * distances[0]
-                };
 
-                if within_epsilon {
-                    nearby_ids.push(*id);
-                    nearby_distances.push(*distance);
-                }
+        let search_result = self.raw_centroid.search(query, k)?;
+
+        for (id, distance) in search_result
+            .keys
+            .iter()
+            .zip(search_result.distances.iter())
+        {
+            let within_epsilon = if search_result.distances[0] < 0.0 && *distance < 0.0 {
+                // Both negative: reverse the comparison
+                *distance >= (1_f32 + rng_epsilon) * search_result.distances[0]
+            } else {
+                // At least one is non-negative: use normal comparison
+                *distance <= (1_f32 + rng_epsilon) * search_result.distances[0]
+            };
+
+            if within_epsilon {
+                nearby_ids.push(*id as usize);
+                nearby_distances.push(*distance);
             }
         }
         let mut nearby_ids2: Vec<usize> = Vec::with_capacity(k);
@@ -717,20 +646,12 @@ impl FastSpannIndexWriter {
             // Remove from heads DashMap
             self.heads.remove(&head_id);
 
-            // Delete from HNSW
-            {
-                let hnsw_write_guard = self.hnsw_index.inner.write();
-                hnsw_write_guard
-                    .hnsw_index
-                    .delete(head_id as usize)
-                    .map_err(|e| {
-                        tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
-            }
+            // Delete from both centroid indexes
+            self.raw_centroid.remove(head_id)?;
+            self.quantized_centroid.remove(head_id)?;
 
             // Track as deleted
-            self.deleted_heads.insert(head_id, ());
+            self.deleted_heads.insert(head_id);
         }
 
         Ok(())
@@ -780,37 +701,33 @@ impl FastSpannIndexWriter {
         head_embedding: &[f32],
         k: usize,
     ) -> Result<NearbyHeadsResult, SpannIndexWriterError> {
-        let read_guard = self.hnsw_index.inner.read();
-        let (nearest_ids, nearest_distances) = read_guard
-            .hnsw_index
-            .query(head_embedding, k, &[], &[])
-            .map_err(|e| {
-                tracing::error!("Error querying hnsw for {:?}: {:?}", head_embedding, e);
-                SpannIndexWriterError::HnswIndexSearchError(e)
-            })?;
-        drop(read_guard); // Release HNSW lock before accessing centroids
+        let search_result = self.raw_centroid.search(head_embedding, k)?;
 
         // Get the embeddings from heads DashMap.
         // Filter out heads that are too far from the nearest head.
         const MAX_DIST_RATIO: f32 = 2.0;
-        let limit_dist = nearest_distances.first().map(|d| d * MAX_DIST_RATIO);
+        let limit_dist = search_result.distances.first().map(|d| d * MAX_DIST_RATIO);
 
         let mut result = NearbyHeadsResult {
             ids: Vec::with_capacity(k),
             distances: Vec::with_capacity(k),
             embeddings: Vec::with_capacity(k),
         };
-        for (id, distance) in nearest_ids.into_iter().zip(nearest_distances.into_iter()) {
+        for (id, distance) in search_result
+            .keys
+            .into_iter()
+            .zip(search_result.distances.into_iter())
+        {
             // Skip heads that are too far from the nearest head.
             if let Some(limit) = limit_dist {
                 if distance > limit {
                     continue;
                 }
             }
-            let Some(head_data) = self.heads.get(&(id as u32)) else {
+            let Some(head_data) = self.heads.get(&id) else {
                 continue;
             };
-            result.ids.push(id);
+            result.ids.push(id as usize);
             result.distances.push(distance);
             result.embeddings.push(Arc::clone(&head_data.centroid));
         }
@@ -1148,22 +1065,10 @@ impl FastSpannIndexWriter {
             target_data.length += source_data.length;
             drop(target_data); // Release lock before HNSW and reassignment
 
-            // Delete source from HNSW
-            {
-                let hnsw_write_guard = self.hnsw_index.inner.write();
-                hnsw_write_guard
-                    .hnsw_index
-                    .delete(source_head_id as usize)
-                    .map_err(|e| {
-                        tracing::error!(
-                            "Error deleting head {} from hnsw index during merge: {}",
-                            source_head_id,
-                            e
-                        );
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
-            }
-            self.deleted_heads.insert(source_head_id, ());
+            // Delete source from both centroid indexes
+            self.raw_centroid.remove(source_head_id)?;
+            self.quantized_centroid.remove(source_head_id)?;
+            self.deleted_heads.insert(source_head_id);
 
             // Reassign merged points that now violate NPA
             for (i, doc_id) in source_data.posting_list.ids.iter().enumerate() {
@@ -1454,35 +1359,10 @@ impl FastSpannIndexWriter {
                 },
             );
 
-            // Only add to HNSW if this is a NEW head
+            // Only add to centroid indexes if this is a NEW head
             if same_head_cluster != Some(k) {
-                let mut hnsw_write_guard = self.hnsw_index.inner.write();
-                let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
-                let hnsw_capacity = hnsw_write_guard.hnsw_index.capacity();
-                if hnsw_len + 1 > hnsw_capacity {
-                    hnsw_write_guard
-                        .hnsw_index
-                        .resize(hnsw_capacity * 2)
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error resizing hnsw index during split to {}: {}",
-                                hnsw_capacity * 2,
-                                e
-                            );
-                            SpannIndexWriterError::HnswIndexResizeError(e)
-                        })?;
-                }
-                hnsw_write_guard
-                    .hnsw_index
-                    .add(cluster_head_id as usize, &centroid)
-                    .map_err(|e| {
-                        tracing::error!(
-                            "Error adding head {} to hnsw index: {}",
-                            cluster_head_id,
-                            e
-                        );
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
+                self.raw_centroid.add(cluster_head_id, &centroid)?;
+                self.quantized_centroid.add(cluster_head_id, &centroid)?;
                 self.stats
                     .num_heads_created
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1493,14 +1373,14 @@ impl FastSpannIndexWriter {
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
 
-        // Only delete old head from HNSW if we didn't reuse it
+        // Only delete old head from centroid indexes if we didn't reuse it
         if same_head_cluster.is_none() {
-            let hnsw_write_guard = self.hnsw_index.inner.write();
-            let _ = hnsw_write_guard.hnsw_index.delete(head_id as usize);
+            self.raw_centroid.remove(head_id)?;
+            self.quantized_centroid.remove(head_id)?;
             self.stats
                 .num_heads_deleted
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            self.deleted_heads.insert(head_id, ());
+            self.deleted_heads.insert(head_id);
         }
 
         // Reassign points to nearby heads
@@ -1542,35 +1422,12 @@ impl FastSpannIndexWriter {
             self.stats
                 .num_pl_modified
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            // Next add to hnsw.
-            {
-                let mut write_guard = self.hnsw_index.inner.write();
-                let hnsw_len = write_guard.hnsw_index.len_with_deleted();
-                let hnsw_capacity = write_guard.hnsw_index.capacity();
-                if hnsw_len + 1 > hnsw_capacity {
-                    write_guard
-                        .hnsw_index
-                        .resize(hnsw_capacity * 2)
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error resizing hnsw index during append to {}: {}",
-                                hnsw_capacity * 2,
-                                e
-                            );
-                            SpannIndexWriterError::HnswIndexResizeError(e)
-                        })?;
-                }
-                write_guard
-                    .hnsw_index
-                    .add(next_id as usize, &embeddings)
-                    .map_err(|e| {
-                        tracing::error!("Error adding new head {} to hnsw index: {}", next_id, e);
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
-                self.stats
-                    .num_heads_created
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            }
+            // Add to both centroid indexes.
+            self.raw_centroid.add(next_id, &embeddings)?;
+            self.quantized_centroid.add(next_id, &embeddings)?;
+            self.stats
+                .num_heads_created
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             return Ok(());
         }
         // Otherwise add to the posting list of these arrays.
@@ -1643,17 +1500,6 @@ impl FastSpannIndexWriter {
         Ok(())
     }
 
-    async fn is_head_deleted(&self, head_id: usize) -> Result<bool, SpannIndexWriterError> {
-        let hnsw_read_guard = self.hnsw_index.inner.read();
-        let hnsw_emb = hnsw_read_guard.hnsw_index.get(head_id);
-        // TODO(Sanket): Check for exact error.
-        // TODO(Sanket): We should get this information from hnswlib and not rely on error.
-        if hnsw_emb.is_err() || hnsw_emb.unwrap().is_none() {
-            return Ok(true);
-        }
-        Ok(false)
-    }
-
     // GC method - scrubs the posting list to remove outdated entries and optionally merges
     async fn garbage_collect_head(
         &self,
@@ -1665,113 +1511,6 @@ impl FastSpannIndexWriter {
             .await
     }
 
-    pub fn eligible_to_gc(&mut self, threshold: f32) -> bool {
-        let (len_with_deleted, len_without_deleted) = {
-            let hnsw_read_guard = self.hnsw_index.inner.read();
-            (
-                hnsw_read_guard.hnsw_index.len_with_deleted(),
-                hnsw_read_guard.hnsw_index.len(),
-            )
-        };
-        if (len_with_deleted as f32) < ((1.0 + (threshold / 100.0)) * (len_without_deleted as f32))
-        {
-            tracing::info!(
-                "No need to garbage collect heads since delete count is within threshold"
-            );
-            return false;
-        }
-        true
-    }
-
-    pub async fn garbage_collect_heads(&mut self) -> Result<(), SpannIndexWriterError> {
-        tracing::info!("Garbage collecting all the heads");
-        let (prefix_path, non_deleted_len) = {
-            let hnsw_read_guard = self.hnsw_index.inner.read();
-            (
-                hnsw_read_guard.prefix_path.clone(),
-                hnsw_read_guard.hnsw_index.len(),
-            )
-        };
-        if non_deleted_len == 0 {
-            return Ok(());
-        }
-        // Create a new hnsw index and add elements to it.
-        let clean_hnsw = self
-            .hnsw_provider
-            .create(
-                &self.collection_id,
-                self.params.max_neighbors,
-                self.params.ef_construction,
-                self.params.ef_search,
-                self.dimensionality as i32,
-                self.params.space.clone().into(),
-                &prefix_path,
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!("Error creating hnsw index during gc");
-                SpannIndexWriterError::HnswIndexCreateError(*e)
-            })?;
-        {
-            let hnsw_read_guard = self.hnsw_index.inner.read();
-            let mut clean_hnsw_write_guard = clean_hnsw.inner.write();
-            let (non_deleted_heads, _) = hnsw_read_guard.hnsw_index.get_all_ids().map_err(|e| {
-                tracing::error!("Error getting all ids from hnsw index during gc: {}", e);
-                SpannIndexWriterError::HnswIndexSearchError(e)
-            })?;
-            clean_hnsw_write_guard
-                .hnsw_index
-                .resize(non_deleted_heads.len())
-                .map_err(|e| {
-                    tracing::error!(
-                        "Error resizing hnsw index during gc to {}: {}",
-                        non_deleted_heads.len(),
-                        e
-                    );
-                    SpannIndexWriterError::HnswIndexResizeError(e)
-                })?;
-            for head in non_deleted_heads {
-                let head_embedding = hnsw_read_guard
-                    .hnsw_index
-                    .get(head)
-                    .map_err(|e| {
-                        tracing::error!(
-                            "Error getting head {} from hnsw index during gc: {}",
-                            head,
-                            e
-                        );
-                        SpannIndexWriterError::HnswIndexSearchError(e)
-                    })?
-                    .ok_or(SpannIndexWriterError::HeadNotFound)?;
-                let hnsw_len = clean_hnsw_write_guard.hnsw_index.len_with_deleted();
-                let hnsw_capacity = clean_hnsw_write_guard.hnsw_index.capacity();
-                if hnsw_len + 1 > hnsw_capacity {
-                    clean_hnsw_write_guard
-                        .hnsw_index
-                        .resize(hnsw_capacity * 2)
-                        .map_err(|e| {
-                            tracing::error!(
-                                "Error resizing hnsw index during gc to {}: {}",
-                                hnsw_capacity * 2,
-                                e
-                            );
-                            SpannIndexWriterError::HnswIndexResizeError(e)
-                        })?;
-                }
-                clean_hnsw_write_guard
-                    .hnsw_index
-                    .add(head, &head_embedding)
-                    .map_err(|e| {
-                        tracing::error!("Error adding head {} to clean hnsw index: {}", head, e);
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
-            }
-        }
-        // Swap the hnsw index.
-        self.cleaned_up_hnsw_index.replace(clean_hnsw);
-        Ok(())
-    }
-
     pub async fn pl_garbage_collect_random_sample(
         &self,
         sample_size: f32,
@@ -1780,41 +1519,23 @@ impl FastSpannIndexWriter {
             "Garbage collecting {} random samples of posting list",
             sample_size
         );
-        // Get all the heads.
-        let non_deleted_heads;
-        {
-            let hnsw_read_guard = self.hnsw_index.inner.read();
-            (non_deleted_heads, _) = hnsw_read_guard.hnsw_index.get_all_ids().map_err(|e| {
-                tracing::error!("Error getting all ids from hnsw index during gc: {}", e);
-                SpannIndexWriterError::HnswIndexSearchError(e)
-            })?;
-        }
+        // Get all the heads from DashMap.
+        let all_head_ids: Vec<u32> = self.heads.iter().map(|r| *r.key()).collect();
+
         // Randomly sample x% of heads for gc.
-        let sampled_heads = non_deleted_heads.choose_multiple(
+        let sampled_heads = all_head_ids.choose_multiple(
             &mut rand::thread_rng(),
-            (non_deleted_heads.len() as f32 * sample_size).floor() as usize,
+            (all_head_ids.len() as f32 * sample_size).floor() as usize,
         );
+
         // Iterate over all the heads and gc heads.
         for head_id in sampled_heads.into_iter() {
-            if self.is_head_deleted(*head_id).await? {
-                continue;
-            }
             let head_embedding = self
-                .hnsw_index
-                .inner
-                .read()
-                .hnsw_index
-                .get(*head_id)
-                .map_err(|e| {
-                    tracing::error!(
-                        "Error getting head {} from hnsw index during gc: {}",
-                        head_id,
-                        e
-                    );
-                    SpannIndexWriterError::HnswIndexSearchError(e)
-                })?
+                .raw_centroid
+                .get(*head_id)?
                 .ok_or(SpannIndexWriterError::HeadNotFound)?;
-            self.garbage_collect_head(*head_id, &head_embedding).await?;
+            self.garbage_collect_head(*head_id as usize, &head_embedding)
+                .await?;
         }
         Ok(())
     }
@@ -1836,18 +1557,7 @@ impl FastSpannIndexWriter {
                 }
             }
         }
-        if self.gc_context.hnsw_context().enabled {
-            match &self.gc_context.hnsw_context().policy {
-                HnswGarbageCollectionPolicy::FullRebuild => {
-                    self.garbage_collect_heads().await?;
-                }
-                HnswGarbageCollectionPolicy::DeletePercentage(policy) => {
-                    if self.eligible_to_gc(policy.threshold) {
-                        self.garbage_collect_heads().await?;
-                    }
-                }
-            }
-        }
+        // Note: USearch handles GC automatically after save, no need for explicit HNSW GC.
         tracing::info!(
             "Garbage collected in {} ms",
             stopwatch.elapsed_micros() / 1000
@@ -1979,8 +1689,18 @@ impl FastSpannIndexWriter {
         );
     }
 
-    pub async fn commit(self) -> Result<SpannIndexFlusher, SpannIndexWriterError> {
+    pub async fn commit(self) -> Result<FastSpannIndexFlusher, SpannIndexWriterError> {
         self.emit_counters();
+
+        // Reconcile heads where we have in-memory delta that doesn't match total length
+        for head_ref in self.heads.iter() {
+            let pl_len = head_ref.posting_list.ids.len();
+            if pl_len > 0 && pl_len != head_ref.length as usize {
+                let head_id = *head_ref.key();
+                self.reconcile_posting_list(head_id).await?;
+            }
+        }
+
         // Posting list: write staged data and delete removed heads.
         let pl_flusher = {
             let stopwatch = Stopwatch::new(
@@ -2023,7 +1743,7 @@ impl FastSpannIndexWriter {
             }
 
             // Delete removed heads
-            for (head_id, _) in Arc::try_unwrap(self.deleted_heads)
+            for head_id in Arc::try_unwrap(self.deleted_heads)
                 .unwrap_or_else(|arc| (*arc).clone())
                 .into_iter()
             {
@@ -2153,52 +1873,13 @@ impl FastSpannIndexWriter {
         })?;
         tracing::info!("Committed max head id");
 
-        // Hnsw.
-        let (hnsw_id, prefix_path, hnsw_index) = {
-            let stopwatch = Stopwatch::new(
-                &self.metrics.hnsw_commit_latency,
-                &[],
-                chroma_tracing::util::StopWatchUnit::Millis,
-            );
-            let (hnsw_id, prefix_path, hnsw_index) = match self.cleaned_up_hnsw_index {
-                Some(index) => {
-                    tracing::info!("Committing cleaned up hnsw index");
-                    let (id, prefix_path) = {
-                        let index_guard = index.inner.read();
-                        (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
-                    };
-                    (id, prefix_path, index)
-                }
-                None => {
-                    let (id, prefix_path) = {
-                        let index_guard = self.hnsw_index.inner.read();
-                        (index_guard.hnsw_index.id, index_guard.prefix_path.clone())
-                    };
-                    (id, prefix_path, self.hnsw_index.clone())
-                }
-            };
-            self.hnsw_provider.commit(hnsw_index.clone()).map_err(|e| {
-                tracing::error!("Error committing hnsw index: {}", e);
-                SpannIndexWriterError::HnswIndexCommitError(e)
-            })?;
-            tracing::info!(
-                "Committed hnsw index in {} ms",
-                stopwatch.elapsed_micros() / 1000
-            );
-            (hnsw_id, prefix_path, hnsw_index)
-        };
-
-        Ok(SpannIndexFlusher {
+        Ok(FastSpannIndexFlusher {
             pl_flusher,
             versions_map_flusher,
             max_head_id_flusher,
-            hnsw_flusher: HnswIndexFlusher {
-                provider: self.hnsw_provider,
-                prefix_path,
-                index_id: hnsw_id,
-                hnsw_index,
-                cmek: self.cmek,
-            },
+            raw_centroid: self.raw_centroid,
+            quantized_centroid: self.quantized_centroid,
+            usearch_provider: self.usearch_provider,
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
                 versions_map_flush_latency: self.metrics.versions_map_flush_latency.clone(),
@@ -2232,8 +1913,8 @@ mod tests {
 
     use crate::{
         config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
-        hnsw_provider::HnswIndexProvider,
         spann::types::GarbageCollectionContext,
+        usearch::USearchIndexProvider,
     };
 
     use super::{FastSpannIndexWriter, SpannMetrics};
@@ -2253,14 +1934,8 @@ mod tests {
         );
         let blockfile_provider =
             BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
-        let hnsw_cache = new_non_persistent_cache_for_test();
-        let hnsw_provider = HnswIndexProvider::new(
-            storage.clone(),
-            PathBuf::from(tmp_dir.path().to_str().unwrap()),
-            hnsw_cache,
-            16,
-            false,
-        );
+        let usearch_cache = new_non_persistent_cache_for_test();
+        let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
         let collection_id = CollectionUuid::new();
         let dimensionality = 2;
         let params = InternalSpannConfiguration {
@@ -2282,7 +1957,8 @@ mod tests {
         let prefix_path = "";
         let pl_block_size = 5 * 1024 * 1024;
         let writer = FastSpannIndexWriter::from_id(
-            &hnsw_provider,
+            &usearch_provider,
+            None,
             None,
             None,
             None,

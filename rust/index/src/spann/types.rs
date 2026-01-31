@@ -35,7 +35,8 @@ use crate::{
         HnswIndexRef,
     },
     spann::utils::cluster,
-    IndexUuid,
+    usearch::{USearchError, USearchIndex, USearchIndexProvider},
+    IndexUuid, VectorIndexProvider,
 };
 
 use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
@@ -390,6 +391,8 @@ pub enum SpannIndexWriterError {
     HnswIndexFlushError(#[source] HnswIndexProviderFlushError),
     #[error("Error kmeans clustering {0}")]
     KMeansClusteringError(#[from] KMeansError),
+    #[error("Centroid index error {0}")]
+    CentroidIndexError(#[from] USearchError),
 }
 
 impl ChromaError for SpannIndexWriterError {
@@ -424,6 +427,7 @@ impl ChromaError for SpannIndexWriterError {
             Self::VersionsMapWriterCreateError(e) => e.code(),
             Self::MaxHeadIdWriterCreateError(e) => e.code(),
             Self::KMeansClusteringError(e) => e.code(),
+            Self::CentroidIndexError(ref e) => e.code(),
         }
     }
 }
@@ -2510,6 +2514,26 @@ pub struct SpannIndexIds {
     pub prefix_path: String,
 }
 
+pub struct FastSpannIndexFlusher {
+    pub(crate) pl_flusher: BlockfileFlusher,
+    pub(crate) versions_map_flusher: BlockfileFlusher,
+    pub(crate) max_head_id_flusher: BlockfileFlusher,
+    pub(crate) raw_centroid: USearchIndex,
+    pub(crate) quantized_centroid: USearchIndex,
+    pub(crate) usearch_provider: USearchIndexProvider,
+    pub(crate) metrics: SpannIndexFlusherMetrics,
+}
+
+#[derive(Debug)]
+pub struct FastSpannIndexIds {
+    pub pl_id: Uuid,
+    pub versions_map_id: Uuid,
+    pub max_head_id_id: Uuid,
+    pub raw_centroid_id: IndexUuid,
+    pub quantized_centroid_id: IndexUuid,
+    pub prefix_path: String,
+}
+
 impl SpannIndexFlusher {
     pub async fn flush(self) -> Result<SpannIndexIds, SpannIndexWriterError> {
         let res = SpannIndexIds {
@@ -2599,6 +2623,103 @@ impl SpannIndexFlusher {
             );
         }
         Ok(res)
+    }
+}
+
+impl FastSpannIndexFlusher {
+    pub async fn flush(self) -> Result<FastSpannIndexIds, SpannIndexWriterError> {
+        // Flush posting list
+        let pl_id = {
+            let stopwatch = Stopwatch::new(
+                &self.metrics.pl_flush_latency,
+                &[],
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
+            let pl_id = self.pl_flusher.id();
+            let num_pl_entries_flushed = self.pl_flusher.num_entries();
+            self.pl_flusher
+                .flush::<u32, &SpannPostingList<'_>>()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error flushing posting list {}: {}", pl_id, e);
+                    SpannIndexWriterError::PostingListFlushError(e)
+                })?;
+            self.metrics
+                .num_pl_entries_flushed
+                .add(num_pl_entries_flushed as u64, &[]);
+            tracing::info!(
+                "Flushed {} entries from posting list in {} ms",
+                num_pl_entries_flushed,
+                stopwatch.elapsed_micros() / 1000
+            );
+            pl_id
+        };
+
+        // Flush versions map
+        let versions_map_id = {
+            let stopwatch = Stopwatch::new(
+                &self.metrics.versions_map_flush_latency,
+                &[],
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
+            let versions_map_id = self.versions_map_flusher.id();
+            let num_versions_map_entries_flushed = self.versions_map_flusher.num_entries();
+            self.versions_map_flusher
+                .flush::<u32, u32>()
+                .await
+                .map_err(|e| {
+                    tracing::error!("Error flushing versions map {}: {}", versions_map_id, e);
+                    SpannIndexWriterError::VersionsMapFlushError(e)
+                })?;
+            self.metrics
+                .num_versions_map_entries_flushed
+                .add(num_versions_map_entries_flushed as u64, &[]);
+            tracing::info!(
+                "Flushed {} entries from versions map in {} ms",
+                num_versions_map_entries_flushed,
+                stopwatch.elapsed_micros() / 1000
+            );
+            versions_map_id
+        };
+
+        // Flush max head id
+        let max_head_id_id = self.max_head_id_flusher.id();
+        let prefix_path = self.max_head_id_flusher.prefix_path().to_string();
+        self.max_head_id_flusher
+            .flush::<&str, u32>()
+            .await
+            .map_err(|e| {
+                tracing::error!("Error flushing max head id {}: {}", max_head_id_id, e);
+                SpannIndexWriterError::MaxHeadIdFlushError(e)
+            })?;
+
+        // Flush centroid indexes to S3
+        let (raw_centroid_id, quantized_centroid_id) = {
+            let stopwatch = Stopwatch::new(
+                &self.metrics.hnsw_flush_latency,
+                &[],
+                chroma_tracing::util::StopWatchUnit::Millis,
+            );
+            let raw_centroid_id = self.usearch_provider.flush(&self.raw_centroid).await?;
+            let quantized_centroid_id = self
+                .usearch_provider
+                .flush(&self.quantized_centroid)
+                .await?;
+            tracing::info!(
+                "Flushed centroid indexes in {} ms",
+                stopwatch.elapsed_micros() / 1000
+            );
+            (raw_centroid_id, quantized_centroid_id)
+        };
+
+        Ok(FastSpannIndexIds {
+            pl_id,
+            versions_map_id,
+            max_head_id_id,
+            raw_centroid_id,
+            quantized_centroid_id,
+            prefix_path,
+        })
     }
 }
 
