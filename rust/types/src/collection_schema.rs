@@ -18,8 +18,8 @@ use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
     default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
-    default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
-    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
+    default_num_threads, default_quantize, default_reassign_neighbor_count, default_resize_factor,
+    default_search_ef, default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
@@ -239,9 +239,6 @@ pub struct Schema {
     /// ID of the attached function that created this output collection (if applicable)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_attached_function_id: Option<String>,
-    /// Enable quantization for vector search (cloud-only feature)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_quantization: Option<bool>,
 }
 
 impl Schema {
@@ -538,7 +535,6 @@ impl Default for Schema {
             keys,
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         }
     }
 }
@@ -796,6 +792,7 @@ impl Schema {
                         ef_construction: Some(default_construction_ef_spann()),
                         ef_search: Some(default_search_ef_spann()),
                         max_neighbors: Some(default_m_spann()),
+                        quantize: default_quantize(),
                     }),
                 },
             },
@@ -889,6 +886,7 @@ impl Schema {
                                 ef_construction: Some(default_construction_ef_spann()),
                                 ef_search: Some(default_search_ef_spann()),
                                 max_neighbors: Some(default_m_spann()),
+                                quantize: default_quantize(),
                             }),
                         },
                     },
@@ -919,7 +917,6 @@ impl Schema {
             keys,
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         }
     }
 
@@ -1032,9 +1029,6 @@ impl Schema {
                         .source_attached_function_id
                         .clone()
                         .or(default_schema.source_attached_function_id.clone()),
-                    enable_quantization: user
-                        .enable_quantization
-                        .or(default_schema.enable_quantization),
                 })
             }
             None => Ok(default_schema),
@@ -1066,7 +1060,6 @@ impl Schema {
                 .source_attached_function_id
                 .clone()
                 .or(self.source_attached_function_id.clone()),
-            enable_quantization: other.enable_quantization.or(self.enable_quantization),
         })
     }
 
@@ -1595,6 +1588,7 @@ impl Schema {
                 ef_construction: user.ef_construction.or(default.ef_construction),
                 ef_search: user.ef_search.or(default.ef_search),
                 max_neighbors: user.max_neighbors.or(default.max_neighbors),
+                quantize: user.quantize || default.quantize,
             }),
             (Some(default), None) => Some(default.clone()),
             (None, Some(user)) => Some(user.clone()),
@@ -2648,6 +2642,13 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
+    /// Enable quantization for vector search (cloud-only feature)
+    #[serde(default = "default_quantize", skip_serializing_if = "is_false")]
+    pub quantize: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl SpannIndexConfig {
@@ -2733,6 +2734,9 @@ impl SpannIndexConfig {
             if max_neighbors != default_m_spann() {
                 return false;
             }
+        }
+        if self.quantize != default_quantize() {
+            return false;
         }
         true
     }
@@ -2896,6 +2900,7 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     ef_construction: Some(spann_config.ef_construction),
                     ef_search: Some(spann_config.ef_search),
                     max_neighbors: Some(spann_config.max_neighbors),
+                    quantize: default_quantize(),
                 }),
             },
         };
@@ -2951,7 +2956,6 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         };
 
         let result = Schema::reconcile_with_defaults(Some(&user_schema), KnnIndex::Spann).unwrap();
@@ -2967,7 +2971,6 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         };
 
         user_schema.defaults.string = Some(StringValueType {
@@ -3005,7 +3008,6 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         };
 
         user_schema.defaults.float_list = Some(FloatListValueType {
@@ -3057,7 +3059,6 @@ mod tests {
                 keys: merged_keys,
                 cmek: None,
                 source_attached_function_id: None,
-                enable_quantization: None,
             }
         };
 
@@ -3096,7 +3097,6 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         };
 
         // Add a custom key override
@@ -3146,7 +3146,6 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         };
 
         // Override the #embedding key with custom settings
@@ -3271,6 +3270,7 @@ mod tests {
                         ef_construction: Some(50),
                         ef_search: Some(40),
                         max_neighbors: Some(20),
+                        quantize: false,
                     });
                 }
             }
@@ -3447,6 +3447,7 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
+            quantize: false,
         };
 
         let user_spann = SpannIndexConfig {
@@ -3466,6 +3467,7 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
+            quantize: false,
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann)).unwrap();
@@ -3500,6 +3502,7 @@ mod tests {
             ef_construction: Some(180),
             ef_search: Some(170),
             max_neighbors: Some(32),
+            quantize: false,
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -3614,6 +3617,7 @@ mod tests {
                 ef_construction: None,
                 ef_search: None,
                 max_neighbors: None,
+                quantize: false,
             }), // Add SPANN config
         };
 
@@ -3670,7 +3674,6 @@ mod tests {
             keys: HashMap::new(),
             cmek: None,
             source_attached_function_id: None,
-            enable_quantization: None,
         };
 
         // Set up complex user defaults
@@ -3749,7 +3752,6 @@ mod tests {
                 keys: merged_keys,
                 cmek: None,
                 source_attached_function_id: None,
-                enable_quantization: None,
             }
         };
 
@@ -5994,6 +5996,7 @@ mod tests {
                         ef_construction,
                         ef_search,
                         max_neighbors,
+                        quantize: false,
                     },
                 )
         }
@@ -6175,6 +6178,7 @@ mod tests {
                         ef_construction: Some(spann_config.ef_construction),
                         ef_search: Some(spann_config.ef_search),
                         max_neighbors: Some(spann_config.max_neighbors),
+                        quantize: false,
                     }),
                 },
             }
@@ -6339,6 +6343,7 @@ mod tests {
                 ef_construction: Some(config.ef_construction),
                 ef_search: Some(config.ef_search),
                 max_neighbors: Some(config.max_neighbors),
+                quantize: false,
             })
         }
 
@@ -6420,7 +6425,6 @@ mod tests {
                             keys: extra_keys,
                             cmek: None,
                             source_attached_function_id: None,
-                            enable_quantization: None,
                         }
                     },
                 )

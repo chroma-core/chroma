@@ -163,6 +163,7 @@ type SpannIndexConfig struct {
 	EfConstruction        *int     `json:"ef_construction,omitempty"`
 	EfSearch              *int     `json:"ef_search,omitempty"`
 	MaxNeighbors          *int     `json:"max_neighbors,omitempty"`
+	Quantize              bool     `json:"quantize,omitempty"`
 }
 
 type VectorIndexType struct {
@@ -262,7 +263,6 @@ type Schema struct {
 	Keys                     map[string]ValueTypes `json:"keys"`
 	Cmek                     *Cmek                 `json:"cmek,omitempty"`
 	SourceAttachedFunctionID *string               `json:"source_attached_function_id,omitempty"`
-	EnableQuantization       *bool                 `json:"enable_quantization,omitempty"`
 }
 
 // GetSourceAttachedFunctionIDFromSchema parses a schema string and returns the source attached function ID if present
