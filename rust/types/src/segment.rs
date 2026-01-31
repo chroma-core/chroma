@@ -117,6 +117,8 @@ pub struct Segment {
 }
 
 impl Segment {
+    // TODO(Sanket): Add QuantizedSpann to the prefetch supported list when
+    // we have intelligent prefetching.
     pub fn prefetch_supported(&self) -> bool {
         matches!(
             self.r#type,
@@ -124,6 +126,7 @@ impl Segment {
         )
     }
 
+    // TODO(Sanket): Add file paths for QuantizedSpann when we have intelligent prefetching.
     pub fn filepaths_to_prefetch(&self) -> Vec<String> {
         let mut res = Vec::new();
         match self.r#type {

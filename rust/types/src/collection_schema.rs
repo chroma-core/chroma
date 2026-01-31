@@ -944,6 +944,32 @@ impl Schema {
             })
     }
 
+    /// Check if quantization is enabled in the SPANN index configuration
+    pub fn is_quantization_enabled(&self) -> bool {
+        let check_spann = |vector_index: &VectorIndexType| {
+            vector_index
+                .config
+                .spann
+                .as_ref()
+                .map(|config| config.quantize)
+                .unwrap_or(false)
+        };
+
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .map(check_spann)
+            .unwrap_or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .map(check_spann)
+                    .unwrap_or(false)
+            })
+    }
+
     pub fn get_internal_hnsw_config(&self) -> Option<InternalHnswConfiguration> {
         let to_internal = |vector_index: &VectorIndexType| {
             if vector_index.config.spann.is_some() {
