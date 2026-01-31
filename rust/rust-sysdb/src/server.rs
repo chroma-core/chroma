@@ -194,21 +194,23 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<ListDatabasesRequest>,
     ) -> Result<Response<ListDatabasesResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("list_databases is not supported"))
     }
 
     async fn delete_database(
         &self,
         _request: Request<DeleteDatabaseRequest>,
     ) -> Result<Response<DeleteDatabaseResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("delete_database is not supported"))
     }
 
     async fn finish_database_deletion(
         &self,
         _request: Request<FinishDatabaseDeletionRequest>,
     ) -> Result<Response<FinishDatabaseDeletionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "finish_database_deletion is not supported",
+        ))
     }
 
     async fn create_tenant(
@@ -243,45 +245,39 @@ impl SysDb for SysdbService {
 
     async fn set_tenant_resource_name(
         &self,
-        request: Request<SetTenantResourceNameRequest>,
+        _request: Request<SetTenantResourceNameRequest>,
     ) -> Result<Response<SetTenantResourceNameResponse>, Status> {
-        let proto_req = request.into_inner();
-        let internal_req: internal::SetTenantResourceNameRequest = proto_req
-            .try_into()
-            .map_err(|e: SysDbError| Status::from(e))?;
-
-        let backends = internal_req.assign(&self.backends);
-        let resp = internal_req.run(backends).await?;
-
-        Ok(Response::new(resp.into()))
+        Err(Status::unimplemented(
+            "set_tenant_resource_name is not supported",
+        ))
     }
 
     async fn create_segment(
         &self,
         _request: Request<CreateSegmentRequest>,
     ) -> Result<Response<CreateSegmentResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("create_segment is not supported"))
     }
 
     async fn delete_segment(
         &self,
         _request: Request<DeleteSegmentRequest>,
     ) -> Result<Response<DeleteSegmentResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("delete_segment is not supported"))
     }
 
     async fn get_segments(
         &self,
         _request: Request<GetSegmentsRequest>,
     ) -> Result<Response<GetSegmentsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("get_segments is not supported"))
     }
 
     async fn update_segment(
         &self,
         _request: Request<UpdateSegmentRequest>,
     ) -> Result<Response<UpdateSegmentResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("update_segment is not supported"))
     }
 
     async fn create_collection(
@@ -307,21 +303,23 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<DeleteCollectionRequest>,
     ) -> Result<Response<DeleteCollectionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("delete_collection is not supported"))
     }
 
     async fn finish_collection_deletion(
         &self,
         _request: Request<FinishCollectionDeletionRequest>,
     ) -> Result<Response<FinishCollectionDeletionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "finish_collection_deletion is not supported",
+        ))
     }
 
     async fn get_collection(
         &self,
         _request: Request<GetCollectionRequest>,
     ) -> Result<Response<GetCollectionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("get_collection is not supported"))
     }
 
     async fn get_collections(
@@ -347,14 +345,16 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<GetCollectionByResourceNameRequest>,
     ) -> Result<Response<GetCollectionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "get_collection_by_resource_name is not supported",
+        ))
     }
 
     async fn count_collections(
         &self,
         _request: Request<CountCollectionsRequest>,
     ) -> Result<Response<CountCollectionsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("count_collections is not supported"))
     }
 
     async fn get_collection_with_segments(
@@ -380,7 +380,7 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<CheckCollectionsRequest>,
     ) -> Result<Response<CheckCollectionsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("check_collections is not supported"))
     }
 
     async fn update_collection(
@@ -406,21 +406,21 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<ForkCollectionRequest>,
     ) -> Result<Response<ForkCollectionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("fork_collection is not supported"))
     }
 
     async fn count_forks(
         &self,
         _request: Request<CountForksRequest>,
     ) -> Result<Response<CountForksResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("count_forks is not supported"))
     }
 
     async fn reset_state(
         &self,
         _request: Request<()>,
     ) -> Result<Response<ResetStateResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("reset_state is not supported"))
     }
 
     async fn get_last_compaction_time_for_tenant(
@@ -459,92 +459,113 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<SetLastCompactionTimeForTenantRequest>,
     ) -> Result<Response<()>, Status> {
-        // TODO: Remove this method
-        todo!()
+        Err(Status::unimplemented(
+            "set_last_compaction_time_for_tenant is not supported",
+        ))
     }
 
     async fn restore_collection(
         &self,
         _request: Request<RestoreCollectionRequest>,
     ) -> Result<Response<RestoreCollectionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("restore_collection is not supported"))
     }
 
     async fn list_collection_versions(
         &self,
         _request: Request<ListCollectionVersionsRequest>,
     ) -> Result<Response<ListCollectionVersionsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "list_collection_versions is not supported",
+        ))
     }
 
     async fn get_collection_size(
         &self,
         _request: Request<GetCollectionSizeRequest>,
     ) -> Result<Response<GetCollectionSizeResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "get_collection_size is not supported",
+        ))
     }
 
     async fn list_collections_to_gc(
         &self,
         _request: Request<ListCollectionsToGcRequest>,
     ) -> Result<Response<ListCollectionsToGcResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "list_collections_to_gc is not supported",
+        ))
     }
 
     async fn mark_version_for_deletion(
         &self,
         _request: Request<MarkVersionForDeletionRequest>,
     ) -> Result<Response<MarkVersionForDeletionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "mark_version_for_deletion is not supported",
+        ))
     }
 
     async fn delete_collection_version(
         &self,
         _request: Request<DeleteCollectionVersionRequest>,
     ) -> Result<Response<DeleteCollectionVersionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "delete_collection_version is not supported",
+        ))
     }
 
     async fn batch_get_collection_version_file_paths(
         &self,
         _request: Request<BatchGetCollectionVersionFilePathsRequest>,
     ) -> Result<Response<BatchGetCollectionVersionFilePathsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "batch_get_collection_version_file_paths is not supported",
+        ))
     }
 
     async fn batch_get_collection_soft_delete_status(
         &self,
         _request: Request<BatchGetCollectionSoftDeleteStatusRequest>,
     ) -> Result<Response<BatchGetCollectionSoftDeleteStatusResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "batch_get_collection_soft_delete_status is not supported",
+        ))
     }
 
     async fn cleanup_expired_partial_attached_functions(
         &self,
         _request: Request<CleanupExpiredPartialAttachedFunctionsRequest>,
     ) -> Result<Response<CleanupExpiredPartialAttachedFunctionsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "cleanup_expired_partial_attached_functions is not supported",
+        ))
     }
 
     async fn get_functions(
         &self,
         _request: Request<GetFunctionsRequest>,
     ) -> Result<Response<GetFunctionsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("get_functions is not supported"))
     }
 
     async fn get_attached_functions_to_gc(
         &self,
         _request: Request<GetAttachedFunctionsToGcRequest>,
     ) -> Result<Response<GetAttachedFunctionsToGcResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "get_attached_functions_to_gc is not supported",
+        ))
     }
 
     async fn finish_attached_function_deletion(
         &self,
         _request: Request<FinishAttachedFunctionDeletionRequest>,
     ) -> Result<Response<FinishAttachedFunctionDeletionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "finish_attached_function_deletion is not supported",
+        ))
     }
 
     async fn flush_collection_compaction(
@@ -656,42 +677,50 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<AttachFunctionRequest>,
     ) -> Result<Response<AttachFunctionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("attach_function is not supported"))
     }
 
     async fn get_attached_functions(
         &self,
         _request: Request<GetAttachedFunctionsRequest>,
     ) -> Result<Response<GetAttachedFunctionsResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "get_attached_functions is not supported",
+        ))
     }
 
     async fn detach_function(
         &self,
         _request: Request<DetachFunctionRequest>,
     ) -> Result<Response<DetachFunctionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented("detach_function is not supported"))
     }
 
     async fn finish_create_attached_function(
         &self,
         _request: Request<FinishCreateAttachedFunctionRequest>,
     ) -> Result<Response<FinishCreateAttachedFunctionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "finish_create_attached_function is not supported",
+        ))
     }
 
     async fn flush_collection_compaction_and_attached_function(
         &self,
         _request: Request<FlushCollectionCompactionAndAttachedFunctionRequest>,
     ) -> Result<Response<FlushCollectionCompactionAndAttachedFunctionResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "flush_collection_compaction_and_attached_function is not supported",
+        ))
     }
 
     async fn increment_compaction_failure_count(
         &self,
         _request: Request<IncrementCompactionFailureCountRequest>,
     ) -> Result<Response<IncrementCompactionFailureCountResponse>, Status> {
-        todo!()
+        Err(Status::unimplemented(
+            "increment_compaction_failure_count is not supported",
+        ))
     }
 }
 

@@ -103,24 +103,6 @@ impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantsRequest {
     }
 }
 
-/// Internal request for setting tenant resource name.
-#[derive(Debug, Clone)]
-pub struct SetTenantResourceNameRequest {
-    pub tenant_id: String,
-    pub resource_name: String,
-}
-
-impl TryFrom<chroma_proto::SetTenantResourceNameRequest> for SetTenantResourceNameRequest {
-    type Error = SysDbError;
-
-    fn try_from(req: chroma_proto::SetTenantResourceNameRequest) -> Result<Self, Self::Error> {
-        Ok(Self {
-            tenant_id: req.id,
-            resource_name: req.resource_name,
-        })
-    }
-}
-
 /// Internal request for creating a database.
 #[derive(Debug, Clone)]
 pub struct CreateDatabaseRequest {
@@ -592,15 +574,6 @@ impl Assignable for GetTenantsRequest {
     }
 }
 
-impl Assignable for SetTenantResourceNameRequest {
-    type Output = Vec<Backend>;
-
-    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
-        // Fan out to all backends
-        factory.get_all_backends()
-    }
-}
-
 impl Assignable for CreateDatabaseRequest {
     type Output = Backend;
 
@@ -704,16 +677,6 @@ impl Runnable for GetTenantsRequest {
 }
 
 #[async_trait::async_trait]
-impl Runnable for SetTenantResourceNameRequest {
-    type Response = SetTenantResourceNameResponse;
-    type Input = Vec<Backend>;
-
-    async fn run(self, _backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
-        todo!("SetTenantResourceNameRequest not yet implemented for mcmr")
-    }
-}
-
-#[async_trait::async_trait]
 impl Runnable for CreateDatabaseRequest {
     type Response = CreateDatabaseResponse;
     type Input = Backend;
@@ -807,18 +770,6 @@ impl TryFrom<GetTenantsResponse> for chroma_proto::GetTenantResponse {
         Ok(chroma_proto::GetTenantResponse {
             tenant: Some(tenant.into()),
         })
-    }
-}
-
-/// Internal response for setting tenant resource name.
-#[derive(Debug, Clone)]
-pub struct SetTenantResourceNameResponse {
-    // Empty - set resource name returns no data
-}
-
-impl From<SetTenantResourceNameResponse> for chroma_proto::SetTenantResourceNameResponse {
-    fn from(_: SetTenantResourceNameResponse) -> Self {
-        chroma_proto::SetTenantResourceNameResponse {}
     }
 }
 
