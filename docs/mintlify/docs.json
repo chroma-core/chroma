@@ -218,7 +218,22 @@
       {
         "tab": "API Reference",
         "icon": "brackets-curly",
-        "openapi": "openapi.json"
+        "groups": [
+          {
+            "group": "Chroma API",
+            "openapi": {
+              "source": "openapi.json",
+              "directory": "api-reference"
+            }
+          },
+          {
+            "group": "Chroma Sync API",
+            "openapi": {
+              "source": "https://sync.trychroma.com/openapi.json",
+              "directory": "sync-api-reference"
+            }
+          }
+        ]
       },
       {
         "tab": "Client Reference",
