@@ -123,6 +123,8 @@ impl SpannSegmentWriter {
             &Schema::try_from(&collection.config).map_err(SpannSegmentWriterError::InvalidSchema)?
         };
 
+        // TODO(Sanket): Construct the quantized spann writer here based on config.
+
         let params = schema
             .get_internal_spann_config()
             .ok_or(SpannSegmentWriterError::MissingSpannConfiguration)?;
