@@ -722,42 +722,70 @@ impl RootManager {
         max_block_size_bytes: usize,
     ) -> Result<Option<RootReader>, RootManagerError> {
         let index = self.cache.obtain(*id).await.ok().flatten();
-        match index {
-            Some(index) => Ok(Some(index)),
-            None => {
-                let key = Self::get_storage_key(prefix_path, id);
-                let _slow_operation_log = LogSlowOperation::new(
-                    format!(
-                        "Cold root fetch from storage and deserialize for key: {}",
-                        key
-                    ),
-                    Duration::from_millis(50),
-                );
-                match self
-                    .storage
-                    .get(&key, GetOptions::new(StorageRequestPriority::P0))
-                    .await
-                {
-                    Ok(bytes) => match RootReader::from_bytes::<K>(
-                        &bytes,
-                        prefix_path,
-                        *id,
-                        max_block_size_bytes,
-                    ) {
-                        Ok(root) => {
-                            self.cache.insert(*id, root.clone()).await;
-                            Ok(Some(root))
-                        }
-                        Err(e) => {
-                            tracing::error!("Error turning bytes into root: {}", e);
-                            Err(RootManagerError::FromBytesError(e))
+        if let Some(index) = index {
+            return Ok(Some(index));
+        }
+
+        // Closure cloning
+        let key = Self::get_storage_key(prefix_path, id);
+        let id_clone = *id;
+        let prefix_path_clone = prefix_path.to_string();
+        let cache_clone = self.cache.clone();
+        let key_clone = key.clone();
+
+        let res = {
+            let _slow_operation_log = LogSlowOperation::new(
+                format!(
+                    "Cold root fetch from storage and deserialize for key: {}",
+                    key_clone
+                ),
+                Duration::from_millis(50),
+            );
+            self.storage
+                .fetch(
+                    &key,
+                    GetOptions::new(StorageRequestPriority::P0),
+                    move |bytes| async move {
+                        let bytes = match bytes {
+                            Ok(bytes) => bytes,
+                            Err(e) => {
+                                tracing::error!("Error loading root from storage: {:?}", e);
+                                return Err(StorageError::Message {
+                                    message: "Error loading root".to_string(),
+                                });
+                            }
+                        };
+                        match RootReader::from_bytes::<K>(
+                            &bytes,
+                            &prefix_path_clone,
+                            id_clone,
+                            max_block_size_bytes,
+                        ) {
+                            Ok(root) => {
+                                cache_clone.insert(id_clone, root.clone()).await;
+                                Ok(root)
+                            }
+                            Err(e) => {
+                                tracing::error!(
+                                    "Error converting bytes to RootReader {:?}/{:?}",
+                                    key_clone,
+                                    e
+                                );
+                                Err(StorageError::Message {
+                                    message: "Error converting bytes to RootReader".to_string(),
+                                })
+                            }
                         }
                     },
-                    Err(e) => {
-                        tracing::error!("Error reading root from storage: {}", e);
-                        Err(RootManagerError::StorageGetError(e))
-                    }
-                }
+                )
+                .instrument(Span::current())
+                .await
+        };
+        match res {
+            Ok(root) => Ok(Some(root.0)),
+            Err(e) => {
+                tracing::error!("Error fetching root from storage: {:?}", e);
+                Err(RootManagerError::StorageGetError(e))
             }
         }
     }
