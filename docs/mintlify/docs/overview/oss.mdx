@@ -22,6 +22,14 @@ Here are some helpful links to get you started with contributing to Chroma
 
 ### Contributing Code and Ideas
 
+#### Feature Requests
+
+Feature requests and proposals for large changes to Chroma should be submitted using [GitHub Issues](https://github.com/chroma-core/chroma/issues). If you want to suggest a new feature or a major change, please open an issue and select the relevant template. This allows the core Chroma team and the community to discuss and provide feedback directly in the issue. For smaller changes like bug fixes or documentation updates, you can submit an issue or open a pull request as usual.
+
+Once proposed, the issue will be reviewed by the Chroma team and its status will be tracked in GitHub. We use labels and issue states to indicate the progress of the proposal—for example, whether it is under review, accepted, being implemented, or closed. For more information, see our GitHub Issues page and contribution guidelines.
+
+You can join our [Discord](https://discord.gg/MMeYNTmh3x) and chat with us in the [#feature-ideas](https://discord.com/channels/1073293645303795742/1131592310786887700) channel. We are always happy to discuss new ideas and features with the community.
+
 #### Pull Requests
 
 In order to submit a change to Chroma please submit a [Pull Request](https://github.com/chroma-core/chroma/compare) against Chroma or the documentation. The pull request will be reviewed by the Chroma team and if approved, will be merged into the repository. We will do our best to review pull requests in a timely manner but please be patient as we are a small team. We will work to integrate your proposed changes as quickly as possible if they align with the goals of the project. We ask that you label your pull request with a title prefix that indicates the type of change you are proposing. The following prefixes are used:
@@ -38,15 +46,21 @@ CLN: Code cleanup
 CHORE: Maintenance and other tasks that do not modify source or test files
 ```
 
-#### CIPs
+## Roadmap
 
-Chroma Improvement Proposals or CIPs (pronounced "Chips") are the way to propose new features or large changes to Chroma. If you plan to make a large change to Chroma please submit a CIP first so that the core Chroma team as well as the community can discuss the proposed change and provide feedback. A CIP should provide a concise technical specification of the feature and a rationale for why it is needed. The CIP should be submitted as a pull request to the [CIPs folder](https://github.com/chroma-core/chroma/tree/main/docs/cip). The CIP will be reviewed by the Chroma team and if approved will be merged into the repository. To learn more about writing a CIP you can read the [guide](https://github.com/chroma-core/chroma/blob/main/docs/cip/CIP_Chroma_Improvment_Proposals.md). CIPs are not required for small changes such as bug fixes or documentation updates.
+You can track our progress on the Chroma project on the [changelog](https://www.trychroma.com/changelog).
 
-A CIP starts in the "Proposed" state, then moves to "Under Review" once the Chroma team has reviewed it and is considering it for implementation. Once the CIP is approved it will move to the "Accepted" state and the implementation can begin. Once the implementation is complete the CIP will move to the "Implemented" state. If the CIP is not approved it will move to the "Rejected" state. If the CIP is withdrawn by the author it will move to the "Withdrawn" state.
+Chroma is built and maintained by a small core team, so we are intentional about
+where we invest engineering effort. Chroma has two deployment modes—distributed
+Chroma and single-node local Chroma—which currently rely on different storage
+subsystems. The database is and will always remain open-source (Apache 2.0), and
+our cloud offering simply runs the same open-source distributed system.
 
-#### Discord
-
-For less fleshed out ideas you want to discuss with the community, you can join our [Discord](https://discord.gg/MMeYNTmh3x) and chat with us in the [#feature-ideas](https://discord.com/channels/1073293645303795742/1131592310786887700) channel. We are always happy to discuss new ideas and features with the community.
+Today, the majority of our engineering effort is focused on distributed Chroma
+and the cloud offering. As a result, local Chroma may temporarily lack some
+features or behaviors available in the distributed system. Restoring and
+maintaining 100% feature and API parity remains an active goal, and unifying the
+underlying storage systems is a key part of that work.
 
 ## Telemetry
 
