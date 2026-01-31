@@ -136,35 +136,37 @@ impl ArrowBlockfileProvider {
 
         let mut futures = FuturesUnordered::new();
         for block_id in block_ids.iter() {
-            // Don't prefetch if already cached.
-            if !self.block_manager.cached(block_id).await {
-                // Use prefetch to write to disk cache only, bypassing memory.
-                // This avoids polluting the memory cache with data that is not immediately needed.
-                futures.push(self.block_manager.prefetch(
-                    prefix_path,
-                    block_id,
-                    StorageRequestPriority::P1,
-                ));
+            // Use prefetch to write to disk cache only, bypassing memory.
+            // This avoids polluting the memory cache with data that is not immediately needed.
+            // prefetch() internally skips blocks that are already cached.
+            futures.push(self.block_manager.prefetch(
+                prefix_path,
+                block_id,
+                StorageRequestPriority::P1,
+            ));
+        }
+        let total = futures.len();
+
+        tracing::info!(
+            "Prefetching up to {} blocks to disk for blockfile ID: {:?}",
+            total,
+            id
+        );
+
+        let mut fetched_count = 0;
+        while let Some(result) = futures.next().await {
+            if result?.is_some() {
+                fetched_count += 1;
             }
         }
-        let count = futures.len();
 
         tracing::info!(
-            "Prefetching {} blocks to disk for blockfile ID: {:?}",
-            count,
+            "Prefetched {}/{} blocks to disk for blockfile ID: {:?}",
+            fetched_count,
+            total,
             id
         );
-
-        while let Some(result) = futures.next().await {
-            result?;
-        }
-
-        tracing::info!(
-            "Prefetched {} blocks to disk for blockfile ID: {:?}",
-            count,
-            id
-        );
-        Ok(count)
+        Ok(fetched_count)
     }
 
     pub async fn write<
@@ -468,14 +470,6 @@ impl BlockManager {
         block
     }
 
-    pub(super) async fn cached(&self, id: &Uuid) -> bool {
-        self.block_cache
-            .get(id)
-            .await
-            .map(|b| b.is_some())
-            .unwrap_or(false)
-    }
-
     pub fn format_key(prefix_path: &str, id: &Uuid) -> String {
         // For legacy collections, prefix_path is empty.
         if prefix_path.is_empty() {
@@ -490,6 +484,11 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
+        // Check cache first before going to storage.
+        let block = self.block_cache.obtain(*id).await.ok().flatten();
+        if let Some(block) = block {
+            return Ok(Some(block));
+        }
         self.get_inner(prefix_path, id, priority, false).await
     }
 
@@ -497,12 +496,17 @@ impl BlockManager {
     /// This is useful for prefetching data that is not immediately needed
     /// but may be accessed later. By writing to disk only, we avoid polluting
     /// the memory cache with data that is not immediately needed.
+    /// Returns Ok(None) if the block is already cached.
     pub(super) async fn prefetch(
         &self,
         prefix_path: &str,
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
+        // Skip if already cached - cheap check to avoid unnecessary storage fetches.
+        if self.block_cache.may_contain(id).await {
+            return Ok(None);
+        }
         self.get_inner(prefix_path, id, priority, true).await
     }
 
@@ -513,11 +517,6 @@ impl BlockManager {
         priority: StorageRequestPriority,
         disk_only: bool,
     ) -> Result<Option<Block>, GetError> {
-        let block = self.block_cache.obtain(*id).await.ok().flatten();
-        if let Some(block) = block {
-            return Ok(Some(block));
-        }
-
         // Closure cloning
         let key = Self::format_key(prefix_path, id);
         let id_clone = *id;
@@ -890,7 +889,7 @@ mod tests {
     use chroma_storage::test_storage;
 
     #[tokio::test]
-    async fn test_cached() {
+    async fn test_cache_write_through() {
         let (_temp_dir, storage) = test_storage();
         let manager = BlockManager::new(
             storage,
@@ -898,10 +897,13 @@ mod tests {
             new_cache_for_test(),
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        assert!(!manager.cached(&Uuid::new_v4()).await);
+        assert!(!manager.block_cache.may_contain(&Uuid::new_v4()).await);
 
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();
         let block = manager.commit::<&str, String>(delta).await;
-        assert!(manager.cached(&block.id).await, "should be write-through");
+        assert!(
+            manager.block_cache.may_contain(&block.id).await,
+            "should be write-through"
+        );
     }
 }
