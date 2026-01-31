@@ -362,11 +362,19 @@ pub async fn standup_local_chroma(
         frontend_service_entrypoint_with_config(Arc::new(()), Arc::new(()), &config, true).await;
     });
     let admin_client = AdminClient::local(host);
-    admin_client
-        .healthcheck()
-        .await
-        .map_err(|_| UtilsError::LocalConnect)?;
-    Ok((admin_client, handle))
+
+    // Wait for the server to be ready before returning.
+    // The server is spawned asynchronously and may not have bound to the port yet.
+    let max_retries = 50;
+    let retry_delay = std::time::Duration::from_millis(100);
+    for _ in 0..max_retries {
+        if admin_client.healthcheck().await.is_ok() {
+            return Ok((admin_client, handle));
+        }
+        tokio::time::sleep(retry_delay).await;
+    }
+
+    Err(UtilsError::LocalConnect.into())
 }
 
 pub async fn parse_path(path: String) -> Result<(AdminClient, JoinHandle<()>), CliError> {
