@@ -1,9 +1,44 @@
 ---
 title: "Getting Started"
-description: "Chroma is an open-source search engine for AI. It comes with everything you need to get started built-in, and runs on your machine."
+description: "Get up and running with Chroma, the open-source AI-native vector database, in under 10 minutes."
 ---
-import { Callout } from '/snippets/callout.mdx';
+import { Callout, Warning } from '/snippets/callout.mdx';
 import { YouTube } from '/snippets/youtube.jsx';
+
+This guide is for developers who want to install Chroma and run their first semantic search query. By the end, you'll understand Chroma's core concepts and be able to store and query your own data.
+
+## What is a Vector Database?
+
+A **vector database** stores data as numerical vectors (embeddings) that capture semantic meaning. Unlike traditional databases that match exact keywords, vector databases find results based on *meaning*—so a search for "tropical fruit" can match documents about "pineapple" even if they don't share any words.
+
+Chroma handles the complexity of embeddings for you: just add your text, and Chroma will embed, index, and enable semantic search automatically.
+
+## Core Concepts
+
+Before diving in, here are the key concepts you'll encounter:
+
+| Concept | Description |
+|---------|-------------|
+| **Client** | Your connection to Chroma. Can be in-memory, persistent, or cloud-based. |
+| **Collection** | A named group of documents, like a table in a traditional database. |
+| **Document** | The text you want to store and search. |
+| **Embedding** | A numerical vector representing your document's meaning (Chroma generates these automatically). |
+| **Query** | A search request that finds documents semantically similar to your input. |
+
+## Choose Your Path
+
+<CardGroup cols={2}>
+  <Card title="Open Source (Local)" icon="laptop" href="#install-chroma-open-source">
+    Run Chroma on your machine. Free, no account needed. Great for development and experimentation.
+  </Card>
+  <Card title="Chroma Cloud" icon="cloud" href="/cloud/getting-started">
+    Managed, serverless database. Fast, scalable, and production-ready. $5 in free credits included.
+  </Card>
+</CardGroup>
+
+---
+
+## Install Chroma (Open Source)
 
 <Tabs>
 <Tab title="Python" icon="python">
@@ -18,64 +53,25 @@ import { YouTube } from '/snippets/youtube.jsx';
   />
 </div>
 
-<Callout>
-For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+### Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Python | 3.9+ | Check with `python --version` |
+| pip | Latest | Usually included with Python |
+| SQLite | 3.35+ | Included in Python 3.10+. [Troubleshoot older versions](/docs/overview/troubleshooting#sqlite) |
+
+<Callout title="Recommended">
+Use a virtual environment to avoid dependency conflicts:
+```bash
+python -m venv chroma-env && source chroma-env/bin/activate
+```
 </Callout>
 
-## Install with AI
+### Quick Start
 
-Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI agent. It will quickly set you up with Chroma.
-
-<CodeGroup>
-```prompt Chroma Cloud
-In this directory create a new Python project with Chroma set up.
-Use a virtual environment.
-
-Write a small example that adds some data to a collection and queries it.
-Do not delete the data from the collection when it's complete.
-Run the script when you are done setting up the environment and writing the
-script. The output should show what data was ingested, what was the query,
-and the results.
-Your own summary should include this output so the user can see it.
-
-First, install `chromadb`.
-
-The project should be set up with Chroma Cloud. When you install `chromadb`,
-you get access to the Chroma CLI. You can run `chroma login` to authenticate.
-This will open a browser for authentication and save a connection profile
-locally.
-
-You can also use `chroma profile show` to see if the user already has an
-active profile saved locally. If so, you can skip the login step.
-
-Then create a DB using the CLI with `chroma db create chroma-getting-started`.
-This will create a DB with this name.
-
-Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
-This will create a .env file in the current directory with the connection
-variables for this DB and account, so the CloudClient can be instantiated
-with chromadb.CloudClient(api_key=os.getenv("CHROMA_API_KEY"), ...).
-```
-
-```text OSS
-In this directory create a new Python project with Chroma set up.
-Use a virtual environment.
-
-Write a small example that adds some data to a collection and queries it.
-Do not delete the data from the collection when it's complete.
-Run the script when you are done setting up the environment and writing the
-script. The output should show what data was ingested, what was the query,
-and the results.
-Your own summary should include this output so the user can see it.
-
-Use Chroma's in-memory client: `chromadb.Client()`
-```
-</CodeGroup>
-
-## Install Manually
-
-<Steps titleSize="h3">
-  <Step title="Install">
+<Steps titleSize="h4">
+  <Step title="Install Chroma">
     <CodeGroup>
     ```bash pip
     pip install chromadb
@@ -89,25 +85,28 @@ Use Chroma's in-memory client: `chromadb.Client()`
     </CodeGroup>
   </Step>
 
-  <Step title="Create a Chroma Client">
-    ```python Python
+  <Step title="Create a Client">
+    The in-memory client is the fastest way to get started. Data is stored in memory and will be lost when your program exits.
+
+    ```python
     import chromadb
-    chroma_client = chromadb.Client()
+
+    client = chromadb.Client()
     ```
   </Step>
 
-  <Step title="Create a collection">
-    Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
+  <Step title="Create a Collection">
+    Collections store your documents and their embeddings.
 
-    ```python Python
-    collection = chroma_client.create_collection(name="my_collection")
+    ```python
+    collection = client.create_collection(name="my_collection")
     ```
   </Step>
 
-  <Step title="Add some text documents to the collection">
-    Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
+  <Step title="Add Documents">
+    Add your text documents with unique IDs. Chroma automatically generates embeddings.
 
-    ```python Python
+    ```python
     collection.add(
         ids=["id1", "id2"],
         documents=[
@@ -118,75 +117,101 @@ Use Chroma's in-memory client: `chromadb.Client()`
     ```
   </Step>
 
-  <Step title="Query the collection">
-    You can query the collection with a list of query texts, and Chroma will return the n most similar results. It's that easy!
+  <Step title="Query">
+    Search for documents similar to your query text.
 
-    ```python Python
+    ```python
     results = collection.query(
-        query_texts=["This is a query document about hawaii"], # Chroma will embed this for you
-        n_results=2 # how many results to return
+        query_texts=["This is a query document about hawaii"],
+        n_results=2
     )
     print(results)
     ```
 
-    If n\_results is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set n\_results=2.
-  </Step>
-
-  <Step title="Inspect Results">
-    From the above - you can see that our query about hawaii is semantically most similar to the document about pineapple.
-
-    ```python Python
+    **Expected Output:**
+    ```python
     {
-      'documents': [[
-          'This is a document about pineapple',
-          'This is a document about oranges'
-      ]],
-      'ids': [['id1', 'id2']],
-      'distances': [[1.0404009819030762, 1.243080496788025]],
-      'uris': None,
-      'data': None,
-      'metadatas': [[None, None]],
-      'embeddings': None,
+        'ids': [['id1', 'id2']],
+        'documents': [[
+            'This is a document about pineapple',
+            'This is a document about oranges'
+        ]],
+        'distances': [[1.0404009819030762, 1.243080496788025]],
+        'metadatas': [[None, None]],
+        'embeddings': None,
+        'uris': None,
+        'data': None
     }
     ```
-  </Step>
 
-  <Step title="Try it out yourself">
-    What if we tried querying with "This is a document about florida"? Here is a full example.
-
-    ```python Python expandable
-    import chromadb
-    chroma_client = chromadb.Client()
-
-    # switch \`create_collection\` to \`get_or_create_collection\` to avoid creating a new collection every time
-    collection = chroma_client.get_or_create_collection(name="my_collection")
-
-    # switch \`add\` to \`upsert\` to avoid adding the same documents every time
-    collection.upsert(
-        documents=[
-            "This is a document about pineapple",
-            "This is a document about oranges"
-        ],
-        ids=["id1", "id2"]
-    )
-
-    results = collection.query(
-        query_texts=["This is a query document about florida"], # Chroma will embed this for you
-        n_results=2 # how many results to return
-    )
-
-    print(results)
-    ```
+    Notice that "pineapple" (id1) has a smaller distance than "oranges" (id2) — it's more semantically similar to "hawaii"!
   </Step>
 </Steps>
 
-## Next steps
+### Complete Example
 
-In this guide we used Chroma's [in-memory client](/docs/run-chroma/clients#in-memory-client) for simplicity. It starts a Chroma server in-memory, so any data you ingest will be lost when your program terminates. You can use the [persistent client](/docs/run-chroma/clients#persistent-client) or run Chroma in [client-server mode](/docs/run-chroma/client-server) if you need data persistence.
+Copy and run this complete script to verify your installation:
 
-- Learn how to [Deploy Chroma](/guides/deploy/client-server-mode) to a server
-- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
-- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+```python
+import chromadb
+
+# Create an in-memory client
+client = chromadb.Client()
+
+# Create a collection (use get_or_create_collection to avoid errors on re-runs)
+collection = client.get_or_create_collection(name="my_collection")
+
+# Add documents (use upsert to avoid duplicates on re-runs)
+collection.upsert(
+    ids=["id1", "id2", "id3"],
+    documents=[
+        "This is a document about pineapple",
+        "This is a document about oranges",
+        "This is a document about airplanes"
+    ]
+)
+
+# Query for documents about tropical topics
+results = collection.query(
+    query_texts=["tropical fruit"],
+    n_results=2
+)
+
+print("Query: 'tropical fruit'")
+print(f"Results: {results['documents'][0]}")
+print(f"Distances: {results['distances'][0]}")
+```
+
+**Expected Output:**
+```
+Query: 'tropical fruit'
+Results: ['This is a document about pineapple', 'This is a document about oranges']
+Distances: [1.2534053325653076, 1.3506293296813965]
+```
+
+<Callout title="Troubleshooting">
+If installation fails, see the [Troubleshooting guide](/docs/overview/troubleshooting) for common issues and solutions, including SQLite version problems and build errors.
+</Callout>
+
+### Install with AI Assistant
+
+If you prefer, give this prompt to Claude Code, Cursor, or your favorite AI coding assistant:
+
+<Accordion title="AI Setup Prompt">
+```text
+In this directory create a new Python project with Chroma set up.
+Use a virtual environment.
+
+Write a small example that adds some data to a collection and queries it.
+Do not delete the data from the collection when it's complete.
+Run the script when you are done setting up the environment and writing the
+script. The output should show what data was ingested, what was the query,
+and the results.
+Your own summary should include this output so the user can see it.
+
+Use Chroma's in-memory client: `chromadb.Client()`
+```
+</Accordion>
 
 </Tab>
 
@@ -202,45 +227,173 @@ In this guide we used Chroma's [in-memory client](/docs/run-chroma/clients#in-me
   />
 </div>
 
-<Callout>
-For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+### Prerequisites
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| Node.js | 18+ | Check with `node --version` |
+| npm/pnpm/yarn/bun | Latest | Any package manager works |
+
+<Callout title="Important">
+The TypeScript client requires a running Chroma server. You can start one using the CLI or Docker (see Step 2 below).
 </Callout>
 
-## Install with AI
+### Quick Start
 
-Give the following prompt to Claude Code, Cursor, Codex, or your favorite AI agent. It will quickly set you up with Chroma.
+<Steps titleSize="h4">
+  <Step title="Install the Package">
+    <CodeGroup>
+    ```bash npm
+    npm install chromadb @chroma-core/default-embed
+    ```
+    ```bash pnpm
+    pnpm add chromadb @chroma-core/default-embed
+    ```
+    ```bash yarn
+    yarn add chromadb @chroma-core/default-embed
+    ```
+    ```bash bun
+    bun add chromadb @chroma-core/default-embed
+    ```
+    </CodeGroup>
+  </Step>
 
-<CodeGroup>
-```prompt Chroma Cloud
-In this directory create a new Typescript project with Chroma set up.
+  <Step title="Start the Chroma Server">
+    In a separate terminal, start the Chroma backend:
 
-Write a small example that adds some data to a collection and queries it.
-Do not delete the data from the collection when it's complete.
-Run the script when you are done setting up the environment and writing the
-script. The output should show what data was ingested, what was the query,
-and the results.
-Your own summary should include this output so the user can see it.
+    <CodeGroup>
+    ```bash CLI
+    npx chroma run --path ./chroma-data
+    ```
+    ```bash Docker
+    docker run -p 8000:8000 chromadb/chroma
+    ```
+    </CodeGroup>
 
-First, install `chromadb`.
+    The server will start on `http://localhost:8000`. Keep this terminal running.
+  </Step>
 
-The project should be set up with Chroma Cloud. When you install `chromadb`,
-you get access to the Chroma CLI. You can run `chroma login` to authenticate.
-This will open a browser for authentication and save a connection profile
-locally.
+  <Step title="Create a Client">
+    Connect to your running Chroma server:
 
-You can also use `chroma profile show` to see if the user already has an
-active profile saved locally. If so, you can skip the login step.
+    ```typescript
+    import { ChromaClient } from "chromadb";
 
-Then create a DB using the CLI with `chroma db create chroma-getting-started`.
-This will create a DB with this name.
+    const client = new ChromaClient();
+    ```
+  </Step>
 
-Then use the CLI command `chroma db connect chroma-getting-started --env-file`.
-This will create a .env file in the current directory with the connection
-variables for this DB and account, so the CloudClient can be instantiated
-with: new CloudClient().
+  <Step title="Create a Collection">
+    Collections store your documents and their embeddings.
+
+    ```typescript
+    const collection = await client.createCollection({
+      name: "my_collection",
+    });
+    ```
+  </Step>
+
+  <Step title="Add Documents">
+    Add your text documents with unique IDs. Chroma automatically generates embeddings.
+
+    ```typescript
+    await collection.add({
+      ids: ["id1", "id2"],
+      documents: [
+        "This is a document about pineapple",
+        "This is a document about oranges",
+      ],
+    });
+    ```
+  </Step>
+
+  <Step title="Query">
+    Search for documents similar to your query text.
+
+    ```typescript
+    const results = await collection.query({
+      queryTexts: "This is a query document about hawaii",
+      nResults: 2,
+    });
+
+    console.log(results);
+    ```
+
+    **Expected Output:**
+    ```typescript
+    {
+      ids: [['id1', 'id2']],
+      documents: [[
+        'This is a document about pineapple',
+        'This is a document about oranges'
+      ]],
+      distances: [[1.0404009819030762, 1.243080496788025]],
+      metadatas: [[null, null]],
+      embeddings: null
+    }
+    ```
+
+    Notice that "pineapple" (id1) has a smaller distance than "oranges" (id2) — it's more semantically similar to "hawaii"!
+  </Step>
+</Steps>
+
+### Complete Example
+
+Save this as `index.ts` and run with `npx ts-node index.ts` (or your preferred TypeScript runner):
+
+```typescript
+import { ChromaClient } from "chromadb";
+
+async function main() {
+  // Connect to the Chroma server
+  const client = new ChromaClient();
+
+  // Create a collection (use getOrCreateCollection to avoid errors on re-runs)
+  const collection = await client.getOrCreateCollection({
+    name: "my_collection",
+  });
+
+  // Add documents (use upsert to avoid duplicates on re-runs)
+  await collection.upsert({
+    ids: ["id1", "id2", "id3"],
+    documents: [
+      "This is a document about pineapple",
+      "This is a document about oranges",
+      "This is a document about airplanes",
+    ],
+  });
+
+  // Query for documents about tropical topics
+  const results = await collection.query({
+    queryTexts: ["tropical fruit"],
+    nResults: 2,
+  });
+
+  console.log("Query: 'tropical fruit'");
+  console.log("Results:", results.documents?.[0]);
+  console.log("Distances:", results.distances?.[0]);
+}
+
+main();
 ```
 
-```prompt OSS
+**Expected Output:**
+```
+Query: 'tropical fruit'
+Results: ['This is a document about pineapple', 'This is a document about oranges']
+Distances: [1.2534053325653076, 1.3506293296813965]
+```
+
+<Callout title="Using Next.js?">
+If you encounter bundling issues with Next.js, wrap your config with `withChroma`. See [Troubleshooting](/docs/overview/troubleshooting#chroma-js-client-failures-on-nextjs-projects) for details.
+</Callout>
+
+### Install with AI Assistant
+
+If you prefer, give this prompt to Claude Code, Cursor, or your favorite AI coding assistant:
+
+<Accordion title="AI Setup Prompt">
+```text
 In this directory create a new Typescript project with Chroma set up.
 
 Write a small example that adds some data to a collection and queries it.
@@ -257,151 +410,58 @@ for you with `chroma run`.
 Make sure to instruct the user on how to start a local Chroma server in your
 summary.
 ```
-</CodeGroup>
-
-## Install Manually
-
-<Steps titleSize="h3">
-  <Step title="Install">
-    <CodeGroup>
-    ```bash npm
-    npm install chromadb @chroma-core/default-embed
-    ```
-    ```bash pnpm
-    pnpm add chromadb @chroma-core/default-embed
-    ```
-    ```bash bun
-    bun add chromadb @chroma-core/default-embed
-    ```
-    ```bash yarn
-    yarn add chromadb @chroma-core/default-embed
-    ```
-    </CodeGroup>
-  </Step>
-
-  <Step title="Create a Chroma Client">
-    Run the Chroma backend:
-
-    ```bash Terminal CLI
-    chroma run --path ./getting-started
-    ```
-    ```bash Terminal Docker
-    docker pull chromadb/chroma
-    docker run -p 8000:8000 chromadb/chroma
-    ```
-
-    Then create a client which connects to it:
-
-    ```typescript TypeScript ESM
-    import { ChromaClient } from "chromadb";
-    const client = new ChromaClient();
-    ```
-
-    ```typescript TypeScript CJS
-    const { ChromaClient } = require("chromadb");
-    const client = new ChromaClient();
-    ```
-  </Step>
-
-  <Step title="Create a collection">
-    Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
-
-    ```typescript TypeScript
-    const collection = await client.createCollection({
-      name: "my_collection",
-    });
-    ```
-  </Step>
-
-  <Step title="Add some text documents to the collection">
-    Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
-
-    ```typescript TypeScript
-    await collection.add({
-      ids: ["id1", "id2"],
-      documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges",
-      ],
-    });
-    ```
-  </Step>
-
-  <Step title="Query the collection">
-    You can query the collection with a list of query texts, and Chroma will return the n most similar results. It's that easy!
-
-    ```typescript TypeScript
-    const results = await collection.query({
-      queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
-      nResults: 2, // how many results to return
-    });
-
-    console.log(results);
-    ```
-
-    If n\_results is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set n\_results=2.
-  </Step>
-
-  <Step title="Inspect Results">
-    From the above - you can see that our query about hawaii is semantically most similar to the document about pineapple.
-
-    ```typescript TypeScript
-    {
-        documents: [
-            [
-                'This is a document about pineapple',
-                'This is a document about oranges'
-            ]
-        ],
-        ids: [
-            ['id1', 'id2']
-        ],
-        distances: [[1.0404009819030762, 1.243080496788025]],
-        uris: null,
-        data: null,
-        metadatas: [[null, null]],
-        embeddings: null
-    }
-    ```
-  </Step>
-
-  <Step title="Try it out yourself">
-    What if we tried querying with "This is a document about florida"? Here is a full example.
-
-    ```typescript TypeScript expandable
-    import { ChromaClient } from "chromadb";
-    const client = new ChromaClient();
-
-    // switch `createCollection` to `getOrCreateCollection` to avoid creating a new collection every time
-    const collection = await client.getOrCreateCollection({
-      name: "my_collection",
-    });
-
-    // switch `addRecords` to `upsertRecords` to avoid adding the same documents every time
-    await collection.upsert({
-      documents: [
-        "This is a document about pineapple",
-        "This is a document about oranges",
-      ],
-      ids: ["id1", "id2"],
-    });
-
-    const results = await collection.query({
-      queryTexts: ["This is a query document about florida"], // Chroma will embed this for you
-      nResults: 2, // how many results to return
-    });
-
-    console.log(results);
-    ```
-  </Step>
-</Steps>
-
-## Next steps
-
-- We offer [first class support](/docs/embeddings/embedding-functions) for various embedding providers via our embedding function interface. Each embedding function ships in its own npm package.
-- Learn how to [Deploy Chroma](/guides/deploy/client-server-mode) to a server
-- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
-- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+</Accordion>
 
 </Tab>
 </Tabs>
+
+---
+
+## Next Steps
+
+Now that you have Chroma running, here's a recommended learning path:
+
+### Data Persistence
+
+The in-memory client loses data when your program exits. For persistent storage:
+
+| Option | Use Case | Learn More |
+|--------|----------|------------|
+| **Persistent Client** (Python) | Local development with saved data | [Persistent Client](/docs/run-chroma/clients#persistent-client) |
+| **Client-Server Mode** | Multi-process or multi-language access | [Client-Server Mode](/docs/run-chroma/client-server) |
+| **Chroma Cloud** | Production deployments | [Cloud Getting Started](/cloud/getting-started) |
+
+### Build Your Knowledge
+
+<CardGroup cols={2}>
+  <Card title="Collections" icon="folder" href="/docs/collections/manage-collections">
+    Create, list, and manage your collections
+  </Card>
+  <Card title="Querying" icon="magnifying-glass" href="/docs/querying-collections/query-and-get">
+    Advanced queries, filtering, and retrieval
+  </Card>
+  <Card title="Metadata Filtering" icon="filter" href="/docs/querying-collections/metadata-filtering">
+    Filter results by metadata fields
+  </Card>
+  <Card title="Embedding Functions" icon="brain" href="/docs/embeddings/embedding-functions">
+    Use custom embedding models (OpenAI, Cohere, etc.)
+  </Card>
+</CardGroup>
+
+### Deploy
+
+<CardGroup cols={2}>
+  <Card title="Docker Deployment" icon="docker" href="/guides/deploy/docker">
+    Run Chroma in a container
+  </Card>
+  <Card title="AWS / GCP / Azure" icon="cloud" href="/guides/deploy/aws">
+    Deploy to your cloud provider
+  </Card>
+</CardGroup>
+
+### Get Help
+
+- [Troubleshooting](/docs/overview/troubleshooting) — Common issues and solutions
+- [Discord Community](https://discord.com/invite/MMeYNTmh3x) — Ask questions and get help
+- [GitHub Issues](https://github.com/chroma-core/chroma/issues) — Report bugs or request features
+- [X (@trychroma)](https://twitter.com/trychroma) — Follow for updates
