@@ -970,6 +970,32 @@ impl Schema {
             })
     }
 
+    /// Get a mutable reference to the SPANN index configuration
+    /// Checks the #embedding key first, then falls back to defaults
+    pub fn get_spann_config_mut(&mut self) -> Option<&mut SpannIndexConfig> {
+        // Try #embedding key first
+        if let Some(value_types) = self.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut value_types.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    if let Some(spann_config) = &mut vector_index.config.spann {
+                        return Some(spann_config);
+                    }
+                }
+            }
+        }
+
+        // Fall back to defaults
+        if let Some(float_list) = &mut self.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                if let Some(spann_config) = &mut vector_index.config.spann {
+                    return Some(spann_config);
+                }
+            }
+        }
+
+        None
+    }
+
     pub fn get_internal_hnsw_config(&self) -> Option<InternalHnswConfiguration> {
         let to_internal = |vector_index: &VectorIndexType| {
             if vector_index.config.spann.is_some() {

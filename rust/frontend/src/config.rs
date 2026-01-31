@@ -75,6 +75,8 @@ pub struct FrontendConfig {
     pub enable_schema: bool,
     #[serde(default = "default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    #[serde(default = "Default::default")]
+    pub tenants_with_quantization_enabled: Vec<String>,
 }
 
 impl FrontendConfig {
@@ -96,7 +98,20 @@ impl FrontendConfig {
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
             min_records_for_invocation: default_min_records_for_invocation(),
+            tenants_with_quantization_enabled: vec![],
         }
+    }
+
+    /// Check if quantization should be enabled for the given tenant
+    /// Returns true if:
+    /// - The list contains "*" (all tenants), OR
+    /// - The tenant_id is in the list
+    pub fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
+        self.tenants_with_quantization_enabled
+            .contains(&"*".to_string())
+            || self
+                .tenants_with_quantization_enabled
+                .contains(&tenant_id.to_string())
     }
 }
 

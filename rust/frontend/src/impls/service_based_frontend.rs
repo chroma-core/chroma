@@ -82,6 +82,7 @@ pub struct ServiceBasedFrontend {
     enable_schema: bool,
     retries_builder: ExponentialBuilder,
     min_records_for_invocation: u64,
+    tenants_with_quantization_enabled: Vec<String>,
 }
 
 impl ServiceBasedFrontend {
@@ -96,6 +97,7 @@ impl ServiceBasedFrontend {
         default_knn_index: KnnIndex,
         enable_schema: bool,
         min_records_for_invocation: u64,
+        tenants_with_quantization_enabled: Vec<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -150,7 +152,20 @@ impl ServiceBasedFrontend {
             enable_schema,
             retries_builder,
             min_records_for_invocation,
+            tenants_with_quantization_enabled,
         }
+    }
+
+    /// Check if quantization should be enabled for the given tenant
+    /// Returns true if:
+    /// - The list contains "*" (all tenants), OR
+    /// - The tenant_id is in the list
+    fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
+        self.tenants_with_quantization_enabled
+            .contains(&"*".to_string())
+            || self
+                .tenants_with_quantization_enabled
+                .contains(&tenant_id.to_string())
     }
 
     pub fn get_default_knn_index(&self) -> KnnIndex {
@@ -514,7 +529,7 @@ impl ServiceBasedFrontend {
             }
         }
 
-        let reconciled_schema = if self.enable_schema {
+        let mut reconciled_schema = if self.enable_schema {
             // its safe to take here, bc we're moving all config info to schema
             // when configuration is None, we then populate in sysdb with empty config {}
             // this allows for easier migration paths in the future
@@ -532,6 +547,13 @@ impl ServiceBasedFrontend {
         } else {
             None
         };
+
+        // Enable quantization for tenants in the config list (or all tenants if "*" is present)
+        if let Some(ref mut schema) = reconciled_schema {
+            if let Some(spann_config) = schema.get_spann_config_mut() {
+                spann_config.quantize = self.should_enable_quantization_for_tenant(&tenant_id);
+            }
+        }
 
         let segments = match self.executor {
             Executor::Distributed(_) => {
@@ -2340,6 +2362,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.default_knn_index,
             config.enable_schema,
             config.min_records_for_invocation,
+            config.tenants_with_quantization_enabled.clone(),
         ))
     }
 }

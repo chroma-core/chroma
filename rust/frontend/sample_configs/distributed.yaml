@@ -80,3 +80,4 @@ enable_schema: true
 tenants_to_migrate_immediately:
 - "default_tenant"
 tenants_to_migrate_immediately_threshold: "ffffffff-ffff-ffff-ffff-ffffffffffff"
+tenants_with_quantization_enabled: []
