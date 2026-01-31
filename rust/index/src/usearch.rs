@@ -86,7 +86,7 @@ impl ChromaError for USearchError {
 // NOTE(sicheng): The reserve buffer prevents concurrent adds passing capacity check at the
 // same time and overflow the reserved space. The buffer size should be greater than the
 // number of concurrent threads working on the same index.
-const RESERVE_BUFFER: usize = 128;
+const RESERVE_BUFFER: usize = 1024;
 
 #[derive(Clone)]
 pub struct USearchIndex {

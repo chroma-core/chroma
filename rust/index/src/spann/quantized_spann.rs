@@ -19,6 +19,8 @@ use faer::{
     },
     Mat,
 };
+use simsimd::SpatialSimilarity;
+
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -26,12 +28,10 @@ use chroma_blockstore::provider::BlockfileProvider;
 
 use crate::{
     quantization::Code,
+    spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
-
-// TODO: Re-enable when split() is implemented
-// use super::utils::{cluster, query_quantized_cluster, KMeansAlgorithmInput};
 
 // Blockfile prefixes
 const PREFIX_CENTER: &str = "center";
@@ -41,6 +41,7 @@ const PREFIX_ROTATION: &str = "rotation";
 const PREFIX_VERSION: &str = "version";
 
 /// In-memory staging for a quantized cluster head.
+#[derive(Clone)]
 struct QuantizedDelta {
     center: Arc<[f32]>,
     codes: Vec<Arc<[u8]>>,
@@ -121,6 +122,9 @@ pub struct MutableQuantizedSpannIndex<I: VectorIndex> {
     // This is a temporary solution for loading raw embeddings; a dedicated
     // raw embedding store may be introduced in the future.
     raw_embedding_reader: Option<BlockfileReader<'static, u32, DataRecord<'static>>>,
+
+    // === Dedup Sets ===
+    balancing: Arc<DashSet<u32>>,
 }
 
 impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
@@ -148,7 +152,12 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
     /// Balance a cluster: scrub then trigger split/merge if needed.
     async fn balance(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        if !self.balancing.insert(cluster_id) {
+            return Ok(());
+        }
+
         let Some(len) = self.scrub(cluster_id).await? else {
+            self.balancing.remove(&cluster_id);
             return Ok(());
         };
 
@@ -158,6 +167,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             self.merge(cluster_id).await?;
         }
 
+        self.balancing.remove(&cluster_id);
         Ok(())
     }
 
@@ -378,6 +388,49 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))
     }
 
+    /// Reassign a point to new clusters via RNG query.
+    ///
+    /// Called when a point ends up further from its new cluster center than it was
+    /// from the old center (NPA check failure). Finds better clusters via RNG and
+    /// appends the point there with an incremented version.
+    ///
+    /// Does NOT trigger balance on target clusters to avoid cascading splits.
+    async fn reassign(
+        &self,
+        from_cluster_id: u32,
+        id: u32,
+        version: u32,
+        embedding: Arc<[f32]>,
+    ) -> Result<(), QuantizedSpannError> {
+        if !self.is_valid(id, version) {
+            return Ok(());
+        }
+
+        let candidates = self.navigate(&embedding)?;
+        let rng_cluster_ids = self.rng_select(&candidates).keys;
+
+        if rng_cluster_ids.contains(&from_cluster_id) {
+            return Ok(());
+        }
+
+        if !self.is_valid(id, version) {
+            return Ok(());
+        }
+
+        let new_version = self.upgrade(id);
+
+        for cluster_id in rng_cluster_ids {
+            if let Some(centroid) = self.centroid(cluster_id) {
+                let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
+                    .as_ref()
+                    .into();
+                self.append(cluster_id, id, new_version, code);
+            }
+        }
+
+        Ok(())
+    }
+
     /// Apply epsilon and RNG filtering to navigate results.
     /// Returns up to `replica_count` cluster heads that pass both filters.
     fn rng_select(&self, candidates: &SearchResult) -> SearchResult {
@@ -456,8 +509,251 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     }
 
     /// Split a large cluster into two smaller clusters using 2-means clustering.
-    /// TODO: Implement split logic with new delta structure.
-    async fn split(&self, _cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    async fn split(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        let Some(old_center) = self.centroid(cluster_id) else {
+            return Ok(());
+        };
+        let Some(delta) = self.detach(cluster_id).await? else {
+            return Ok(());
+        };
+
+        let embeddings = delta
+            .ids
+            .iter()
+            .zip(delta.versions.iter())
+            .filter_map(|(id, version)| {
+                self.is_valid(*id, *version)
+                    .then(|| self.embeddings.get(id).map(|e| (*id, *version, e.clone())))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+
+        if embeddings.len() <= self.config.spann_split_threshold {
+            self.deltas.insert(cluster_id, delta);
+            return Ok(());
+        }
+
+        let (left_center, left_group, right_center, right_group) =
+            utils::split(embeddings, &self.config.distance_function);
+
+        let left_distance = self.distance(&left_center, &old_center);
+        let right_distance = self.distance(&right_center, &old_center);
+
+        if left_distance.abs() < f32::EPSILON && right_distance.abs() < f32::EPSILON {
+            self.deltas.insert(cluster_id, delta);
+            return Ok(());
+        }
+
+        let left_delta = QuantizedDelta {
+            center: left_center.clone(),
+            codes: left_group
+                .iter()
+                .map(|(_, _, e)| Code::<Vec<u8>>::quantize(e, &left_center).as_ref().into())
+                .collect(),
+            ids: left_group.iter().map(|(id, _, _)| *id).collect(),
+            length: left_group.len(),
+            versions: left_group.iter().map(|(_, version, _)| *version).collect(),
+        };
+
+        let left_cluster_id = if left_distance.abs() < f32::EPSILON {
+            self.deltas.insert(cluster_id, left_delta);
+            cluster_id
+        } else {
+            self.create(left_delta)?
+        };
+
+        let right_delta = QuantizedDelta {
+            center: right_center.clone(),
+            codes: right_group
+                .iter()
+                .map(|(_, _, e)| Code::<Vec<u8>>::quantize(e, &right_center).as_ref().into())
+                .collect(),
+            ids: right_group.iter().map(|(id, _, _)| *id).collect(),
+            length: right_group.len(),
+            versions: right_group.iter().map(|(_, version, _)| *version).collect(),
+        };
+
+        let right_cluster_id = if right_distance.abs() < f32::EPSILON {
+            self.deltas.insert(cluster_id, right_delta);
+            cluster_id
+        } else {
+            self.create(right_delta)?
+        };
+
+        if left_cluster_id != cluster_id && right_cluster_id != cluster_id {
+            self.drop(cluster_id)?;
+        }
+
+        // NPA check for split points
+        let evaluated = DashSet::new();
+
+        if left_cluster_id != cluster_id {
+            for (id, version, embedding) in &left_group {
+                if !self.is_valid(*id, *version) {
+                    continue;
+                }
+                if !evaluated.insert(*id) {
+                    continue;
+                }
+                let old_dist = self.distance(embedding, &old_center);
+                let new_dist = self.distance(embedding, &left_center);
+                if new_dist > old_dist {
+                    self.reassign(left_cluster_id, *id, *version, embedding.clone())
+                        .await?;
+                }
+            }
+        }
+
+        if right_cluster_id != cluster_id {
+            for (id, version, embedding) in &right_group {
+                if !self.is_valid(*id, *version) {
+                    continue;
+                }
+                if !evaluated.insert(*id) {
+                    continue;
+                }
+                let old_dist = self.distance(embedding, &old_center);
+                let new_dist = self.distance(embedding, &right_center);
+                if new_dist > old_dist {
+                    self.reassign(right_cluster_id, *id, *version, embedding.clone())
+                        .await?;
+                }
+            }
+        }
+
+        // NPA check for neighbor points
+        let mut reassign_candidates = Vec::new();
+        let old_q_norm = f32::dot(&old_center, &old_center).unwrap_or(0.0).sqrt() as f32;
+        let left_q_norm = if left_cluster_id == cluster_id {
+            old_q_norm
+        } else {
+            f32::dot(&left_center, &left_center).unwrap_or(0.0).sqrt() as f32
+        };
+        let right_q_norm = if right_cluster_id == cluster_id {
+            old_q_norm
+        } else {
+            f32::dot(&right_center, &right_center).unwrap_or(0.0).sqrt() as f32
+        };
+
+        let neighbors = self.navigate(&old_center)?;
+        for neighbor_id in neighbors.keys {
+            if neighbor_id == cluster_id
+                || neighbor_id == left_cluster_id
+                || neighbor_id == right_cluster_id
+            {
+                continue;
+            }
+            self.scrub(neighbor_id).await?;
+            let Some(neighbor_delta) = self.deltas.get(&neighbor_id).map(|d| d.clone()) else {
+                continue;
+            };
+
+            let c_norm = f32::dot(&neighbor_delta.center, &neighbor_delta.center)
+                .unwrap_or(0.0)
+                .sqrt() as f32;
+
+            let old_r_q = old_center
+                .iter()
+                .zip(neighbor_delta.center.iter())
+                .map(|(a, b)| a - b)
+                .collect::<Vec<_>>();
+            let old_c_dot_q = f32::dot(&neighbor_delta.center, &old_center).unwrap_or(0.0) as f32;
+
+            let (left_r_q, left_c_dot_q) = if left_cluster_id == cluster_id {
+                (old_r_q.clone(), old_c_dot_q)
+            } else {
+                let r_q = left_center
+                    .iter()
+                    .zip(neighbor_delta.center.iter())
+                    .map(|(a, b)| a - b)
+                    .collect::<Vec<_>>();
+                let c_dot_q = f32::dot(&neighbor_delta.center, &left_center).unwrap_or(0.0) as f32;
+                (r_q, c_dot_q)
+            };
+
+            let (right_r_q, right_c_dot_q) = if right_cluster_id == cluster_id {
+                (old_r_q.clone(), old_c_dot_q)
+            } else {
+                let r_q = right_center
+                    .iter()
+                    .zip(neighbor_delta.center.iter())
+                    .map(|(a, b)| a - b)
+                    .collect::<Vec<_>>();
+                let c_dot_q = f32::dot(&neighbor_delta.center, &right_center).unwrap_or(0.0) as f32;
+                (r_q, c_dot_q)
+            };
+
+            let neighbor_r_q = vec![0.0; neighbor_delta.center.len()];
+            let neighbor_c_dot_q = c_norm * c_norm;
+            let neighbor_q_norm = c_norm;
+
+            for (i, code) in neighbor_delta.codes.iter().enumerate() {
+                let id = neighbor_delta.ids[i];
+                let version = neighbor_delta.versions[i];
+
+                if !self.is_valid(id, version) {
+                    continue;
+                }
+                if !evaluated.insert(id) {
+                    continue;
+                }
+
+                let code = Code::<&[u8]>::new(code.as_ref());
+
+                let neighbor_dist = code.distance_query(
+                    &self.config.distance_function,
+                    &neighbor_r_q,
+                    c_norm,
+                    neighbor_c_dot_q,
+                    neighbor_q_norm,
+                );
+                let left_dist = code.distance_query(
+                    &self.config.distance_function,
+                    &left_r_q,
+                    c_norm,
+                    left_c_dot_q,
+                    left_q_norm,
+                );
+                let right_dist = code.distance_query(
+                    &self.config.distance_function,
+                    &right_r_q,
+                    c_norm,
+                    right_c_dot_q,
+                    right_q_norm,
+                );
+                let old_dist = code.distance_query(
+                    &self.config.distance_function,
+                    &old_r_q,
+                    c_norm,
+                    old_c_dot_q,
+                    old_q_norm,
+                );
+
+                if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
+                    continue;
+                }
+                if old_dist <= left_dist && old_dist <= right_dist {
+                    continue;
+                }
+
+                reassign_candidates.push((neighbor_id, id, version));
+            }
+        }
+
+        let candidate_ids = reassign_candidates
+            .iter()
+            .map(|(_, id, _)| *id)
+            .collect::<Vec<_>>();
+        self.load_raw(&candidate_ids).await?;
+
+        for (from_cluster_id, id, version) in reassign_candidates {
+            let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) else {
+                continue;
+            };
+            self.reassign(from_cluster_id, id, version, embedding)
+                .await?;
+        }
+
         Ok(())
     }
 
@@ -670,6 +966,8 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             // === Blockfile Readers ===
             quantized_cluster_reader,
             raw_embedding_reader,
+            // === Dedup Sets ===
+            balancing: DashSet::new().into(),
         })
     }
 
