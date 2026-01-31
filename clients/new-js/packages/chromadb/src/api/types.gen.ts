@@ -557,6 +557,10 @@ export type SpannIndexConfig = {
     nreplica_count?: number | null;
     num_centers_to_merge_to?: number | null;
     num_samples_kmeans?: number | null;
+    /**
+     * Enable quantization for vector search (cloud-only feature)
+     */
+    quantize?: boolean;
     reassign_neighbor_count?: number | null;
     search_nprobe?: number | null;
     search_rng_epsilon?: number | null;
