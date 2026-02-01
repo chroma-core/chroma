@@ -2693,16 +2693,22 @@ impl FastSpannIndexFlusher {
                 SpannIndexWriterError::MaxHeadIdFlushError(e)
             })?;
 
-        // Flush centroid indexes to S3
+        // Commit and flush centroid indexes to S3
         let (raw_centroid_id, quantized_centroid_id) = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.hnsw_flush_latency,
                 &[],
                 chroma_tracing::util::StopWatchUnit::Millis,
             );
-            let raw_centroid_id = self.usearch_provider.flush(&self.raw_centroid).await?;
+            // Commit to get IDs
+            let raw_centroid_id = self.usearch_provider.commit(&self.raw_centroid).await?;
             let quantized_centroid_id = self
                 .usearch_provider
+                .commit(&self.quantized_centroid)
+                .await?;
+            // Flush to storage
+            self.usearch_provider.flush(&self.raw_centroid).await?;
+            self.usearch_provider
                 .flush(&self.quantized_centroid)
                 .await?;
             tracing::info!(

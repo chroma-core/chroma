@@ -275,7 +275,7 @@ impl FastSpannIndexWriter {
             if prefix.is_empty() {
                 versions.insert(key, value);
             } else {
-                let embedding = raw_centroid.get(key)?.ok_or_else(|| {
+                let embedding = raw_centroid.get(key as u64)?.ok_or_else(|| {
                     tracing::error!("Embedding not found in raw centroid index for id {}", key);
                     SpannIndexWriterError::HeadNotFound
                 })?;
@@ -647,8 +647,8 @@ impl FastSpannIndexWriter {
             self.heads.remove(&head_id);
 
             // Delete from both centroid indexes
-            self.raw_centroid.remove(head_id)?;
-            self.quantized_centroid.remove(head_id)?;
+            self.raw_centroid.remove(head_id as u64)?;
+            self.quantized_centroid.remove(head_id as u64)?;
 
             // Track as deleted
             self.deleted_heads.insert(head_id);
@@ -724,7 +724,7 @@ impl FastSpannIndexWriter {
                     continue;
                 }
             }
-            let Some(head_data) = self.heads.get(&id) else {
+            let Some(head_data) = self.heads.get(&(id as u32)) else {
                 continue;
             };
             result.ids.push(id as usize);
@@ -1066,8 +1066,8 @@ impl FastSpannIndexWriter {
             drop(target_data); // Release lock before HNSW and reassignment
 
             // Delete source from both centroid indexes
-            self.raw_centroid.remove(source_head_id)?;
-            self.quantized_centroid.remove(source_head_id)?;
+            self.raw_centroid.remove(source_head_id as u64)?;
+            self.quantized_centroid.remove(source_head_id as u64)?;
             self.deleted_heads.insert(source_head_id);
 
             // Reassign merged points that now violate NPA
@@ -1361,8 +1361,9 @@ impl FastSpannIndexWriter {
 
             // Only add to centroid indexes if this is a NEW head
             if same_head_cluster != Some(k) {
-                self.raw_centroid.add(cluster_head_id, &centroid)?;
-                self.quantized_centroid.add(cluster_head_id, &centroid)?;
+                self.raw_centroid.add(cluster_head_id as u64, &centroid)?;
+                self.quantized_centroid
+                    .add(cluster_head_id as u64, &centroid)?;
                 self.stats
                     .num_heads_created
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1375,8 +1376,8 @@ impl FastSpannIndexWriter {
 
         // Only delete old head from centroid indexes if we didn't reuse it
         if same_head_cluster.is_none() {
-            self.raw_centroid.remove(head_id)?;
-            self.quantized_centroid.remove(head_id)?;
+            self.raw_centroid.remove(head_id as u64)?;
+            self.quantized_centroid.remove(head_id as u64)?;
             self.stats
                 .num_heads_deleted
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1423,8 +1424,8 @@ impl FastSpannIndexWriter {
                 .num_pl_modified
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             // Add to both centroid indexes.
-            self.raw_centroid.add(next_id, &embeddings)?;
-            self.quantized_centroid.add(next_id, &embeddings)?;
+            self.raw_centroid.add(next_id as u64, &embeddings)?;
+            self.quantized_centroid.add(next_id as u64, &embeddings)?;
             self.stats
                 .num_heads_created
                 .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1532,7 +1533,7 @@ impl FastSpannIndexWriter {
         for head_id in sampled_heads.into_iter() {
             let head_embedding = self
                 .raw_centroid
-                .get(*head_id)?
+                .get(*head_id as u64)?
                 .ok_or(SpannIndexWriterError::HeadNotFound)?;
             self.garbage_collect_head(*head_id as usize, &head_embedding)
                 .await?;
@@ -1692,13 +1693,23 @@ impl FastSpannIndexWriter {
     pub async fn commit(self) -> Result<FastSpannIndexFlusher, SpannIndexWriterError> {
         self.emit_counters();
 
-        // Reconcile heads where we have in-memory delta that doesn't match total length
-        for head_ref in self.heads.iter() {
-            let pl_len = head_ref.posting_list.ids.len();
-            if pl_len > 0 && pl_len != head_ref.length as usize {
-                let head_id = *head_ref.key();
-                self.reconcile_posting_list(head_id).await?;
-            }
+        // Collect head IDs that need reconciliation (don't hold refs while calling reconcile)
+        let heads_to_reconcile: Vec<u32> = self
+            .heads
+            .iter()
+            .filter_map(|head_ref| {
+                let pl_len = head_ref.posting_list.ids.len();
+                if pl_len > 0 && pl_len != head_ref.length as usize {
+                    Some(*head_ref.key())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Reconcile after releasing refs
+        for head_id in heads_to_reconcile {
+            self.reconcile_posting_list(head_id).await?;
         }
 
         // Posting list: write staged data and delete removed heads.
@@ -1896,7 +1907,7 @@ impl FastSpannIndexWriter {
 
 #[cfg(test)]
 mod tests {
-    use std::{f32::consts::PI, path::PathBuf};
+    use std::f32::consts::PI;
 
     use chroma_blockstore::{
         arrow::{
@@ -1915,6 +1926,7 @@ mod tests {
         config::{HnswGarbageCollectionConfig, PlGarbageCollectionConfig},
         spann::types::GarbageCollectionContext,
         usearch::USearchIndexProvider,
+        VectorIndex,
     };
 
     use super::{FastSpannIndexWriter, SpannMetrics};
@@ -2003,12 +2015,11 @@ mod tests {
                 .expect("Error adding to spann index writer");
         }
         {
-            let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.hnsw_index.len(), 1);
-            let emb = hnsw_read_guard
-                .hnsw_index
+            assert_eq!(writer.raw_centroid.len().unwrap(), 1);
+            let emb = writer
+                .raw_centroid
                 .get(1)
-                .expect("Error getting hnsw index")
+                .expect("Error getting centroid")
                 .unwrap();
             assert_eq!(emb, &[0.0, 0.0]);
         }
@@ -2028,11 +2039,10 @@ mod tests {
         let mut emb_1_id;
         let mut emb_2_id;
         {
-            let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.hnsw_index.len(), 2);
+            assert_eq!(writer.raw_centroid.len().unwrap(), 2);
             emb_2_id = 2;
             // Head could be 2 and 3 or 1 and 2.
-            if hnsw_read_guard.hnsw_index.get(1).is_err() {
+            if writer.raw_centroid.get(1).unwrap().is_none() {
                 emb_1_id = 3;
             } else {
                 emb_1_id = 1;
@@ -2079,11 +2089,10 @@ mod tests {
                 .expect("Error adding to spann index writer");
         }
         {
-            let hnsw_read_guard = writer.hnsw_index.inner.read();
-            assert_eq!(hnsw_read_guard.hnsw_index.len(), 2);
+            assert_eq!(writer.raw_centroid.len().unwrap(), 2);
             emb_2_id = 2;
             // Head could be 2 and 3 or 1 and 2.
-            if hnsw_read_guard.hnsw_index.get(1).is_err() {
+            if writer.raw_centroid.get(1).unwrap().is_none() {
                 emb_1_id = 3;
             } else {
                 emb_1_id = 1;
