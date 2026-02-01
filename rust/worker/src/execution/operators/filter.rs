@@ -420,6 +420,61 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
         metadata_provider: &MetadataProvider<'me>,
     ) -> Result<SignedRoaringBitmap, FilterError> {
         let result = match &self.comparison {
+            MetadataComparison::Exists(exists) => {
+                // Build a union over value domains to capture any presence of this key
+                let mut parts: Vec<SignedRoaringBitmap> = Vec::new();
+                // Booleans: true or false
+                for b in [true, false] {
+                    if let Ok(bm) = metadata_provider
+                        .filter_by_metadata(&self.key, &MetadataValue::Bool(b), &PrimitiveOperator::Equal)
+                        .await
+                    {
+                        parts.push(SignedRoaringBitmap::Include(bm));
+                    }
+                }
+                // Integers: (< 0) ∪ (= 0) ∪ (> 0)
+                for (val, op) in [
+                    (MetadataValue::Int(0), PrimitiveOperator::LessThan),
+                    (MetadataValue::Int(0), PrimitiveOperator::Equal),
+                    (MetadataValue::Int(0), PrimitiveOperator::GreaterThan),
+                ] {
+                    if let Ok(bm) = metadata_provider
+                        .filter_by_metadata(&self.key, &val, &op)
+                        .await
+                    {
+                        parts.push(SignedRoaringBitmap::Include(bm));
+                    }
+                }
+                // Floats: (< 0.0) ∪ (= 0.0) ∪ (> 0.0)
+                for (val, op) in [
+                    (MetadataValue::Float(0.0), PrimitiveOperator::LessThan),
+                    (MetadataValue::Float(0.0), PrimitiveOperator::Equal),
+                    (MetadataValue::Float(0.0), PrimitiveOperator::GreaterThan),
+                ] {
+                    if let Ok(bm) = metadata_provider
+                        .filter_by_metadata(&self.key, &val, &op)
+                        .await
+                    {
+                        parts.push(SignedRoaringBitmap::Include(bm));
+                    }
+                }
+                // Strings: (> "") ∪ (= "")
+                for (val, op) in [
+                    (MetadataValue::Str(String::new()), PrimitiveOperator::GreaterThan),
+                    (MetadataValue::Str(String::new()), PrimitiveOperator::Equal),
+                ] {
+                    if let Ok(bm) = metadata_provider
+                        .filter_by_metadata(&self.key, &val, &op)
+                        .await
+                    {
+                        parts.push(SignedRoaringBitmap::Include(bm));
+                    }
+                }
+                let union = parts
+                    .into_iter()
+                    .fold(SignedRoaringBitmap::empty(), BitOr::bitor);
+                if *exists { union } else { union.flip() }
+            }
             MetadataComparison::Primitive(primitive_operator, metadata_value) => {
                 match primitive_operator {
                     // We convert the inequality check in to an equality check, and then negate the result

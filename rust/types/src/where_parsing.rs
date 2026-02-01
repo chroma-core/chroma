@@ -238,6 +238,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
             return Err(WhereValidationError::WhereClause);
         }
         let (operator, operand) = value_obj.iter().next().unwrap();
+        if operator == "$exists" {
+            let exists = operand.as_bool().ok_or(WhereValidationError::WhereClause)?;
+            return Ok(Where::Metadata(MetadataExpression {
+                key: key.clone(),
+                comparison: crate::MetadataComparison::Exists(exists),
+            }));
+        }
         if operand.is_array() {
             let set_operator;
             if operator == "$in" {
