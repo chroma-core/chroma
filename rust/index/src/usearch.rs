@@ -10,7 +10,7 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
 use chroma_types::{Cmek, CollectionUuid};
-use crossbeam::sync::ShardedLock;
+use parking_lot::RwLock;
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
 use tokio::task::spawn_blocking;
@@ -57,18 +57,10 @@ pub enum USearchError {
     Cache(#[from] chroma_cache::CacheError),
     #[error("Index error: {0}")]
     Index(String),
-    #[error("Lock poisoned")]
-    Poison,
     #[error("Cannot retrieve embeddings from quantized index")]
     QuantizedEmbedding,
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
-}
-
-impl<T> From<std::sync::PoisonError<T>> for USearchError {
-    fn from(_: std::sync::PoisonError<T>) -> Self {
-        Self::Poison
-    }
 }
 
 impl ChromaError for USearchError {
@@ -76,24 +68,18 @@ impl ChromaError for USearchError {
         match self {
             USearchError::Cache(err) => err.code(),
             USearchError::Index(_) => ErrorCodes::Internal,
-            USearchError::Poison => ErrorCodes::Internal,
             USearchError::QuantizedEmbedding => ErrorCodes::InvalidArgument,
             USearchError::Storage(err) => err.code(),
         }
     }
 }
 
-// NOTE(sicheng): The reserve buffer prevents concurrent adds passing capacity check at the
-// same time and overflow the reserved space. The buffer size should be greater than the
-// number of concurrent threads working on the same index.
-const RESERVE_BUFFER: usize = 1024;
-
 #[derive(Clone)]
 pub struct USearchIndex {
     id: IndexUuid,
     cache_key: CacheKey,
     cmek: Option<Cmek>,
-    index: Arc<ShardedLock<usearch::Index>>,
+    index: Arc<RwLock<usearch::Index>>,
     prefix_path: String,
     quantization_center: Option<Arc<[f32]>>,
     tombstones: Arc<AtomicUsize>,
@@ -110,16 +96,49 @@ impl USearchIndex {
         }
     }
 
+    /// Apply custom quantization metric to the index.
+    fn apply_quantization_metric(
+        index: &mut usearch::Index,
+        center: &[f32],
+        distance_function: DistanceFunction,
+    ) {
+        let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
+        let dim = center.len();
+        let code_len = Code::<&[u8]>::size(dim);
+
+        index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
+            // SAFETY: usearch passes valid pointers of `code_len` i8 elements
+            let a_i8 = unsafe { std::slice::from_raw_parts(a_ptr, code_len) };
+            let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
+            let a = bytemuck::cast_slice(a_i8);
+            let b = bytemuck::cast_slice(b_i8);
+            let code_a = Code::<_>::new(a);
+            let code_b = Code::<_>::new(b);
+            code_a.distance_code(&distance_function, &code_b, c_norm, dim)
+        }));
+    }
+
     /// Load serialized data into the index.
-    async fn load(&self, data: Arc<Vec<u8>>) -> Result<(), USearchError> {
+    async fn load(
+        &self,
+        data: Arc<Vec<u8>>,
+        distance_function: DistanceFunction,
+    ) -> Result<(), USearchError> {
         let index = self.index.clone();
         let tombstones = self.tombstones.clone();
+        let quantization_center = self.quantization_center.clone();
         spawn_blocking(move || {
-            index
-                .write()?
+            let mut guard = index.write();
+            guard
                 .load_from_buffer(&data)
                 .map_err(|e| USearchError::Index(e.to_string()))?;
             tombstones.store(0, Ordering::Relaxed);
+
+            // Re-apply custom metric after loading (load_from_buffer resets it)
+            if let Some(center) = quantization_center {
+                Self::apply_quantization_metric(&mut guard, &center, distance_function);
+            }
+
             Ok(())
         })
         .await
@@ -130,7 +149,7 @@ impl USearchIndex {
     async fn save(&self) -> Result<Vec<u8>, USearchError> {
         let index = self.index.clone();
         spawn_blocking(move || {
-            let guard = index.write()?;
+            let guard = index.write();
             let mut buffer = vec![0u8; guard.serialized_length()];
             guard
                 .save_to_buffer(&mut buffer)
@@ -155,18 +174,7 @@ impl USearchIndex {
             usearch::Index::new(&options).map_err(|e| USearchError::Index(e.to_string()))?;
 
         if let Some(center) = &quantization_center {
-            let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
-            let dim = center.len();
-            let df = distance_function;
-            let code_len = Code::<&[u8]>::size(dim);
-            index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
-                // SAFETY: usearch passes valid pointers of `code_len` i8 elements
-                let a_i8 = unsafe { std::slice::from_raw_parts(a_ptr, code_len) };
-                let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
-                let a = bytemuck::cast_slice(a_i8);
-                let b = bytemuck::cast_slice(b_i8);
-                Code::<_>::new(a).distance_code(&df, &Code::<_>::new(b), c_norm, dim)
-            }));
+            Self::apply_quantization_metric(&mut index, center, distance_function);
         }
 
         Ok(Self {
@@ -185,35 +193,29 @@ impl VectorIndex for USearchIndex {
     type Error = USearchError;
 
     fn add(&self, key: u32, vector: &[f32]) -> Result<(), Self::Error> {
-        let need_resize = {
-            let index = self.index.read()?;
-            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
-            raw_size + RESERVE_BUFFER >= index.capacity()
-        };
+        let code = self
+            .quantization_center
+            .as_ref()
+            .map(|center| Code::<_>::quantize(vector, center));
 
-        if need_resize {
-            let index = self.index.write()?;
-            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
-            if raw_size + RESERVE_BUFFER >= index.capacity() {
-                let new_capacity = (index.capacity() * 2).max(RESERVE_BUFFER);
-                index
-                    .reserve(new_capacity)
-                    .map_err(|e| USearchError::Index(e.to_string()))?;
-            }
+        let index = self.index.write();
+        if index.size() + self.tombstones.load(Ordering::SeqCst) >= index.capacity() {
+            index
+                .reserve(index.capacity().max(128) * 2)
+                .map_err(|e| USearchError::Index(e.to_string()))?
         }
 
-        if let Some(center) = &self.quantization_center {
-            let code = Code::<_>::quantize(vector, center);
+        if let Some(code) = code {
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            self.index.read()?.add(key as u64, i8_slice)
+            index.add(key as u64, i8_slice)
         } else {
-            self.index.read()?.add(key as u64, vector)
+            index.add(key as u64, vector)
         }
         .map_err(|e| USearchError::Index(e.to_string()))
     }
 
     fn capacity(&self) -> Result<usize, Self::Error> {
-        Ok(self.index.read()?.capacity())
+        Ok(self.index.read().capacity())
     }
 
     fn get(&self, key: u32) -> Result<Option<Vec<f32>>, Self::Error> {
@@ -224,7 +226,7 @@ impl VectorIndex for USearchIndex {
         let mut vector = Vec::new();
         let count = self
             .index
-            .read()?
+            .read()
             .export(key as u64, &mut vector)
             .map_err(|e| USearchError::Index(e.to_string()))?;
 
@@ -232,13 +234,13 @@ impl VectorIndex for USearchIndex {
     }
 
     fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.index.read()?.size())
+        Ok(self.index.read().size())
     }
 
     fn remove(&self, key: u32) -> Result<(), Self::Error> {
-        self.tombstones.fetch_add(1, Ordering::Relaxed);
+        self.tombstones.fetch_add(1, Ordering::SeqCst);
         self.index
-            .read()?
+            .write()
             .remove(key as u64)
             .map_err(|e| USearchError::Index(e.to_string()))?;
         Ok(())
@@ -246,7 +248,7 @@ impl VectorIndex for USearchIndex {
 
     fn reserve(&self, capacity: usize) -> Result<(), Self::Error> {
         self.index
-            .write()?
+            .write()
             .reserve(capacity)
             .map_err(|e| USearchError::Index(e.to_string()))
     }
@@ -255,9 +257,9 @@ impl VectorIndex for USearchIndex {
         let matches = if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(query, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            self.index.read()?.search(i8_slice, count)
+            self.index.read().search(i8_slice, count)
         } else {
-            self.index.read()?.search(query, count)
+            self.index.read().search(query, count)
         }
         .map_err(|e| USearchError::Index(e.to_string()))?;
 
@@ -270,11 +272,7 @@ impl VectorIndex for USearchIndex {
 
 impl Weighted for USearchIndex {
     fn weight(&self) -> usize {
-        let Ok(index) = self.index.read() else {
-            return 1;
-        };
-        let bytes = index.memory_usage();
-        (bytes / 1024 / 1024).max(1)
+        (self.index.read().memory_usage() / 1024 / 1024).max(1)
     }
 }
 
@@ -325,7 +323,9 @@ impl USearchIndexProvider {
             options.clone(),
             config.quantization_center.clone(),
         )?;
-        index.load(buffer.into()).await?;
+        index
+            .load(buffer.into(), config.distance_function.clone())
+            .await?;
         Ok(Some(index))
     }
 }
@@ -449,7 +449,7 @@ impl VectorIndexProvider for USearchIndexProvider {
                     options,
                     config.quantization_center.clone(),
                 )?;
-                index.load(bytes).await?;
+                index.load(bytes, config.distance_function.clone()).await?;
 
                 if !is_fork {
                     self.cache.insert(cache_key, index.clone()).await;
@@ -475,6 +475,70 @@ mod tests {
 
     fn random_vector(rng: &mut impl Rng, dim: usize) -> Vec<f32> {
         (0..dim).map(|_| rng.gen_range(-4.0_f32..4.0)).collect()
+    }
+
+    #[tokio::test]
+    async fn test_metric() {
+        let (_temp_dir, storage) = test_storage();
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        const DIM: usize = 128;
+
+        // Quantized config with non-zero center
+        let center: Arc<[f32]> = Arc::from(vec![0.1f32; DIM]);
+        let config = USearchIndexConfig {
+            collection_id,
+            cmek: None,
+            prefix_path: String::new(),
+            dimensions: DIM,
+            distance_function: DistanceFunction::Euclidean,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            quantization_center: Some(center),
+        };
+
+        // Generate test vectors
+        let mut rng = StdRng::seed_from_u64(42);
+        let vectors: Vec<Vec<f32>> = (0..16).map(|_| random_vector(&mut rng, DIM)).collect();
+
+        // Create index, add vectors, search, flush
+        let (index_id, results_before) = {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+            let index = provider.open(&config, OpenMode::Create).await.unwrap();
+            for (i, v) in vectors.iter().enumerate() {
+                index.add(i as u32, v).unwrap();
+            }
+            let results = index.search(&vectors[0], 8).unwrap();
+            let id = provider.flush(&index).await.unwrap();
+            (id, results)
+        };
+
+        // Load from storage (fresh provider, empty cache) and search again
+        let results_after = {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+            let index = provider
+                .open(&config, OpenMode::Open(index_id))
+                .await
+                .unwrap();
+            index.search(&vectors[0], 8).unwrap()
+        };
+
+        // Verify distances match
+        assert_eq!(results_before.keys, results_after.keys);
+        for (before, after) in results_before
+            .distances
+            .iter()
+            .zip(results_after.distances.iter())
+        {
+            assert!(
+                (before - after).abs() <= f32::EPSILON,
+                "Distance mismatch: before={}, after={}",
+                before,
+                after
+            );
+        }
     }
 
     #[tokio::test]
