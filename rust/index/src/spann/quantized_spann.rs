@@ -60,12 +60,14 @@ pub struct QuantizedSpannConfig {
     pub distance_function: DistanceFunction,
 
     // === SPANN ===
+    pub spann_center_drift_threshold: f32,
+    pub spann_merge_threshold: usize,
     pub spann_nprobe: usize,
+    pub spann_reassign_neighbor_count: usize,
     pub spann_replica_count: usize,
     pub spann_rng_epsilon: f32,
     pub spann_rng_factor: f32,
     pub spann_split_threshold: usize,
-    pub spann_merge_threshold: usize,
 
     // === Blockfile IDs ===
     pub embedding_metadata_id: Option<Uuid>,
@@ -228,7 +230,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     /// Insert a rotated vector into the index.
     async fn insert(&self, key: u32, vector: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
         let version = self.upgrade(key);
-        let candidates = self.navigate(&vector)?;
+        let candidates = self.navigate(&vector, self.config.spann_nprobe)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
         if rng_cluster_ids.is_empty() {
@@ -346,7 +348,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         };
 
-        let neighbors = self.navigate(&source_center)?;
+        let neighbors = self.navigate(&source_center, self.config.spann_nprobe)?;
         let Some(target_id) = neighbors.keys.iter().copied().find(|id| *id != cluster_id) else {
             return Ok(());
         };
@@ -382,9 +384,9 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     }
 
     /// Query the centroid index for the nearest cluster heads.
-    fn navigate(&self, query: &[f32]) -> Result<SearchResult, QuantizedSpannError> {
+    fn navigate(&self, query: &[f32], count: usize) -> Result<SearchResult, QuantizedSpannError> {
         self.raw_centroid
-            .search(query, self.config.spann_nprobe)
+            .search(query, count)
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))
     }
 
@@ -406,7 +408,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         }
 
-        let candidates = self.navigate(&embedding)?;
+        let candidates = self.navigate(&embedding, self.config.spann_reassign_neighbor_count)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
         if rng_cluster_ids.contains(&from_cluster_id) {
@@ -635,7 +637,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             f32::dot(&right_center, &right_center).unwrap_or(0.0).sqrt() as f32
         };
 
-        let neighbors = self.navigate(&old_center)?;
+        let neighbors = self.navigate(&old_center, self.config.spann_reassign_neighbor_count)?;
         for neighbor_id in neighbors.keys {
             if neighbor_id == cluster_id
                 || neighbor_id == left_cluster_id
@@ -976,10 +978,62 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
     /// This method consumes the index and prepares all data for persistence.
     /// Call `flush()` on the returned flusher to actually write to storage.
     pub async fn commit(
-        self,
+        mut self,
         blockfile_provider: &BlockfileProvider,
-        usearch_provider: USearchIndexProvider,
+        usearch_provider: &USearchIndexProvider,
+        usearch_config: &USearchIndexConfig,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
+        // === Step 0: Check center drift and rebuild centroid indexes if needed ===
+        let dim = self.config.dimensions;
+        let mut new_center = vec![0.0f32; dim];
+        for delta in self.deltas.iter() {
+            for i in 0..dim {
+                new_center[i] += delta.center[i];
+            }
+        }
+        for i in 0..dim {
+            new_center[i] /= self.deltas.len().max(1) as f32;
+        }
+
+        let diff = new_center
+            .iter()
+            .zip(self.center.iter())
+            .map(|(a, b)| a - b)
+            .collect::<Vec<_>>();
+        let drift_dist_sq = f32::dot(&diff, &diff).unwrap_or(0.0) as f32;
+        let center_norm_sq = f32::dot(&new_center, &new_center).unwrap_or(0.0) as f32;
+
+        self.center =
+            if drift_dist_sq > self.config.spann_center_drift_threshold.powi(2) * center_norm_sq {
+                self.raw_centroid = usearch_provider
+                    .open(&usearch_config, OpenMode::Create)
+                    .await
+                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+
+                let quantized_config = USearchIndexConfig {
+                    quantization_center: Some(new_center.clone().into()),
+                    ..usearch_config.clone()
+                };
+                self.quantized_centroid = usearch_provider
+                    .open(&quantized_config, OpenMode::Create)
+                    .await
+                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+
+                for entry in self.deltas.iter() {
+                    let cluster_id = *entry.key();
+                    self.raw_centroid
+                        .add(cluster_id, &entry.center)
+                        .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                    self.quantized_centroid
+                        .add(cluster_id, &entry.center)
+                        .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                }
+
+                new_center.into()
+            } else {
+                self.center
+            };
+
         // === Step 1: quantized_cluster blockfile ===
         let quantized_cluster_flusher = {
             let mut cluster_ids = self
@@ -1147,7 +1201,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             quantized_cluster_flusher,
             raw_centroid: self.raw_centroid,
             scalar_metadata_flusher,
-            usearch_provider,
+            usearch_provider: usearch_provider.clone(),
         })
     }
 }
