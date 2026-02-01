@@ -192,9 +192,28 @@ impl SysDb for SysdbService {
 
     async fn list_databases(
         &self,
-        _request: Request<ListDatabasesRequest>,
+        request: Request<ListDatabasesRequest>,
     ) -> Result<Response<ListDatabasesResponse>, Status> {
-        Err(Status::unimplemented("list_databases is not supported"))
+        let proto_req = request.into_inner();
+        let internal_req: internal::ListDatabasesRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await?;
+
+        // Convert internal Database to proto Database
+        // Names are already prefixed with topology (e.g., "tilt-spanning+my_db")
+        let databases: Vec<chroma_types::chroma_proto::Database> = internal_resp
+            .into_iter()
+            .map(|db| chroma_types::chroma_proto::Database {
+                id: db.id.to_string(),
+                name: db.name,
+                tenant: db.tenant,
+            })
+            .collect();
+
+        Ok(Response::new(ListDatabasesResponse { databases }))
     }
 
     async fn delete_database(
@@ -794,7 +813,7 @@ impl SysdbService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{Backend, BackendFactory};
+    use crate::backend::{Assignable, Backend, BackendFactory};
     use crate::spanner::SpannerBackend;
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
@@ -808,8 +827,8 @@ mod tests {
         FlushSegmentCompactionInfo,
     };
     use chroma_types::{
-        CollectionUuid, DatabaseName, Schema, Segment, SegmentScope, SegmentType, SegmentUuid,
-        TopologyName,
+        CollectionUuid, Database, DatabaseName, Schema, Segment, SegmentScope, SegmentType,
+        SegmentUuid, TopologyName,
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -1688,6 +1707,316 @@ mod tests {
         assert!(
             matches!(backend, Backend::Spanner(_)),
             "Should route to default Spanner backend"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup test data - create multiple databases
+        let (tenant_id, database_name1) = setup_tenant_and_database(&backend).await;
+        let database_name2 = DatabaseName::new("test_database_2").expect("Invalid database name");
+        let create_db_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: database_name2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_db_req2)
+            .await
+            .expect("Failed to create second database");
+
+        // Test the internal ListDatabasesRequest
+        let request = internal::ListDatabasesRequest {
+            tenant_id: tenant_id.clone(),
+        };
+
+        // Test the Runnable implementation
+        let backends = vec![Backend::Spanner(backend.clone())];
+        let result = request.run(backends).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to list databases: {:?}",
+            result.err()
+        );
+
+        let databases = result.unwrap();
+        assert!(databases.len() == 2, "Should return exactly two databases");
+
+        // Verify both databases we created are in the results
+        let db_names: Vec<String> = databases.iter().map(|db| db.name.clone()).collect();
+        assert!(
+            db_names.contains(&database_name1.as_ref().to_string()),
+            "Should contain the first test database: {}",
+            database_name1.as_ref()
+        );
+        assert!(
+            db_names.contains(&database_name2.as_ref().to_string()),
+            "Should contain the second test database: {}",
+            database_name2.as_ref()
+        );
+
+        // Verify all databases belong to the correct tenant
+        for db in &databases {
+            assert_eq!(
+                db.tenant, tenant_id,
+                "Database should belong to test tenant"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases_empty_tenant() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Use a non-existent tenant
+        let tenant_id = Uuid::new_v4().to_string();
+        let request = internal::ListDatabasesRequest { tenant_id };
+
+        let backends = vec![Backend::Spanner(backend)];
+        let result = request.run(backends).await;
+
+        assert!(result.is_ok(), "Should succeed even for empty tenant");
+
+        let databases = result.unwrap();
+        assert!(
+            databases.is_empty(),
+            "Should return empty list for non-existent tenant"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases_with_factory() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup test data - create multiple databases
+        let (tenant_id, database_name1) = setup_tenant_and_database(&backend).await;
+        let database_name2 = DatabaseName::new("test_database_2").expect("Invalid database name");
+        let create_db_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: database_name2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_db_req2)
+            .await
+            .expect("Failed to create second database");
+
+        // Create a backend factory
+        let mut topology_to_backend = std::collections::HashMap::new();
+        topology_to_backend.insert(TopologyName::new("us").unwrap(), backend.clone());
+        let factory = BackendFactory::new(topology_to_backend);
+
+        // Test the Assignable implementation
+        let request = internal::ListDatabasesRequest {
+            tenant_id: tenant_id.clone(),
+        };
+        let backends = request.assign(&factory);
+
+        assert!(!backends.is_empty(), "Should assign at least one backend");
+
+        // Test the Runnable implementation with factory-assigned backends
+        let result = request.run(backends).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to list databases: {:?}",
+            result.err()
+        );
+
+        let databases = result.unwrap();
+        assert!(databases.len() >= 2, "Should return at least two databases");
+
+        // Verify both databases we created are in the results
+        let db_names: Vec<String> = databases.iter().map(|db| db.name.clone()).collect();
+        assert!(
+            db_names.contains(&database_name1.as_ref().to_string()),
+            "Should contain the first test database: {}",
+            database_name1.as_ref()
+        );
+        assert!(
+            db_names.contains(&database_name2.as_ref().to_string()),
+            "Should contain the second test database: {}",
+            database_name2.as_ref()
+        );
+
+        // Verify all databases belong to the correct tenant
+        for db in &databases {
+            assert_eq!(
+                db.tenant, tenant_id,
+                "Database should belong to test tenant"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases_single_and_mcmr() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup test data - create single-region databases
+        let (tenant_id, single_region_db1) = setup_tenant_and_database(&backend).await;
+        let single_region_db2 =
+            DatabaseName::new("single_region_db_2").expect("Invalid database name");
+        let create_sr_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: single_region_db2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_sr_req2)
+            .await
+            .expect("Failed to create second single-region database");
+
+        // Create MCMR databases (simulate by creating databases with topology prefixes)
+        let mcmr_db1 = DatabaseName::new("us+mcmr_db_1").expect("Invalid database name");
+        let create_mcmr_req1 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: mcmr_db1.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_mcmr_req1)
+            .await
+            .expect("Failed to create first MCMR database");
+
+        let mcmr_db2 = DatabaseName::new("eu+mcmr_db_2").expect("Invalid database name");
+        let create_mcmr_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: mcmr_db2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_mcmr_req2)
+            .await
+            .expect("Failed to create second MCMR database");
+
+        // Test the internal ListDatabasesRequest
+        let request = internal::ListDatabasesRequest {
+            tenant_id: tenant_id.clone(),
+        };
+
+        // Test the Runnable implementation with single backend (simulates MCMR scenario)
+        let backends = vec![Backend::Spanner(backend.clone())];
+        let result = request.run(backends).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to list databases with single and MCMR: {:?}",
+            result.err()
+        );
+
+        let databases = result.unwrap();
+        assert!(
+            databases.len() >= 4,
+            "Should return at least four databases"
+        );
+
+        // Verify all databases we created are in the results
+        let db_names: Vec<String> = databases.iter().map(|db| db.name.clone()).collect();
+        assert!(
+            db_names.contains(&single_region_db1.as_ref().to_string()),
+            "Should contain the first single-region database: {}",
+            single_region_db1.as_ref()
+        );
+        assert!(
+            db_names.contains(&single_region_db2.as_ref().to_string()),
+            "Should contain the second single-region database: {}",
+            single_region_db2.as_ref()
+        );
+        assert!(
+            db_names.contains(&mcmr_db1.as_ref().to_string()),
+            "Should contain the first MCMR database: {}",
+            mcmr_db1.as_ref()
+        );
+        assert!(
+            db_names.contains(&mcmr_db2.as_ref().to_string()),
+            "Should contain the second MCMR database: {}",
+            mcmr_db2.as_ref()
+        );
+
+        // Verify all databases belong to the correct tenant
+        for db in &databases {
+            assert_eq!(
+                db.tenant, tenant_id,
+                "Database should belong to test tenant"
+            );
+        }
+
+        // Test stable sorting by topology - single-region databases first, then MCMR sorted by topology
+        let single_region_dbs: Vec<&Database> = databases
+            .iter()
+            .filter(|db| !db.name.contains('+'))
+            .collect();
+        let mcmr_dbs: Vec<&Database> = databases
+            .iter()
+            .filter(|db| db.name.contains('+'))
+            .collect();
+
+        // Verify single-region databases come first
+        if !single_region_dbs.is_empty() && !mcmr_dbs.is_empty() {
+            let first_mcmr_index = databases
+                .iter()
+                .position(|db| db.name.contains('+'))
+                .unwrap();
+
+            // All databases before the first MCMR database should be single-region
+            for db in &databases[..first_mcmr_index] {
+                assert!(
+                    !db.name.contains('+'),
+                    "Database before first MCMR should be single-region, got: {}",
+                    db.name
+                );
+            }
+
+            // All databases after the first MCMR database should be MCMR
+            for db in &databases[first_mcmr_index..] {
+                assert!(
+                    db.name.contains('+'),
+                    "Database after first MCMR should be MCMR, got: {}",
+                    db.name
+                );
+            }
+        }
+
+        // Verify MCMR databases are sorted by topology (eu before us)
+        assert!(
+            mcmr_dbs.len() == 2,
+            "Should return exactly two MCMR databases"
+        );
+        assert!(
+            mcmr_dbs[0].name.starts_with("eu+"),
+            "First MCMR database should be from 'eu' topology, got: {}",
+            mcmr_dbs[0].name
+        );
+        assert!(
+            mcmr_dbs[1].name.starts_with("us+"),
+            "Second MCMR database should be from 'us' topology, got: {}",
+            mcmr_dbs[1].name
+        );
+
+        // Test that we have both single-region and MCMR databases
+        let single_region_count = databases.iter().filter(|db| !db.name.contains('+')).count();
+        let mcmr_count = databases.iter().filter(|db| db.name.contains('+')).count();
+
+        assert!(
+            single_region_count >= 2,
+            "Should have at least 2 single-region databases, got: {}",
+            single_region_count
+        );
+        assert!(
+            mcmr_count >= 2,
+            "Should have at least 2 MCMR databases, got: {}",
+            mcmr_count
         );
     }
 }

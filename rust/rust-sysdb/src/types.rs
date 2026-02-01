@@ -153,6 +153,31 @@ impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
     }
 }
 
+/// Internal request for listing databases.
+#[derive(Debug, Clone)]
+pub struct ListDatabasesRequest {
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::ListDatabasesRequest> for ListDatabasesRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::ListDatabasesRequest) -> Result<Self, Self::Error> {
+        // MCMR list_databases does not support limit/offset - pagination is handled client-side
+        if req.limit.is_some() || req.offset.unwrap_or(0) != 0 {
+            return Err(SysDbError::InvalidArgument(
+                "MCMR list_databases does not support limit or offset".to_string(),
+            ));
+        }
+        Ok(Self {
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal response for listing databases.
+pub type ListDatabasesResponse = Vec<Database>;
+
 /// Internal request for creating a collection.
 #[derive(Debug, Clone)]
 pub struct CreateCollectionRequest {
@@ -592,6 +617,15 @@ impl Assignable for GetDatabaseRequest {
     }
 }
 
+impl Assignable for ListDatabasesRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends with their topology names
+        factory.get_all_backends()
+    }
+}
+
 impl Assignable for CreateCollectionRequest {
     type Output = Backend;
 
@@ -693,6 +727,36 @@ impl Runnable for GetDatabaseRequest {
 
     async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_database(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ListDatabasesRequest {
+    type Response = ListDatabasesResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut all_databases: Vec<Database> = Vec::new();
+
+        // Query each backend and collect all databases
+        for backend in backends {
+            let databases = backend.list_databases(&self.tenant_id).await?;
+            all_databases.extend(databases);
+        }
+
+        // Stable sort databases by topology prefix (the part before '+')
+        all_databases.sort_by(|a, b| {
+            let a_topo = DatabaseName::new(a.name.clone())
+                .map(|db| db.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string());
+            let b_topo = DatabaseName::new(b.name.clone())
+                .map(|db| db.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string());
+
+            a_topo.cmp(&b_topo)
+        });
+
+        Ok(all_databases)
     }
 }
 

@@ -75,8 +75,7 @@ use crate::types::{
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_storage::config::{RegionalStorage, TopologicalStorage};
-use chroma_types::chroma_proto::Database;
-use chroma_types::{MultiCloudMultiRegionConfiguration, TopologyName};
+use chroma_types::{Database, MultiCloudMultiRegionConfiguration, TopologyName};
 
 /// Factory that holds all configured backend instances.
 ///
@@ -273,14 +272,9 @@ impl Backend {
     }
 
     /// List databases for a tenant.
-    pub async fn list_databases(
-        &self,
-        tenant: &str,
-        limit: Option<i32>,
-        offset: i32,
-    ) -> Result<Vec<Database>, SysDbError> {
+    pub async fn list_databases(&self, tenant: &str) -> Result<Vec<Database>, SysDbError> {
         match self {
-            Backend::Spanner(s) => s.list_databases(tenant, limit, offset).await,
+            Backend::Spanner(s) => s.list_databases(tenant).await,
         }
     }
 
