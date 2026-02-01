@@ -101,18 +101,22 @@ impl QuantizedClusterDelta {
             .map(|v| (v.center.len(), v.codes.len() / v.ids.len().max(1)))
             .unwrap_or((0, 0));
 
-        // Size breakdown:
-        // - center: FixedSizeList has no offsets, just data
-        // - codes: outer List has offsets, inner FixedSizeList has no offsets
-        // - ids/versions: List has offsets
-        // Total offset arrays: 3 (codes outer, ids, versions)
-        bit_util::round_upto_multiple_of_64(inner.prefix_size)
-            + bit_util::round_upto_multiple_of_64(inner.key_size)
-            + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>())
-            + bit_util::round_upto_multiple_of_64(inner.vector_count * code_length)
-            + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u64>()) * 2
-            + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3
-            + K::offset_size(cluster_count)
+        // Arrow storage size breakdown (each component 64-byte aligned):
+        // - prefix_size: string prefixes for composite keys
+        // - key_size: key data for composite keys
+        // - center: FixedSizeList<f32> with `cluster_count` centroids of `dimension` floats each
+        // - codes: List<FixedSizeList<u8>> with `vector_count` codes of `code_length` bytes each
+        // - ids: List<u32> with `vector_count` point IDs
+        // - versions: List<u32> with `vector_count` version numbers
+        // - offsets: 3 offset arrays (codes outer, ids, versions) with (cluster_count + 1) i32 each
+        // - key offsets: key-specific offset overhead
+        bit_util::round_upto_multiple_of_64(inner.prefix_size) // prefix strings
+            + bit_util::round_upto_multiple_of_64(inner.key_size) // key data
+            + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>()) // centers
+            + bit_util::round_upto_multiple_of_64(inner.vector_count * code_length) // codes
+            + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u32>()) * 2 // ids + versions
+            + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3 // list offsets (i32)
+            + K::offset_size(cluster_count) // key-specific offsets
     }
 
     pub(super) fn split<K: ArrowWriteableKey>(
@@ -171,14 +175,14 @@ impl QuantizedClusterDelta {
             vector_count += v.ids.len();
             cluster_count += 1;
 
-            // Same size calculation as get_size()
-            let total_size = bit_util::round_upto_multiple_of_64(prefix_size)
-                + bit_util::round_upto_multiple_of_64(key_size)
-                + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>())
-                + bit_util::round_upto_multiple_of_64(vector_count * code_length)
-                + bit_util::round_upto_multiple_of_64(vector_count * size_of::<u64>()) * 2
-                + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3
-                + K::offset_size(cluster_count);
+            // Same size calculation as get_size() - see comments there for breakdown
+            let total_size = bit_util::round_upto_multiple_of_64(prefix_size) // prefix strings
+                + bit_util::round_upto_multiple_of_64(key_size) // key data
+                + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>()) // centers
+                + bit_util::round_upto_multiple_of_64(vector_count * code_length) // codes
+                + bit_util::round_upto_multiple_of_64(vector_count * size_of::<u32>()) * 2 // ids + versions
+                + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3 // list offsets (i32)
+                + K::offset_size(cluster_count); // key-specific offsets
 
             if total_size > split_size {
                 return k.clone();

@@ -804,7 +804,7 @@ pub fn query_quantized_cluster(
         .map(|(id, code_bytes)| {
             let code = Code::<&[u8]>::new(code_bytes);
             let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
-            (*id as u32, distance)
+            (*id, distance)
         })
         .unzip();
 
