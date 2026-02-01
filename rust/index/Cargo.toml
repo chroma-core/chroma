@@ -5,7 +5,6 @@ edition = "2021"
 
 [features]
 default = []
-usearch = ["dep:usearch"]
 
 [lib]
 path = "src/lib.rs"
@@ -37,7 +36,7 @@ hnswlib = { workspace = true }
 opentelemetry = { version = "0.27.0", default-features = false, features = ["trace", "metrics"] }
 simsimd = { workspace = true }
 dashmap = { workspace = true }
-usearch = { workspace = true, optional = true }
+usearch = { workspace = true }
 faer = { workspace = true }
 
 chroma-error = { workspace = true }
