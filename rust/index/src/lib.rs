@@ -7,7 +7,6 @@ pub mod quantization;
 pub mod spann;
 pub mod sparse;
 pub mod types;
-#[cfg(feature = "usearch")]
 pub mod usearch;
 pub mod utils;
 
