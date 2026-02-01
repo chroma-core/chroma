@@ -282,15 +282,15 @@ impl MetadataProvider<'_> {
                             }
                             // Perform range scan of all documents
                             candidate_offsets => {
-                                for (offset, record) in rec_reader.get_all_data().await? {
+                                for (offset, record) in rec_reader.get_all_data().instrument(tracing::trace_span!(parent: Span::current(), "Get all data")).await? {
                                     if (candidate_offsets.is_none()
-                                        || candidate_offsets
-                                            .as_ref()
-                                            .is_some_and(|offsets| offsets.contains(offset)))
-                                        && record.document.is_some_and(|doc| regex.is_match(doc))
-                                    {
-                                        exact_matching_offset_ids.insert(offset);
-                                    }
+                                            || candidate_offsets
+                                                .as_ref()
+                                                .is_some_and(|offsets| offsets.contains(offset)))
+                                            && record.document.is_some_and(|doc| regex.is_match(doc))
+                                        {
+                                            exact_matching_offset_ids.insert(offset);
+                                        }
                                 }
                             }
                         }
