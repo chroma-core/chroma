@@ -57,3 +57,6 @@ features = ["pyo3/extension-module"]
 manifest-path = "rust/python_bindings/Cargo.toml"
 python-packages = ["chromadb"]
 include = ["chromadb/proto/**/*.py", "schemas/**/*"]
+
+[flake8]
+ban-relative-imports = true
