@@ -38,7 +38,6 @@ opentelemetry = { version = "0.27.0", default-features = false, features = ["tra
 simsimd = { workspace = true }
 dashmap = { workspace = true }
 usearch = { workspace = true, optional = true }
-crossbeam = { workspace = true }
 faer = { workspace = true }
 
 chroma-error = { workspace = true }
