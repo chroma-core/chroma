@@ -3,10 +3,10 @@ use std::sync::Arc;
 use arrow::{
     array::{
         Array, ArrayRef, FixedSizeListArray, FixedSizeListBuilder, Float32Array, Float32Builder,
-        ListArray, ListBuilder, PrimitiveArray, StructArray, UInt64Builder, UInt8Array,
+        ListArray, ListBuilder, PrimitiveArray, StructArray, UInt32Builder, UInt8Array,
         UInt8Builder,
     },
-    datatypes::{ArrowPrimitiveType, DataType, Field, Fields, UInt64Type},
+    datatypes::{ArrowPrimitiveType, DataType, Field, Fields, UInt32Type},
 };
 use chroma_types::{QuantizedCluster, QuantizedClusterOwned};
 
@@ -64,8 +64,8 @@ pub struct QuantizedClusterSizeTracker {
 pub struct QuantizedClusterArrowBuilder {
     center: FixedSizeListBuilder<Float32Builder>,
     codes: ListBuilder<FixedSizeListBuilder<UInt8Builder>>,
-    ids: ListBuilder<UInt64Builder>,
-    versions: ListBuilder<UInt64Builder>,
+    ids: ListBuilder<UInt32Builder>,
+    versions: ListBuilder<UInt32Builder>,
 }
 
 impl ArrowWriteableValue for QuantizedCluster<'_> {
@@ -116,11 +116,11 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
                 tracker.cluster_count,
             ),
             ids: ListBuilder::with_capacity(
-                UInt64Builder::with_capacity(tracker.vector_count),
+                UInt32Builder::with_capacity(tracker.vector_count),
                 tracker.cluster_count,
             ),
             versions: ListBuilder::with_capacity(
-                UInt64Builder::with_capacity(tracker.vector_count),
+                UInt32Builder::with_capacity(tracker.vector_count),
                 tracker.cluster_count,
             ),
         }
@@ -175,12 +175,12 @@ impl ArrowWriteableValue for QuantizedCluster<'_> {
         );
         let ids_field = Field::new(
             "ids",
-            DataType::List(Arc::new(Field::new("item", DataType::UInt64, true))),
+            DataType::List(Arc::new(Field::new("item", DataType::UInt32, true))),
             true,
         );
         let versions_field = Field::new(
             "versions",
-            DataType::List(Arc::new(Field::new("item", DataType::UInt64, true))),
+            DataType::List(Arc::new(Field::new("item", DataType::UInt32, true))),
             true,
         );
 
@@ -267,8 +267,8 @@ impl<'data> ArrowReadableValue<'data> for QuantizedCluster<'data> {
         QuantizedCluster {
             center,
             codes,
-            ids: get_list_slice::<UInt64Type>(ids_arr, index),
-            versions: get_list_slice::<UInt64Type>(versions_arr, index),
+            ids: get_list_slice::<UInt32Type>(ids_arr, index),
+            versions: get_list_slice::<UInt32Type>(versions_arr, index),
         }
     }
 

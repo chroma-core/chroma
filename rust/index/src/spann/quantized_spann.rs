@@ -304,8 +304,8 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                     .zip(persisted.codes.chunks(code_size))
                 {
                     delta.codes.push(Arc::from(code));
-                    delta.ids.push(*id as u32);
-                    delta.versions.push(*version as u32);
+                    delta.ids.push(*id);
+                    delta.versions.push(*version);
                 }
             }
         }
@@ -1070,15 +1070,17 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             // Apply changes in order
             for cluster_id in cluster_ids {
                 if let Some(delta) = self.deltas.get(&cluster_id) {
-                    let codes: Vec<u8> =
-                        delta.codes.iter().flat_map(|c| c.iter()).copied().collect();
-                    let ids: Vec<u64> = delta.ids.iter().map(|&id| id as u64).collect();
-                    let versions: Vec<u64> = delta.versions.iter().map(|&v| v as u64).collect();
+                    let codes = delta
+                        .codes
+                        .iter()
+                        .flat_map(|c| c.iter())
+                        .copied()
+                        .collect::<Vec<_>>();
                     let cluster_ref = QuantizedCluster {
                         center: &delta.center,
                         codes: &codes,
-                        ids: &ids,
-                        versions: &versions,
+                        ids: &delta.ids,
+                        versions: &delta.versions,
                     };
                     writer
                         .set("", cluster_id, cluster_ref)
