@@ -14,6 +14,9 @@
     "family": "Inter"
   },
   "favicon": "/favicon.svg",
+  "thumbnails": {
+    "background": "/images/og-bg.png"
+  },
   "navigation": {
     "tabs": [
       {
