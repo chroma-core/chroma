@@ -437,13 +437,16 @@ impl GrpcLog {
         database_name: DatabaseName,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
+        cmek: Option<Cmek>,
     ) -> Result<ForkLogsResponse, GrpcForkLogsError> {
+        let cmek_proto = cmek.map(|c| c.into());
         let response = self
             .client_for(source_collection_id)?
             .fork_logs(chroma_proto::ForkLogsRequest {
                 database_name: database_name.into_string(),
                 source_collection_id: source_collection_id.to_string(),
                 target_collection_id: target_collection_id.to_string(),
+                cmek: cmek_proto,
             })
             .await
             .map_err(|err| match err.code() {
