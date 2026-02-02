@@ -305,10 +305,29 @@
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/trychroma",
       "github": "https://github.com/chroma-core/chroma",
-      "discord": "https://discord.gg/MMeYNTmh3x"
-    }
+      "x": "https://x.com/trychroma",
+      "discord": "https://discord.gg/MMeYNTmh3x",
+      "youtube": "https://youtube.com/@trychroma"
+    },
+    "links": [
+      {
+        "items": [
+          {
+            "label": "Enterprise",
+            "href": "https://trychroma.com/enterprise"
+          },
+          {
+            "label": "Pricing",
+            "href": "https://trychroma.com/pricing"
+          },
+          {
+            "label": "Changelog",
+            "href": "https://trychroma.com/changelog"
+          }
+        ]
+      }
+    ]
   },
   "integrations": {
     "posthog": {
