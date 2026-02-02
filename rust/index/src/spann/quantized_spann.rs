@@ -139,6 +139,75 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     pub fn remove(&self, key: u32) {
         self.upgrade(key);
     }
+
+    pub async fn search(
+        &self,
+        query: &[f32],
+        k: usize,
+        use_quantized_centroid: bool,
+    ) -> Result<Vec<(u32, f32)>, QuantizedSpannError> {
+        use std::collections::HashSet;
+
+        let rotated = self.rotate(query);
+
+        // Navigate: find nearest clusters
+        let cluster_ids = if use_quantized_centroid {
+            self.quantized_centroid
+                .search(&rotated, self.config.spann_nprobe)
+                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?
+                .keys
+        } else {
+            self.raw_centroid
+                .search(&rotated, self.config.spann_nprobe)
+                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?
+                .keys
+        };
+
+        // Scan clusters and collect results
+        let mut measured = HashSet::new();
+        let mut results = Vec::new();
+
+        let q_norm = (f32::dot(&rotated, &rotated).unwrap_or(0.0) as f32).sqrt();
+
+        for cluster_id in cluster_ids {
+            self.load(cluster_id).await?;
+
+            let Some(delta) = self.deltas.get(&cluster_id) else {
+                continue;
+            };
+
+            let center = &delta.center;
+            let c_norm = (f32::dot(center, center).unwrap_or(0.0) as f32).sqrt();
+            let c_dot_q = f32::dot(center, &rotated).unwrap_or(0.0) as f32;
+            let r_q: Vec<f32> = rotated
+                .iter()
+                .zip(center.iter())
+                .map(|(q, c)| q - c)
+                .collect();
+
+            for (i, (id, version)) in delta.ids.iter().zip(delta.versions.iter()).enumerate() {
+                if !self.is_valid(*id, *version) || !measured.insert(*id) {
+                    continue;
+                }
+
+                let code = Code::<&[u8]>::new(&delta.codes[i]);
+                let distance = code.distance_query(
+                    &self.config.distance_function,
+                    &r_q,
+                    c_norm,
+                    c_dot_q,
+                    q_norm,
+                );
+                results.push((*id, distance));
+            }
+        }
+
+        // Sort by distance ascending and truncate to k
+        results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
+
+        Ok(results)
+    }
 }
 
 impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
@@ -395,8 +464,6 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     /// Called when a point ends up further from its new cluster center than it was
     /// from the old center (NPA check failure). Finds better clusters via RNG and
     /// appends the point there with an incremented version.
-    ///
-    /// Does NOT trigger balance on target clusters to avoid cascading splits.
     async fn reassign(
         &self,
         from_cluster_id: u32,
@@ -421,13 +488,23 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
         let new_version = self.upgrade(id);
 
+        let mut staging = Vec::new();
         for cluster_id in rng_cluster_ids {
             if let Some(centroid) = self.centroid(cluster_id) {
                 let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
                     .as_ref()
                     .into();
-                self.append(cluster_id, id, new_version, code);
+                if self
+                    .append(cluster_id, id, new_version, code)
+                    .is_some_and(|len| len > self.config.spann_split_threshold)
+                {
+                    staging.push(cluster_id);
+                }
             }
+        }
+
+        for cluster_id in staging {
+            Box::pin(self.balance(cluster_id)).await?;
         }
 
         Ok(())
@@ -983,7 +1060,11 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
         usearch_provider: &USearchIndexProvider,
         usearch_config: &USearchIndexConfig,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
+        use std::time::Instant;
+        let commit_start = Instant::now();
+
         // === Step 0: Check center drift and rebuild centroid indexes if needed ===
+        let step0_start = Instant::now();
         let dim = self.config.dimensions;
         let mut new_center = vec![0.0f32; dim];
         for delta in self.deltas.iter() {
@@ -1033,23 +1114,33 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             } else {
                 self.center
             };
+        eprintln!("[commit] Step 0 (drift check): {:?}", step0_start.elapsed());
 
         // === Step 1: quantized_cluster blockfile ===
+        let step1_start = Instant::now();
         let quantized_cluster_flusher = {
+            let total_clusters = self.deltas.len();
             let mut cluster_ids = self
                 .deltas
                 .iter()
                 .filter_map(|e| (!e.value().ids.is_empty()).then_some(*e.key()))
                 .collect::<Vec<_>>();
+            let touched_clusters = cluster_ids.len();
+            let skipped_clusters = total_clusters - touched_clusters;
 
             for cluster_id in &cluster_ids {
                 self.scrub(*cluster_id).await?;
             }
 
             // Add deleted cluster ids
+            let tombstoned_clusters = self.tombstones.len();
             for cluster_id in self.tombstones.iter() {
                 cluster_ids.push(*cluster_id);
             }
+            eprintln!(
+                "[commit] Step 1: total={}, touched={}, skipped={}, tombstoned={}",
+                total_clusters, touched_clusters, skipped_clusters, tombstoned_clusters
+            );
 
             // Sort for ordered mutations
             cluster_ids.sort_unstable();
@@ -1099,8 +1190,13 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?
         };
+        eprintln!(
+            "[commit] Step 1 (quantized_cluster): {:?}",
+            step1_start.elapsed()
+        );
 
         // === Step 2: scalar_metadata blockfile ===
+        let step2_start = Instant::now();
         // Stores: next_cluster_id, lengths, versions
         // Always create fresh, write in alphabetical prefix order: length < next < version
         // NOTE(sicheng): Must come after quantized_cluster because scrubbing may change lengths
@@ -1154,8 +1250,13 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?
         };
+        eprintln!(
+            "[commit] Step 2 (scalar_metadata): {:?}",
+            step2_start.elapsed()
+        );
 
         // === Step 3: embedding_metadata blockfile ===
+        let step3_start = Instant::now();
         // Stores: quantization center and rotation matrix columns
         // Write in alphabetical prefix order: center < rotation
         let embedding_metadata_flusher = {
@@ -1195,6 +1296,11 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?
         };
+        eprintln!(
+            "[commit] Step 3 (embedding_metadata): {:?}",
+            step3_start.elapsed()
+        );
+        eprintln!("[commit] Total: {:?}", commit_start.elapsed());
 
         Ok(QuantizedSpannFlusher {
             config: self.config,

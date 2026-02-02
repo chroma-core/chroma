@@ -10,6 +10,7 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
 use chroma_types::{Cmek, CollectionUuid};
+use crossbeam::sync::ShardedLock;
 use parking_lot::RwLock;
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
@@ -79,7 +80,7 @@ pub struct USearchIndex {
     id: IndexUuid,
     cache_key: CacheKey,
     cmek: Option<Cmek>,
-    index: Arc<RwLock<usearch::Index>>,
+    index: Arc<ShardedLock<usearch::Index>>,
     prefix_path: String,
     quantization_center: Option<Arc<[f32]>>,
     tombstones: Arc<AtomicUsize>,
@@ -128,16 +129,16 @@ impl USearchIndex {
         let tombstones = self.tombstones.clone();
         let quantization_center = self.quantization_center.clone();
         spawn_blocking(move || {
-            let mut guard = index.write();
+            let mut guard = index.write().expect("?");
             guard
                 .load_from_buffer(&data)
                 .map_err(|e| USearchError::Index(e.to_string()))?;
             tombstones.store(0, Ordering::Relaxed);
 
             // Re-apply custom metric after loading (load_from_buffer resets it)
-            if let Some(center) = quantization_center {
-                Self::apply_quantization_metric(&mut guard, &center, distance_function);
-            }
+            // if let Some(center) = quantization_center {
+            //     Self::apply_quantization_metric(&mut guard, &center, distance_function);
+            // }
 
             Ok(())
         })
@@ -149,7 +150,7 @@ impl USearchIndex {
     async fn save(&self) -> Result<Vec<u8>, USearchError> {
         let index = self.index.clone();
         spawn_blocking(move || {
-            let guard = index.write();
+            let guard = index.write().expect("?");
             let mut buffer = vec![0u8; guard.serialized_length()];
             guard
                 .save_to_buffer(&mut buffer)
@@ -193,29 +194,35 @@ impl VectorIndex for USearchIndex {
     type Error = USearchError;
 
     fn add(&self, key: u32, vector: &[f32]) -> Result<(), Self::Error> {
-        let code = self
-            .quantization_center
-            .as_ref()
-            .map(|center| Code::<_>::quantize(vector, center));
+        let need_resize = {
+            let index = self.index.read().expect("?");
+            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+            raw_size + 128 >= index.capacity()
+        };
 
-        let index = self.index.write();
-        if index.size() + self.tombstones.load(Ordering::SeqCst) >= index.capacity() {
-            index
-                .reserve(index.capacity().max(128) * 2)
-                .map_err(|e| USearchError::Index(e.to_string()))?
+        if need_resize {
+            let index = self.index.write().expect("?");
+            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+            if raw_size + 128 >= index.capacity() {
+                let new_capacity = (index.capacity() * 2).max(128);
+                index
+                    .reserve(new_capacity)
+                    .map_err(|e| USearchError::Index(e.to_string()))?;
+            }
         }
 
-        if let Some(code) = code {
+        if let Some(center) = &self.quantization_center {
+            let code = Code::<_>::quantize(vector, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            index.add(key as u64, i8_slice)
+            self.index.read().expect("?").add(key as u64, i8_slice)
         } else {
-            index.add(key as u64, vector)
+            self.index.read().expect("?").add(key as u64, vector)
         }
         .map_err(|e| USearchError::Index(e.to_string()))
     }
 
     fn capacity(&self) -> Result<usize, Self::Error> {
-        Ok(self.index.read().capacity())
+        Ok(self.index.read().expect("?").capacity())
     }
 
     fn get(&self, key: u32) -> Result<Option<Vec<f32>>, Self::Error> {
@@ -227,6 +234,7 @@ impl VectorIndex for USearchIndex {
         let count = self
             .index
             .read()
+            .expect("?")
             .export(key as u64, &mut vector)
             .map_err(|e| USearchError::Index(e.to_string()))?;
 
@@ -234,13 +242,14 @@ impl VectorIndex for USearchIndex {
     }
 
     fn len(&self) -> Result<usize, Self::Error> {
-        Ok(self.index.read().size())
+        Ok(self.index.read().expect("?").size())
     }
 
     fn remove(&self, key: u32) -> Result<(), Self::Error> {
-        self.tombstones.fetch_add(1, Ordering::SeqCst);
+        self.tombstones.fetch_add(1, Ordering::Relaxed);
         self.index
-            .write()
+            .read()
+            .expect("?")
             .remove(key as u64)
             .map_err(|e| USearchError::Index(e.to_string()))?;
         Ok(())
@@ -249,6 +258,7 @@ impl VectorIndex for USearchIndex {
     fn reserve(&self, capacity: usize) -> Result<(), Self::Error> {
         self.index
             .write()
+            .expect("?")
             .reserve(capacity)
             .map_err(|e| USearchError::Index(e.to_string()))
     }
@@ -257,9 +267,9 @@ impl VectorIndex for USearchIndex {
         let matches = if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(query, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            self.index.read().search(i8_slice, count)
+            self.index.read().expect("?").search(i8_slice, count)
         } else {
-            self.index.read().search(query, count)
+            self.index.read().expect("?").search(query, count)
         }
         .map_err(|e| USearchError::Index(e.to_string()))?;
 
@@ -272,7 +282,7 @@ impl VectorIndex for USearchIndex {
 
 impl Weighted for USearchIndex {
     fn weight(&self) -> usize {
-        (self.index.read().memory_usage() / 1024 / 1024).max(1)
+        (self.index.read().expect("?").memory_usage() / 1024 / 1024).max(1)
     }
 }
 
