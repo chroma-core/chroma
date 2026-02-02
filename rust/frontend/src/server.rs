@@ -45,7 +45,7 @@ use tokio::signal::unix::{signal, SignalKind};
 #[cfg(windows)]
 use tokio::signal::windows::ctrl_c;
 use tower_http::cors::CorsLayer;
-use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
+use utoipa::openapi::{security::{ApiKey, ApiKeyValue, SecurityScheme}, Server};
 use utoipa::ToSchema;
 use utoipa::{Modify, OpenApi};
 use utoipa_axum::router::OpenApiRouter;
@@ -3350,6 +3350,13 @@ impl Modify for ChromaTokenSecurityAddon {
     }
 }
 
+struct ServerAddon;
+impl Modify for ServerAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        openapi.servers = Some(vec![Server::new("https://api.trychroma.com")]);
+    }
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -3388,7 +3395,7 @@ impl Modify for ChromaTokenSecurityAddon {
         indexing_status,
     ),
     // Apply our new security scheme here
-    modifiers(&ChromaTokenSecurityAddon)
+    modifiers(&ChromaTokenSecurityAddon, &ServerAddon)
 )]
 struct ApiDoc;
 
