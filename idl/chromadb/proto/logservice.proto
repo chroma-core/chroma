@@ -64,6 +64,7 @@ message ForkLogsRequest {
   string source_collection_id = 1;
   string target_collection_id = 2;
   string database_name = 5;
+  optional Cmek cmek = 6;  // Encryption key for log fragments
 }
 
 message ForkLogsResponse {

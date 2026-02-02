@@ -728,6 +728,15 @@ impl ServiceBasedFrontend {
         let database_name = DatabaseName::new(database_name).ok_or_else(|| {
             ForkCollectionError::InvalidArgument("database_name cannot be empty".to_string())
         })?;
+        // Get source collection to extract CMEK for the forked log.
+        let source_collection = self
+            .get_cached_collection(database_name.clone(), source_collection_id)
+            .await
+            .map_err(|err| ForkCollectionError::Internal(err.boxed()))?;
+        let cmek = source_collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
         let log_offsets = self
             .log_client
             .fork_logs(
@@ -735,6 +744,7 @@ impl ServiceBasedFrontend {
                 database_name,
                 source_collection_id,
                 target_collection_id,
+                cmek,
             )
             .await?;
         let mut collection_and_segments = self

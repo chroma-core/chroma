@@ -131,11 +131,17 @@ impl Log {
         database_name: DatabaseName,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
+        cmek: Option<Cmek>,
     ) -> Result<ForkLogsResponse, ForkCollectionError> {
         match self {
             Log::Sqlite(_) => Err(ForkCollectionError::Local),
             Log::Grpc(log) => log
-                .fork_logs(database_name, source_collection_id, target_collection_id)
+                .fork_logs(
+                    database_name,
+                    source_collection_id,
+                    target_collection_id,
+                    cmek,
+                )
                 .await
                 .map_err(|err| err.boxed().into()),
             Log::InMemory(_) => Err(ForkCollectionError::Local),
