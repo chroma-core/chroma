@@ -556,6 +556,9 @@ async fn pre_flight_checks(
         (status = 200, description = "Reset successful", body = bool),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    extensions(
+        ("x-hidden" = json!(true))
     )
 )]
 async fn reset(
@@ -1476,7 +1479,8 @@ async fn get_collection(
                 "label": "Get collection by CRN",
                 "source": "curl -X GET 'https://api.trychroma.com/api/v2/collections/my_tenant:my_database:my_collection' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
-        ]))
+        ])),
+        ("x-hidden" = json!(true))
     )
 )]
 async fn get_collection_by_crn(
