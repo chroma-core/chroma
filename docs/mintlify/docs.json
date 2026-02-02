@@ -13,7 +13,7 @@
   "fonts": {
     "family": "Inter"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/images/favicon.svg",
   "thumbnails": {
     "background": "/images/og-bg.png"
   },
@@ -281,8 +281,8 @@
     }
   },
   "logo": {
-    "light": "/light-logo.svg",
-    "dark": "/dark-logo.svg"
+    "light": "/images/light-logo.svg",
+    "dark": "/images/dark-logo.svg"
   },
   "navbar": {
     "primary": {
