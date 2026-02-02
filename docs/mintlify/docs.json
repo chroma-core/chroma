@@ -283,8 +283,9 @@
   },
   "navbar": {
     "primary": {
-      "type": "github",
-      "href": "https://github.com/chroma-core/chroma"
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://trychroma.com/login"
     }
   },
   "contextual": {
