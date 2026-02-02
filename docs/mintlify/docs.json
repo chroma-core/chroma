@@ -286,8 +286,9 @@
   },
   "navbar": {
     "primary": {
-      "type": "github",
-      "href": "https://github.com/chroma-core/chroma"
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://trychroma.com/login"
     }
   },
   "contextual": {
@@ -313,6 +314,9 @@
     "posthog": {
       "apiKey": "phc_M1NrBVW8hgvKCGYxVtYusnbBvpVq9sKpE7FJMew9suK",
       "sessionRecording": false
+    },
+    "gtm": {
+      "tagId": "GTM-T8MGS4GJ"
     }
   }
 }
