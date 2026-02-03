@@ -101,18 +101,6 @@ impl FrontendConfig {
             tenants_with_quantization_enabled: vec![],
         }
     }
-
-    /// Check if quantization should be enabled for the given tenant
-    /// Returns true if:
-    /// - The list contains "*" (all tenants), OR
-    /// - The tenant_id is in the list
-    pub fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
-        self.tenants_with_quantization_enabled
-            .contains(&"*".to_string())
-            || self
-                .tenants_with_quantization_enabled
-                .contains(&tenant_id.to_string())
-    }
 }
 
 fn default_otel_service_name() -> String {

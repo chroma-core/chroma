@@ -162,10 +162,8 @@ impl ServiceBasedFrontend {
     /// - The tenant_id is in the list
     fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
         self.tenants_with_quantization_enabled
-            .contains(&"*".to_string())
-            || self
-                .tenants_with_quantization_enabled
-                .contains(&tenant_id.to_string())
+            .iter()
+            .any(|t| t == "*" || t == tenant_id)
     }
 
     pub fn get_default_knn_index(&self) -> KnnIndex {
