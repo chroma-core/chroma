@@ -1309,7 +1309,6 @@ async fn create_collection(
         )?),
     };
 
-
     let database_name = DatabaseName::new(database).ok_or_else(|| {
         ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
     })?;
