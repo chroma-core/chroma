@@ -219,42 +219,35 @@
         ]
       },
       {
-        "tab": "API Reference",
-        "icon": "brackets-curly",
-        "groups": [
-          {
-            "group": "Chroma API",
-            "openapi": {
-              "source": "openapi.json",
-              "directory": "api-reference"
-            }
-          },
-          {
-            "group": "Chroma Sync API",
-            "openapi": {
-              "source": "sync.openapi.json",
-              "directory": "sync-api-reference"
-            }
-          }
-        ]
-      },
-      {
-        "tab": "SDK Reference",
+        "tab": "Reference",
         "icon": "code",
         "pages": [
-          "reference/chroma-reference",
+          "reference/overview",
           {
-            "group": "Python",
+            "group": "SDKs",
             "pages": [
-              "reference/python/client",
-              "reference/python/collection"
+              "reference/python",
+              "reference/typescript",
+              "reference/rust"
             ]
           },
           {
-            "group": "Typescript",
+            "group": "APIs",
             "pages": [
-              "reference/js/client",
-              "reference/js/collection"
+              {
+                "group": "Chroma Core API",
+                "openapi": {
+                  "source": "openapi.json",
+                  "directory": "reference/chroma-api"
+                }
+              },
+              {
+                "group": "Chroma Sync API",
+                "openapi": {
+                  "source": "sync.openapi.json",
+                  "directory": "reference/sync-api"
+                }
+              }
             ]
           }
         ]
