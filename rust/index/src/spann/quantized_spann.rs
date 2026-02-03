@@ -1445,20 +1445,29 @@ impl QuantizedSpannFlusher {
 }
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
-    use std::sync::Arc;
+    use std::sync::{atomic::Ordering, Arc};
 
     use chroma_blockstore::{
-        arrow::{config::TEST_MAX_BLOCK_SIZE_BYTES, provider::ArrowBlockfileProvider},
+        arrow::{
+            config::TEST_MAX_BLOCK_SIZE_BYTES,
+            provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+        },
         provider::BlockfileProvider,
+        BlockfileWriterOptions,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, InternalSpannConfiguration, Space};
+    use chroma_types::{CollectionUuid, DataRecord, InternalSpannConfiguration, Space};
+    use rand::{Rng, SeedableRng};
     use tempfile::TempDir;
 
+    use crate::{
+        quantization::Code,
+        usearch::{USearchIndex, USearchIndexProvider},
+        VectorIndex,
+    };
+
     use super::{QuantizedDelta, QuantizedSpannIndexWriter};
-    use crate::usearch::{USearchIndex, USearchIndexProvider};
 
     const TEST_DIMENSION: usize = 4;
     const TEST_EPSILON: f32 = 1e-5;
@@ -1702,9 +1711,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_and_scrub_operations() {
-        use chroma_blockstore::{arrow::provider::BlockfileReaderOptions, BlockfileWriterOptions};
-        use chroma_types::DataRecord;
-
         // =======================================================================
         // Setup: Create raw embedding blockfile with test data
         // =======================================================================
@@ -1976,8 +1982,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_insert_and_balance_operations() {
-        use crate::quantization::Code;
-
         // =======================================================================
         // Setup
         // =======================================================================
@@ -2238,5 +2242,285 @@ mod tests {
             point_200_found,
             "Point 200 should exist in some cluster after merge"
         );
+    }
+
+    #[tokio::test]
+    async fn test_persist() {
+        // === Constants ===
+        const SEED: u64 = 42;
+        const BATCH_SIZE: usize = 1_000;
+        const CHUNK_SIZE: usize = 200;
+        const NUM_CYCLES: usize = 4;
+        const TOTAL_VECTORS: usize = BATCH_SIZE * NUM_CYCLES; // 4K
+
+        // === Setup ===
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let collection_id = CollectionUuid::new();
+
+        // Generate all embeddings upfront with fixed seed RNG
+        let embeddings = {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(SEED);
+            Arc::new(
+                (0..TOTAL_VECTORS)
+                    .map(|_| [rng.gen(), rng.gen(), rng.gen(), rng.gen()])
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        // Create raw embedding blockfile with all 40K embeddings
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let raw_writer = blockfile_provider
+            .write::<u32, &DataRecord<'_>>(
+                BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            )
+            .await
+            .expect("Failed to create raw embedding writer");
+
+        for (id, embedding) in embeddings.iter().enumerate() {
+            let record = DataRecord {
+                id: "",
+                embedding: embedding.as_slice(),
+                metadata: None,
+                document: None,
+            };
+            raw_writer
+                .set("", id as u32, &record)
+                .await
+                .expect("Failed to write raw embedding");
+        }
+
+        let raw_flusher = raw_writer
+            .commit::<u32, &DataRecord<'_>>()
+            .await
+            .expect("Failed to commit raw embeddings");
+        let raw_embedding_id = raw_flusher.id();
+        raw_flusher
+            .flush::<u32, &DataRecord<'_>>()
+            .await
+            .expect("Failed to flush raw embeddings");
+
+        // Create initial writer
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            collection_id,
+            TEST_DIMENSION,
+            test_params(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        let mut file_ids;
+
+        // === Cycle Loop ===
+        for cycle in 0..NUM_CYCLES {
+            let start_id = cycle * BATCH_SIZE;
+            let end_id = start_id + BATCH_SIZE;
+
+            // --- Verify previous cycle data (cycles 1-3) ---
+            if cycle > 0 {
+                // Check version map has all previous IDs
+                for id in 0..start_id {
+                    assert!(
+                        writer.versions.contains_key(&(id as u32)),
+                        "Cycle {}: missing ID {} in version map",
+                        cycle,
+                        id
+                    );
+                }
+            }
+
+            // --- Concurrent insert ---
+            let writer_arc = Arc::new(writer);
+            let mut handles = vec![];
+
+            for chunk_start in (start_id..end_id).step_by(CHUNK_SIZE) {
+                let chunk_end = (chunk_start + CHUNK_SIZE).min(end_id);
+                let writer_clone = Arc::clone(&writer_arc);
+                let embeddings_clone = Arc::clone(&embeddings);
+
+                handles.push(tokio::spawn(async move {
+                    for id in chunk_start..chunk_end {
+                        writer_clone
+                            .add(id as u32, &embeddings_clone[id])
+                            .await
+                            .expect("add failed");
+                    }
+                }));
+            }
+
+            for handle in handles {
+                handle.await.expect("task panicked");
+            }
+
+            writer = Arc::try_unwrap(writer_arc)
+                .unwrap_or_else(|_| panic!("Arc still has multiple owners"));
+
+            // --- Pre-commit verification ---
+            // For each delta, verify all point versions <= global version
+            for delta in writer.deltas.iter() {
+                for (id, ver) in delta.ids.iter().zip(delta.versions.iter()) {
+                    let global = *writer
+                        .versions
+                        .get(id)
+                        .expect("ID not found in version map");
+                    assert!(
+                        *ver <= global,
+                        "Cycle {}: version in delta ({}) exceeds global ({}) for ID {}",
+                        cycle,
+                        ver,
+                        global,
+                        id
+                    );
+                }
+            }
+
+            // --- Capture rotation before flush ---
+            let mut rng = rand::rngs::StdRng::seed_from_u64(SEED + cycle as u64);
+            let test_vec = [rng.gen(), rng.gen(), rng.gen(), rng.gen()];
+            let expected_rotated = writer.rotate(&test_vec);
+
+            // --- Commit + Flush ---
+            let blockfile_provider = test_blockfile_provider(storage.clone());
+            let usearch_provider = test_usearch_provider(storage.clone());
+
+            let flusher = writer
+                .commit(&blockfile_provider, &usearch_provider)
+                .await
+                .expect("commit failed");
+            file_ids = flusher.flush().await.expect("flush failed");
+
+            // --- Reopen ---
+            let blockfile_provider = test_blockfile_provider(storage.clone());
+            let usearch_provider = test_usearch_provider(storage.clone());
+
+            let raw_reader = blockfile_provider
+                .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
+                    raw_embedding_id,
+                    "".to_string(),
+                ))
+                .await
+                .expect("Failed to open raw embedding reader");
+
+            writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                collection_id,
+                TEST_DIMENSION,
+                test_params(),
+                file_ids.clone(),
+                None,
+                "".to_string(),
+                Some(raw_reader),
+                &blockfile_provider,
+                &usearch_provider,
+            )
+            .await
+            .expect("Failed to reopen writer");
+
+            // --- Verify rotation matrix consistency after reopen ---
+            let actual_rotated = writer.rotate(&test_vec);
+            assert!(
+                writer.distance(&expected_rotated, &actual_rotated) < TEST_EPSILON,
+                "Cycle {}: rotation matrix changed after persistence",
+                cycle
+            );
+        }
+
+        // === Final Verification ===
+        assert_eq!(
+            writer.versions.len(),
+            TOTAL_VECTORS,
+            "Expected {} IDs in version map, got {}",
+            TOTAL_VECTORS,
+            writer.versions.len()
+        );
+
+        // Verify all IDs are present in version map
+        for id in 0..TOTAL_VECTORS {
+            assert!(
+                writer.versions.contains_key(&(id as u32)),
+                "Final: missing ID {} in version map",
+                id
+            );
+        }
+
+        // --- Load all clusters and verify delta consistency ---
+        let cluster_ids = writer.deltas.iter().map(|e| *e.key()).collect::<Vec<_>>();
+
+        for cluster_id in &cluster_ids {
+            // Get length before load (from blockfile metadata, already set during open)
+            let length_before = writer.deltas.get(cluster_id).unwrap().length;
+
+            writer.load(*cluster_id).await.expect("load failed");
+
+            // After load, verify ids/codes/versions lengths match
+            let delta = writer.deltas.get(cluster_id).unwrap();
+            assert_eq!(
+                delta.ids.len(),
+                length_before,
+                "Cluster {}: loaded ids length ({}) != expected length ({})",
+                cluster_id,
+                delta.ids.len(),
+                length_before
+            );
+            assert_eq!(
+                delta.codes.len(),
+                length_before,
+                "Cluster {}: loaded codes length mismatch",
+                cluster_id
+            );
+            assert_eq!(
+                delta.versions.len(),
+                length_before,
+                "Cluster {}: loaded versions length mismatch",
+                cluster_id
+            );
+
+            // Verify all versions in delta <= global version
+            for (id, ver) in delta.ids.iter().zip(delta.versions.iter()) {
+                let global = *writer.versions.get(id).expect("missing from version map");
+                assert!(
+                    *ver <= global,
+                    "Cluster {}: version in delta ({}) exceeds global ({}) for ID {}",
+                    cluster_id,
+                    ver,
+                    global,
+                    id
+                );
+            }
+        }
+
+        // --- Verify each vector has at least one up-to-date copy ---
+        for id in 0..TOTAL_VECTORS {
+            let id = id as u32;
+            let global = *writer.versions.get(&id).expect("missing ID");
+
+            let has_current_copy = writer.deltas.iter().any(|delta| {
+                delta
+                    .ids
+                    .iter()
+                    .zip(delta.versions.iter())
+                    .any(|(did, dver)| *did == id && *dver == global)
+            });
+
+            assert!(
+                has_current_copy,
+                "ID {} has no up-to-date copy in any cluster (global version: {})",
+                id, global
+            );
+        }
+
+        // --- Verify raw centroid index contains all cluster IDs ---
+        for cluster_id in &cluster_ids {
+            let result = writer.raw_centroid.get(*cluster_id);
+            assert!(
+                result.is_ok() && result.unwrap().is_some(),
+                "Cluster {} not found in raw_centroid index",
+                cluster_id
+            );
+        }
     }
 }
