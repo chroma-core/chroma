@@ -179,7 +179,7 @@ impl TryFrom<chroma_proto::ListDatabasesRequest> for ListDatabasesRequest {
 pub type ListDatabasesResponse = Vec<Database>;
 
 /// Internal request for creating a collection.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CreateCollectionRequest {
     pub id: CollectionUuid,
     pub name: String,
@@ -190,6 +190,18 @@ pub struct CreateCollectionRequest {
     pub get_or_create: bool,
     pub tenant_id: String,
     pub database_name: DatabaseName,
+}
+
+impl std::fmt::Debug for CreateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateCollectionRequest")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("tenant_id", &self.tenant_id)
+            .field("get_or_create", &self.get_or_create)
+            .field("database_name", &self.database_name)
+            .finish()
+    }
 }
 
 impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
@@ -485,7 +497,7 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
 }
 
 /// Internal request for updating a collection.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct UpdateCollectionRequest {
     /// The database containing the collection (required for routing)
     pub database_name: DatabaseName,
@@ -501,6 +513,17 @@ pub struct UpdateCollectionRequest {
     pub reset_metadata: bool,
     // New configuration to set (optional - None means don't change)
     pub new_configuration: Option<UpdateCollectionConfiguration>,
+}
+
+impl std::fmt::Debug for UpdateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateCollectionRequest")
+            .field("database_name", &self.database_name)
+            .field("id", &self.id)
+            .field("reset_metadata", &self.reset_metadata)
+            .field("name", &self.name)
+            .finish()
+    }
 }
 
 impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
