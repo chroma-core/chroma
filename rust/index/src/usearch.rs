@@ -174,6 +174,13 @@ impl USearchIndex {
         let mut index =
             usearch::Index::new(&options).map_err(|e| USearchError::Index(e.to_string()))?;
 
+        // Reserve initial capacity and thread slots upfront.
+        // USearch requires pre-allocated thread contexts for concurrent operations.
+        // 128 threads should cover most workloads.
+        index
+            .reserve_capacity_and_threads(128, 128)
+            .map_err(|e| USearchError::Index(e.to_string()))?;
+
         if let Some(center) = &quantization_center {
             Self::apply_quantization_metric(&mut index, center, distance_function);
         }
@@ -205,8 +212,9 @@ impl VectorIndex for USearchIndex {
             let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
             if raw_size + 128 >= index.capacity() {
                 let new_capacity = (index.capacity() * 2).max(128);
+                // Reserve capacity and thread slots (128 threads should cover most workloads)
                 index
-                    .reserve(new_capacity)
+                    .reserve_capacity_and_threads(new_capacity, 128)
                     .map_err(|e| USearchError::Index(e.to_string()))?;
             }
         }
@@ -256,10 +264,11 @@ impl VectorIndex for USearchIndex {
     }
 
     fn reserve(&self, capacity: usize) -> Result<(), Self::Error> {
+        // Reserve capacity and thread slots (128 threads should cover most workloads)
         self.index
             .write()
             .expect("?")
-            .reserve(capacity)
+            .reserve_capacity_and_threads(capacity, 128)
             .map_err(|e| USearchError::Index(e.to_string()))
     }
 
