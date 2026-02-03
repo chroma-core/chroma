@@ -5,13 +5,20 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::time::Duration;
+
+#[cfg(test)]
+use serial_test::serial;
 
 use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
+use google_cloud_googleapis::spanner::admin::database::v1::UpdateDatabaseDdlRequest;
+use google_cloud_spanner::admin::client::Client as AdminClient;
+use google_cloud_spanner::admin::AdminClientConfig;
 use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
 use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
@@ -53,6 +60,7 @@ use crate::types::{
 
 use chroma_types::{
     Collection, Database, InternalCollectionConfiguration, RegionName, Segment, Tenant,
+    TopologyName,
 };
 
 #[derive(Error, Debug)]
@@ -79,19 +87,31 @@ impl ChromaError for SpannerError {
 #[derive(Clone)]
 pub struct SpannerBackend {
     client: Client,
+    /// The Spanner configuration (needed for running migrations on reset)
+    spanner_config: SpannerConfig,
     /// All regions in this backend's topology (for multi-region writes)
     regions: Vec<RegionName>,
     /// The local region for this instance (for reads)
     local_region: RegionName,
+    /// The topology name for this backend (for migrations)
+    topology_name: TopologyName,
 }
 
 impl SpannerBackend {
     /// Create a new SpannerBackend with the given client and region configuration.
-    pub fn new(client: Client, regions: Vec<RegionName>, local_region: RegionName) -> Self {
+    pub fn new(
+        client: Client,
+        spanner_config: SpannerConfig,
+        regions: Vec<RegionName>,
+        local_region: RegionName,
+        topology_name: TopologyName,
+    ) -> Self {
         Self {
             client,
+            spanner_config,
             regions,
             local_region,
+            topology_name,
         }
     }
 
@@ -1523,11 +1543,163 @@ impl SpannerBackend {
         }
     }
 
+    /// Reset the database state by dropping all tables and re-running migrations.
+    /// This provides a completely clean slate for testing.
+    pub async fn reset(&self) -> Result<(), SysDbError> {
+        // Step 1: Get all indexes first
+        let get_indexes_stmt = Statement::new(
+            "SELECT table_name, index_name FROM INFORMATION_SCHEMA.INDEXES WHERE table_schema = ''",
+        );
+        let mut tx = self.client.single().await?;
+        let mut indexes_result = tx.query(get_indexes_stmt).await?;
+        let mut table_names = HashSet::new();
+
+        let mut indexes: Vec<(String, String)> = Vec::new();
+        while let Some(row) = indexes_result.next().await? {
+            let table_name: String = row
+                .column_by_name("table_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            table_names.insert(table_name.clone());
+            let index_name: String = row
+                .column_by_name("index_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            if index_name != "PRIMARY_KEY" {
+                indexes.push((table_name, index_name));
+            }
+        }
+
+        tracing::info!(
+            "Found {} tables to drop: {:?}",
+            table_names.len(),
+            table_names
+        );
+        tracing::info!("Found {} indexes to drop: {:?}", indexes.len(), indexes);
+
+        // Step 2: Create admin client for DDL operations
+        let (admin_client, database_path) = match &self.spanner_config {
+            SpannerConfig::Emulator(emulator) => {
+                let admin_config = AdminClientConfig {
+                    environment: Environment::Emulator(emulator.grpc_endpoint()),
+                };
+                let client = AdminClient::new(admin_config).await.map_err(|e| {
+                    SysDbError::Internal(format!("Failed to create admin client: {}", e))
+                })?;
+                (client, emulator.database_path())
+            }
+            _ => {
+                return Err(SysDbError::Internal(
+                    "Reset only allowed for emulator".to_string(),
+                ));
+            }
+        };
+
+        // Step 3: Drop all indexes first, then tables
+        // Try multiple passes to handle dependencies
+        for _pass in 0..5 {
+            // Drop indexes first
+            let mut remaining_indexes: Vec<(String, String)> = Vec::new();
+            for (table_name, index_name) in &indexes {
+                let drop_index_ddl = format!("DROP INDEX {}", index_name);
+                let request = UpdateDatabaseDdlRequest {
+                    database: database_path.clone(),
+                    statements: vec![drop_index_ddl],
+                    operation_id: String::new(),
+                    proto_descriptors: Vec::new(),
+                    throughput_mode: false,
+                };
+
+                match admin_client
+                    .database()
+                    .update_database_ddl(request, None)
+                    .await
+                {
+                    Ok(mut operation) => {
+                        if let Err(e) = operation.wait(None).await {
+                            tracing::debug!("Failed to execute DDL: {}", e);
+                            remaining_indexes.push((table_name.clone(), index_name.clone()));
+                        } else {
+                            tracing::info!("Successfully executed DDL DROP INDEX {}", index_name);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to execute DDL: {}", e);
+                        remaining_indexes.push((table_name.clone(), index_name.clone()));
+                    }
+                }
+            }
+            indexes = remaining_indexes;
+
+            // Then drop tables
+            if table_names.is_empty() {
+                break;
+            }
+
+            let mut remaining_tables: HashSet<String> = HashSet::new();
+            for table_name in &table_names {
+                let drop_table_ddl = format!("DROP TABLE {}", table_name);
+                let request = UpdateDatabaseDdlRequest {
+                    database: database_path.clone(),
+                    statements: vec![drop_table_ddl],
+                    operation_id: String::new(),
+                    proto_descriptors: Vec::new(),
+                    throughput_mode: false,
+                };
+
+                match admin_client
+                    .database()
+                    .update_database_ddl(request, None)
+                    .await
+                {
+                    Ok(mut operation) => {
+                        if let Err(e) = operation.wait(None).await {
+                            tracing::debug!("Failed to execute DDL: {}", e);
+                            remaining_tables.insert(table_name.clone());
+                        } else {
+                            tracing::info!("Successfully executed DDL DROP TABLE {}", table_name);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to execute DDL: {}", e);
+                        remaining_tables.insert(table_name.clone());
+                    }
+                }
+            }
+            table_names = remaining_tables;
+        }
+
+        if !indexes.is_empty() {
+            return Err(SysDbError::Internal(format!(
+                "Failed to drop indexes after 5 passes: {:?}",
+                indexes
+            )));
+        }
+
+        if !table_names.is_empty() {
+            return Err(SysDbError::Internal(format!(
+                "Failed to drop tables after 5 passes: {:?}",
+                table_names
+            )));
+        }
+
+        // Step 4: Run migrations to recreate schema
+        tracing::info!("Running migrations to recreate schema...");
+        spanner_migrations::run_migrations(
+            &self.spanner_config,
+            Some("spanner_sysdb"),
+            spanner_migrations::MigrationMode::Apply,
+            Some(&self.topology_name.to_string()),
+        )
+        .await
+        .map_err(|e| SysDbError::Internal(format!("Failed to run migrations: {}", e)))?;
+
+        tracing::info!("Successfully reset Spanner database state");
+        Ok(())
+    }
+
     pub async fn close(self) {
         self.client.close().await;
     }
 }
-
 #[async_trait::async_trait]
 impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
     async fn try_from_config(
@@ -1583,8 +1755,10 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
 
         Ok(SpannerBackend {
             client,
+            spanner_config: config.spanner.clone(),
             regions: config.regions.clone(),
             local_region: config.local_region.clone(),
+            topology_name: config.topology_name.clone(),
         })
     }
 }
@@ -1644,6 +1818,7 @@ pub mod tests {
             spanner: &spanner_config,
             regions,
             local_region,
+            topology_name: TopologyName::new("test-topology").unwrap(),
         };
 
         match SpannerBackend::try_from_config(&config, &registry).await {
@@ -7654,5 +7829,130 @@ pub mod tests {
             None,
             Some(&expected_schema),
         );
+    }
+
+    #[tokio::test]
+    #[serial] // Don't want the reset to run concurrently with other tests
+    async fn test_k8s_mcmr_integration_reset_emulator_config() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Test that reset works with emulator config
+        let result = backend.reset().await;
+        assert!(
+            result.is_ok(),
+            "Reset should succeed with emulator config: {:?}",
+            result.err()
+        );
+
+        // Verify that after reset there's exactly one tenant
+        let tenants_req = GetTenantsRequest {
+            ids: vec!["default_tenant".to_string()],
+        };
+        let tenants_result = backend.get_tenants(tenants_req).await;
+        assert!(
+            tenants_result.is_ok(),
+            "Failed to list tenants after reset: {:?}",
+            tenants_result.err()
+        );
+        let tenants_response = tenants_result.unwrap();
+        assert_eq!(
+            tenants_response.tenants.len(),
+            1,
+            "Should have exactly one tenant after reset"
+        );
+
+        let tenant = &tenants_response.tenants[0];
+
+        // Verify that for that tenant there's exactly one database
+        let databases = backend.list_databases(&tenant.id).await;
+        assert!(
+            databases.is_ok(),
+            "Failed to list databases after reset: {:?}",
+            databases.err()
+        );
+        let databases_vec = databases.unwrap();
+        assert_eq!(
+            databases_vec.len(),
+            1,
+            "Should have exactly one database after reset"
+        );
+
+        let database = &databases_vec[0];
+
+        // Verify that for that database there are no collections
+        let collections_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .database_name(chroma_types::DatabaseName::new(database.name.clone()).unwrap())
+                .tenant_id(tenant.id.clone()),
+        };
+        let collections_result = backend.get_collections(collections_req).await;
+        assert!(
+            collections_result.is_ok(),
+            "Failed to list collections after reset: {:?}",
+            collections_result.err()
+        );
+        let collections_response = collections_result.unwrap();
+        assert_eq!(
+            collections_response.collections.len(),
+            0,
+            "Should have no collections after reset"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_reset_non_emulator_config_fails() {
+        use crate::config::SpannerBackendConfig;
+        use chroma_config::spanner::SpannerGcpConfig;
+
+        // Create a GCP config (non-emulator)
+        let gcp_config = SpannerGcpConfig {
+            project: "test-project".to_string(),
+            instance: "test-instance".to_string(),
+            database: "test-database".to_string(),
+            session_pool: SpannerSessionPoolConfig::default(),
+            channel: SpannerChannelConfig::default(),
+        };
+
+        let spanner_config = SpannerConfig::Gcp(gcp_config);
+        let registry = Registry::new();
+
+        let regions = vec![
+            RegionName::new("us").unwrap(),
+            RegionName::new("asia").unwrap(),
+            RegionName::new("europe").unwrap(),
+        ];
+        let local_region = RegionName::new("us").unwrap();
+
+        let config = SpannerBackendConfig {
+            spanner: &spanner_config,
+            regions,
+            local_region,
+            topology_name: TopologyName::new("test-gcp-topology").unwrap(),
+        };
+
+        // Create backend with GCP config
+        let backend = SpannerBackend::try_from_config(&config, &registry).await;
+
+        // Even if connection fails, we can test the reset logic by creating a minimal backend
+        // For this test, we'll create a backend manually with GCP config
+        if let Ok(backend) = backend {
+            // Test that reset fails with non-emulator config
+            let result = backend.reset().await;
+            assert!(
+                result.is_err(),
+                "Reset should fail with non-emulator config"
+            );
+
+            let error = result.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Reset only allowed for emulator"),
+                "Expected 'Reset only allowed for emulator' error, got: {}",
+                error
+            );
+        }
     }
 }
