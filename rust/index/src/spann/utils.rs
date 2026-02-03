@@ -9,6 +9,17 @@ use thiserror::Error;
 
 use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
 
+/// A point with its ID, version, and embedding.
+pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
+
+/// Result of a 2-means split: (center, points) for each of the two clusters.
+pub type SplitResult = (
+    Arc<[f32]>,
+    Vec<EmbeddingPoint>,
+    Arc<[f32]>,
+    Vec<EmbeddingPoint>,
+);
+
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.
 // TODO(Sanket): Make these configurable.
@@ -611,16 +622,7 @@ pub async fn rng_query(
 ///
 /// Returns (left_center, left_group, right_center, right_group) where centers
 /// are the nearest actual vectors to the computed cluster centroids.
-/// Each element in the groups is (id, version, embedding).
-pub fn split(
-    embeddings: Vec<(u32, u32, Arc<[f32]>)>,
-    distance_function: &DistanceFunction,
-) -> (
-    Arc<[f32]>,
-    Vec<(u32, u32, Arc<[f32]>)>,
-    Arc<[f32]>,
-    Vec<(u32, u32, Arc<[f32]>)>,
-) {
+pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
     let n = embeddings.len();
 
     if n < 2 {
