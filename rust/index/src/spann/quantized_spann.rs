@@ -9,7 +9,9 @@ use chroma_blockstore::{
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Cmek, DataRecord, InternalSpannConfiguration, QuantizedCluster, Space};
+use chroma_types::{
+    Cmek, CollectionUuid, DataRecord, InternalSpannConfiguration, QuantizedCluster, Space,
+};
 use dashmap::{DashMap, DashSet};
 use faer::{
     col::ColRef,
@@ -73,6 +75,8 @@ impl ChromaError for QuantizedSpannError {
 pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // === Config ===
     cmek: Option<Cmek>,
+    collection_id: CollectionUuid,
+    dimension: usize,
     file_ids: Option<QuantizedSpannIds>,
     params: InternalSpannConfiguration,
     prefix_path: String,
@@ -776,21 +780,33 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 impl QuantizedSpannIndexWriter<USearchIndex> {
     /// Create a new quantized SPANN index.
     pub async fn create(
+        collection_id: CollectionUuid,
+        dimension: usize,
         params: InternalSpannConfiguration,
         cmek: Option<Cmek>,
         prefix_path: String,
-        usearch_config: USearchIndexConfig,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannError> {
-        let dim = usearch_config.dimensions;
-
         // Create random rotation matrix
         let dist = UnitaryMat {
-            dim,
+            dim: dimension,
             standard_normal: StandardNormal,
         };
         let rotation = dist.sample(&mut ThreadRng::default());
-        let center = Arc::<[f32]>::from(vec![0.0; dim]);
+        let center = Arc::<[f32]>::from(vec![0.0; dimension]);
+
+        // Build USearch config from params
+        let usearch_config = USearchIndexConfig {
+            collection_id,
+            cmek: cmek.clone(),
+            prefix_path: prefix_path.clone(),
+            dimensions: dimension,
+            distance_function: DistanceFunction::from(params.space.clone()),
+            connectivity: params.max_neighbors,
+            expansion_add: params.ef_construction,
+            expansion_search: params.ef_search,
+            quantization_center: None,
+        };
 
         // Create centroid indexes
         let raw_centroid = usearch_provider
@@ -810,6 +826,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         Ok(Self {
             // === Config ===
             cmek,
+            collection_id,
+            dimension,
             file_ids: None,
             params,
             prefix_path,
@@ -835,17 +853,16 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
     /// Open an existing quantized SPANN index from file IDs.
     pub async fn open(
+        collection_id: CollectionUuid,
+        dimension: usize,
         params: InternalSpannConfiguration,
         file_ids: QuantizedSpannIds,
         cmek: Option<Cmek>,
         prefix_path: String,
         raw_embedding_reader: Option<BlockfileReader<'static, u32, DataRecord<'static>>>,
-        usearch_config: USearchIndexConfig,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannError> {
-        let dim = usearch_config.dimensions;
-
         // Step 0: Load embedding_metadata (rotation matrix + quantization center)
         let options =
             BlockfileReaderOptions::new(file_ids.embedding_metadata_id, prefix_path.clone());
@@ -862,25 +879,25 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .collect::<Vec<_>>();
 
         // Validate number of columns
-        if columns.len() != dim {
+        if columns.len() != dimension {
             return Err(QuantizedSpannError::DimensionMismatch {
-                expected: dim,
+                expected: dimension,
                 got: columns.len(),
             });
         }
 
         // Validate each column length
         for (_prefix, _key, col) in &columns {
-            if col.len() != dim {
+            if col.len() != dimension {
                 return Err(QuantizedSpannError::DimensionMismatch {
-                    expected: dim,
+                    expected: dimension,
                     got: col.len(),
                 });
             }
         }
 
         // Construct rotation matrix column by column
-        let rotation = Mat::from_fn(dim, dim, |i, j| columns[j].2[i]);
+        let rotation = Mat::from_fn(dimension, dimension, |i, j| columns[j].2[i]);
 
         // Load quantization center
         let center = reader
@@ -888,7 +905,20 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .await
             .map_err(QuantizedSpannError::Blockfile)?
             .map(Arc::<[f32]>::from)
-            .unwrap_or_else(|| vec![0.0; dim].into());
+            .unwrap_or_else(|| vec![0.0; dimension].into());
+
+        // Build USearch config from params
+        let usearch_config = USearchIndexConfig {
+            collection_id,
+            cmek: cmek.clone(),
+            prefix_path: prefix_path.clone(),
+            dimensions: dimension,
+            distance_function: DistanceFunction::from(params.space.clone()),
+            connectivity: params.max_neighbors,
+            expansion_add: params.ef_construction,
+            expansion_search: params.ef_search,
+            quantization_center: None,
+        };
 
         // Step 1: Open centroid indexes
         let raw_centroid = usearch_provider
@@ -979,6 +1009,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         Ok(Self {
             // === Config ===
             cmek,
+            collection_id,
+            dimension,
             file_ids: Some(file_ids),
             params,
             prefix_path,
@@ -1010,7 +1042,6 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         mut self,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
-        usearch_config: &USearchIndexConfig,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
         // === Step 0: Check center drift and rebuild centroid indexes if needed ===
         let dim = self.center.len();
@@ -1034,6 +1065,19 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
         self.center = if drift_dist_sq > self.params.center_drift_threshold.powi(2) * center_norm_sq
         {
+            // Build USearch config from stored fields
+            let usearch_config = USearchIndexConfig {
+                collection_id: self.collection_id,
+                cmek: self.cmek.clone(),
+                prefix_path: self.prefix_path.clone(),
+                dimensions: self.dimension,
+                distance_function: DistanceFunction::from(self.params.space.clone()),
+                connectivity: self.params.max_neighbors,
+                expansion_add: self.params.ef_construction,
+                expansion_search: self.params.ef_search,
+                quantization_center: None,
+            };
+
             self.raw_centroid = usearch_provider
                 .open(&usearch_config, OpenMode::Create)
                 .await
@@ -1041,7 +1085,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
             let quantized_config = USearchIndexConfig {
                 quantization_center: Some(new_center.clone().into()),
-                ..usearch_config.clone()
+                ..usearch_config
             };
             self.quantized_centroid = usearch_provider
                 .open(&quantized_config, OpenMode::Create)
