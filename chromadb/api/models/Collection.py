@@ -428,7 +428,7 @@ class Collection(CollectionCommon["ServerAPI"]):
         """Update existing records by ID.
 
         Records are provided in columnar format. If provided, the `embeddings`, `metadatas`, `documents`, and `uris` lists must be the same length.
-        Entires in each list correspond to the same record.
+        Entries in each list correspond to the same record.
 
         >>> ids = ["id1", "id2", "id3"]
         >>> embeddings = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]
