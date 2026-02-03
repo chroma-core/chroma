@@ -272,9 +272,14 @@
   "navbar": {
     "links": [
       {
-        "label": "GitHub",
+        "label": "26k",
         "icon": "github",
         "href": "https://github.com/chroma-core/chroma"
+      },
+      {
+        "label": "25k",
+        "icon": "x-twitter",
+        "href": "https://x.com/trychroma"
       }
     ],
     "primary": {
