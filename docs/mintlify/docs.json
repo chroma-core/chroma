@@ -280,6 +280,21 @@
       ]
     }
   },
+  "api": {
+    "examples": {
+      "languages": [
+        "terminal",
+        "python",
+        "typescript",
+        "rust",
+        "curl",
+        "go",
+        "java",
+        "ruby",
+        "php"
+      ]
+    }
+  },
   "logo": {
     "light": "/images/light-logo.svg",
     "dark": "/images/dark-logo.svg"
