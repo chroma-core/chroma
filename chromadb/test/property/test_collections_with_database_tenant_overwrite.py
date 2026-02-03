@@ -9,6 +9,7 @@ from hypothesis.stateful import (
 
 import uuid
 import logging
+import os
 import pytest
 from chromadb.api import AdminAPI
 from chromadb.api.client import AdminClient, Client
@@ -16,6 +17,9 @@ from chromadb.config import Settings, System
 from chromadb.test.conftest import (
     ClientFactories,
     fastapi_fixture_admin_and_singleton_tenant_db_user,
+    MULTI_REGION_ENABLED,
+    MULTI_REGION_TOPOLOGY,
+    NOT_CLUSTER_ONLY,
 )
 from chromadb.test.property.test_collections_with_database_tenant import (
     TenantDatabaseCollectionStateMachine,
@@ -27,6 +31,8 @@ import chromadb.api.types as types
 # See conftest.py
 SINGLETON_TENANT = "singleton_tenant"
 SINGLETON_DATABASE = "singleton_database"
+if MULTI_REGION_ENABLED:
+    SINGLETON_DATABASE = f"{MULTI_REGION_TOPOLOGY}+singleton_database"
 
 
 class SingletonTenantDatabaseCollectionStateMachine(
@@ -77,13 +83,27 @@ class SingletonTenantDatabaseCollectionStateMachine(
         if self.client == self.singleton_client:
             self.client = self.root_client
             self.admin_client = self.root_admin_client
+            # When switching back to root, restore the previous tenant/database context
+            # Use EFFECTIVE_DEFAULT_DATABASE for consistency with base class
+            from chromadb.test.property.test_collections_with_database_tenant import (
+                EFFECTIVE_DEFAULT_DATABASE,
+            )
+            from chromadb.config import DEFAULT_TENANT
+
+            self.client.set_tenant(DEFAULT_TENANT, EFFECTIVE_DEFAULT_DATABASE)
+            self.curr_tenant = DEFAULT_TENANT
+            self.curr_database = EFFECTIVE_DEFAULT_DATABASE
         else:
             self.client = self.singleton_client
             self.admin_client = self.singleton_admin_client
+            # Set to singleton tenant/database context and update state
+            self.client.set_tenant(SINGLETON_TENANT, SINGLETON_DATABASE)
+            self.curr_tenant = SINGLETON_TENANT
+            self.curr_database = SINGLETON_DATABASE
 
     @overrides
     def set_api_tenant_database(self, tenant: str, database: str) -> None:
-        self.root_client.set_tenant(tenant, database)
+        self.client.set_tenant(tenant, database)
 
     @overrides
     def get_tenant_model(
@@ -138,10 +158,7 @@ class SingletonTenantDatabaseCollectionStateMachine(
 
     @property
     def model(self) -> Dict[str, Optional[types.CollectionMetadata]]:
-        if self.client == self.singleton_client:
-            return self.tenant_to_database_to_model[SINGLETON_TENANT][
-                SINGLETON_DATABASE
-            ]
+        # Always use current tenant/database context
         return self.tenant_to_database_to_model[self.curr_tenant][self.curr_database]
 
 
@@ -149,8 +166,15 @@ def _singleton_and_root_clients() -> Tuple[Client, Client, ClientFactories]:
     api_fixture = fastapi_fixture_admin_and_singleton_tenant_db_user()
     sys: System = next(api_fixture)
     sys.reset_state()
+
+    # When connecting to external Tilt, also reset the server
+    if os.getenv("CHROMA_SERVER_HOST") and not NOT_CLUSTER_ONLY:
+        root_client_for_reset = ClientFactories(sys).create_client()
+        root_client_for_reset.reset()
+
     client_factories = ClientFactories(sys)
     root_client = client_factories.create_client()
+    root_client.reset()
     _root_admin_client = client_factories.create_admin_client_from_system()
 
     # This is a little awkward but we have to create the tenant and DB
