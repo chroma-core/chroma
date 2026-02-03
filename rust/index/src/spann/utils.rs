@@ -2,23 +2,10 @@ use std::{cmp::min, collections::HashMap, sync::Arc};
 
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::QuantizedCluster;
-use rand::{seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng};
-use simsimd::SpatialSimilarity;
+use rand::{seq::SliceRandom, Rng};
 use thiserror::Error;
 
-use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
-
-/// A point with its ID, version, and embedding.
-pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
-
-/// Result of a 2-means split: (center, points) for each of the two clusters.
-pub type SplitResult = (
-    Arc<[f32]>,
-    Vec<EmbeddingPoint>,
-    Arc<[f32]>,
-    Vec<EmbeddingPoint>,
-);
+use crate::hnsw_provider::HnswIndexRef;
 
 // TODO(Sanket): I don't understand why the reference implementation defined
 // max_distance this way.
@@ -87,8 +74,6 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 
 /// The output from kmeans.
 /// - cluster_centers: The embeddings of the centers of the clusters.
-/// - cluster_center_vector_ids: The point index (into input.embeddings) whose embedding is the center.
-///   -1 if no points assigned to the cluster.
 /// - cluster_counts: The number of points in each cluster.
 /// - cluster_labels: The mapping of each point to the cluster it belongs to. Clusters are
 ///   identified by unsigned integers starting from 0. These ids are also indexes in the
@@ -97,7 +82,6 @@ impl<'referred_data> KMeansAlgorithmInput<'referred_data> {
 #[derive(Debug)]
 pub struct KMeansAlgorithmOutput {
     pub cluster_centers: Vec<Arc<[f32]>>,
-    pub cluster_center_vector_ids: Vec<i32>,
     pub cluster_counts: Vec<usize>,
     pub cluster_labels: HashMap<usize, i32>,
     pub num_clusters: usize,
@@ -476,7 +460,6 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
     let kmeans_assign =
         kmeansassign_finish(input, &previous_centers, /* generate_labels */ false)?;
     let mut final_centers = Vec::with_capacity(input.k);
-    let mut final_center_vector_ids = Vec::with_capacity(input.k);
     #[allow(clippy::needless_range_loop)]
     for center_ids in 0..input.k {
         if kmeans_assign.cluster_nearest_point_idx[center_ids] >= 0 {
@@ -484,11 +467,9 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
                 input.embeddings[kmeans_assign.cluster_nearest_point_idx[center_ids] as usize]
                     .clone(),
             );
-            final_center_vector_ids.push(kmeans_assign.cluster_nearest_point_idx[center_ids]);
         } else {
             // Arc::from(Vec) = takes ownership of Vec's buffer, zero data copy
             final_centers.push(Arc::from(std::mem::take(&mut previous_centers[center_ids])));
-            final_center_vector_ids.push(-1);
         }
     }
     // Finally assign points to these nearest points in the cluster.
@@ -505,7 +486,6 @@ pub fn cluster(input: &mut KMeansAlgorithmInput) -> Result<KMeansAlgorithmOutput
 
     Ok(KMeansAlgorithmOutput {
         cluster_centers: final_centers,
-        cluster_center_vector_ids: final_center_vector_ids,
         cluster_counts: previous_counts,
         cluster_labels: kmeans_assign.cluster_labels,
         num_clusters: total_non_zero_clusters,
@@ -616,201 +596,6 @@ pub async fn rng_query(
     }
 
     Ok((res_ids, res_distances, res_embeddings))
-}
-
-/// Split a set of embeddings into two groups using 2-means clustering.
-///
-/// Returns (left_center, left_group, right_center, right_group) where centers
-/// are the nearest actual vectors to the computed cluster centroids.
-pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
-    let n = embeddings.len();
-
-    if n < 2 {
-        let dim = embeddings.first().map(|(_, _, e)| e.len()).unwrap_or(0);
-        let c = Arc::<[f32]>::from(vec![0.0; dim]);
-        return (c.clone(), embeddings, c, Vec::new());
-    }
-
-    let dim = embeddings[0].2.len();
-
-    // Initialization: try 4 random seeds, keep best
-    let mut rng = thread_rng();
-    let mut best_c_0 = embeddings[0].2.as_ref();
-    let mut best_c_1 = embeddings[1].2.as_ref();
-    let mut best_total_dist = f32::MAX;
-
-    for _ in 0..4 {
-        let picked = embeddings.iter().choose_multiple(&mut rng, 2);
-        let c_0 = picked[0].2.as_ref();
-        let c_1 = picked[1].2.as_ref();
-
-        let total_dist: f32 = embeddings
-            .iter()
-            .map(|(_, _, e)| {
-                distance_function
-                    .distance(e, c_0)
-                    .min(distance_function.distance(e, c_1))
-            })
-            .sum();
-
-        if total_dist < best_total_dist {
-            best_total_dist = total_dist;
-            best_c_0 = picked[0].2.as_ref();
-            best_c_1 = picked[1].2.as_ref();
-        }
-    }
-
-    let mut c_0 = best_c_0.to_vec();
-    let mut c_1 = best_c_1.to_vec();
-
-    // 2-means iteration
-    let mut labels = vec![false; n];
-    let mut prev_total_dist = f32::MAX;
-    let mut no_improvement = 0;
-
-    for _ in 0..128 {
-        // Assignment
-        let mut total_dist = 0.0;
-        for (i, (_, _, e)) in embeddings.iter().enumerate() {
-            let dist_0 = distance_function.distance(e, &c_0);
-            let dist_1 = distance_function.distance(e, &c_1);
-            labels[i] = dist_1 < dist_0;
-            total_dist += dist_0.min(dist_1);
-        }
-
-        // Update centers (inline average)
-        let mut new_c_0 = vec![0.0; dim];
-        let mut new_c_1 = vec![0.0; dim];
-        let mut count_0 = 0usize;
-        let mut count_1 = 0usize;
-
-        for (i, (_, _, e)) in embeddings.iter().enumerate() {
-            if labels[i] {
-                for (j, v) in e.iter().enumerate() {
-                    new_c_1[j] += v;
-                }
-                count_1 += 1;
-            } else {
-                for (j, v) in e.iter().enumerate() {
-                    new_c_0[j] += v;
-                }
-                count_0 += 1;
-            }
-        }
-
-        if count_0 > 0 {
-            new_c_0.iter_mut().for_each(|v| *v /= count_0 as f32);
-        }
-        if count_1 > 0 {
-            new_c_1.iter_mut().for_each(|v| *v /= count_1 as f32);
-        }
-
-        // Check convergence
-        let c_0_c_1_dist = distance_function.distance(&c_0, &c_1);
-        let relative_diff = if c_0_c_1_dist > f32::EPSILON {
-            (distance_function.distance(&c_0, &new_c_0)
-                + distance_function.distance(&c_1, &new_c_1))
-                / c_0_c_1_dist
-        } else {
-            0.0
-        };
-
-        c_0 = new_c_0;
-        c_1 = new_c_1;
-
-        if relative_diff < f32::EPSILON {
-            break;
-        }
-
-        if total_dist >= prev_total_dist {
-            no_improvement += 1;
-            if no_improvement >= 4 {
-                break;
-            }
-        } else {
-            no_improvement = 0;
-        }
-        prev_total_dist = total_dist;
-    }
-
-    // Find nearest actual vectors as centers
-    let mut nearest_0_idx = 0;
-    let mut nearest_0_dist = f32::MAX;
-    let mut nearest_1_idx = 0;
-    let mut nearest_1_dist = f32::MAX;
-
-    for (i, (_, _, e)) in embeddings.iter().enumerate() {
-        let dist_0 = distance_function.distance(e, &c_0);
-        let dist_1 = distance_function.distance(e, &c_1);
-
-        if !labels[i] && dist_0 < nearest_0_dist {
-            nearest_0_dist = dist_0;
-            nearest_0_idx = i;
-        }
-        if labels[i] && dist_1 < nearest_1_dist {
-            nearest_1_dist = dist_1;
-            nearest_1_idx = i;
-        }
-    }
-
-    let left_center = embeddings[nearest_0_idx].2.clone();
-    let right_center = embeddings[nearest_1_idx].2.clone();
-
-    // Build output groups
-    let count_0 = labels.iter().filter(|&&l| !l).count();
-    let count_1 = n - count_0;
-
-    let mut group_0 = Vec::with_capacity(count_0);
-    let mut group_1 = Vec::with_capacity(count_1);
-
-    for ((id, version, embedding), label) in embeddings.into_iter().zip(labels) {
-        if label {
-            group_1.push((id, version, embedding));
-        } else {
-            group_0.push((id, version, embedding));
-        }
-    }
-
-    (left_center, group_0, right_center, group_1)
-}
-
-/// Query a quantized cluster, returning all points sorted by estimated distance.
-///
-/// Uses RaBitQ distance estimation between the query and each quantized point.
-pub fn query_quantized_cluster(
-    cluster: &QuantizedCluster<'_>,
-    query: &[f32],
-    distance_function: &DistanceFunction,
-) -> SearchResult {
-    let dim = cluster.center.len();
-    if cluster.ids.is_empty() || dim == 0 {
-        return SearchResult::default();
-    }
-
-    // Precompute query-related values
-    let c_norm = (f32::dot(cluster.center, cluster.center).unwrap_or(0.0) as f32).sqrt();
-    let c_dot_q = f32::dot(cluster.center, query).unwrap_or(0.0) as f32;
-    let q_norm = (f32::dot(query, query).unwrap_or(0.0) as f32).sqrt();
-    let r_q = query
-        .iter()
-        .zip(cluster.center.iter())
-        .map(|(q, c)| q - c)
-        .collect::<Vec<_>>();
-
-    // Compute distances for each point
-    let code_size = cluster.codes.len() / cluster.ids.len().max(1);
-    let (keys, distances): (Vec<u32>, Vec<f32>) = cluster
-        .ids
-        .iter()
-        .zip(cluster.codes.chunks(code_size))
-        .map(|(id, code_bytes)| {
-            let code = Code::<&[u8]>::new(code_bytes);
-            let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
-            (*id, distance)
-        })
-        .unzip();
-
-    SearchResult { keys, distances }
 }
 
 #[cfg(test)]
