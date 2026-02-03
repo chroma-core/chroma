@@ -292,6 +292,7 @@
     "options": [
       "copy",
       "view",
+      "grok",
       "chatgpt",
       "claude",
       "mcp",
