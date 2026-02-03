@@ -201,6 +201,11 @@
                         "label": "Heartbeat",
                         "lang": "python",
                         "source": "timestamp = client.heartbeat()"
+                    },
+                    {
+                        "label": "Heartbeat",
+                        "lang": "rust",
+                        "source": "let timestamp = client.heartbeat().await?;"
                     }
                 ]
             }
@@ -657,7 +662,7 @@
                 "x-codeSamples": [
                     {
                         "label": "Create Database",
-                        "lang": "CLI",
+                        "lang": "terminal",
                         "source": "chroma db create my-new-db"
                     }
                 ]
@@ -818,7 +823,7 @@
                 "x-codeSamples": [
                     {
                         "label": "Delete Database",
-                        "lang": "CLI",
+                        "lang": "terminal",
                         "source": "chroma db delete my-db"
                     }
                 ]
