@@ -583,6 +583,19 @@ class GetRequest(TypedDict):
 
 
 class GetResult(TypedDict):
+    """Result payload for collection.get() operations.
+
+    The returned records are in columnar form. Corresponding entries in each list correspond to the same record.
+
+    >>> results = collection.get(ids=["id1", "id2", "id3"])
+    >>> records = zip(results["ids"], results["documents"], results["metadatas"])
+    >>> for id, document, metadata in records:
+    >>>     print(id, document, metadata)
+
+    GetResult will only include ids and the fields specified in the `include` param
+    when making the get() operation.
+    """
+
     ids: List[ID]
     embeddings: Optional[
         Union[Embeddings, PyEmbeddings, NDArray[Union[np.int32, np.float32]]]
@@ -604,6 +617,24 @@ class QueryRequest(TypedDict):
 
 
 class QueryResult(TypedDict):
+    """Result payload for collection.query() operations.
+
+    The returned records are batches of records in columnar form.
+
+    >>> results = collection.query(query_embeddings=[batch_1, batch_2, ...])
+    >>> batches = zip(results["ids"], results["documents"], results["metadatas"])
+
+    Each batch is a list of records in columnar form.
+
+    >>> for batch in batches:
+    >>>     records = zip(batch["ids"], batch["documents"], batch["metadatas"])
+    >>>     for id, document, metadata in records:
+    >>>         print(id, document, metadata)
+
+    QueryResult will only include ids and the fields specified in the `include` param
+    when making the query() operation.
+    """
+
     ids: List[IDs]
     embeddings: Optional[
         Union[
@@ -631,8 +662,10 @@ class IndexingStatus:
 class SearchResultRow(TypedDict, total=False):
     """A single row from search results.
 
-    Only includes fields that were actually returned in the search.
-    The 'id' field is always present.
+    Each SearchResultRow contains the fields present in the search response for a given record.
+    The 'id' field is always included; other fields are present if selected for in the search.
+
+    `score` is the calculated value from the ranking function used during the search, if used.
     """
 
     id: str  # Always present
@@ -643,18 +676,20 @@ class SearchResultRow(TypedDict, total=False):
 
 
 class SearchResult(dict):  # type: ignore
-    """Column-major response from the search API with conversion methods.
+    """
+    Column-major response from the search API.
 
-    Inherits from dict to maintain backward compatibility with existing code
-    that treats SearchResult as a dictionary.
+    Searches are performed in batches. Each batch is a list of records in columnar form.
 
-    Structure:
-        - ids: List[List[str]] - Always present
-        - documents: List[Optional[List[Optional[str]]]] - Optional per payload
-        - embeddings: List[Optional[List[Optional[List[float]]]]] - Optional per payload
-        - metadatas: List[Optional[List[Optional[Dict[str, Any]]]]] - Optional per payload
-        - scores: List[Optional[List[Optional[float]]]] - Optional per payload
-        - select: List[List[str]] - Selected fields for each payload
+    >>> results = collection.search([search_1, search_2, ...])
+    >>> payloads = zip(results["ids"], results["documents"], results["metadatas"])
+
+    Each payload contains a field grouped per search payload, in column-major form.
+
+    >>> for payload in payloads:
+    >>>     ids, docs, metas = payload
+    >>>     for id, doc, meta in zip(ids, docs, metas):
+    >>>         print(id, doc, meta)
     """
 
     # Type hints for IDE support and documentation
@@ -668,9 +703,14 @@ class SearchResult(dict):  # type: ignore
     def rows(self) -> List[List[SearchResultRow]]:
         """Convert column-major format to row-major format.
 
+        >>> results = collection.search([search_1, search_2, ...])
+        >>> rows = results.rows()
+        >>> for payload in rows:
+        >>>     for row in payload:
+        >>>         print(row["id"], row["document"], row["metadata"], row["score"])
+
         Returns:
-            List of lists where each inner list contains SearchResultRow dicts
-            for one search payload.
+            List of per-payload rows as SearchResultRow dictionaries.
         """
         result: List[List[SearchResultRow]] = []
 
@@ -777,16 +817,22 @@ class ReadLevel(str, Enum):
 # TODO: make warnings prettier and add link to migration docs
 @runtime_checkable
 class EmbeddingFunction(Protocol[D]):
-    """
-    A protocol for embedding functions. To implement a new embedding function,
-    you need to implement the following methods at minimum:
-    - __call__
+    """Protocol for embedding functions.
 
-    For future compatibility, it is strongly recommended to also implement:
-    - __init__
-    - name
-    - build_from_config
-    - get_config
+    To implement a new embedding function,
+    you need to implement the following methods:
+        - __init__
+        - __call__
+        - name
+        - build_from_config
+        - get_config
+
+    Additionally, you should register the embedding function so it will automatically
+    be used by the Chroma client.
+
+    >>> @register_embedding_function
+    >>> class MyEmbeddingFunction(EmbeddingFunction[Documents]):
+    >>>     ...
     """
 
     @abstractmethod
@@ -794,9 +840,13 @@ class EmbeddingFunction(Protocol[D]):
         ...
 
     def embed_query(self, input: D) -> Embeddings:
-        """
-        Get the embeddings for a query input.
-        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """Embed a query input.
+
+        Use this to create embeddings for documents and embeddings for queries/searches differently.
+        Some embedding models are trained to produce different embeddings for documents and queries/searches
+        for better performance.
+
+        If not overridden, this calls ``__call__``.
         """
         return self.__call__(input)
 
@@ -818,14 +868,7 @@ class EmbeddingFunction(Protocol[D]):
         return cast(Embeddings, retry(**retry_kwargs)(self.__call__)(input))  # type: ignore[call-overload]
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Initialize the embedding function.
-        Pass any arguments that will be needed to build the embedding function
-        config.
-
-        Note: This method is provided for backward compatibility.
-        Future implementations should override this method.
-        """
+        """Initialize the embedding function. This method should be overriden."""
 
         warnings.warn(
             f"The class {self.__class__.__name__} does not implement __init__. "
@@ -836,12 +879,7 @@ class EmbeddingFunction(Protocol[D]):
 
     @staticmethod
     def name() -> str:
-        """
-        Return the name of the embedding function.
-
-        Note: This method is provided for backward compatibility.
-        Future implementations should override this method.
-        """
+        """Return the embedding function name. This method should be overriden."""
 
         warnings.warn(
             "The EmbeddingFunction class does not implement name(). "
@@ -852,26 +890,16 @@ class EmbeddingFunction(Protocol[D]):
         return NotImplemented
 
     def default_space(self) -> Space:
-        """
-        Return the default space for the embedding function.
-        """
+        """Return the default space for the embedding function."""
         return "l2"
 
     def supported_spaces(self) -> List[Space]:
-        """
-        Return the supported spaces for the embedding function.
-        """
+        """Return the supported spaces for the embedding function."""
         return ["cosine", "l2", "ip"]
 
     @staticmethod
     def build_from_config(config: Dict[str, Any]) -> "EmbeddingFunction[D]":
-        """
-        Build the embedding function from a config, which will be used to
-        deserialize the embedding function.
-
-        Note: This method is provided for backward compatibility.
-        Future implementations should override this method.
-        """
+        """Build an embedding function from a serialized config. This method should be overriden."""
 
         warnings.warn(
             "The EmbeddingFunction class does not implement build_from_config(). "
@@ -882,12 +910,8 @@ class EmbeddingFunction(Protocol[D]):
         return NotImplemented
 
     def get_config(self) -> Dict[str, Any]:
-        """
-        Return the config for the embedding function, which will be used to
-        serialize the embedding function.
-
-        Note: This method is provided for backward compatibility.
-        Future implementations should override this method.
+        """Return a serializable configuration for the embedding function.
+        This method should be overriden.
         """
 
         warnings.warn(
@@ -901,16 +925,12 @@ class EmbeddingFunction(Protocol[D]):
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        """
-        Validate the update to the config.
-        """
+        """Validate a config update."""
         return
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
-        """
-        Validate the config.
-        """
+        """Validate a config."""
         return
 
     def is_legacy(self) -> bool:
@@ -1420,16 +1440,14 @@ def convert_list_embeddings_to_np(embeddings: PyEmbeddings) -> Embeddings:
 
 @runtime_checkable
 class SparseEmbeddingFunction(Protocol[D]):
-    """
-    A protocol for sparse vector functions. To implement a new sparse vector function,
-    you need to implement the following methods at minimum:
-    - __call__
+    """Protocol for sparse embedding functions.
 
-    For future compatibility, it is strongly recommended to also implement:
-    - __init__
-    - name
-    - build_from_config
-    - get_config
+    To implement a new sparse embedding function, you need to implement the following methods:
+        - __call__
+        - __init__
+        - name
+        - build_from_config
+        - get_config
     """
 
     @abstractmethod
@@ -1437,9 +1455,9 @@ class SparseEmbeddingFunction(Protocol[D]):
         ...
 
     def embed_query(self, input: D) -> SparseVectors:
-        """
-        Get the embeddings for a query input.
-        This method is optional, and if not implemented, the default behavior is to call __call__.
+        """Embed a query input.
+
+        If not overridden, this calls ``__call__``.
         """
         return self.__call__(input)
 
@@ -1462,51 +1480,35 @@ class SparseEmbeddingFunction(Protocol[D]):
 
     @abstractmethod
     def __init__(self, *args: Any, **kwargs: Any) -> None:
-        """
-        Initialize the embedding function.
-        Pass any arguments that will be needed to build the embedding function
-        config.
-        """
+        """Initialize the embedding function."""
         ...
 
     @staticmethod
     @abstractmethod
     def name() -> str:
-        """
-        Return the name of the embedding function.
-        """
+        """Return the embedding function name."""
         ...
 
     @staticmethod
     @abstractmethod
     def build_from_config(config: Dict[str, Any]) -> "SparseEmbeddingFunction[D]":
-        """
-        Build the embedding function from a config, which will be used to
-        deserialize the embedding function.
-        """
+        """Build an embedding function from a serialized config."""
         ...
 
     @abstractmethod
     def get_config(self) -> Dict[str, Any]:
-        """
-        Return the config for the embedding function, which will be used to
-        serialize the embedding function.
-        """
+        """Return a serializable configuration for the embedding function."""
         ...
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
     ) -> None:
-        """
-        Validate the update to the config.
-        """
+        """Validate a config update."""
         return
 
     @staticmethod
     def validate_config(config: Dict[str, Any]) -> None:
-        """
-        Validate the config.
-        """
+        """Validate a config."""
         return
 
 
@@ -2029,15 +2031,12 @@ class ValueTypes:
 
 @dataclass
 class Schema:
-    """Collection schema for configuring indexes and encryption.
-
-    The schema controls how data is indexed and can optionally specify
-    customer-managed encryption keys (CMEK) for data at rest.
+    """Collection schema for indexing and encryption configuration.
 
     Attributes:
-        defaults: Default index configurations for each value type
-        keys: Key-specific index overrides
-        cmek: Optional customer-managed encryption key for collection data
+        defaults: Default index configurations for each value type.
+        keys: Key-specific index overrides.
+        cmek: Optional customer-managed encryption key for collection data.
     """
 
     defaults: ValueTypes

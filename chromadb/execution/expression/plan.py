@@ -39,58 +39,31 @@ class KNNPlan:
 class Search:
     """Payload for hybrid search operations.
 
-    Can be constructed directly or using builder pattern:
+    Can be constructed by directly providing the parameters, or by using the builder pattern.
 
-    Direct construction with expressions:
-        Search(
-            where=Key("status") == "active",
-            rank=Knn(query=[0.1, 0.2]),
-            limit=Limit(limit=10),
-            select=Select(keys={Key.DOCUMENT})
-        )
+    Examples:
+        Direct construction with expressions:
+            Search(
+                where=Key("status") == "active",
+                rank=Knn(query=[0.1, 0.2]),
+                limit=Limit(limit=10),
+                select=Select(keys={Key.DOCUMENT}),
+            )
 
-    Direct construction with dicts:
-        Search(
-            where={"status": "active"},
-            rank={"$knn": {"query": [0.1, 0.2]}},
-            limit=10,  # Creates Limit(limit=10, offset=0)
-            select=["#document", "#score"]
-        )
+        Direct construction with dicts:
+            Search(
+                where={"status": "active"},
+                rank={"$knn": {"query": [0.1, 0.2]}},
+                limit=10,
+                select=["#document", "#score"],
+            )
 
-    Builder pattern:
-        (Search()
-            .where(Key("status") == "active")
-            .rank(Knn(query=[0.1, 0.2]))
-            .limit(10)
-            .select(Key.DOCUMENT))
-
-    Builder pattern with dicts:
-        (Search()
-            .where({"status": "active"})
-            .rank({"$knn": {"query": [0.1, 0.2]}})
-            .limit(10)
-            .select(Key.DOCUMENT))
-
-    Filter by IDs:
-        Search().where(Key.ID.is_in(["id1", "id2", "id3"]))
-
-    Combined with metadata filtering:
-        Search().where((Key.ID.is_in(["id1", "id2"])) & (Key("status") == "active"))
-
-    With group_by:
-        (Search()
-            .rank(Knn(query=[0.1, 0.2]))
-            .group_by(GroupBy(
-                keys=[Key("category")],
-                aggregate=MinK(keys=[Key.SCORE], k=3)
-            )))
-
-    Empty Search() is valid and will use defaults:
-        - where: None (no filtering)
-        - rank: None (no ranking - results ordered by default order)
-        - group_by: None (no grouping)
-        - limit: No limit
-        - select: Empty selection
+        Builder pattern:
+            (Search()
+             .where(Key("status") == "active")
+             .rank(Knn(query=[0.1, 0.2]))
+             .limit(10)
+             .select(Key.DOCUMENT))
     """
 
     def __init__(
@@ -101,7 +74,7 @@ class Search:
         limit: Optional[Union[Limit, Dict[str, Any], int]] = None,
         select: Optional[Union[Select, Dict[str, Any], List[str], Set[str]]] = None,
     ):
-        """Initialize a Search with optional parameters.
+        """Initialize a Search payload.
 
         Args:
             where: Where expression or dict for filtering results (defaults to None - no filtering)
@@ -184,7 +157,7 @@ class Search:
             )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert the Search to a dictionary for JSON serialization"""
+        """Return a JSON-serializable dictionary representation."""
         return {
             "filter": self._where.to_dict() if self._where is not None else None,
             "rank": self._rank.to_dict() if self._rank is not None else None,
@@ -195,7 +168,7 @@ class Search:
 
     # Builder methods for chaining
     def select_all(self) -> "Search":
-        """Select all predefined keys (document, embedding, metadata, score)"""
+        """Select all predefined keys (document, embedding, metadata, score)."""
         new_select = Select(keys={Key.DOCUMENT, Key.EMBEDDING, Key.METADATA, Key.SCORE})
         return Search(
             where=self._where,
@@ -206,13 +179,13 @@ class Search:
         )
 
     def select(self, *keys: Union[Key, str]) -> "Search":
-        """Select specific keys
+        """Select specific keys to return.
 
         Args:
-            *keys: Variable number of Key objects or string key names
+            *keys: Key objects or string key names.
 
         Returns:
-            New Search object with updated select configuration
+            Search: A new Search with updated selection.
         """
         new_select = Select(keys=set(keys))
         return Search(
@@ -224,11 +197,10 @@ class Search:
         )
 
     def where(self, where: Optional[Union[Where, Dict[str, Any]]]) -> "Search":
-        """Set the where clause for filtering
+        """Set the where clause for filtering.
 
         Args:
-            where: A Where expression, dict, or None for filtering
-                   Dicts will be converted using Where.from_dict()
+            where: Where expression, dict, or None.
 
         Example:
             search.where((Key("status") == "active") & (Key("score") > 0.5))
@@ -244,7 +216,7 @@ class Search:
         )
 
     def rank(self, rank_expr: Optional[Union[Rank, Dict[str, Any]]]) -> "Search":
-        """Set the ranking expression
+        """Set the ranking expression.
 
         Args:
             rank_expr: A Rank expression, dict, or None for scoring
