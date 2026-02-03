@@ -210,28 +210,31 @@ def _test_add(
         wait_for_version_increase(client1, collection.name, initial_version1)
         wait_for_version_increase(client2, collection.name, initial_version2)
 
-    invariants.count(coll1, cast(strategies.RecordSet, normalized_record_set))
+    # Verify invariants on both collections to ensure cross-region replication works.
+    # Data is written via both coll1 and coll2, so checking both verifies that data
+    # written to region 1 appears in region 2 and vice versa.
     n_results = max(1, (len(normalized_record_set["ids"]) // 10))
-
-    if batch_ann_accuracy:
-        batch_size = 10
-        for i in range(0, len(normalized_record_set["ids"]), batch_size):
+    for coll in (coll1, coll2):
+        invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+        if batch_ann_accuracy:
+            batch_size = 10
+            for i in range(0, len(normalized_record_set["ids"]), batch_size):
+                invariants.ann_accuracy(
+                    coll,
+                    cast(strategies.RecordSet, normalized_record_set),
+                    n_results=n_results,
+                    embedding_function=collection.embedding_function,
+                    query_indices=list(
+                        range(i, min(i + batch_size, len(normalized_record_set["ids"])))
+                    ),
+                )
+        else:
             invariants.ann_accuracy(
-                coll1,
+                coll,
                 cast(strategies.RecordSet, normalized_record_set),
                 n_results=n_results,
                 embedding_function=collection.embedding_function,
-                query_indices=list(
-                    range(i, min(i + batch_size, len(normalized_record_set["ids"])))
-                ),
             )
-    else:
-        invariants.ann_accuracy(
-            coll1,
-            cast(strategies.RecordSet, normalized_record_set),
-            n_results=n_results,
-            embedding_function=collection.embedding_function,
-        )
 
 
 # Hypothesis struggles to generate large record sets so we explicitly create
@@ -326,4 +329,20 @@ def test_add_large(
             client2, collection.name, initial_version2, additional_time=240
         )
 
-    invariants.count(coll1, cast(strategies.RecordSet, normalized_record_set))
+    # Verify invariants on both collections to ensure cross-region replication works.
+    # Data is written via both coll1 and coll2, so checking both verifies that data
+    # written to region 1 appears in region 2 and vice versa.
+    n_results = max(1, (len(normalized_record_set["ids"]) // 10))
+    for coll in (coll1, coll2):
+        invariants.count(coll, cast(strategies.RecordSet, normalized_record_set))
+        batch_size = 10
+        for i in range(0, len(normalized_record_set["ids"]), batch_size):
+            invariants.ann_accuracy(
+                coll,
+                cast(strategies.RecordSet, normalized_record_set),
+                n_results=n_results,
+                embedding_function=collection.embedding_function,
+                query_indices=list(
+                    range(i, min(i + batch_size, len(normalized_record_set["ids"])))
+                ),
+            )
