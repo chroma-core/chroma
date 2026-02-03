@@ -228,7 +228,7 @@ class Collection(CollectionCommon["ServerAPI"]):
             n_results: Number of neighbors to return per query.
             where: Metadata filter.
             where_document: Document content filter.
-            include: Fields to include in results.
+            include: Fields to include in results. Can contain "embeddings", "metadatas", "documents", "uris", "distances". Defaults to "metadatas", "documents", "distances".
 
         Returns:
             QueryResult: Nearest neighbor results.
