@@ -239,8 +239,8 @@
         ]
       },
       {
-        "tab": "Client Reference",
-        "hidden": true,
+        "tab": "SDK Reference",
+        "icon": "code",
         "pages": [
           "reference/chroma-reference",
           {
@@ -264,11 +264,11 @@
   "api": {
     "examples": {
       "languages": [
+        "curl",
         "terminal",
         "python",
         "typescript",
-        "rust",
-        "curl"
+        "rust"
       ]
     }
   },
