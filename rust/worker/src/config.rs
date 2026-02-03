@@ -216,7 +216,8 @@ pub struct CompactionServiceConfig {
     pub otel_filters: Vec<OtelFilter>,
 
     /// The member ID of the compaction service instance. This is used to determine
-    /// which compaction service instance should handle a given collection.
+    /// which compaction service instance should handle a given collection. This is
+    /// typically set through an environment variable via the K8s Downward API.
     #[serde(default = "CompactionServiceConfig::default_my_member_id")]
     pub my_member_id: String,
 
@@ -259,7 +260,7 @@ pub struct CompactionServiceConfig {
     #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
 
-    /// The configuration for the compactor (index builder).
+    /// The configuration for the compaction orchestrator (index builder).
     #[serde(default)]
     pub compactor: crate::compactor::config::CompactorConfig,
 
