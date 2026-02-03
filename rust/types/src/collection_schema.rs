@@ -1621,7 +1621,7 @@ impl Schema {
         match (default_spann, user_spann) {
             (Some(default), Some(user)) => {
                 // Validate that quantize is always false (should only be set programmatically by frontend)
-                if user.quantize || default.quantize {
+                if user.quantize != default_quantize() || default.quantize != default_quantize() {
                     return Err(SchemaError::InvalidUserInput {
                         reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
@@ -1647,12 +1647,12 @@ impl Schema {
                     ef_construction: user.ef_construction.or(default.ef_construction),
                     ef_search: user.ef_search.or(default.ef_search),
                     max_neighbors: user.max_neighbors.or(default.max_neighbors),
-                    quantize: false, // Always false - quantization is set programmatically
+                    quantize: default_quantize(), // Always false - quantization is set programmatically
                 }))
             }
             (Some(default), None) => {
                 // Validate default is also false
-                if default.quantize {
+                if default.quantize != default_quantize() {
                     return Err(SchemaError::InvalidUserInput {
                         reason: "quantize field cannot be set to true in default schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
@@ -1661,7 +1661,7 @@ impl Schema {
             }
             (None, Some(user)) => {
                 // Validate user is false
-                if user.quantize {
+                if user.quantize != default_quantize() {
                     return Err(SchemaError::InvalidUserInput {
                         reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
