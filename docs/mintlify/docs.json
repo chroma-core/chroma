@@ -268,7 +268,7 @@
   "navbar": {
     "links": [
       {
-        "label": "Github",
+        "label": "GitHub",
         "icon": "github",
         "href": "https://github.com/chroma-core/chroma"
       }
