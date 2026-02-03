@@ -439,7 +439,19 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<()>,
     ) -> Result<Response<ResetStateResponse>, Status> {
-        Err(Status::unimplemented("reset_state is not supported"))
+        let internal_req = internal::ResetStateRequest {};
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req
+            .run(backends)
+            .await
+            .map_err(|e| Status::from(e))?;
+
+        let proto_resp: ResetStateResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn get_last_compaction_time_for_tenant(

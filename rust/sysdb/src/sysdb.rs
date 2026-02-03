@@ -2032,10 +2032,18 @@ impl GrpcSysDb {
     }
 
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        // Call the Rust SysDB service's reset_state which will fan out to all backends
         self.client
             .reset_state(())
             .await
             .map_err(|e| TonicError(e).boxed())?;
+        if let Some(mut mcmr_client) = self._mcmr_client.clone() {
+            mcmr_client
+                .reset_state(())
+                .await
+                .map_err(|e| TonicError(e).boxed())?;
+        }
+
         Ok(ResetResponse {})
     }
 

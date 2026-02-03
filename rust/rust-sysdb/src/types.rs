@@ -1356,6 +1356,48 @@ pub struct UpdateTenantRequest {
 #[derive(Debug, Clone)]
 pub struct UpdateTenantResponse {}
 
+/// Internal request for resetting the database state.
+#[derive(Debug, Clone)]
+pub struct ResetStateRequest {}
+
+/// Internal response for resetting the database state.
+#[derive(Debug, Clone)]
+pub struct ResetStateResponse {}
+
+// ============================================================================
+// Assignable Trait Implementations
+// ============================================================================
+
+impl Assignable for ResetStateRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends for reset
+        factory.get_all_backends()
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ResetStateRequest {
+    type Response = ResetStateResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.reset().await?;
+        }
+        Ok(ResetStateResponse {})
+    }
+}
+
+impl TryFrom<ResetStateResponse> for chroma_proto::ResetStateResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: ResetStateResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::ResetStateResponse {})
+    }
+}
+
 /// Internal request for updating segments after compaction.
 #[derive(Debug, Clone)]
 pub struct UpdateSegmentRequest {

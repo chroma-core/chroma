@@ -18,6 +18,7 @@ from typing import (
 from uuid import UUID
 
 import hypothesis
+from chromadb.errors import ChromaError
 import pytest
 import uvicorn
 from httpx import ConnectError
@@ -906,16 +907,33 @@ def client_factories(system: System) -> Generator[ClientFactories, None, None]:
         del client
 
 
-def create_isolated_database(client: ClientAPI) -> None:
-    """Create an isolated database for a test and updates the client to use it."""
+def get_topology_name(databse_name: str) -> Optional[str]:
+    return databse_name.split("+")[0] if len(databse_name.split("+")) > 1 else None
+
+
+def create_database(client: ClientAPI, database_name: str) -> None:
     admin_settings = client.get_settings()
     if admin_settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         admin_settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
-
     admin = AdminClient(admin_settings)
+    admin.create_database(database_name)
+
+
+def create_isolated_database(client: ClientAPI) -> None:
+    """Create an isolated database for a test and updates the client to use it."""
     database = "test_" + str(uuid.uuid4())
-    admin.create_database(database)
+    topo_name = get_topology_name(client.database)
+    if topo_name is not None:
+        database = topo_name + "+" + database
+    create_database(database)
     client.set_database(database)
+
+
+def switch_to_mcmr_database(client: ClientAPI) -> None:
+    """Switch the client to use the mcmr database."""
+    # TODO: This topo name should be a test global constant
+    mcmr_db_name = "tilt-spanning+default-database"
+    client.set_database(mcmr_db_name)
 
 
 @pytest.fixture(scope="function")
@@ -924,12 +942,18 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
-        yield client
-        client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
-        yield client
-        client.clear_system_cache()
+
+    if (
+        os.environ.get("MULTI_REGION") == "true"
+        and "fastapi" in system.settings.chroma_api_impl
+    ):
+        print("SWITCHING TO MCMR")
+        switch_to_mcmr_database(client)
+
+    yield client
+    client.clear_system_cache()
 
 
 @pytest.fixture(scope="function")
@@ -941,6 +965,9 @@ def http_client(system_http_server: System) -> Generator[ClientAPI, None, None]:
         == "chromadb.api.async_fastapi.AsyncFastAPI"
     ):
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system_http_server))
+        print("CONSIDERING SWITCHING TO MCMR")
+        if os.environ.get("MULTI_REGION") == "true":
+            switch_to_mcmr_database(client)
         yield client
         client.clear_system_cache()
     else:

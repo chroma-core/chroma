@@ -347,6 +347,13 @@ impl Backend {
         }
     }
 
+    /// Reset the database state by deleting all data and recreating default entities.
+    pub async fn reset(&self) -> Result<(), SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.reset().await,
+        }
+    }
+
     // ============================================================
     // Lifecycle
     // ============================================================
