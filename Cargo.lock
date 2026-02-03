@@ -8210,6 +8210,7 @@ version = "0.1.0"
 dependencies = [
  "chroma-config",
  "chroma-tracing",
+ "chroma-types",
  "clap",
  "figment",
  "gcloud-gax",
