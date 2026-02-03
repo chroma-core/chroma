@@ -287,11 +287,7 @@
         "python",
         "typescript",
         "rust",
-        "curl",
-        "go",
-        "java",
-        "ruby",
-        "php"
+        "curl"
       ]
     }
   },
@@ -312,7 +308,6 @@
       "view",
       "chatgpt",
       "claude",
-      "perplexity",
       "mcp",
       "cursor",
       "vscode"
