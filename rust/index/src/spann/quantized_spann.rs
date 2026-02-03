@@ -108,8 +108,8 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
 }
 
 impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
-    pub async fn add(&self, id: u32, vector: &[f32]) -> Result<(), QuantizedSpannError> {
-        let rotated = self.rotate(vector);
+    pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), QuantizedSpannError> {
+        let rotated = self.rotate(embedding);
         self.embeddings.insert(id, rotated.clone());
         self.insert(id, rotated).await
     }
@@ -198,40 +198,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Insert a rotated vector into the index.
-    async fn insert(&self, id: u32, vector: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
-        let version = self.upgrade(id);
-        let candidates = self.navigate(&vector, self.params.write_nprobe as usize)?;
+    async fn insert(&self, id: u32, embedding: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
+        let candidates = self.navigate(&embedding, self.params.write_nprobe as usize)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
-        if rng_cluster_ids.is_empty() {
-            let code = Code::<Vec<u8>>::quantize(&vector, &vector).as_ref().into();
-            let delta = QuantizedDelta {
-                center: vector,
-                codes: vec![code],
-                ids: vec![id],
-                length: 1,
-                versions: vec![version],
-            };
-            self.spawn(delta)?;
-        } else {
-            let mut staging = Vec::new();
-            for cluster_id in rng_cluster_ids {
-                if let Some(centroid) = self.centroid(cluster_id) {
-                    let code = Code::<Vec<u8>>::quantize(&vector, &centroid)
-                        .as_ref()
-                        .into();
-                    if self
-                        .append(cluster_id, id, version, code)
-                        .is_some_and(|len| len > self.params.split_threshold as usize)
-                    {
-                        staging.push(cluster_id);
-                    }
-                }
-            }
-
-            for cluster_id in staging {
-                Box::pin(self.balance(cluster_id)).await?;
-            }
+        for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
+            Box::pin(self.balance(cluster_id)).await?;
         }
 
         Ok(())
@@ -244,7 +216,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .is_some_and(|global_version| *global_version == version)
     }
 
-    /// Load cluster data from reader into deltas (reconciliation).
+    /// Load cluster data from reader into deltas.
     async fn load(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
         let Some(reader) = &self.quantized_cluster_reader else {
             return Ok(());
@@ -253,7 +225,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         if self
             .deltas
             .get(&cluster_id)
-            .is_none_or(|delta| delta.ids.len() >= delta.length as usize)
+            .is_none_or(|delta| delta.ids.len() >= delta.length)
         {
             return Ok(());
         }
@@ -268,7 +240,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
         let code_size = persisted.codes.len() / persisted.ids.len().max(1);
         if let Some(mut delta) = self.deltas.get_mut(&cluster_id) {
-            if delta.ids.len() < delta.length as usize {
+            if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted
                     .ids
                     .iter()
@@ -367,13 +339,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))
     }
 
-    /// Reassign a point to new clusters via RNG query.
-    ///
-    /// Called when a point ends up further from its new cluster center than it was
-    /// from the old center (NPA check failure). Finds better clusters via RNG and
-    /// appends the point there with an incremented version.
-    ///
-    /// Does NOT trigger balance on target clusters to avoid cascading splits.
+    /// Reassign a vector to new clusters via RNG query
     async fn reassign(
         &self,
         from_cluster_id: u32,
@@ -396,27 +362,61 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         }
 
-        let new_version = self.upgrade(id);
-        let mut staging = Vec::new();
-        for cluster_id in rng_cluster_ids {
-            if let Some(centroid) = self.centroid(cluster_id) {
-                let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
-                    .as_ref()
-                    .into();
-                if self
-                    .append(cluster_id, id, new_version, code)
-                    .is_some_and(|len| len > self.params.split_threshold as usize)
-                {
-                    staging.push(cluster_id);
-                }
-            }
-        }
-
-        for cluster_id in staging {
+        for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
             Box::pin(self.balance(cluster_id)).await?;
         }
 
         Ok(())
+    }
+
+    /// Register a vector in target clusters.
+    /// Returns the clusters whose lengths exceed split threshold
+    fn register(
+        &self,
+        id: u32,
+        embedding: Arc<[f32]>,
+        target_cluster_ids: &[u32],
+    ) -> Result<Vec<u32>, QuantizedSpannError> {
+        let version = self.upgrade(id);
+
+        let mut registered = false;
+        let mut staging = Vec::new();
+
+        for cluster_id in target_cluster_ids {
+            let Some(centroid) = self.centroid(*cluster_id) else {
+                continue;
+            };
+
+            let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
+                .as_ref()
+                .into();
+
+            let Some(len) = self.append(*cluster_id, id, version, code) else {
+                continue;
+            };
+
+            registered = true;
+
+            if len > self.params.split_threshold as usize {
+                staging.push(*cluster_id);
+            }
+        }
+
+        if !registered {
+            let code = Code::<Vec<u8>>::quantize(&embedding, &embedding)
+                .as_ref()
+                .into();
+            let delta = QuantizedDelta {
+                center: embedding,
+                codes: vec![code],
+                ids: vec![id],
+                length: 1,
+                versions: vec![version],
+            };
+            self.spawn(delta)?;
+        }
+
+        Ok(staging)
     }
 
     /// Apply epsilon and RNG filtering to navigate results.
@@ -459,13 +459,13 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Normalize (if cosine) and rotate a vector for RaBitQ quantization.
-    fn rotate(&self, vector: &[f32]) -> Arc<[f32]> {
+    fn rotate(&self, embedding: &[f32]) -> Arc<[f32]> {
         let rotated = match self.params.space {
             Space::Cosine => {
-                let normalized = normalize(vector);
+                let normalized = normalize(embedding);
                 &self.rotation * ColRef::from_slice(&normalized)
             }
-            _ => &self.rotation * ColRef::from_slice(vector),
+            _ => &self.rotation * ColRef::from_slice(embedding),
         };
         rotated.iter().copied().collect()
     }
@@ -791,12 +791,12 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         let dim = self.center.len();
         let mut new_center = vec![0.0f32; dim];
         for delta in self.deltas.iter() {
-            for i in 0..dim {
-                new_center[i] += delta.center[i];
+            for (acc_dim, dim) in new_center.iter_mut().zip(delta.center.iter()) {
+                *acc_dim += *dim;
             }
         }
-        for i in 0..dim {
-            new_center[i] /= self.deltas.len().max(1) as f32;
+        for acc_dim in new_center.iter_mut() {
+            *acc_dim /= self.deltas.len().max(1) as f32;
         }
 
         let diff = new_center
@@ -1098,6 +1098,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
     }
 
     /// Open an existing quantized SPANN index from file IDs.
+    #[allow(clippy::too_many_arguments)]
     pub async fn open(
         collection_id: CollectionUuid,
         dimension: usize,
