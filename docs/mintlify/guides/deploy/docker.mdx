@@ -34,7 +34,7 @@ chroma_client.heartbeat()
 ```
 
 <Callout title="Client-only package">
-If you're using Python, you may want to use the [client-only package](/production/chroma-server/python-thin-client) for a smaller install size.
+If you're using Python, you may want to use the [client-only package](./python-thin-client) for a smaller install size.
 </Callout>
 </Tab>
 
@@ -78,7 +78,7 @@ docker run -v ./chroma-data:/data -v ./config.yaml:/config.yaml -p 8000:8000 chr
 
 ## Observability with Docker
 
-Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. OpenTelemetry traces allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](../administration/observability) for a full explanation of the available parameters.
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. OpenTelemetry traces allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](./observability) for a full explanation of the available parameters.
 
 Here's an example of how to create an observability stack with Docker Compose. The stack is composed of
 

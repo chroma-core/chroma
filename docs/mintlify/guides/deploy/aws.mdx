@@ -166,7 +166,7 @@ aws cloudformation delete-stack --stack-name my-chroma-stack
 
 ## Observability with AWS
 
-Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only exports OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](../administration/observability) for a full explanation of the available parameters.
+Chroma is instrumented with [OpenTelemetry](https://opentelemetry.io/) hooks for observability. We currently only export OpenTelemetry [traces](https://opentelemetry.io/docs/concepts/signals/traces/). These should allow you to understand how requests flow through the system and quickly identify bottlenecks. Check out the [observability docs](./observability) for a full explanation of the available parameters.
 
 To enable tracing on your Chroma server, simply pass your desired values as arguments when creating your Cloudformation stack:
 
