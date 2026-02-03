@@ -906,14 +906,14 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 OpenMode::Fork(file_ids.quantized_centroid_id),
             )
             .await
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
 
         // Step 2: Load scalar metadata (next_cluster_id, versions, cluster_lengths)
         let options = BlockfileReaderOptions::new(file_ids.scalar_metadata_id, prefix_path.clone());
         let reader = blockfile_provider
             .read::<u32, u32>(options)
             .await
-            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+            .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
 
         // Load cluster lengths
         let cluster_lengths = DashMap::new();
@@ -949,7 +949,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             blockfile_provider
                 .read(options)
                 .await
-                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?,
+                .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?,
         );
 
         // Step 3: Initialize deltas from cluster_lengths by getting centers from raw_centroid
@@ -961,7 +961,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             // Get center embedding from raw_centroid index
             if let Some(center_embedding) = raw_centroid
                 .get(cluster_id)
-                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?
             {
                 deltas.insert(
                     cluster_id,
@@ -1037,7 +1037,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             self.raw_centroid = usearch_provider
                 .open(&usearch_config, OpenMode::Create)
                 .await
-                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
 
             let quantized_config = USearchIndexConfig {
                 quantization_center: Some(new_center.clone().into()),
@@ -1046,16 +1046,16 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             self.quantized_centroid = usearch_provider
                 .open(&quantized_config, OpenMode::Create)
                 .await
-                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
 
             for entry in self.deltas.iter() {
                 let cluster_id = *entry.key();
                 self.raw_centroid
                     .add(cluster_id, &entry.center)
-                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
                 self.quantized_centroid
                     .add(cluster_id, &entry.center)
-                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
             }
 
             new_center.into()
@@ -1064,9 +1064,12 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         };
 
         // === Step 1: Create blockfile writers ===
-        let mut qc_options = BlockfileWriterOptions::new(self.prefix_path.clone());
-        let mut sm_options = BlockfileWriterOptions::new(self.prefix_path.clone());
-        let mut em_options = BlockfileWriterOptions::new(self.prefix_path.clone());
+        let mut qc_options =
+            BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
+        let mut sm_options =
+            BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
+        let mut em_options =
+            BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
 
         if let Some(file_ids) = &self.file_ids {
             qc_options = qc_options.fork(file_ids.quantized_cluster_id);
