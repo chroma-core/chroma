@@ -130,14 +130,14 @@ pub struct MutableQuantizedSpannIndex<I: VectorIndex> {
 }
 
 impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
-    pub async fn add(&self, key: u32, vector: &[f32]) -> Result<(), QuantizedSpannError> {
+    pub async fn add(&self, id: u32, vector: &[f32]) -> Result<(), QuantizedSpannError> {
         let rotated = self.rotate(vector);
-        self.embeddings.insert(key, rotated.clone());
-        self.insert(key, rotated).await
+        self.embeddings.insert(id, rotated.clone());
+        self.insert(id, rotated).await
     }
 
-    pub fn remove(&self, key: u32) {
-        self.upgrade(key);
+    pub fn remove(&self, id: u32) {
+        self.upgrade(id);
     }
 }
 
@@ -175,21 +175,23 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
     /// Get the centroid for a cluster, cloning to release the lock.
     fn centroid(&self, cluster_id: u32) -> Option<Arc<[f32]>> {
-        self.deltas.get(&cluster_id).map(|d| d.center.clone())
+        self.deltas
+            .get(&cluster_id)
+            .map(|delta| delta.center.clone())
     }
 
     /// Create a new cluster and register it in the centroid index.
     fn create(&self, delta: QuantizedDelta) -> Result<u32, QuantizedSpannError> {
-        let id = self.next_cluster_id.fetch_add(1, Ordering::Relaxed);
+        let cluster_id = self.next_cluster_id.fetch_add(1, Ordering::Relaxed);
         let center = delta.center.clone();
-        self.deltas.insert(id, delta);
+        self.deltas.insert(cluster_id, delta);
         self.raw_centroid
-            .add(id, &center)
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+            .add(cluster_id, &center)
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
         self.quantized_centroid
-            .add(id, &center)
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-        Ok(id)
+            .add(cluster_id, &center)
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        Ok(cluster_id)
     }
 
     /// Remove a cluster from deltas and load raw embeddings for its valid points.
@@ -219,17 +221,17 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     fn drop(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
         self.raw_centroid
             .remove(cluster_id)
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
         self.quantized_centroid
             .remove(cluster_id)
-            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
         self.tombstones.insert(cluster_id);
         Ok(())
     }
 
     /// Insert a rotated vector into the index.
-    async fn insert(&self, key: u32, vector: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
-        let version = self.upgrade(key);
+    async fn insert(&self, id: u32, vector: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
+        let version = self.upgrade(id);
         let candidates = self.navigate(&vector, self.config.spann_nprobe)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
@@ -238,7 +240,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             let delta = QuantizedDelta {
                 center: vector,
                 codes: vec![code],
-                ids: vec![key],
+                ids: vec![id],
                 length: 1,
                 versions: vec![version],
             };
@@ -251,7 +253,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                         .as_ref()
                         .into();
                     if self
-                        .append(cluster_id, key, version, code)
+                        .append(cluster_id, id, version, code)
                         .is_some_and(|len| len > self.config.spann_split_threshold)
                     {
                         staging.push(cluster_id);
@@ -269,7 +271,9 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
     /// Check if a point is valid (version matches current version).
     fn is_valid(&self, id: u32, version: u32) -> bool {
-        self.versions.get(&id).is_some_and(|v| *v == version)
+        self.versions
+            .get(&id)
+            .is_some_and(|global_version| *global_version == version)
     }
 
     /// Load cluster data from reader into deltas (reconciliation).
@@ -281,7 +285,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         if self
             .deltas
             .get(&cluster_id)
-            .is_none_or(|d| d.ids.len() >= d.length as usize)
+            .is_none_or(|delta| delta.ids.len() >= delta.length as usize)
         {
             return Ok(());
         }
@@ -349,11 +353,16 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         };
 
         let neighbors = self.navigate(&source_center, self.config.spann_nprobe)?;
-        let Some(target_id) = neighbors.keys.iter().copied().find(|id| *id != cluster_id) else {
+        let Some(nearest_cluster_id) = neighbors
+            .keys
+            .iter()
+            .copied()
+            .find(|neighbor_cluster_id| *neighbor_cluster_id != cluster_id)
+        else {
             return Ok(());
         };
 
-        let Some(target_center) = self.centroid(target_id) else {
+        let Some(target_center) = self.centroid(nearest_cluster_id) else {
             return Ok(());
         };
 
@@ -363,7 +372,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
         self.drop(cluster_id)?;
         for (id, version) in source_delta.ids.iter().zip(source_delta.versions.iter()) {
-            let Some(embedding) = self.embeddings.get(id).map(|e| e.clone()) else {
+            let Some(embedding) = self.embeddings.get(id).map(|emb| emb.clone()) else {
                 continue;
             };
 
@@ -374,9 +383,9 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                 let code = Code::<Vec<u8>>::quantize(&embedding, &target_center)
                     .as_ref()
                     .into();
-                self.append(target_id, *id, *version, code);
+                self.append(nearest_cluster_id, *id, *version, code);
             } else {
-                self.insert(*id, embedding).await?;
+                self.reassign(cluster_id, *id, *version, embedding).await?;
             }
         }
 
@@ -408,7 +417,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         }
 
-        let candidates = self.navigate(&embedding, self.config.spann_reassign_neighbor_count)?;
+        let candidates = self.navigate(&embedding, self.config.spann_nprobe)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
         if rng_cluster_ids.contains(&from_cluster_id) {
@@ -420,14 +429,23 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         }
 
         let new_version = self.upgrade(id);
-
+        let mut staging = Vec::new();
         for cluster_id in rng_cluster_ids {
             if let Some(centroid) = self.centroid(cluster_id) {
                 let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
                     .as_ref()
                     .into();
-                self.append(cluster_id, id, new_version, code);
+                if self
+                    .append(cluster_id, id, new_version, code)
+                    .is_some_and(|len| len > self.config.spann_split_threshold)
+                {
+                    staging.push(cluster_id);
+                }
             }
+        }
+
+        for cluster_id in staging {
+            Box::pin(self.balance(cluster_id)).await?;
         }
 
         Ok(())
@@ -445,7 +463,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             if (distance - first_distance).abs()
                 > self.config.spann_rng_epsilon * first_distance.abs()
             {
-                continue;
+                break;
             }
 
             let Some(center) = self.centroid(*cluster_id) else {
@@ -525,7 +543,11 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             .zip(delta.versions.iter())
             .filter_map(|(id, version)| {
                 self.is_valid(*id, *version)
-                    .then(|| self.embeddings.get(id).map(|e| (*id, *version, e.clone())))
+                    .then(|| {
+                        self.embeddings
+                            .get(id)
+                            .map(|emb| (*id, *version, emb.clone()))
+                    })
                     .flatten()
             })
             .collect::<Vec<_>>();
@@ -550,7 +572,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             center: left_center.clone(),
             codes: left_group
                 .iter()
-                .map(|(_, _, e)| Code::<Vec<u8>>::quantize(e, &left_center).as_ref().into())
+                .map(|(_, _, emb)| Code::<Vec<u8>>::quantize(emb, &left_center).as_ref().into())
                 .collect(),
             ids: left_group.iter().map(|(id, _, _)| *id).collect(),
             length: left_group.len(),
@@ -568,7 +590,11 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             center: right_center.clone(),
             codes: right_group
                 .iter()
-                .map(|(_, _, e)| Code::<Vec<u8>>::quantize(e, &right_center).as_ref().into())
+                .map(|(_, _, emb)| {
+                    Code::<Vec<u8>>::quantize(emb, &right_center)
+                        .as_ref()
+                        .into()
+                })
                 .collect(),
             ids: right_group.iter().map(|(id, _, _)| *id).collect(),
             length: right_group.len(),
@@ -759,9 +785,9 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
         Ok(())
     }
 
-    /// Increment and return the next version for a key.
-    fn upgrade(&self, key: u32) -> u32 {
-        let mut entry = self.versions.entry(key).or_default();
+    /// Increment and return the next version for a vector.
+    fn upgrade(&self, id: u32) -> u32 {
+        let mut entry = self.versions.entry(id).or_default();
         *entry += 1;
         *entry
     }
