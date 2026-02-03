@@ -75,6 +75,8 @@ pub struct FrontendConfig {
     pub enable_schema: bool,
     #[serde(default = "default_min_records_for_invocation")]
     pub min_records_for_invocation: u64,
+    #[serde(default = "Default::default")]
+    pub tenants_with_quantization_enabled: Vec<String>,
 }
 
 impl FrontendConfig {
@@ -96,6 +98,7 @@ impl FrontendConfig {
             tenants_to_migrate_immediately_threshold: None,
             enable_schema: default_enable_schema(),
             min_records_for_invocation: default_min_records_for_invocation(),
+            tenants_with_quantization_enabled: vec![],
         }
     }
 }
