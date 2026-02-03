@@ -1,4 +1,57 @@
+use std::time::Duration;
+
+use google_cloud_spanner::session::SessionConfig;
 use serde::{Deserialize, Serialize};
+
+/// Session pool configuration for Spanner connections.
+///
+/// The default values are tuned for production workloads with higher concurrency and longer
+/// timeouts than the library defaults.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpannerSessionPoolConfig {
+    /// How long to wait for a session before timing out.  Default: 30 seconds.
+    #[serde(default = "SpannerSessionPoolConfig::default_session_get_timeout_secs")]
+    pub session_get_timeout_secs: u64,
+    /// Maximum concurrent sessions.  Default: 800.
+    #[serde(default = "SpannerSessionPoolConfig::default_max_opened")]
+    pub max_opened: usize,
+    /// Minimum sessions to keep warm.  Default: 50.
+    #[serde(default = "SpannerSessionPoolConfig::default_min_opened")]
+    pub min_opened: usize,
+}
+
+impl SpannerSessionPoolConfig {
+    fn default_session_get_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_max_opened() -> usize {
+        800
+    }
+
+    fn default_min_opened() -> usize {
+        50
+    }
+
+    /// Converts this configuration to the library's `SessionConfig`.
+    pub fn to_session_config(&self) -> SessionConfig {
+        let mut config = SessionConfig::default();
+        config.session_get_timeout = Duration::from_secs(self.session_get_timeout_secs);
+        config.max_opened = self.max_opened;
+        config.min_opened = self.min_opened;
+        config
+    }
+}
+
+impl Default for SpannerSessionPoolConfig {
+    fn default() -> Self {
+        Self {
+            session_get_timeout_secs: Self::default_session_get_timeout_secs(),
+            max_opened: Self::default_max_opened(),
+            min_opened: Self::default_min_opened(),
+        }
+    }
+}
 
 /// Configuration for connecting to a Spanner emulator (local development)
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -15,6 +68,8 @@ pub struct SpannerEmulatorConfig {
     pub instance: String,
     #[serde(default = "SpannerEmulatorConfig::default_database")]
     pub database: String,
+    #[serde(default)]
+    pub session_pool: SpannerSessionPoolConfig,
 }
 
 impl Default for SpannerEmulatorConfig {
@@ -26,6 +81,7 @@ impl Default for SpannerEmulatorConfig {
             project: Self::default_project(),
             instance: Self::default_instance(),
             database: Self::default_database(),
+            session_pool: SpannerSessionPoolConfig::default(),
         }
     }
 }
@@ -77,6 +133,8 @@ pub struct SpannerGcpConfig {
     pub instance: String,
     #[serde(default = "SpannerGcpConfig::default_database")]
     pub database: String,
+    #[serde(default)]
+    pub session_pool: SpannerSessionPoolConfig,
 }
 
 impl SpannerGcpConfig {
@@ -108,6 +166,7 @@ impl Default for SpannerGcpConfig {
             project: Self::default_project(),
             instance: Self::default_instance(),
             database: Self::default_database(),
+            session_pool: SpannerSessionPoolConfig::default(),
         }
     }
 }
@@ -123,10 +182,19 @@ pub enum SpannerConfig {
 }
 
 impl SpannerConfig {
+    /// Returns the database path in the format required by the Spanner client.
     pub fn database_path(&self) -> String {
         match self {
             Self::Emulator(e) => e.database_path(),
             Self::Gcp(g) => g.database_path(),
+        }
+    }
+
+    /// Returns the session pool configuration for this Spanner instance.
+    pub fn session_config(&self) -> SessionConfig {
+        match self {
+            Self::Emulator(e) => e.session_pool.to_session_config(),
+            Self::Gcp(g) => g.session_pool.to_session_config(),
         }
     }
 }

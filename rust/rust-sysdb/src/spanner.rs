@@ -1513,10 +1513,12 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
         config: &SpannerBackendConfig<'a>,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let session_config = config.spanner.session_config();
         let client = match config.spanner {
             SpannerConfig::Emulator(emulator) => {
                 let client_config = ClientConfig {
                     environment: Environment::Emulator(emulator.grpc_endpoint()),
+                    session_config,
                     ..Default::default()
                 };
 
@@ -1535,10 +1537,11 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
                 client
             }
             SpannerConfig::Gcp(gcp) => {
-                let client_config = ClientConfig::default().with_auth().await.map_err(|e| {
+                let mut client_config = ClientConfig::default().with_auth().await.map_err(|e| {
                     Box::new(SpannerError::ConfigurationError(e.to_string()))
                         as Box<dyn ChromaError>
                 })?;
+                client_config.session_config = session_config;
 
                 let client = Client::new(&gcp.database_path(), client_config)
                     .await
@@ -1597,6 +1600,7 @@ pub mod tests {
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
             database: "local-sysdb-database".to_string(),
+            session_pool: Default::default(),
         };
 
         let spanner_config = SpannerConfig::Emulator(emulator);
