@@ -242,12 +242,8 @@ impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest 
         let metadata = req
             .metadata
             .map(|proto_metadata| -> Result<Metadata, SysDbError> {
-                let mut metadata =
+                let metadata =
                     Metadata::try_from(proto_metadata).map_err(SysDbError::InvalidMetadata)?;
-
-                // Filter out legacy metadata keys starting with "hnsw:"
-                metadata.retain(|key, _| !key.starts_with("hnsw:"));
-
                 Ok(metadata)
             })
             .transpose()?;
