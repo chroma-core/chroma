@@ -368,13 +368,24 @@ impl SpannerBackend {
         }
     }
 
-    pub async fn list_databases(
-        &self,
-        _tenant: &str,
-        _limit: Option<i32>,
-        _offset: i32,
-    ) -> Result<Vec<chroma_types::chroma_proto::Database>, SysDbError> {
-        todo!("implement list_databases")
+    pub async fn list_databases(&self, tenant: &str) -> Result<Vec<Database>, SysDbError> {
+        let query = "SELECT id, name, tenant_id FROM databases \
+                     WHERE tenant_id = @tenant_id AND is_deleted = FALSE \
+                     ORDER BY created_at ASC";
+
+        let mut stmt = Statement::new(query);
+        stmt.add_param("tenant_id", &tenant);
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx.query(stmt).await?;
+
+        let mut databases = Vec::new();
+        while let Some(row) = result_set.next().await? {
+            let database = Database::try_from(SpannerRow { row })?;
+            databases.push(database);
+        }
+
+        Ok(databases)
     }
 
     pub async fn delete_database(&self, _name: &str, _tenant: &str) -> Result<(), SysDbError> {

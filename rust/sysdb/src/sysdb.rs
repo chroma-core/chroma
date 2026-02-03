@@ -1007,28 +1007,95 @@ impl GrpcSysDb {
         limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        let req = chroma_proto::ListDatabasesRequest {
-            tenant,
-            limit: limit.map(|l| l as i32),
-            offset: Some(offset as i32),
+        // Collect databases from single-region client
+        // We request all databases (offset=0) and handle pagination manually
+        let single_region_req = chroma_proto::ListDatabasesRequest {
+            tenant: tenant.clone(),
+            limit: None,
+            offset: Some(0),
         };
-        match self.client.list_databases(req).await {
-            Ok(resp) => resp
-                .into_inner()
-                .databases
-                .into_iter()
-                .map(|db| {
-                    Uuid::parse_str(&db.id)
-                        .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
-                        .map(|id| Database {
-                            id,
-                            name: db.name,
-                            tenant: db.tenant,
-                        })
-                })
-                .collect(),
-            Err(err) => Err(ListDatabasesError::Internal(err.into())),
+        let single_region_dbs: Vec<Database> =
+            match self.client.list_databases(single_region_req).await {
+                Ok(resp) => resp
+                    .into_inner()
+                    .databases
+                    .into_iter()
+                    .map(|db| {
+                        Uuid::parse_str(&db.id)
+                            .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
+                            .map(|id| Database {
+                                id,
+                                name: db.name,
+                                tenant: db.tenant.clone(),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Err(err) => return Err(ListDatabasesError::Internal(err.into())),
+            };
+
+        // Early bail-out: if single-region has enough results to satisfy offset + limit
+        if let Some(lim) = limit {
+            let total_needed = offset.saturating_add(lim);
+            if single_region_dbs.len() as u32 >= total_needed {
+                let start = (offset as usize).min(single_region_dbs.len());
+                let end = (start.saturating_add(lim as usize)).min(single_region_dbs.len());
+                return Ok(single_region_dbs[start..end].to_vec());
+            }
         }
+
+        // Collect databases from MCMR client if available
+        // MCMR returns databases with topology prefixes (e.g., "topology+db_name")
+        // Note: MCMR server does not support limit/offset, so we request all and paginate client-side
+        let mcmr_req = chroma_proto::ListDatabasesRequest {
+            tenant: tenant.clone(),
+            limit: None,
+            offset: None,
+        };
+        let mut mcmr_dbs: Vec<Database> = if let Some(mut mcmr_client) = self._mcmr_client.clone() {
+            match mcmr_client.list_databases(mcmr_req).await {
+                Ok(resp) => resp
+                    .into_inner()
+                    .databases
+                    .into_iter()
+                    .map(|db| {
+                        Uuid::parse_str(&db.id)
+                            .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
+                            .map(|id| Database {
+                                id,
+                                name: db.name,
+                                tenant: db.tenant.clone(),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Err(err) => {
+                    tracing::error!("Failed to list databases from MCMR client: {:?}", err);
+                    return Err(ListDatabasesError::Internal(err.into()));
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        // Stable sort MCMR databases by topology prefix (the part before '+')
+        mcmr_dbs.sort_by_key(|db| {
+            DatabaseName::new(db.name.clone())
+                .map(|name| name.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string())
+        });
+
+        // Merge results: single-region databases first, then MCMR databases
+        let mut all_dbs = single_region_dbs;
+        all_dbs.extend(mcmr_dbs);
+
+        // Apply offset and limit to the combined results manually
+        let start = (offset as usize).min(all_dbs.len());
+        let end = if let Some(lim) = limit {
+            (start + lim as usize).min(all_dbs.len())
+        } else {
+            all_dbs.len()
+        };
+
+        Ok(all_dbs[start..end].to_vec())
     }
 
     pub async fn get_database(
