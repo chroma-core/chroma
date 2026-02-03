@@ -245,8 +245,55 @@
                 "group": "Chroma Core API",
                 "openapi": {
                   "source": "openapi.json",
-                  "directory": "reference/chroma-api"
-                }
+                  "directory": "api-reference"
+                },
+                "pages": [
+                  {
+                    "group": "Collection",
+                    "pages": [
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections_count",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                      "GET /api/v2/collections/{crn}",
+                      "PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                      "DELETE /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}"
+                    ]
+                  },
+                  {
+                    "group": "System",
+                    "pages": [
+                      "GET /api/v2/healthcheck",
+                      "GET /api/v2/heartbeat",
+                      "GET /api/v2/pre-flight-checks",
+                      "POST /api/v2/reset",
+                      "GET /api/v2/version"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Chroma Cloud API",
+                "openapi": {
+                  "source": "openapi.json",
+                  "directory": "api-reference"
+                },
+                "pages": [
+                  {
+                    "group": "Collection",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork"
+                    ]
+                  },
+                  {
+                    "group": "Function",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach"
+                    ]
+                  }
+                ]
               },
               {
                 "group": "Chroma Sync API",
