@@ -478,7 +478,9 @@ impl ServiceBasedFrontend {
         if let Some(config) = configuration.as_ref() {
             match &config.vector_index {
                 VectorIndexConfiguration::Spann { .. } => {
-                    if !supported_segment_types.contains(&SegmentType::Spann) {
+                    if !supported_segment_types.contains(&SegmentType::Spann)
+                        && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
+                    {
                         return Err(CreateCollectionError::SpannNotImplemented);
                     }
                 }
@@ -496,7 +498,9 @@ impl ServiceBasedFrontend {
         // Check default server configuration's index type
         match self.default_knn_index {
             KnnIndex::Spann => {
-                if !supported_segment_types.contains(&SegmentType::Spann) {
+                if !supported_segment_types.contains(&SegmentType::Spann)
+                    && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
+                {
                     return Err(CreateCollectionError::SpannNotImplemented);
                 }
             }
@@ -535,7 +539,12 @@ impl ServiceBasedFrontend {
                 if self.enable_schema {
                     if let Some(schema) = reconciled_schema.as_ref() {
                         if schema.get_internal_spann_config().is_some() {
-                            vector_segment_type = SegmentType::Spann;
+                            // Use QuantizedSpann if quantization is enabled, otherwise use Spann
+                            if schema.is_quantization_enabled() {
+                                vector_segment_type = SegmentType::QuantizedSpann;
+                            } else {
+                                vector_segment_type = SegmentType::Spann;
+                            }
                         }
                     }
                 }

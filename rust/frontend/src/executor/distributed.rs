@@ -120,6 +120,7 @@ impl DistributedExecutor {
         vec![
             SegmentType::HnswDistributed,
             SegmentType::Spann,
+            SegmentType::QuantizedSpann,
             SegmentType::BlockfileRecord,
             SegmentType::BlockfileMetadata,
         ]
