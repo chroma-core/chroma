@@ -11,18 +11,18 @@ const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
 
 #[derive(Deserialize, Serialize, Debug)]
 /// # Description
-/// The RootConfig for all chroma services this is a YAML file that
-/// is shared between all services, and secondarily, fields can be
-/// populated from environment variables. The environment variables
-/// are prefixed with CHROMA_ and are uppercase. Values in the envionment
-/// variables take precedence over values in the YAML file.
-/// By default, it is read from the current working directory,
-/// with the filename chroma_config.yaml.
+/// The RootConfig object wraps the query and compaction config objects so that
+/// we can share the same config file between the multiple services. The config
+/// is loaded from a YAML file on disk, though fields can optionally be
+/// populated by environment variables. The environment variables are prefixed
+/// with CHROMA_ and are uppercase. Values in the environment variables take
+/// precedence over values in the YAML file.
 pub struct RootConfig {
-    // The root config object wraps the worker config object so that
-    // we can share the same config file between multiple services.
+    /// The configuration for the query service.
     #[serde(default)]
     pub query_service: QueryServiceConfig,
+
+    /// The configuration for the compaction service.
     #[serde(default)]
     pub compaction_service: CompactionServiceConfig,
 }
@@ -61,7 +61,6 @@ impl RootConfig {
     /// # Notes
     /// The environment variables are prefixed with CHROMA_ and are uppercase.
     /// Values in the envionment variables take precedence over values in the YAML file.
-    // NOTE:  Copied to ../load/src/config.rs.
     pub fn load_from_path(path: &str) -> Self {
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
@@ -203,52 +202,90 @@ impl QueryServiceConfig {
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 /// # Description
 /// The primary config for the compaction service.
-/// ## Description of parameters
-/// - my_ip: The IP address of the worker service. Used for memberlist assignment. Must be provided.
-/// - assignment_policy: The assignment policy to use. Must be provided.
-/// # Notes
-/// In order to set the enviroment variables, you must prefix them with CHROMA_COMPACTOR__<FIELD_NAME>.
-/// For example, to set my_ip, you would set CHROMA_COMPACTOR__MY_IP.
-/// Each submodule that needs to be configured from the config object should implement the Configurable trait and
-/// have its own field in this struct for its Config struct.
 pub struct CompactionServiceConfig {
+    /// The service name to be used for OpenTelemetry.
     #[serde(default = "CompactionServiceConfig::default_service_name")]
     pub service_name: String,
+
+    /// The OpenTelemetry endpoint to send traces to.
     #[serde(default = "CompactionServiceConfig::default_otel_endpoint")]
     pub otel_endpoint: String,
+
+    /// Additional RUST_LOG style filters to apply for tracing.
     #[serde(default = "CompactionServiceConfig::default_otel_filters")]
     pub otel_filters: Vec<OtelFilter>,
+
+    /// The member ID of the compaction service instance. This is used to determine
+    /// which compaction service instance should handle a given collection. This is
+    /// typically set through an environment variable via the K8s Downward API.
     #[serde(default = "CompactionServiceConfig::default_my_member_id")]
     pub my_member_id: String,
-    #[allow(dead_code)]
+
+    /// The port to listen on for gRPC requests.
     #[serde(default = "CompactionServiceConfig::default_my_port")]
     pub my_port: u16,
+
+    /// The assignment policy to use for determining which compaction service instance
+    /// should handle a given collection.
     #[serde(default)]
     pub assignment_policy: assignment::config::AssignmentPolicyConfig,
+
+    /// The configuration for the memberlist provider, which maintains a list of all
+    /// compaction service instances.
     #[serde(default)]
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
+
+    /// The configuration for connecting to the chroma metadata (sysdb) service.
     #[serde(default)]
     pub sysdb: SysDbConfig,
+
+    /// The configuration for connecting to the chroma multi-cloud / multi-region metadata (sysdb) service.
     #[serde(default)]
     pub mcmr_sysdb: Option<chroma_sysdb::GrpcSysDbConfig>,
+
+    /// The configuration for connecting to the chroma data storage (S3, etc.) service.
     #[serde(default)]
     pub storage: chroma_storage::config::StorageConfig,
+
+    /// The configuration for connecting to the chroma WAL (log) service.
     #[serde(default)]
     pub log: chroma_log::config::LogConfig,
+
+    /// The configuration for connecting to the chroma heap service.
+    // TODO: This is currently unused.
     #[serde(default)]
     pub heap_service: s3heap_service::client::HeapServiceConfig,
+
+    /// The configuration for the dispatcher (task execution engine).
     #[serde(default)]
     pub dispatcher: chroma_system::DispatcherConfig,
+
+    /// The configuration for the compaction orchestrator (index builder).
     #[serde(default)]
     pub compactor: crate::compactor::config::CompactorConfig,
+
+    /// The configuration for the task runner (chroma background task execution engine).
+    // TODO: This is currently unused.
     #[serde(default)]
     pub task_runner: Option<crate::compactor::config::TaskRunnerConfig>,
+
+    /// The configuration for managing blockfiles within the compaction service.
+    /// Blockfiles are the underlying data structure for storing collection data in chroma.
     #[serde(default)]
     pub blockfile_provider: chroma_blockstore::config::BlockfileProviderConfig,
+
+    /// The configuration for managing HNSW indices within the compaction service.
+    /// HNSW is a graph-based index that is used for approximate nearest neighbor search.
+    // TODO: This should move underneath spann_provider once we remove support for HNSW.
     #[serde(default)]
     pub hnsw_provider: chroma_index::config::HnswProviderConfig,
+
+    /// The configuration for managing SPANN indices within the compaction service.
+    /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
     #[serde(default)]
     pub spann_provider: chroma_index::config::SpannProviderConfig,
+
+    /// If set, a pprof server will be started on this port.
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
 }
