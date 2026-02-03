@@ -12,10 +12,10 @@ pub struct SpannerSessionPoolConfig {
     /// How long to wait for a session before timing out.  Default: 30 seconds.
     #[serde(default = "SpannerSessionPoolConfig::default_session_get_timeout_secs")]
     pub session_get_timeout_secs: u64,
-    /// Maximum concurrent sessions.  Default: 800.
+    /// Maximum concurrent sessions.  Default: 400.
     #[serde(default = "SpannerSessionPoolConfig::default_max_opened")]
     pub max_opened: usize,
-    /// Minimum sessions to keep warm.  Default: 50.
+    /// Minimum sessions to keep warm.  Default: 25.
     #[serde(default = "SpannerSessionPoolConfig::default_min_opened")]
     pub min_opened: usize,
 }
@@ -26,11 +26,11 @@ impl SpannerSessionPoolConfig {
     }
 
     fn default_max_opened() -> usize {
-        800
+        400
     }
 
     fn default_min_opened() -> usize {
-        50
+        25
     }
 
     /// Converts this configuration to the library's `SessionConfig`.
