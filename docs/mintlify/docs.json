@@ -261,6 +261,17 @@
       }
     ]
   },
+  "api": {
+    "examples": {
+      "languages": [
+        "terminal",
+        "python",
+        "typescript",
+        "rust",
+        "curl"
+      ]
+    }
+  },
   "logo": {
     "light": "/images/light-logo.svg",
     "dark": "/images/dark-logo.svg"
@@ -285,7 +296,6 @@
       "view",
       "chatgpt",
       "claude",
-      "perplexity",
       "mcp",
       "cursor",
       "vscode"
