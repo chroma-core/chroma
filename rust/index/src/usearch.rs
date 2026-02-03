@@ -68,6 +68,8 @@ pub enum CacheKey {
 pub enum USearchError {
     #[error("Cache error: {0}")]
     Cache(#[from] chroma_cache::CacheError),
+    #[error("Dimension mismatch: expected {expected}, got {got}")]
+    DimensionMismatch { expected: usize, got: usize },
     #[error("Index error: {0}")]
     Index(String),
     #[error("Cannot retrieve embeddings from quantized index")]
@@ -80,6 +82,7 @@ impl ChromaError for USearchError {
     fn code(&self) -> ErrorCodes {
         match self {
             USearchError::Cache(err) => err.code(),
+            USearchError::DimensionMismatch { .. } => ErrorCodes::InvalidArgument,
             USearchError::Index(_) => ErrorCodes::Internal,
             USearchError::QuantizedEmbedding => ErrorCodes::InvalidArgument,
             USearchError::Storage(err) => err.code(),
@@ -170,7 +173,15 @@ impl USearchIndex {
     /// Create a new empty index.
     fn new(config: USearchIndexConfig, id: IndexUuid) -> Result<Self, USearchError> {
         let (scalar, index_dimensions) = match &config.quantization_center {
-            Some(_) => (ScalarKind::I8, Code::<&[u8]>::size(config.dimensions)),
+            Some(center) => {
+                if center.len() != config.dimensions {
+                    return Err(USearchError::DimensionMismatch {
+                        expected: config.dimensions,
+                        got: center.len(),
+                    });
+                }
+                (ScalarKind::I8, Code::<&[u8]>::size(config.dimensions))
+            }
             None => (ScalarKind::F32, config.dimensions),
         };
 
@@ -210,6 +221,13 @@ impl VectorIndex for USearchIndex {
     type Error = USearchError;
 
     fn add(&self, key: u32, vector: &[f32]) -> Result<(), Self::Error> {
+        if vector.len() != self.config.dimensions {
+            return Err(USearchError::DimensionMismatch {
+                expected: self.config.dimensions,
+                got: vector.len(),
+            });
+        }
+
         let code = self
             .config
             .quantization_center
@@ -274,6 +292,13 @@ impl VectorIndex for USearchIndex {
     }
 
     fn search(&self, query: &[f32], count: usize) -> Result<SearchResult, Self::Error> {
+        if query.len() != self.config.dimensions {
+            return Err(USearchError::DimensionMismatch {
+                expected: self.config.dimensions,
+                got: query.len(),
+            });
+        }
+
         let matches = if let Some(center) = &self.config.quantization_center {
             let code = Code::<_>::quantize(query, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
