@@ -147,8 +147,6 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_m_spann")]
     #[validate(range(max = 64))]
     pub max_neighbors: usize,
-    #[serde(default = "default_center_drift_threshold")]
-    pub center_drift_threshold: f32,
 }
 
 impl Default for InternalSpannConfiguration {
@@ -193,7 +191,6 @@ impl From<(Option<&Space>, &SpannIndexConfig)> for InternalSpannConfiguration {
             ef_search: config.ef_search.unwrap_or(default_search_ef_spann()),
             max_neighbors: config.max_neighbors.unwrap_or(default_m_spann()),
             space: space.unwrap_or(&default_space()).clone(),
-            center_drift_threshold: default_center_drift_threshold(),
         }
     }
 }
