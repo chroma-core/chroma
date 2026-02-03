@@ -2510,6 +2510,15 @@ pub struct SpannIndexIds {
     pub prefix_path: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct QuantizedSpannIds {
+    pub embedding_metadata_id: Uuid,
+    pub quantized_centroid_id: IndexUuid,
+    pub quantized_cluster_id: Uuid,
+    pub raw_centroid_id: IndexUuid,
+    pub scalar_metadata_id: Uuid,
+}
+
 impl SpannIndexFlusher {
     pub async fn flush(self) -> Result<SpannIndexIds, SpannIndexWriterError> {
         let res = SpannIndexIds {

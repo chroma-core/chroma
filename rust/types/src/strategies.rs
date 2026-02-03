@@ -627,6 +627,7 @@ pub fn internal_spann_configuration_strategy() -> impl Strategy<Value = Internal
             Just(1.0f32),             // write_rng_factor (validated == 1.0)
             spann_epsilon_strategy(), // write_rng_epsilon ∈ [5, 10]
             50u32..=200,              // split_threshold (min 50, max 200)
+            Just(0.125f32),           // center_drift_threshold
             1usize..=1000,            // num_samples_kmeans (max 1000)
         ),
         (
@@ -651,6 +652,7 @@ pub fn internal_spann_configuration_strategy() -> impl Strategy<Value = Internal
                     write_rng_factor,
                     write_rng_epsilon,
                     split_threshold,
+                    center_drift_threshold,
                     num_samples_kmeans,
                 ),
                 (
@@ -681,6 +683,7 @@ pub fn internal_spann_configuration_strategy() -> impl Strategy<Value = Internal
                 ef_construction,
                 ef_search,
                 max_neighbors,
+                center_drift_threshold,
             },
         )
 }

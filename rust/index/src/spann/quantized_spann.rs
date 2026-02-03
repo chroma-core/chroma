@@ -9,7 +9,7 @@ use chroma_blockstore::{
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_types::{Cmek, DataRecord, QuantizedCluster};
+use chroma_types::{Cmek, DataRecord, InternalSpannConfiguration, QuantizedCluster, Space};
 use dashmap::{DashMap, DashSet};
 use faer::{
     col::ColRef,
@@ -22,15 +22,14 @@ use faer::{
 use simsimd::SpatialSimilarity;
 
 use thiserror::Error;
-use uuid::Uuid;
 
 use chroma_blockstore::provider::BlockfileProvider;
 
 use crate::{
     quantization::Code,
-    spann::utils,
+    spann::{types::QuantizedSpannIds, utils},
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
-    IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 // Blockfile prefixes
@@ -48,34 +47,6 @@ struct QuantizedDelta {
     ids: Vec<u32>,
     length: usize,
     versions: Vec<u32>,
-}
-
-/// Configuration for quantized SPANN index.
-#[derive(Clone)]
-pub struct QuantizedSpannConfig {
-    // === Shared ===
-    pub cmek: Option<Cmek>,
-    pub prefix_path: String,
-    pub dimensions: usize,
-    pub distance_function: DistanceFunction,
-
-    // === SPANN ===
-    pub spann_center_drift_threshold: f32,
-    pub spann_merge_threshold: usize,
-    pub spann_nprobe: usize,
-    pub spann_reassign_neighbor_count: usize,
-    pub spann_replica_count: usize,
-    pub spann_rng_epsilon: f32,
-    pub spann_rng_factor: f32,
-    pub spann_split_threshold: usize,
-
-    // === Blockfile IDs ===
-    pub embedding_metadata_id: Option<Uuid>,
-    pub quantized_centroid_id: Option<IndexUuid>,
-    pub quantized_cluster_id: Option<Uuid>,
-    pub raw_centroid_id: Option<IndexUuid>,
-    pub raw_embedding_id: Option<Uuid>,
-    pub scalar_metadata_id: Option<Uuid>,
 }
 
 #[derive(Error, Debug)]
@@ -99,9 +70,12 @@ impl ChromaError for QuantizedSpannError {
 }
 
 /// Mutable quantized SPANN index, generic over centroid index.
-pub struct MutableQuantizedSpannIndex<I: VectorIndex> {
+pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // === Config ===
-    config: QuantizedSpannConfig,
+    cmek: Option<Cmek>,
+    file_ids: Option<QuantizedSpannIds>,
+    params: InternalSpannConfiguration,
+    prefix_path: String,
 
     // === Centroid Index ===
     next_cluster_id: Arc<AtomicU32>,
@@ -129,7 +103,7 @@ pub struct MutableQuantizedSpannIndex<I: VectorIndex> {
     balancing: Arc<DashSet<u32>>,
 }
 
-impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
+impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     pub async fn add(&self, id: u32, vector: &[f32]) -> Result<(), QuantizedSpannError> {
         let rotated = self.rotate(vector);
         self.embeddings.insert(id, rotated.clone());
@@ -141,7 +115,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     }
 }
 
-impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
+impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// Append a point to an existing cluster. Returns new length, or None if cluster not found.
     fn append(&self, cluster_id: u32, id: u32, version: u32, code: Arc<[u8]>) -> Option<usize> {
         let mut delta = self.deltas.get_mut(&cluster_id)?;
@@ -163,9 +137,9 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         };
 
-        if len > self.config.spann_split_threshold {
+        if len > self.params.split_threshold as usize {
             self.split(cluster_id).await?;
-        } else if len > 0 && len < self.config.spann_merge_threshold {
+        } else if len > 0 && len < self.params.merge_threshold as usize {
             self.merge(cluster_id).await?;
         }
 
@@ -180,8 +154,8 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             .map(|delta| delta.center.clone())
     }
 
-    /// Create a new cluster and register it in the centroid index.
-    fn create(&self, delta: QuantizedDelta) -> Result<u32, QuantizedSpannError> {
+    /// Spawn a new cluster and register it in the centroid index.
+    fn spawn(&self, delta: QuantizedDelta) -> Result<u32, QuantizedSpannError> {
         let cluster_id = self.next_cluster_id.fetch_add(1, Ordering::Relaxed);
         let center = delta.center.clone();
         self.deltas.insert(cluster_id, delta);
@@ -214,7 +188,11 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
     /// Compute distance between two vectors using the configured distance function.
     fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
-        self.config.distance_function.distance(a, b)
+        match self.params.space {
+            Space::L2 => DistanceFunction::Euclidean.distance(a, b),
+            Space::Cosine => DistanceFunction::Cosine.distance(a, b),
+            Space::Ip => DistanceFunction::InnerProduct.distance(a, b),
+        }
     }
 
     /// Remove a cluster from both centroid indexes and register as tombstone.
@@ -232,7 +210,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     /// Insert a rotated vector into the index.
     async fn insert(&self, id: u32, vector: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
         let version = self.upgrade(id);
-        let candidates = self.navigate(&vector, self.config.spann_nprobe)?;
+        let candidates = self.navigate(&vector, self.params.write_nprobe as usize)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
         if rng_cluster_ids.is_empty() {
@@ -244,7 +222,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                 length: 1,
                 versions: vec![version],
             };
-            self.create(delta)?;
+            self.spawn(delta)?;
         } else {
             let mut staging = Vec::new();
             for cluster_id in rng_cluster_ids {
@@ -254,7 +232,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                         .into();
                     if self
                         .append(cluster_id, id, version, code)
-                        .is_some_and(|len| len > self.config.spann_split_threshold)
+                        .is_some_and(|len| len > self.params.split_threshold as usize)
                     {
                         staging.push(cluster_id);
                     }
@@ -352,7 +330,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         };
 
-        let neighbors = self.navigate(&source_center, self.config.spann_nprobe)?;
+        let neighbors = self.navigate(&source_center, self.params.write_nprobe as usize)?;
         let Some(nearest_cluster_id) = neighbors
             .keys
             .iter()
@@ -417,7 +395,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             return Ok(());
         }
 
-        let candidates = self.navigate(&embedding, self.config.spann_nprobe)?;
+        let candidates = self.navigate(&embedding, self.params.write_nprobe as usize)?;
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
         if rng_cluster_ids.contains(&from_cluster_id) {
@@ -437,7 +415,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                     .into();
                 if self
                     .append(cluster_id, id, new_version, code)
-                    .is_some_and(|len| len > self.config.spann_split_threshold)
+                    .is_some_and(|len| len > self.params.split_threshold as usize)
                 {
                     staging.push(cluster_id);
                 }
@@ -456,12 +434,13 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     fn rng_select(&self, candidates: &SearchResult) -> SearchResult {
         let first_distance = candidates.distances.first().copied().unwrap_or(0.0);
         let mut result = SearchResult::default();
-        let mut selected_centroids = Vec::<Arc<_>>::with_capacity(self.config.spann_replica_count);
+        let mut selected_centroids =
+            Vec::<Arc<_>>::with_capacity(self.params.nreplica_count as usize);
 
         for (cluster_id, distance) in candidates.keys.iter().zip(candidates.distances.iter()) {
             // Epsilon filter
             if (distance - first_distance).abs()
-                > self.config.spann_rng_epsilon * first_distance.abs()
+                > self.params.write_rng_epsilon * first_distance.abs()
             {
                 break;
             }
@@ -472,7 +451,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
             // RNG filter
             if selected_centroids.iter().any(|sel| {
-                self.config.spann_rng_factor * self.distance(&center, sel).abs() <= distance.abs()
+                self.params.write_rng_factor * self.distance(&center, sel).abs() <= distance.abs()
             }) {
                 continue;
             }
@@ -481,7 +460,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             result.distances.push(*distance);
             selected_centroids.push(center);
 
-            if result.keys.len() >= self.config.spann_replica_count {
+            if result.keys.len() >= self.params.nreplica_count as usize {
                 break;
             }
         }
@@ -491,8 +470,8 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
 
     /// Normalize (if cosine) and rotate a vector for RaBitQ quantization.
     fn rotate(&self, vector: &[f32]) -> Arc<[f32]> {
-        let rotated = match self.config.distance_function {
-            DistanceFunction::Cosine => {
+        let rotated = match self.params.space {
+            Space::Cosine => {
                 let normalized = normalize(vector);
                 &self.rotation * ColRef::from_slice(&normalized)
             }
@@ -552,13 +531,14 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             })
             .collect::<Vec<_>>();
 
-        if embeddings.len() <= self.config.spann_split_threshold {
+        if embeddings.len() <= self.params.split_threshold as usize {
             self.deltas.insert(cluster_id, delta);
             return Ok(());
         }
 
+        let distance_function = DistanceFunction::from(self.params.space.clone());
         let (left_center, left_group, right_center, right_group) =
-            utils::split(embeddings, &self.config.distance_function);
+            utils::split(embeddings, &distance_function);
 
         let left_distance = self.distance(&left_center, &old_center);
         let right_distance = self.distance(&right_center, &old_center);
@@ -583,7 +563,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             self.deltas.insert(cluster_id, left_delta);
             cluster_id
         } else {
-            self.create(left_delta)?
+            self.spawn(left_delta)?
         };
 
         let right_delta = QuantizedDelta {
@@ -605,7 +585,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             self.deltas.insert(cluster_id, right_delta);
             cluster_id
         } else {
-            self.create(right_delta)?
+            self.spawn(right_delta)?
         };
 
         if left_cluster_id != cluster_id && right_cluster_id != cluster_id {
@@ -663,7 +643,7 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
             f32::dot(&right_center, &right_center).unwrap_or(0.0).sqrt() as f32
         };
 
-        let neighbors = self.navigate(&old_center, self.config.spann_reassign_neighbor_count)?;
+        let neighbors = self.navigate(&old_center, self.params.reassign_neighbor_count as usize)?;
         for neighbor_id in neighbors.keys {
             if neighbor_id == cluster_id
                 || neighbor_id == left_cluster_id
@@ -729,28 +709,28 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
                 let code = Code::<&[u8]>::new(code.as_ref());
 
                 let neighbor_dist = code.distance_query(
-                    &self.config.distance_function,
+                    &distance_function,
                     &neighbor_r_q,
                     c_norm,
                     neighbor_c_dot_q,
                     neighbor_q_norm,
                 );
                 let left_dist = code.distance_query(
-                    &self.config.distance_function,
+                    &distance_function,
                     &left_r_q,
                     c_norm,
                     left_c_dot_q,
                     left_q_norm,
                 );
                 let right_dist = code.distance_query(
-                    &self.config.distance_function,
+                    &distance_function,
                     &right_r_q,
                     c_norm,
                     right_c_dot_q,
                     right_q_norm,
                 );
                 let old_dist = code.distance_query(
-                    &self.config.distance_function,
+                    &distance_function,
                     &old_r_q,
                     c_norm,
                     old_c_dot_q,
@@ -793,166 +773,186 @@ impl<I: VectorIndex> MutableQuantizedSpannIndex<I> {
     }
 }
 
-impl MutableQuantizedSpannIndex<USearchIndex> {
-    /// Open or create a quantized SPANN index.
-    ///
-    /// If centroid IDs are `None`, creates new centroid indexes.
-    /// If centroid IDs are `Some(id)`, forks from the existing centroid index.
-    /// Similarly, other blockfile IDs in config control create vs fork for each blockfile.
-    pub async fn open(
-        config: QuantizedSpannConfig,
+impl QuantizedSpannIndexWriter<USearchIndex> {
+    /// Create a new quantized SPANN index.
+    pub async fn create(
+        params: InternalSpannConfiguration,
+        cmek: Option<Cmek>,
+        prefix_path: String,
         usearch_config: USearchIndexConfig,
-        blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannError> {
-        let dim = config.dimensions;
+        let dim = usearch_config.dimensions;
 
-        // Step 1: Load embedding_metadata (rotation matrix + quantization center)
-        let (rotation, center) = if let Some(id) = config.embedding_metadata_id {
-            let options = BlockfileReaderOptions::new(id, config.prefix_path.clone());
-            let reader = blockfile_provider
-                .read::<u32, &'static [f32]>(options)
-                .await
-                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
-
-            // Load rotation matrix columns
-            let columns = reader
-                .get_range(PREFIX_ROTATION..=PREFIX_ROTATION, ..)
-                .await
-                .map_err(QuantizedSpannError::Blockfile)?
-                .collect::<Vec<_>>();
-
-            // Validate number of columns
-            if columns.len() != dim {
-                return Err(QuantizedSpannError::DimensionMismatch {
-                    expected: dim,
-                    got: columns.len(),
-                });
-            }
-
-            // Validate each column length
-            for (_prefix, _key, col) in &columns {
-                if col.len() != dim {
-                    return Err(QuantizedSpannError::DimensionMismatch {
-                        expected: dim,
-                        got: col.len(),
-                    });
-                }
-            }
-
-            // Construct rotation matrix column by column
-            let rotation = Mat::from_fn(dim, dim, |i, j| columns[j].2[i]);
-
-            // Load quantization center
-            let center = reader
-                .get(PREFIX_CENTER, 0)
-                .await
-                .map_err(QuantizedSpannError::Blockfile)?
-                .map(Arc::<[f32]>::from)
-                .unwrap_or_else(|| vec![0.0; dim].into());
-
-            (rotation, center)
-        } else {
-            // Sample new random rotation matrix
-            let dist = UnitaryMat {
-                dim,
-                standard_normal: StandardNormal,
-            };
-            let rotation = dist.sample(&mut ThreadRng::default());
-            (rotation, vec![0.0; dim].into())
+        // Create random rotation matrix
+        let dist = UnitaryMat {
+            dim,
+            standard_normal: StandardNormal,
         };
+        let rotation = dist.sample(&mut ThreadRng::default());
+        let center = Arc::<[f32]>::from(vec![0.0; dim]);
 
-        // Step 2: Open centroid indexes
-        let raw_centroid_mode = match config.raw_centroid_id {
-            Some(id) => OpenMode::Fork(id),
-            None => OpenMode::Create,
-        };
+        // Create centroid indexes
         let raw_centroid = usearch_provider
-            .open(&usearch_config, raw_centroid_mode)
+            .open(&usearch_config, OpenMode::Create)
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
-        let quantized_centroid_mode = match config.quantized_centroid_id {
-            Some(id) => OpenMode::Fork(id),
-            None => OpenMode::Create,
-        };
         let quantized_usearch_config = USearchIndexConfig {
             quantization_center: Some(center.clone()),
             ..usearch_config
         };
         let quantized_centroid = usearch_provider
-            .open(&quantized_usearch_config, quantized_centroid_mode)
+            .open(&quantized_usearch_config, OpenMode::Create)
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
-        // Step 3: Load scalar metadata (next_cluster_id, versions, cluster_lengths)
-        let (next_cluster_id, versions, cluster_lengths) =
-            if let Some(id) = config.scalar_metadata_id {
-                let options = BlockfileReaderOptions::new(id, config.prefix_path.clone());
-                let reader = blockfile_provider
-                    .read::<u32, u32>(options)
-                    .await
-                    .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+        Ok(Self {
+            // === Config ===
+            cmek,
+            file_ids: None,
+            params,
+            prefix_path,
+            // === Centroid Index ===
+            next_cluster_id: Arc::new(AtomicU32::new(0)),
+            quantized_centroid,
+            raw_centroid,
+            // === Quantization ===
+            center,
+            rotation,
+            // === In-Memory State ===
+            deltas: DashMap::new().into(),
+            embeddings: DashMap::new().into(),
+            tombstones: DashSet::new().into(),
+            versions: DashMap::new().into(),
+            // === Blockfile Readers ===
+            quantized_cluster_reader: None,
+            raw_embedding_reader: None,
+            // === Dedup Sets ===
+            balancing: DashSet::new().into(),
+        })
+    }
 
-                // Load cluster lengths
-                let cluster_lengths: DashMap<u32, usize> = DashMap::new();
-                for (_prefix, key, value) in reader
-                    .get_range(PREFIX_LENGTH..=PREFIX_LENGTH, ..)
-                    .await
-                    .map_err(QuantizedSpannError::Blockfile)?
-                {
-                    cluster_lengths.insert(key, value as usize);
-                }
+    /// Open an existing quantized SPANN index from file IDs.
+    pub async fn open(
+        params: InternalSpannConfiguration,
+        file_ids: QuantizedSpannIds,
+        cmek: Option<Cmek>,
+        prefix_path: String,
+        raw_embedding_reader: Option<BlockfileReader<'static, u32, DataRecord<'static>>>,
+        usearch_config: USearchIndexConfig,
+        blockfile_provider: &BlockfileProvider,
+        usearch_provider: &USearchIndexProvider,
+    ) -> Result<Self, QuantizedSpannError> {
+        let dim = usearch_config.dimensions;
 
-                // Load next_cluster_id
-                let next_cluster_id = reader
-                    .get(PREFIX_NEXT_CLUSTER, 0)
-                    .await
-                    .map_err(QuantizedSpannError::Blockfile)?
-                    .unwrap_or(0);
+        // Step 0: Load embedding_metadata (rotation matrix + quantization center)
+        let options =
+            BlockfileReaderOptions::new(file_ids.embedding_metadata_id, prefix_path.clone());
+        let reader = blockfile_provider
+            .read::<u32, &'static [f32]>(options)
+            .await
+            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
 
-                // Load versions
-                let versions: DashMap<u32, u32> = DashMap::new();
-                for (_prefix, key, value) in reader
-                    .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
-                    .await
-                    .map_err(QuantizedSpannError::Blockfile)?
-                {
-                    versions.insert(key, value);
-                }
+        // Load rotation matrix columns
+        let columns = reader
+            .get_range(PREFIX_ROTATION..=PREFIX_ROTATION, ..)
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?
+            .collect::<Vec<_>>();
 
-                (next_cluster_id, versions, cluster_lengths)
-            } else {
-                (0u32, DashMap::new(), DashMap::new())
-            };
+        // Validate number of columns
+        if columns.len() != dim {
+            return Err(QuantizedSpannError::DimensionMismatch {
+                expected: dim,
+                got: columns.len(),
+            });
+        }
 
-        // Open quantized cluster reader if ID exists
-        let quantized_cluster_reader = if let Some(id) = config.quantized_cluster_id {
-            let options = BlockfileReaderOptions::new(id, config.prefix_path.clone());
-            Some(
-                blockfile_provider
-                    .read(options)
-                    .await
-                    .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?,
-            )
-        } else {
-            None
+        // Validate each column length
+        for (_prefix, _key, col) in &columns {
+            if col.len() != dim {
+                return Err(QuantizedSpannError::DimensionMismatch {
+                    expected: dim,
+                    got: col.len(),
+                });
+            }
+        }
+
+        // Construct rotation matrix column by column
+        let rotation = Mat::from_fn(dim, dim, |i, j| columns[j].2[i]);
+
+        // Load quantization center
+        let center = reader
+            .get(PREFIX_CENTER, 0)
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?
+            .map(Arc::<[f32]>::from)
+            .unwrap_or_else(|| vec![0.0; dim].into());
+
+        // Step 1: Open centroid indexes
+        let raw_centroid = usearch_provider
+            .open(&usearch_config, OpenMode::Fork(file_ids.raw_centroid_id))
+            .await
+            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+
+        let quantized_usearch_config = USearchIndexConfig {
+            quantization_center: Some(center.clone()),
+            ..usearch_config
         };
-
-        // Open raw embedding reader if ID exists
-        let raw_embedding_reader = if let Some(id) = config.raw_embedding_id {
-            let options = BlockfileReaderOptions::new(id, config.prefix_path.clone());
-            Some(
-                blockfile_provider
-                    .read(options)
-                    .await
-                    .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?,
+        let quantized_centroid = usearch_provider
+            .open(
+                &quantized_usearch_config,
+                OpenMode::Fork(file_ids.quantized_centroid_id),
             )
-        } else {
-            None
-        };
+            .await
+            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
-        // Step 4: Initialize deltas from cluster_lengths by getting centers from raw_centroid
+        // Step 2: Load scalar metadata (next_cluster_id, versions, cluster_lengths)
+        let options = BlockfileReaderOptions::new(file_ids.scalar_metadata_id, prefix_path.clone());
+        let reader = blockfile_provider
+            .read::<u32, u32>(options)
+            .await
+            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+
+        // Load cluster lengths
+        let cluster_lengths = DashMap::new();
+        for (_prefix, key, value) in reader
+            .get_range(PREFIX_LENGTH..=PREFIX_LENGTH, ..)
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?
+        {
+            cluster_lengths.insert(key, value as usize);
+        }
+
+        // Load next_cluster_id
+        let next_cluster_id = reader
+            .get(PREFIX_NEXT_CLUSTER, 0)
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?
+            .unwrap_or(0);
+
+        // Load versions
+        let versions = DashMap::new();
+        for (_prefix, key, value) in reader
+            .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
+            .await
+            .map_err(QuantizedSpannError::Blockfile)?
+        {
+            versions.insert(key, value);
+        }
+
+        // Open quantized cluster reader
+        let options =
+            BlockfileReaderOptions::new(file_ids.quantized_cluster_id, prefix_path.clone());
+        let quantized_cluster_reader = Some(
+            blockfile_provider
+                .read(options)
+                .await
+                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?,
+        );
+
+        // Step 3: Initialize deltas from cluster_lengths by getting centers from raw_centroid
         let deltas = DashMap::new();
         for entry in cluster_lengths.iter() {
             let cluster_id = *entry.key();
@@ -978,7 +978,10 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
 
         Ok(Self {
             // === Config ===
-            config,
+            cmek,
+            file_ids: Some(file_ids),
+            params,
+            prefix_path,
             // === Centroid Index ===
             next_cluster_id: Arc::new(AtomicU32::new(next_cluster_id)),
             quantized_centroid,
@@ -1010,7 +1013,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
         usearch_config: &USearchIndexConfig,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
         // === Step 0: Check center drift and rebuild centroid indexes if needed ===
-        let dim = self.config.dimensions;
+        let dim = self.center.len();
         let mut new_center = vec![0.0f32; dim];
         for delta in self.deltas.iter() {
             for i in 0..dim {
@@ -1029,38 +1032,69 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
         let drift_dist_sq = f32::dot(&diff, &diff).unwrap_or(0.0) as f32;
         let center_norm_sq = f32::dot(&new_center, &new_center).unwrap_or(0.0) as f32;
 
-        self.center =
-            if drift_dist_sq > self.config.spann_center_drift_threshold.powi(2) * center_norm_sq {
-                self.raw_centroid = usearch_provider
-                    .open(&usearch_config, OpenMode::Create)
-                    .await
-                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+        self.center = if drift_dist_sq > self.params.center_drift_threshold.powi(2) * center_norm_sq
+        {
+            self.raw_centroid = usearch_provider
+                .open(&usearch_config, OpenMode::Create)
+                .await
+                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
-                let quantized_config = USearchIndexConfig {
-                    quantization_center: Some(new_center.clone().into()),
-                    ..usearch_config.clone()
-                };
-                self.quantized_centroid = usearch_provider
-                    .open(&quantized_config, OpenMode::Create)
-                    .await
-                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-
-                for entry in self.deltas.iter() {
-                    let cluster_id = *entry.key();
-                    self.raw_centroid
-                        .add(cluster_id, &entry.center)
-                        .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-                    self.quantized_centroid
-                        .add(cluster_id, &entry.center)
-                        .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
-                }
-
-                new_center.into()
-            } else {
-                self.center
+            let quantized_config = USearchIndexConfig {
+                quantization_center: Some(new_center.clone().into()),
+                ..usearch_config.clone()
             };
+            self.quantized_centroid = usearch_provider
+                .open(&quantized_config, OpenMode::Create)
+                .await
+                .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
-        // === Step 1: quantized_cluster blockfile ===
+            for entry in self.deltas.iter() {
+                let cluster_id = *entry.key();
+                self.raw_centroid
+                    .add(cluster_id, &entry.center)
+                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+                self.quantized_centroid
+                    .add(cluster_id, &entry.center)
+                    .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
+            }
+
+            new_center.into()
+        } else {
+            self.center
+        };
+
+        // === Step 1: Create blockfile writers ===
+        let mut qc_options = BlockfileWriterOptions::new(self.prefix_path.clone());
+        let mut sm_options = BlockfileWriterOptions::new(self.prefix_path.clone());
+        let mut em_options = BlockfileWriterOptions::new(self.prefix_path.clone());
+
+        if let Some(file_ids) = &self.file_ids {
+            qc_options = qc_options.fork(file_ids.quantized_cluster_id);
+            em_options = em_options.fork(file_ids.embedding_metadata_id);
+        }
+
+        if let Some(cmek) = &self.cmek {
+            qc_options = qc_options.with_cmek(cmek.clone());
+            sm_options = sm_options.with_cmek(cmek.clone());
+            em_options = em_options.with_cmek(cmek.clone());
+        }
+
+        let quantized_cluster_writer = blockfile_provider
+            .write::<u32, QuantizedCluster<'_>>(qc_options)
+            .await
+            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+
+        let scalar_metadata_writer = blockfile_provider
+            .write::<u32, u32>(sm_options)
+            .await
+            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+
+        let embedding_metadata_writer = blockfile_provider
+            .write::<u32, Vec<f32>>(em_options)
+            .await
+            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+
+        // === Step 2: Write quantized_cluster data ===
         let quantized_cluster_flusher = {
             let mut cluster_ids = self
                 .deltas
@@ -1080,19 +1114,6 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
             // Sort for ordered mutations
             cluster_ids.sort_unstable();
 
-            // Create writer
-            let mut options = BlockfileWriterOptions::new(self.config.prefix_path.clone());
-            if let Some(id) = self.config.quantized_cluster_id {
-                options = options.fork(id);
-            }
-            if let Some(cmek) = &self.config.cmek {
-                options = options.with_cmek(cmek.clone());
-            }
-            let writer = blockfile_provider
-                .write::<u32, QuantizedCluster<'_>>(options)
-                .await
-                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
-
             // Apply changes in order
             for cluster_id in cluster_ids {
                 if let Some(delta) = self.deltas.get(&cluster_id) {
@@ -1108,38 +1129,29 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
                         ids: &delta.ids,
                         versions: &delta.versions,
                     };
-                    writer
+                    quantized_cluster_writer
                         .set("", cluster_id, cluster_ref)
                         .await
                         .map_err(QuantizedSpannError::Blockfile)?;
                 } else {
-                    writer
+                    quantized_cluster_writer
                         .delete::<u32, QuantizedCluster<'_>>("", cluster_id)
                         .await
                         .map_err(QuantizedSpannError::Blockfile)?;
                 }
             }
 
-            writer
+            quantized_cluster_writer
                 .commit::<u32, QuantizedCluster<'_>>()
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 2: scalar_metadata blockfile ===
+        // === Step 3: Write scalar_metadata ===
         // Stores: next_cluster_id, lengths, versions
         // Always create fresh, write in alphabetical prefix order: length < next < version
-        // NOTE(sicheng): Must come after quantized_cluster because scrubbing may change lengths
+        // NOTE: Must come after Step 2 because scrubbing may change lengths
         let scalar_metadata_flusher = {
-            let mut options = BlockfileWriterOptions::new(self.config.prefix_path.clone());
-            if let Some(cmek) = &self.config.cmek {
-                options = options.with_cmek(cmek.clone());
-            }
-            let writer = blockfile_provider
-                .write::<u32, u32>(options)
-                .await
-                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
-
             // 1. PREFIX_LENGTH - sorted by cluster_id
             let mut lengths = self
                 .deltas
@@ -1148,7 +1160,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
                 .collect::<Vec<_>>();
             lengths.sort_unstable();
             for (cluster_id, length) in lengths {
-                writer
+                scalar_metadata_writer
                     .set(PREFIX_LENGTH, cluster_id, length)
                     .await
                     .map_err(QuantizedSpannError::Blockfile)?;
@@ -1156,7 +1168,7 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
 
             // 2. PREFIX_NEXT_CLUSTER - single entry
             let next_id = self.next_cluster_id.load(Ordering::Relaxed);
-            writer
+            scalar_metadata_writer
                 .set(PREFIX_NEXT_CLUSTER, 0u32, next_id)
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?;
@@ -1169,61 +1181,49 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
                 .collect::<Vec<_>>();
             versions.sort_unstable();
             for (point_id, version) in versions {
-                writer
+                scalar_metadata_writer
                     .set(PREFIX_VERSION, point_id, version)
                     .await
                     .map_err(QuantizedSpannError::Blockfile)?;
             }
 
-            writer
+            scalar_metadata_writer
                 .commit::<u32, u32>()
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 3: embedding_metadata blockfile ===
+        // === Step 4: Write embedding_metadata ===
         // Stores: quantization center and rotation matrix columns
         // Write in alphabetical prefix order: center < rotation
         let embedding_metadata_flusher = {
-            let mut options = BlockfileWriterOptions::new(self.config.prefix_path.clone());
-            if let Some(id) = self.config.embedding_metadata_id {
-                options = options.fork(id);
-            }
-            if let Some(cmek) = &self.config.cmek {
-                options = options.with_cmek(cmek.clone());
-            }
-            let writer = blockfile_provider
-                .write::<u32, Vec<f32>>(options)
-                .await
-                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
-
             // 1. PREFIX_CENTER - quantization center (always write, may be updated)
-            writer
+            embedding_metadata_writer
                 .set(PREFIX_CENTER, 0u32, self.center.to_vec())
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?;
 
             // 2. PREFIX_ROTATION - rotation matrix columns (only write for new indexes)
-            if self.config.embedding_metadata_id.is_none() {
-                let dim = self.config.dimensions;
+            if self.file_ids.is_none() {
+                let dim = self.center.len();
                 for col_idx in 0..dim {
-                    let column: Vec<f32> =
-                        (0..dim).map(|row| self.rotation[(row, col_idx)]).collect();
-                    writer
+                    let column = (0..dim)
+                        .map(|row| self.rotation[(row, col_idx)])
+                        .collect::<Vec<_>>();
+                    embedding_metadata_writer
                         .set(PREFIX_ROTATION, col_idx as u32, column)
                         .await
                         .map_err(QuantizedSpannError::Blockfile)?;
                 }
             }
 
-            writer
+            embedding_metadata_writer
                 .commit::<u32, Vec<f32>>()
                 .await
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
         Ok(QuantizedSpannFlusher {
-            config: self.config,
             embedding_metadata_flusher,
             quantized_centroid: self.quantized_centroid,
             quantized_cluster_flusher,
@@ -1236,7 +1236,6 @@ impl MutableQuantizedSpannIndex<USearchIndex> {
 
 /// Flusher for persisting a quantized SPANN index to storage.
 pub struct QuantizedSpannFlusher {
-    config: QuantizedSpannConfig,
     embedding_metadata_flusher: BlockfileFlusher,
     quantized_centroid: USearchIndex,
     quantized_cluster_flusher: BlockfileFlusher,
@@ -1246,8 +1245,8 @@ pub struct QuantizedSpannFlusher {
 }
 
 impl QuantizedSpannFlusher {
-    /// Flush all data to storage and return updated config with IDs.
-    pub async fn flush(self) -> Result<QuantizedSpannConfig, QuantizedSpannError> {
+    /// Flush all data to storage and return the file IDs.
+    pub async fn flush(self) -> Result<QuantizedSpannIds, QuantizedSpannError> {
         // Get IDs before flushing
         let embedding_metadata_id = self.embedding_metadata_flusher.id();
         let quantized_cluster_id = self.quantized_cluster_flusher.id();
@@ -1279,14 +1278,13 @@ impl QuantizedSpannFlusher {
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
-        // Return updated config with all IDs
-        Ok(QuantizedSpannConfig {
-            embedding_metadata_id: Some(embedding_metadata_id),
-            quantized_centroid_id: Some(quantized_centroid_id),
-            quantized_cluster_id: Some(quantized_cluster_id),
-            raw_centroid_id: Some(raw_centroid_id),
-            scalar_metadata_id: Some(scalar_metadata_id),
-            ..self.config
+        // Return file IDs
+        Ok(QuantizedSpannIds {
+            embedding_metadata_id,
+            quantized_centroid_id,
+            quantized_cluster_id,
+            raw_centroid_id,
+            scalar_metadata_id,
         })
     }
 }
