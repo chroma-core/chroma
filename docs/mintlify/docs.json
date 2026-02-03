@@ -259,32 +259,20 @@
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "X",
-          "href": "https://x.com/trychroma",
-          "icon": "x-twitter"
-        },
-        {
-          "anchor": "Discord",
-          "href": "https://discord.gg/MMeYNTmh3x",
-          "icon": "discord"
-        },
-        {
-          "anchor": "Changelog",
-          "href": "https://www.trychroma.com/changelog",
-          "icon": "rss"
-        }
-      ]
-    }
+    ]
   },
   "logo": {
     "light": "/images/light-logo.svg",
     "dark": "/images/dark-logo.svg"
   },
   "navbar": {
+    "links": [
+      {
+        "label": "Github",
+        "icon": "github",
+        "href": "https://github.com/chroma-core/chroma"
+      }
+    ],
     "primary": {
       "type": "button",
       "label": "Dashboard",
