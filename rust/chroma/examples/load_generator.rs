@@ -23,6 +23,7 @@
 //! - `CHROMA_TENANT` - Tenant ID (optional, will be auto-resolved)
 //! - `CHROMA_DATABASE` - Database name (optional, will be auto-resolved)
 
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -31,9 +32,11 @@ use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaCollection;
 use chroma::ChromaHttpClient;
 use clap::Parser;
+use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use tokio::sync::{mpsc, Mutex};
+use serde::{Deserialize, Serialize};
+use tokio::sync::{mpsc, Mutex, Semaphore};
 
 /// Default embedding dimension for the GMM.
 const EMBEDDING_DIM: usize = 1536;
@@ -128,13 +131,50 @@ struct Args {
     /// Target request pace in queries per second.
     #[arg(long, default_value_t = 100)]
     pace_qps: u64,
+
+    /// Maximum number of outstanding operations per collection.
+    #[arg(long, default_value_t = 10)]
+    max_outstanding_ops: usize,
+}
+
+/// Statistics tracking for a single backend.
+struct BackendStats {
+    /// Total number of successful upsert operations.
+    total_upserts: AtomicU64,
+    /// Total number of records upserted.
+    total_records: AtomicU64,
+}
+
+impl BackendStats {
+    /// Creates a new BackendStats instance.
+    fn new() -> Self {
+        Self {
+            total_upserts: AtomicU64::new(0),
+            total_records: AtomicU64::new(0),
+        }
+    }
+
+    /// Records a successful upsert operation.
+    fn record_upsert(&self, batch_size: u64) {
+        self.total_upserts.fetch_add(1, Ordering::Relaxed);
+        self.total_records.fetch_add(batch_size, Ordering::Relaxed);
+    }
+
+    /// Returns the current upsert count.
+    fn upserts(&self) -> u64 {
+        self.total_upserts.load(Ordering::Relaxed)
+    }
+
+    /// Returns the current record count.
+    fn records(&self) -> u64 {
+        self.total_records.load(Ordering::Relaxed)
+    }
 }
 
 /// Shared state for worker tasks.
 struct WorkerContext {
     gmm: Arc<GaussianMixtureModel>,
-    total_upserts: Arc<AtomicU64>,
-    total_records: Arc<AtomicU64>,
+    stats: Arc<BackendStats>,
     batch_size: usize,
     start_time: Instant,
     duration: Duration,
@@ -153,9 +193,144 @@ fn collection_name(index: usize) -> String {
     format!("loadgen_collection_{:06}", index)
 }
 
+/// Returns the path to the collection cache file.
+fn cache_file_path(num_collections: usize) -> String {
+    format!("loadgen_collections_{}.json", num_collections)
+}
+
+/// Cached collection data for dehydration/rehydration.
+#[derive(Serialize, Deserialize)]
+struct CollectionCache {
+    us_collections: Vec<serde_json::Value>,
+    eu_collections: Vec<serde_json::Value>,
+}
+
+/// Attempts to load collections from the cache file.
+async fn load_collections_from_cache(
+    client_us: &ChromaHttpClient,
+    client_eu: &ChromaHttpClient,
+    num_collections: usize,
+) -> Option<(Vec<ChromaCollection>, Vec<ChromaCollection>)> {
+    let cache_path = cache_file_path(num_collections);
+    let path = Path::new(&cache_path);
+
+    if !path.exists() {
+        return None;
+    }
+
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to read cache file: {}", e);
+            return None;
+        }
+    };
+
+    let cache: CollectionCache = match serde_json::from_str(&content) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Failed to parse cache file: {}", e);
+            return None;
+        }
+    };
+
+    if cache.us_collections.len() != num_collections
+        || cache.eu_collections.len() != num_collections
+    {
+        eprintln!(
+            "Cache has wrong number of collections (expected {}, got US:{}, EU:{})",
+            num_collections,
+            cache.us_collections.len(),
+            cache.eu_collections.len()
+        );
+        return None;
+    }
+
+    let mut us_collections = Vec::with_capacity(num_collections);
+    for dehydrated in cache.us_collections {
+        match client_us.rehydrate_collection(dehydrated).await {
+            Ok(c) => us_collections.push(c),
+            Err(e) => {
+                eprintln!("Failed to rehydrate US collection: {}", e);
+                return None;
+            }
+        }
+    }
+
+    let mut eu_collections = Vec::with_capacity(num_collections);
+    for dehydrated in cache.eu_collections {
+        match client_eu.rehydrate_collection(dehydrated).await {
+            Ok(c) => eu_collections.push(c),
+            Err(e) => {
+                eprintln!("Failed to rehydrate EU collection: {}", e);
+                return None;
+            }
+        }
+    }
+
+    Some((us_collections, eu_collections))
+}
+
+/// Saves collections to the cache file.
+async fn save_collections_to_cache(
+    us_collections: &[ChromaCollection],
+    eu_collections: &[ChromaCollection],
+    num_collections: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut us_dehydrated = Vec::with_capacity(us_collections.len());
+    for collection in us_collections {
+        us_dehydrated.push(collection.dehydrate().await?);
+    }
+
+    let mut eu_dehydrated = Vec::with_capacity(eu_collections.len());
+    for collection in eu_collections {
+        eu_dehydrated.push(collection.dehydrate().await?);
+    }
+
+    let cache = CollectionCache {
+        us_collections: us_dehydrated,
+        eu_collections: eu_dehydrated,
+    };
+
+    let content = serde_json::to_string_pretty(&cache)?;
+    let cache_path = cache_file_path(num_collections);
+    std::fs::write(&cache_path, content)?;
+
+    println!("  Saved collections to cache: {}", cache_path);
+    Ok(())
+}
+
+/// Maximum number of retry attempts for collection creation.
+const MAX_COLLECTION_RETRIES: u32 = 3;
+
+/// Creates or gets a collection with retry logic.
+async fn get_or_create_collection_with_retry(
+    client: &ChromaHttpClient,
+    name: String,
+) -> Result<ChromaCollection, chroma::client::ChromaHttpClientError> {
+    let mut last_error = None;
+    for attempt in 1..=MAX_COLLECTION_RETRIES {
+        match client.get_or_create_collection(&name, None, None).await {
+            Ok(collection) => return Ok(collection),
+            Err(e) => {
+                eprintln!(
+                    "  Attempt {}/{} failed for collection '{}': {}",
+                    attempt, MAX_COLLECTION_RETRIES, name, e
+                );
+                last_error = Some(e);
+                if attempt < MAX_COLLECTION_RETRIES {
+                    tokio::time::sleep(Duration::from_millis(500 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap())
+}
+
 /// Runs a worker task that performs upserts in a round-robin fashion across collections.
 async fn run_worker(
     collections: Vec<ChromaCollection>,
+    collection_semaphores: Vec<Arc<Semaphore>>,
     ctx: WorkerContext,
     seed: u64,
     id_prefix: String,
@@ -184,7 +359,14 @@ async fn run_worker(
 
         // Round-robin collection selection
         let collection = &collections[collection_idx];
+        let semaphore = &collection_semaphores[collection_idx];
         collection_idx = (collection_idx + 1) % num_collections;
+
+        // Acquire permit to limit outstanding ops per collection
+        let permit = match semaphore.clone().acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => break,
+        };
 
         // Generate batch
         let embeddings = ctx.gmm.generate_batch(&mut rng, ctx.batch_size);
@@ -198,14 +380,15 @@ async fn run_worker(
         // Perform upsert
         match collection.upsert(ids, embeddings, None, None, None).await {
             Ok(_) => {
-                ctx.total_upserts.fetch_add(1, Ordering::Relaxed);
-                ctx.total_records
-                    .fetch_add(ctx.batch_size as u64, Ordering::Relaxed);
+                ctx.stats.record_upsert(ctx.batch_size as u64);
             }
             Err(e) => {
                 eprintln!("[{}] Upsert error: {}", id_prefix, e);
             }
         }
+
+        // Permit is dropped here, releasing the semaphore slot
+        drop(permit);
     }
 }
 
@@ -219,10 +402,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Tasks: {}", args.tasks);
     println!("Batch size: {}", args.batch_size);
     println!("Pace: {} qps", args.pace_qps.max(1));
+    println!(
+        "Max outstanding ops per collection: {}",
+        args.max_outstanding_ops
+    );
     println!();
 
     // Create clients for both endpoints
-    let client_us = create_client("https://api.trychroma.com:443")?;
+    let client_us = create_client("https://api.devchroma.com:443")?;
     let client_eu = create_client("https://europe-west1.gcp.devchroma.com:443")?;
 
     println!(
@@ -230,34 +417,84 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args.collections
     );
 
-    // Create or get collections on both endpoints
-    let mut collections_us: Vec<ChromaCollection> = Vec::with_capacity(args.collections);
-    let mut collections_eu: Vec<ChromaCollection> = Vec::with_capacity(args.collections);
+    // Try to load collections from cache first
+    let (collections_us, collections_eu) = if let Some((us, eu)) =
+        load_collections_from_cache(&client_us, &client_eu, args.collections).await
+    {
+        println!(
+            "  Loaded {} US collections and {} EU collections from cache",
+            us.len(),
+            eu.len()
+        );
+        (us, eu)
+    } else {
+        // Create or get collections on both endpoints concurrently with retry logic
+        let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
+        let semaphores_warmup: Arc<Semaphore> = Arc::new(Semaphore::new(args.max_outstanding_ops));
 
-    for i in 0..args.collections {
-        let name = collection_name(i);
+        let us_futures: Vec<_> = collection_names
+            .iter()
+            .map(|name| {
+                let name = name.clone();
+                let semaphores_warmup = Arc::clone(&semaphores_warmup);
+                let client_us = client_us.clone();
+                async move {
+                    let _permit = semaphores_warmup.acquire().await.unwrap();
+                    get_or_create_collection_with_retry(&client_us, name).await
+                }
+            })
+            .collect();
+        let eu_futures: Vec<_> = collection_names
+            .iter()
+            .map(|name| {
+                let name = name.clone();
+                let semaphores_warmup = Arc::clone(&semaphores_warmup);
+                let client_eu = client_eu.clone();
+                async move {
+                    let _permit = semaphores_warmup.acquire().await.unwrap();
+                    get_or_create_collection_with_retry(&client_eu, name).await
+                }
+            })
+            .collect();
 
-        let collection_us = client_us
-            .get_or_create_collection(&name, None, None)
-            .await?;
-        collections_us.push(collection_us);
+        let us_results = join_all(us_futures).await;
+        let eu_results = join_all(eu_futures).await;
 
-        let collection_eu = client_eu
-            .get_or_create_collection(&name, None, None)
-            .await?;
-        collections_eu.push(collection_eu);
+        let collections_us: Vec<ChromaCollection> =
+            us_results.into_iter().collect::<Result<_, _>>()?;
+        let collections_eu: Vec<ChromaCollection> =
+            eu_results.into_iter().collect::<Result<_, _>>()?;
 
-        if (i + 1) % 10 == 0 || i == args.collections - 1 {
-            println!("  Created {}/{} collections", i + 1, args.collections);
+        println!(
+            "  Created {} US collections and {} EU collections",
+            collections_us.len(),
+            collections_eu.len()
+        );
+
+        // Save to cache for next run
+        if let Err(e) =
+            save_collections_to_cache(&collections_us, &collections_eu, args.collections).await
+        {
+            eprintln!("  Warning: Failed to save collections to cache: {}", e);
         }
-    }
+
+        (collections_us, collections_eu)
+    };
 
     println!("Collections ready. Starting load generation...\n");
 
+    // Create per-collection semaphores to limit outstanding operations
+    let semaphores_us: Vec<Arc<Semaphore>> = (0..args.collections)
+        .map(|_| Arc::new(Semaphore::new(args.max_outstanding_ops)))
+        .collect();
+    let semaphores_eu: Vec<Arc<Semaphore>> = (0..args.collections)
+        .map(|_| Arc::new(Semaphore::new(args.max_outstanding_ops)))
+        .collect();
+
     // Shared state
     let gmm = Arc::new(GaussianMixtureModel::new(42));
-    let total_upserts = Arc::new(AtomicU64::new(0));
-    let total_records = Arc::new(AtomicU64::new(0));
+    let stats_us = Arc::new(BackendStats::new());
+    let stats_eu = Arc::new(BackendStats::new());
 
     let start_time = Instant::now();
     let duration = Duration::from_secs(args.duration);
@@ -267,17 +504,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
 
-    let pacing_handle = {
-        let start_time = start_time;
-        let duration = duration;
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(ticket_interval);
-            while start_time.elapsed() < duration {
-                interval.tick().await;
-                let _ = ticket_tx.try_send(());
-            }
-        })
-    };
+    let pacing_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(ticket_interval);
+        while start_time.elapsed() < duration {
+            interval.tick().await;
+            let _ = ticket_tx.try_send(());
+        }
+    });
 
     // Spawn worker tasks
     let mut handles = Vec::new();
@@ -286,8 +519,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // US endpoint task
         let ctx = WorkerContext {
             gmm: Arc::clone(&gmm),
-            total_upserts: Arc::clone(&total_upserts),
-            total_records: Arc::clone(&total_records),
+            stats: Arc::clone(&stats_us),
             batch_size: args.batch_size,
             start_time,
             duration,
@@ -295,6 +527,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let handle = tokio::spawn(run_worker(
             collections_us.clone(),
+            semaphores_us.clone(),
             ctx,
             task_id as u64 * 1000,
             format!("us_task{}", task_id),
@@ -304,8 +537,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // EU endpoint task
         let ctx = WorkerContext {
             gmm: Arc::clone(&gmm),
-            total_upserts: Arc::clone(&total_upserts),
-            total_records: Arc::clone(&total_records),
+            stats: Arc::clone(&stats_eu),
             batch_size: args.batch_size,
             start_time,
             duration,
@@ -313,6 +545,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let handle = tokio::spawn(run_worker(
             collections_eu.clone(),
+            semaphores_eu.clone(),
             ctx,
             (task_id as u64 + 500) * 1000,
             format!("eu_task{}", task_id),
@@ -321,34 +554,61 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Progress reporting task
-    let total_upserts_report = Arc::clone(&total_upserts);
-    let total_records_report = Arc::clone(&total_records);
+    let stats_us_report = Arc::clone(&stats_us);
+    let stats_eu_report = Arc::clone(&stats_eu);
     let report_handle = tokio::spawn(async move {
-        let mut last_upserts = 0u64;
-        let mut last_records = 0u64;
+        let mut last_us_upserts = 0u64;
+        let mut last_us_records = 0u64;
+        let mut last_eu_upserts = 0u64;
+        let mut last_eu_records = 0u64;
         let report_interval = Duration::from_secs(10);
 
         while start_time.elapsed() < duration {
             tokio::time::sleep(report_interval).await;
 
-            let current_upserts = total_upserts_report.load(Ordering::Relaxed);
-            let current_records = total_records_report.load(Ordering::Relaxed);
+            let us_upserts = stats_us_report.upserts();
+            let us_records = stats_us_report.records();
+            let eu_upserts = stats_eu_report.upserts();
+            let eu_records = stats_eu_report.records();
             let elapsed = start_time.elapsed().as_secs_f64();
 
-            let upserts_delta = current_upserts - last_upserts;
-            let records_delta = current_records - last_records;
+            let us_upserts_delta = us_upserts - last_us_upserts;
+            let us_records_delta = us_records - last_us_records;
+            let eu_upserts_delta = eu_upserts - last_eu_upserts;
+            let eu_records_delta = eu_records - last_eu_records;
 
+            let interval_secs = report_interval.as_secs_f64();
+
+            println!(
+                "[{:.0}s] US: {} upserts, {} records | Rate: {:.1} upserts/s, {:.1} records/s",
+                elapsed,
+                us_upserts,
+                us_records,
+                us_upserts_delta as f64 / interval_secs,
+                us_records_delta as f64 / interval_secs
+            );
+            println!(
+                "[{:.0}s] EU: {} upserts, {} records | Rate: {:.1} upserts/s, {:.1} records/s",
+                elapsed,
+                eu_upserts,
+                eu_records,
+                eu_upserts_delta as f64 / interval_secs,
+                eu_records_delta as f64 / interval_secs
+            );
             println!(
                 "[{:.0}s] Total: {} upserts, {} records | Rate: {:.1} upserts/s, {:.1} records/s",
                 elapsed,
-                current_upserts,
-                current_records,
-                upserts_delta as f64 / report_interval.as_secs_f64(),
-                records_delta as f64 / report_interval.as_secs_f64()
+                us_upserts + eu_upserts,
+                us_records + eu_records,
+                (us_upserts_delta + eu_upserts_delta) as f64 / interval_secs,
+                (us_records_delta + eu_records_delta) as f64 / interval_secs
             );
+            println!();
 
-            last_upserts = current_upserts;
-            last_records = current_records;
+            last_us_upserts = us_upserts;
+            last_us_records = us_records;
+            last_eu_upserts = eu_upserts;
+            last_eu_records = eu_records;
         }
     });
 
@@ -360,17 +620,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pacing_handle.abort();
 
     let elapsed = start_time.elapsed();
-    let final_upserts = total_upserts.load(Ordering::Relaxed);
-    let final_records = total_records.load(Ordering::Relaxed);
+    let elapsed_secs = elapsed.as_secs_f64();
+
+    let us_upserts = stats_us.upserts();
+    let us_records = stats_us.records();
+    let eu_upserts = stats_eu.upserts();
+    let eu_records = stats_eu.records();
 
     println!("\n=== Load Generation Complete ===");
-    println!("Duration: {:.1} seconds", elapsed.as_secs_f64());
-    println!("Total upserts: {}", final_upserts);
-    println!("Total records: {}", final_records);
+    println!("Duration: {:.1} seconds", elapsed_secs);
+    println!();
+    println!("US Backend:");
+    println!("  Total upserts: {}", us_upserts);
+    println!("  Total records: {}", us_records);
     println!(
-        "Average rate: {:.1} upserts/s, {:.1} records/s",
-        final_upserts as f64 / elapsed.as_secs_f64(),
-        final_records as f64 / elapsed.as_secs_f64()
+        "  Average rate: {:.1} upserts/s, {:.1} records/s",
+        us_upserts as f64 / elapsed_secs,
+        us_records as f64 / elapsed_secs
+    );
+    println!();
+    println!("EU Backend:");
+    println!("  Total upserts: {}", eu_upserts);
+    println!("  Total records: {}", eu_records);
+    println!(
+        "  Average rate: {:.1} upserts/s, {:.1} records/s",
+        eu_upserts as f64 / elapsed_secs,
+        eu_records as f64 / elapsed_secs
+    );
+    println!();
+    println!("Combined:");
+    println!("  Total upserts: {}", us_upserts + eu_upserts);
+    println!("  Total records: {}", us_records + eu_records);
+    println!(
+        "  Average rate: {:.1} upserts/s, {:.1} records/s",
+        (us_upserts + eu_upserts) as f64 / elapsed_secs,
+        (us_records + eu_records) as f64 / elapsed_secs
     );
 
     Ok(())
