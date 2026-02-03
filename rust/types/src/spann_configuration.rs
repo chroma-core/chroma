@@ -68,6 +68,10 @@ pub fn default_m_spann() -> usize {
     64
 }
 
+pub fn default_quantize() -> bool {
+    false
+}
+
 fn default_space_spann() -> Space {
     Space::L2
 }

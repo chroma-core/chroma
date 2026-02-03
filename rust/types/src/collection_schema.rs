@@ -18,8 +18,8 @@ use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
     default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
-    default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
-    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
+    default_num_threads, default_quantize, default_reassign_neighbor_count, default_resize_factor,
+    default_search_ef, default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
@@ -792,6 +792,7 @@ impl Schema {
                         ef_construction: Some(default_construction_ef_spann()),
                         ef_search: Some(default_search_ef_spann()),
                         max_neighbors: Some(default_m_spann()),
+                        quantize: default_quantize(),
                     }),
                 },
             },
@@ -885,6 +886,7 @@ impl Schema {
                                 ef_construction: Some(default_construction_ef_spann()),
                                 ef_search: Some(default_search_ef_spann()),
                                 max_neighbors: Some(default_m_spann()),
+                                quantize: default_quantize(),
                             }),
                         },
                     },
@@ -1586,6 +1588,7 @@ impl Schema {
                 ef_construction: user.ef_construction.or(default.ef_construction),
                 ef_search: user.ef_search.or(default.ef_search),
                 max_neighbors: user.max_neighbors.or(default.max_neighbors),
+                quantize: user.quantize || default.quantize,
             }),
             (Some(default), None) => Some(default.clone()),
             (None, Some(user)) => Some(user.clone()),
@@ -2639,6 +2642,13 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
+    /// Enable quantization for vector search (cloud-only feature)
+    #[serde(default = "default_quantize", skip_serializing_if = "is_false")]
+    pub quantize: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl SpannIndexConfig {
@@ -2724,6 +2734,9 @@ impl SpannIndexConfig {
             if max_neighbors != default_m_spann() {
                 return false;
             }
+        }
+        if self.quantize != default_quantize() {
+            return false;
         }
         true
     }
@@ -2887,6 +2900,7 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     ef_construction: Some(spann_config.ef_construction),
                     ef_search: Some(spann_config.ef_search),
                     max_neighbors: Some(spann_config.max_neighbors),
+                    quantize: default_quantize(),
                 }),
             },
         };
@@ -3256,6 +3270,7 @@ mod tests {
                         ef_construction: Some(50),
                         ef_search: Some(40),
                         max_neighbors: Some(20),
+                        quantize: false,
                     });
                 }
             }
@@ -3432,6 +3447,7 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
+            quantize: false,
         };
 
         let user_spann = SpannIndexConfig {
@@ -3451,6 +3467,7 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
+            quantize: false,
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann)).unwrap();
@@ -3485,6 +3502,7 @@ mod tests {
             ef_construction: Some(180),
             ef_search: Some(170),
             max_neighbors: Some(32),
+            quantize: false,
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -3599,6 +3617,7 @@ mod tests {
                 ef_construction: None,
                 ef_search: None,
                 max_neighbors: None,
+                quantize: false,
             }), // Add SPANN config
         };
 
@@ -5977,6 +5996,7 @@ mod tests {
                         ef_construction,
                         ef_search,
                         max_neighbors,
+                        quantize: false,
                     },
                 )
         }
@@ -6158,6 +6178,7 @@ mod tests {
                         ef_construction: Some(spann_config.ef_construction),
                         ef_search: Some(spann_config.ef_search),
                         max_neighbors: Some(spann_config.max_neighbors),
+                        quantize: false,
                     }),
                 },
             }
@@ -6322,6 +6343,7 @@ mod tests {
                 ef_construction: Some(config.ef_construction),
                 ef_search: Some(config.ef_search),
                 max_neighbors: Some(config.max_neighbors),
+                quantize: false,
             })
         }
 
