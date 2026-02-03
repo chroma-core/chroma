@@ -1282,22 +1282,44 @@ impl GrpcSysDb {
         tenant: String,
         database: Option<DatabaseName>,
     ) -> Result<usize, CountCollectionsError> {
-        // Route to MCMR client if database has a valid topology
-        let mut client = if let Some(ref db) = database {
-            self.client(db)
-                .map_err(|_| CountCollectionsError::Internal)?
-        } else {
-            self.client.clone()
+        let request = chroma_proto::CountCollectionsRequest {
+            tenant: tenant.clone(),
+            database: database.clone().map(|d| d.into_string()),
         };
 
-        let request = chroma_proto::CountCollectionsRequest {
-            tenant,
-            database: database.map(|d| d.into_string()),
-        };
-        let res = client.count_collections(request).await;
-        match res {
-            Ok(res) => Ok(res.into_inner().count as usize),
-            Err(_) => Err(CountCollectionsError::Internal),
+        if let Some(ref db) = database {
+            // When database is specified, route to the appropriate client
+            let mut client = self
+                .client(db)
+                .map_err(|_| CountCollectionsError::Internal)?;
+            let res = client
+                .count_collections(request)
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?;
+            Ok(res.into_inner().count as usize)
+        } else {
+            // When no database is specified, query all clients and sum the results
+            let mut total_count = 0usize;
+
+            // Query default client
+            let res = self
+                .client
+                .count_collections(request.clone())
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?;
+            total_count += res.into_inner().count as usize;
+
+            // Query MCMR client if available
+            if let Some(mcmr_client) = &self._mcmr_client {
+                let res = mcmr_client
+                    .clone()
+                    .count_collections(request)
+                    .await
+                    .map_err(|_| CountCollectionsError::Internal)?;
+                total_count += res.into_inner().count as usize;
+            }
+
+            Ok(total_count)
         }
     }
 

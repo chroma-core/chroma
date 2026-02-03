@@ -371,9 +371,19 @@ impl SysDb for SysdbService {
 
     async fn count_collections(
         &self,
-        _request: Request<CountCollectionsRequest>,
+        request: Request<CountCollectionsRequest>,
     ) -> Result<Response<CountCollectionsResponse>, Status> {
-        Err(Status::unimplemented("count_collections is not supported"))
+        let proto_req = request.into_inner();
+        let internal_req: internal::CountCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await?;
+
+        let proto_resp: CountCollectionsResponse = internal_resp.into();
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn get_collection_with_segments(

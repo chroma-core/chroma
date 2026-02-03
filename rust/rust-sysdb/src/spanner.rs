@@ -50,11 +50,12 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 }
 
 use crate::types::{
-    CollectionFilter, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
-    FlushCompactionResponse, GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse,
-    GetCollectionsRequest, GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse,
-    GetTenantsRequest, GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
+    CollectionFilter, CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
     UpdateCollectionRequest, UpdateCollectionResponse, UpdateSegmentRequest, UpdateTenantRequest,
 };
 
@@ -924,6 +925,55 @@ impl SpannerBackend {
         }
 
         Ok(GetCollectionsResponse { collections })
+    }
+
+    /// Count collections for a tenant, optionally filtered by database.
+    ///
+    /// Counts only non-deleted collections.
+    pub async fn count_collections(
+        &self,
+        req: CountCollectionsRequest,
+    ) -> Result<CountCollectionsResponse, SysDbError> {
+        // Build dynamic WHERE clause
+        let mut where_clauses: Vec<String> = Vec::new();
+        where_clauses.push("tenant_id = @tenant_id".to_string());
+        where_clauses.push("c.is_deleted = FALSE".to_string());
+
+        if req.database_name.is_some() {
+            where_clauses.push("database_name = @database_name".to_string());
+        }
+
+        let where_clause = where_clauses.join(" AND ");
+
+        let query = format!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM collections c
+            WHERE {}
+            "#,
+            where_clause
+        );
+
+        let mut stmt = Statement::new(query);
+        stmt.add_param("tenant_id", &req.tenant_id);
+
+        if let Some(ref db_name) = req.database_name {
+            stmt.add_param("database_name", &db_name.as_ref());
+        }
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx.query(stmt).await?;
+
+        let count: i64 = if let Some(row) = result_set.next().await? {
+            row.column_by_name("count")
+                .map_err(SysDbError::FailedToReadColumn)?
+        } else {
+            0
+        };
+
+        Ok(CountCollectionsResponse {
+            count: count as u64,
+        })
     }
 
     /// Fetch a collection from the database within a transaction.
@@ -7898,6 +7948,51 @@ pub mod tests {
             collections_response.collections.len(),
             0,
             "Should have no collections after reset"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_count_collections() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Test counting with database filter
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections with database filter: {:?}",
+            result.err()
+        );
+        let count_with_db = result.unwrap().count;
+        println!("Collections count with database filter: {}", count_with_db);
+
+        // Test counting without database filter (should include all backends)
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: None,
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections without database filter: {:?}",
+            result.err()
+        );
+        let count_all = result.unwrap().count;
+        println!("Collections count without database filter: {}", count_all);
+
+        // The count without database filter should be >= count with database filter
+        assert!(
+            count_all >= count_with_db,
+            "Count without database filter ({}) should be >= count with database filter ({})",
+            count_all,
+            count_with_db
         );
     }
 
