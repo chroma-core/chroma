@@ -128,7 +128,6 @@ jobs:
       fail-fast: false
       matrix:
         python: ${{ fromJson(inputs.python_versions) }}
-        always_multi_region: ${{ fromJson(inputs.always_multi_region) }}
         test-glob:
           - "chromadb/test/api"
           - "chromadb/test/api/test_collection.py"
@@ -164,7 +163,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      MULTI_REGION: ${{ matrix.always_multi_region || matrix.multi_region || "false" }}
+      MULTI_REGION: ${{ (inputs.always_multi_region || matrix.multi_region) && 'true' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
