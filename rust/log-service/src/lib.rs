@@ -301,12 +301,13 @@ impl<'a> FactoryCreationContext<'a> {
         write_options: &LogWriterOptions,
         read_options: &LogReaderOptions,
         repl_options: &ReplicatedFragmentOptions,
+        cmek: Option<Cmek>,
     ) -> Result<(), Error> {
         if let Some(topology) = self.topology_name {
-            self.fork_to_repl_target(topology, reader, cursor, write_options, repl_options)
+            self.fork_to_repl_target(topology, reader, cursor, write_options, repl_options, cmek)
                 .await
         } else {
-            self.fork_to_s3_target(reader, cursor, write_options, read_options)
+            self.fork_to_s3_target(reader, cursor, write_options, read_options, cmek)
                 .await
         }
     }
@@ -319,6 +320,7 @@ impl<'a> FactoryCreationContext<'a> {
         cursor: LogPosition,
         write_options: &LogWriterOptions,
         repl_options: &ReplicatedFragmentOptions,
+        cmek: Option<Cmek>,
     ) -> Result<(), Error> {
         let Some((regions, topology)) = self.storages.lookup_topology(topology_name) else {
             return Err(Error::MissingTopology(topology_name.to_string()));
@@ -337,7 +339,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.collection_id.0,
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
-        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, None).await?)
+        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
     }
 
     /// Performs a fork/copy to an S3-only target.
@@ -347,6 +349,7 @@ impl<'a> FactoryCreationContext<'a> {
         cursor: LogPosition,
         write_options: &LogWriterOptions,
         read_options: &LogReaderOptions,
+        cmek: Option<Cmek>,
     ) -> Result<(), Error> {
         let region_config = self
             .storages
@@ -363,7 +366,7 @@ impl<'a> FactoryCreationContext<'a> {
             Arc::new(()),
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
-        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, None).await?)
+        Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
     }
 }
 
@@ -2119,6 +2122,12 @@ impl LogServer {
                 .clone(),
         );
 
+        // Extract CMEK from request
+        let cmek = request.cmek.map(Cmek::try_from).transpose().map_err(|e| {
+            tracing::error!("Failed to convert CMEK: {}", e);
+            Status::invalid_argument("Invalid CMEK configuration")
+        })?;
+
         tracing::info!(
             source_collection_id = source_collection_id.to_string(),
             target_collection_id = target_collection_id.to_string(),
@@ -2154,6 +2163,7 @@ impl LogServer {
                 &self.config.writer,
                 &self.config.reader,
                 &self.config.repl,
+                cmek,
             )
             .await
             .map_err(|err| {
@@ -4999,6 +5009,7 @@ mod tests {
                     source_collection_id: source_collection_id.to_string(),
                     target_collection_id: fork_collection_id.to_string(),
                     database_name: db_name.to_string(),
+                    cmek: None,
                 }))
                 .await
                 .expect("Fork Logs should not fail");

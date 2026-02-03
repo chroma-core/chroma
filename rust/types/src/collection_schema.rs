@@ -18,8 +18,8 @@ use crate::{
     default_batch_size, default_construction_ef, default_construction_ef_spann,
     default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
     default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
-    default_num_threads, default_reassign_neighbor_count, default_resize_factor, default_search_ef,
-    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
+    default_num_threads, default_quantize, default_reassign_neighbor_count, default_resize_factor,
+    default_search_ef, default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
@@ -792,6 +792,7 @@ impl Schema {
                         ef_construction: Some(default_construction_ef_spann()),
                         ef_search: Some(default_search_ef_spann()),
                         max_neighbors: Some(default_m_spann()),
+                        quantize: default_quantize(),
                     }),
                 },
             },
@@ -885,6 +886,7 @@ impl Schema {
                                 ef_construction: Some(default_construction_ef_spann()),
                                 ef_search: Some(default_search_ef_spann()),
                                 max_neighbors: Some(default_m_spann()),
+                                quantize: default_quantize(),
                             }),
                         },
                     },
@@ -940,6 +942,58 @@ impl Schema {
                     .and_then(|float_list| float_list.vector_index.as_ref())
                     .and_then(to_internal)
             })
+    }
+
+    /// Check if quantization is enabled in the SPANN index configuration
+    pub fn is_quantization_enabled(&self) -> bool {
+        let check_spann = |vector_index: &VectorIndexType| {
+            vector_index
+                .config
+                .spann
+                .as_ref()
+                .map(|config| config.quantize)
+                .unwrap_or(false)
+        };
+
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .map(check_spann)
+            .unwrap_or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .map(check_spann)
+                    .unwrap_or(false)
+            })
+    }
+
+    /// Get a mutable reference to the SPANN index configuration
+    /// Checks the #embedding key first, then falls back to defaults
+    pub fn get_spann_config_mut(&mut self) -> Option<&mut SpannIndexConfig> {
+        // Try #embedding key first
+        if let Some(value_types) = self.keys.get_mut(EMBEDDING_KEY) {
+            if let Some(float_list) = &mut value_types.float_list {
+                if let Some(vector_index) = &mut float_list.vector_index {
+                    if let Some(spann_config) = &mut vector_index.config.spann {
+                        return Some(spann_config);
+                    }
+                }
+            }
+        }
+
+        // Fall back to defaults
+        if let Some(float_list) = &mut self.defaults.float_list {
+            if let Some(vector_index) = &mut float_list.vector_index {
+                if let Some(spann_config) = &mut vector_index.config.spann {
+                    return Some(spann_config);
+                }
+            }
+        }
+
+        None
     }
 
     pub fn get_internal_hnsw_config(&self) -> Option<InternalHnswConfiguration> {
@@ -1236,7 +1290,7 @@ impl Schema {
             default.float_list.as_ref(),
             user.float_list.as_ref(),
             knn_index,
-        );
+        )?;
 
         // Validate the merged float_list (covers all merge cases)
         if let Some(ref fl) = float_list {
@@ -1337,18 +1391,18 @@ impl Schema {
         default: Option<&FloatListValueType>,
         user: Option<&FloatListValueType>,
         knn_index: KnnIndex,
-    ) -> Option<FloatListValueType> {
+    ) -> Result<Option<FloatListValueType>, SchemaError> {
         match (default, user) {
-            (Some(default), Some(user)) => Some(FloatListValueType {
+            (Some(default), Some(user)) => Ok(Some(FloatListValueType {
                 vector_index: Self::merge_vector_index_type(
                     default.vector_index.as_ref(),
                     user.vector_index.as_ref(),
                     knn_index,
-                ),
-            }),
-            (Some(default), None) => Some(default.clone()),
-            (None, Some(user)) => Some(user.clone()),
-            (None, None) => None,
+                )?,
+            })),
+            (Some(default), None) => Ok(Some(default.clone())),
+            (None, Some(user)) => Ok(Some(user.clone())),
+            (None, None) => Ok(None),
         }
     }
 
@@ -1452,15 +1506,15 @@ impl Schema {
         default: Option<&VectorIndexType>,
         user: Option<&VectorIndexType>,
         knn_index: KnnIndex,
-    ) -> Option<VectorIndexType> {
+    ) -> Result<Option<VectorIndexType>, SchemaError> {
         match (default, user) {
-            (Some(default), Some(user)) => Some(VectorIndexType {
+            (Some(default), Some(user)) => Ok(Some(VectorIndexType {
                 enabled: user.enabled,
-                config: Self::merge_vector_index_config(&default.config, &user.config, knn_index),
-            }),
-            (Some(default), None) => Some(default.clone()),
-            (None, Some(user)) => Some(user.clone()),
-            (None, None) => None,
+                config: Self::merge_vector_index_config(&default.config, &user.config, knn_index)?,
+            })),
+            (Some(default), None) => Ok(Some(default.clone())),
+            (None, Some(user)) => Ok(Some(user.clone())),
+            (None, None) => Ok(None),
         }
     }
 
@@ -1498,9 +1552,9 @@ impl Schema {
         default: &VectorIndexConfig,
         user: &VectorIndexConfig,
         knn_index: KnnIndex,
-    ) -> VectorIndexConfig {
+    ) -> Result<VectorIndexConfig, SchemaError> {
         match knn_index {
-            KnnIndex::Hnsw => VectorIndexConfig {
+            KnnIndex::Hnsw => Ok(VectorIndexConfig {
                 space: user.space.clone().or(default.space.clone()),
                 embedding_function: user
                     .embedding_function
@@ -1509,8 +1563,8 @@ impl Schema {
                 source_key: user.source_key.clone().or(default.source_key.clone()),
                 hnsw: Self::merge_hnsw_configs(default.hnsw.as_ref(), user.hnsw.as_ref()),
                 spann: None,
-            },
-            KnnIndex::Spann => VectorIndexConfig {
+            }),
+            KnnIndex::Spann => Ok(VectorIndexConfig {
                 space: user.space.clone().or(default.space.clone()),
                 embedding_function: user
                     .embedding_function
@@ -1518,8 +1572,8 @@ impl Schema {
                     .or(default.embedding_function.clone()),
                 source_key: user.source_key.clone().or(default.source_key.clone()),
                 hnsw: None,
-                spann: Self::merge_spann_configs(default.spann.as_ref(), user.spann.as_ref()),
-            },
+                spann: Self::merge_spann_configs(default.spann.as_ref(), user.spann.as_ref())?,
+            }),
         }
     }
 
@@ -1563,33 +1617,58 @@ impl Schema {
     fn merge_spann_configs(
         default_spann: Option<&SpannIndexConfig>,
         user_spann: Option<&SpannIndexConfig>,
-    ) -> Option<SpannIndexConfig> {
+    ) -> Result<Option<SpannIndexConfig>, SchemaError> {
         match (default_spann, user_spann) {
-            (Some(default), Some(user)) => Some(SpannIndexConfig {
-                search_nprobe: user.search_nprobe.or(default.search_nprobe),
-                search_rng_factor: user.search_rng_factor.or(default.search_rng_factor),
-                search_rng_epsilon: user.search_rng_epsilon.or(default.search_rng_epsilon),
-                nreplica_count: user.nreplica_count.or(default.nreplica_count),
-                write_rng_factor: user.write_rng_factor.or(default.write_rng_factor),
-                write_rng_epsilon: user.write_rng_epsilon.or(default.write_rng_epsilon),
-                split_threshold: user.split_threshold.or(default.split_threshold),
-                num_samples_kmeans: user.num_samples_kmeans.or(default.num_samples_kmeans),
-                initial_lambda: user.initial_lambda.or(default.initial_lambda),
-                reassign_neighbor_count: user
-                    .reassign_neighbor_count
-                    .or(default.reassign_neighbor_count),
-                merge_threshold: user.merge_threshold.or(default.merge_threshold),
-                num_centers_to_merge_to: user
-                    .num_centers_to_merge_to
-                    .or(default.num_centers_to_merge_to),
-                write_nprobe: user.write_nprobe.or(default.write_nprobe),
-                ef_construction: user.ef_construction.or(default.ef_construction),
-                ef_search: user.ef_search.or(default.ef_search),
-                max_neighbors: user.max_neighbors.or(default.max_neighbors),
-            }),
-            (Some(default), None) => Some(default.clone()),
-            (None, Some(user)) => Some(user.clone()),
-            (None, None) => None,
+            (Some(default), Some(user)) => {
+                // Validate that quantize is always false (should only be set programmatically by frontend)
+                if user.quantize != default_quantize() || default.quantize != default_quantize() {
+                    return Err(SchemaError::InvalidUserInput {
+                        reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                    });
+                }
+                Ok(Some(SpannIndexConfig {
+                    search_nprobe: user.search_nprobe.or(default.search_nprobe),
+                    search_rng_factor: user.search_rng_factor.or(default.search_rng_factor),
+                    search_rng_epsilon: user.search_rng_epsilon.or(default.search_rng_epsilon),
+                    nreplica_count: user.nreplica_count.or(default.nreplica_count),
+                    write_rng_factor: user.write_rng_factor.or(default.write_rng_factor),
+                    write_rng_epsilon: user.write_rng_epsilon.or(default.write_rng_epsilon),
+                    split_threshold: user.split_threshold.or(default.split_threshold),
+                    num_samples_kmeans: user.num_samples_kmeans.or(default.num_samples_kmeans),
+                    initial_lambda: user.initial_lambda.or(default.initial_lambda),
+                    reassign_neighbor_count: user
+                        .reassign_neighbor_count
+                        .or(default.reassign_neighbor_count),
+                    merge_threshold: user.merge_threshold.or(default.merge_threshold),
+                    num_centers_to_merge_to: user
+                        .num_centers_to_merge_to
+                        .or(default.num_centers_to_merge_to),
+                    write_nprobe: user.write_nprobe.or(default.write_nprobe),
+                    ef_construction: user.ef_construction.or(default.ef_construction),
+                    ef_search: user.ef_search.or(default.ef_search),
+                    max_neighbors: user.max_neighbors.or(default.max_neighbors),
+                    quantize: default_quantize(), // Always false - quantization is set programmatically
+                }))
+            }
+            (Some(default), None) => {
+                // Validate default is also false
+                if default.quantize != default_quantize() {
+                    return Err(SchemaError::InvalidUserInput {
+                        reason: "quantize field cannot be set to true in default schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                    });
+                }
+                Ok(Some(default.clone()))
+            }
+            (None, Some(user)) => {
+                // Validate user is false
+                if user.quantize != default_quantize() {
+                    return Err(SchemaError::InvalidUserInput {
+                        reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                    });
+                }
+                Ok(Some(user.clone()))
+            }
+            (None, None) => Ok(None),
         }
     }
 
@@ -2639,6 +2718,13 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
+    /// Enable quantization for vector search (cloud-only feature)
+    #[serde(default = "default_quantize", skip_serializing_if = "is_false")]
+    pub quantize: bool,
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl SpannIndexConfig {
@@ -2724,6 +2810,9 @@ impl SpannIndexConfig {
             if max_neighbors != default_m_spann() {
                 return false;
             }
+        }
+        if self.quantize != default_quantize() {
+            return false;
         }
         true
     }
@@ -2887,6 +2976,7 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     ef_construction: Some(spann_config.ef_construction),
                     ef_search: Some(spann_config.ef_search),
                     max_neighbors: Some(spann_config.max_neighbors),
+                    quantize: default_quantize(),
                 }),
             },
         };
@@ -3256,6 +3346,7 @@ mod tests {
                         ef_construction: Some(50),
                         ef_search: Some(40),
                         max_neighbors: Some(20),
+                        quantize: false,
                     });
                 }
             }
@@ -3432,6 +3523,7 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
+            quantize: false,
         };
 
         let user_spann = SpannIndexConfig {
@@ -3451,9 +3543,12 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
+            quantize: false,
         };
 
-        let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann)).unwrap();
+        let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann))
+            .unwrap()
+            .unwrap();
 
         // Check user overrides
         assert_eq!(result.search_nprobe, Some(20));
@@ -3464,6 +3559,101 @@ mod tests {
         assert_eq!(result.search_rng_factor, Some(1.0));
         assert_eq!(result.nreplica_count, Some(3));
         assert_eq!(result.initial_lambda, Some(100.0));
+    }
+
+    #[test]
+    fn test_merge_spann_configs_rejects_quantize_true() {
+        // Test that merge_spann_configs rejects quantize: true in user schema
+        let default_spann = SpannIndexConfig {
+            search_nprobe: Some(10),
+            search_rng_factor: Some(1.0),
+            search_rng_epsilon: Some(7.0),
+            nreplica_count: Some(3),
+            write_rng_factor: Some(1.0),
+            write_rng_epsilon: Some(6.0),
+            split_threshold: Some(100),
+            num_samples_kmeans: Some(100),
+            initial_lambda: Some(100.0),
+            reassign_neighbor_count: Some(50),
+            merge_threshold: Some(50),
+            num_centers_to_merge_to: Some(4),
+            write_nprobe: Some(5),
+            ef_construction: Some(100),
+            ef_search: Some(10),
+            max_neighbors: Some(16),
+            quantize: false,
+        };
+
+        let user_spann_with_quantize = SpannIndexConfig {
+            search_nprobe: Some(20),
+            search_rng_factor: None,
+            search_rng_epsilon: Some(8.0),
+            nreplica_count: None,
+            write_rng_factor: None,
+            write_rng_epsilon: None,
+            split_threshold: Some(150),
+            num_samples_kmeans: None,
+            initial_lambda: None,
+            reassign_neighbor_count: None,
+            merge_threshold: None,
+            num_centers_to_merge_to: None,
+            write_nprobe: None,
+            ef_construction: None,
+            ef_search: None,
+            max_neighbors: None,
+            quantize: true, // This should be rejected
+        };
+
+        // Should reject user schema with quantize: true
+        let result =
+            Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann_with_quantize));
+        assert!(result.is_err());
+        match result {
+            Err(SchemaError::InvalidUserInput { reason }) => {
+                assert!(reason.contains("quantize field cannot be set to true"));
+            }
+            _ => panic!("Expected InvalidUserInput error"),
+        }
+
+        // Should reject default schema with quantize: true
+        let default_spann_with_quantize = SpannIndexConfig {
+            search_nprobe: Some(10),
+            search_rng_factor: Some(1.0),
+            search_rng_epsilon: Some(7.0),
+            nreplica_count: Some(3),
+            write_rng_factor: Some(1.0),
+            write_rng_epsilon: Some(6.0),
+            split_threshold: Some(100),
+            num_samples_kmeans: Some(100),
+            initial_lambda: Some(100.0),
+            reassign_neighbor_count: Some(50),
+            merge_threshold: Some(50),
+            num_centers_to_merge_to: Some(4),
+            write_nprobe: Some(5),
+            ef_construction: Some(100),
+            ef_search: Some(10),
+            max_neighbors: Some(16),
+            quantize: true, // This should be rejected
+        };
+
+        let result = Schema::merge_spann_configs(Some(&default_spann_with_quantize), None);
+        assert!(result.is_err());
+        match result {
+            Err(SchemaError::InvalidUserInput { reason }) => {
+                assert!(reason.contains("quantize field cannot be set to true"));
+            }
+            _ => panic!("Expected InvalidUserInput error"),
+        }
+
+        // Should reject user-only schema with quantize: true
+        let result = Schema::merge_spann_configs(None, Some(&user_spann_with_quantize));
+        assert!(result.is_err());
+        match result {
+            Err(SchemaError::InvalidUserInput { reason }) => {
+                assert!(reason.contains("quantize field cannot be set to true"));
+            }
+            _ => panic!("Expected InvalidUserInput error"),
+        }
     }
 
     #[test]
@@ -3485,6 +3675,7 @@ mod tests {
             ef_construction: Some(180),
             ef_search: Some(170),
             max_neighbors: Some(32),
+            quantize: false,
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -3599,11 +3790,13 @@ mod tests {
                 ef_construction: None,
                 ef_search: None,
                 max_neighbors: None,
+                quantize: false,
             }), // Add SPANN config
         };
 
         let result =
-            Schema::merge_vector_index_config(&default_config, &user_config, KnnIndex::Hnsw);
+            Schema::merge_vector_index_config(&default_config, &user_config, KnnIndex::Hnsw)
+                .expect("merge should succeed");
 
         // Check field-level merging
         assert_eq!(result.space, Some(Space::L2)); // User override
@@ -5977,6 +6170,7 @@ mod tests {
                         ef_construction,
                         ef_search,
                         max_neighbors,
+                        quantize: false,
                     },
                 )
         }
@@ -6042,6 +6236,7 @@ mod tests {
                 user in partial_spann_index_config_strategy(),
             ) {
                 let merged = Schema::merge_spann_configs(Some(&base), Some(&user))
+                    .expect("merge should return Ok")
                     .expect("merge should return Some when both are Some");
 
                 // Property: user values always take precedence when Some
@@ -6070,6 +6265,7 @@ mod tests {
                 base in partial_spann_index_config_strategy(),
             ) {
                 let merged = Schema::merge_spann_configs(Some(&base), None)
+                    .expect("merge should return Ok")
                     .expect("merge should return Some when base is Some");
 
                 // Property: when user is None, base values are preserved
@@ -6082,7 +6278,8 @@ mod tests {
                 user in vector_index_config_strategy(),
                 knn in knn_index_strategy(),
             ) {
-                let merged = Schema::merge_vector_index_config(&base, &user, knn);
+                let merged = Schema::merge_vector_index_config(&base, &user, knn)
+                    .expect("merge should succeed");
 
                 // Property: user values take precedence for top-level fields
                 if user.space.is_some() {
@@ -6158,6 +6355,7 @@ mod tests {
                         ef_construction: Some(spann_config.ef_construction),
                         ef_search: Some(spann_config.ef_search),
                         max_neighbors: Some(spann_config.max_neighbors),
+                        quantize: false,
                     }),
                 },
             }
@@ -6322,6 +6520,7 @@ mod tests {
                 ef_construction: Some(config.ef_construction),
                 ef_search: Some(config.ef_search),
                 max_neighbors: Some(config.max_neighbors),
+                quantize: false,
             })
         }
 

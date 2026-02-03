@@ -82,6 +82,7 @@ pub struct ServiceBasedFrontend {
     enable_schema: bool,
     retries_builder: ExponentialBuilder,
     min_records_for_invocation: u64,
+    tenants_with_quantization_enabled: Vec<String>,
 }
 
 impl ServiceBasedFrontend {
@@ -96,6 +97,7 @@ impl ServiceBasedFrontend {
         default_knn_index: KnnIndex,
         enable_schema: bool,
         min_records_for_invocation: u64,
+        tenants_with_quantization_enabled: Vec<String>,
     ) -> Self {
         let meter = global::meter("chroma");
         let fork_retries_counter = meter.u64_counter("fork_retries").build();
@@ -150,7 +152,18 @@ impl ServiceBasedFrontend {
             enable_schema,
             retries_builder,
             min_records_for_invocation,
+            tenants_with_quantization_enabled,
         }
+    }
+
+    /// Check if quantization should be enabled for the given tenant
+    /// Returns true if:
+    /// - The list contains "*" (all tenants), OR
+    /// - The tenant_id is in the list
+    fn should_enable_quantization_for_tenant(&self, tenant_id: &str) -> bool {
+        self.tenants_with_quantization_enabled
+            .iter()
+            .any(|t| t == "*" || t == tenant_id)
     }
 
     pub fn get_default_knn_index(&self) -> KnnIndex {
@@ -478,7 +491,9 @@ impl ServiceBasedFrontend {
         if let Some(config) = configuration.as_ref() {
             match &config.vector_index {
                 VectorIndexConfiguration::Spann { .. } => {
-                    if !supported_segment_types.contains(&SegmentType::Spann) {
+                    if !supported_segment_types.contains(&SegmentType::Spann)
+                        && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
+                    {
                         return Err(CreateCollectionError::SpannNotImplemented);
                     }
                 }
@@ -496,7 +511,9 @@ impl ServiceBasedFrontend {
         // Check default server configuration's index type
         match self.default_knn_index {
             KnnIndex::Spann => {
-                if !supported_segment_types.contains(&SegmentType::Spann) {
+                if !supported_segment_types.contains(&SegmentType::Spann)
+                    && !supported_segment_types.contains(&SegmentType::QuantizedSpann)
+                {
                     return Err(CreateCollectionError::SpannNotImplemented);
                 }
             }
@@ -510,7 +527,7 @@ impl ServiceBasedFrontend {
             }
         }
 
-        let reconciled_schema = if self.enable_schema {
+        let mut reconciled_schema = if self.enable_schema {
             // its safe to take here, bc we're moving all config info to schema
             // when configuration is None, we then populate in sysdb with empty config {}
             // this allows for easier migration paths in the future
@@ -529,13 +546,25 @@ impl ServiceBasedFrontend {
             None
         };
 
+        // Enable quantization for tenants in the config list (or all tenants if "*" is present)
+        if let Some(ref mut schema) = reconciled_schema {
+            if let Some(spann_config) = schema.get_spann_config_mut() {
+                spann_config.quantize = self.should_enable_quantization_for_tenant(&tenant_id);
+            }
+        }
+
         let segments = match self.executor {
             Executor::Distributed(_) => {
                 let mut vector_segment_type = SegmentType::HnswDistributed;
                 if self.enable_schema {
                     if let Some(schema) = reconciled_schema.as_ref() {
                         if schema.get_internal_spann_config().is_some() {
-                            vector_segment_type = SegmentType::Spann;
+                            // Use QuantizedSpann if quantization is enabled, otherwise use Spann
+                            if schema.is_quantization_enabled() {
+                                vector_segment_type = SegmentType::QuantizedSpann;
+                            } else {
+                                vector_segment_type = SegmentType::Spann;
+                            }
                         }
                     }
                 }
@@ -728,6 +757,15 @@ impl ServiceBasedFrontend {
         let database_name = DatabaseName::new(database_name).ok_or_else(|| {
             ForkCollectionError::InvalidArgument("database_name cannot be empty".to_string())
         })?;
+        // Get source collection to extract CMEK for the forked log.
+        let source_collection = self
+            .get_cached_collection(database_name.clone(), source_collection_id)
+            .await
+            .map_err(|err| ForkCollectionError::Internal(err.boxed()))?;
+        let cmek = source_collection
+            .schema
+            .as_ref()
+            .and_then(|schema| schema.cmek.clone());
         let log_offsets = self
             .log_client
             .fork_logs(
@@ -735,6 +773,7 @@ impl ServiceBasedFrontend {
                 database_name,
                 source_collection_id,
                 target_collection_id,
+                cmek,
             )
             .await?;
         let mut collection_and_segments = self
@@ -2321,6 +2360,7 @@ impl Configurable<(FrontendConfig, System)> for ServiceBasedFrontend {
             config.default_knn_index,
             config.enable_schema,
             config.min_records_for_invocation,
+            config.tenants_with_quantization_enabled.clone(),
         ))
     }
 }

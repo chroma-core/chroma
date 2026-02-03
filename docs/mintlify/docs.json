@@ -13,7 +13,10 @@
   "fonts": {
     "family": "Inter"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/images/favicon.svg",
+  "thumbnails": {
+    "background": "/images/og-bg.png"
+  },
   "navigation": {
     "tabs": [
       {
@@ -216,75 +219,68 @@
         ]
       },
       {
-        "tab": "API Reference",
-        "icon": "brackets-curly",
-        "groups": [
-          {
-            "group": "Chroma API",
-            "openapi": {
-              "source": "openapi.json",
-              "directory": "api-reference"
-            }
-          },
-          {
-            "group": "Chroma Sync API",
-            "openapi": {
-              "source": "sync.openapi.json",
-              "directory": "sync-api-reference"
-            }
-          }
-        ]
-      },
-      {
-        "tab": "Client Reference",
-        "hidden": true,
+        "tab": "Reference",
+        "icon": "code",
         "pages": [
-          "reference/chroma-reference",
+          "reference/overview",
           {
-            "group": "Python",
+            "group": "SDKs",
             "pages": [
-              "reference/python/client",
-              "reference/python/collection"
+              "reference/python",
+              "reference/typescript",
+              "reference/rust"
             ]
           },
           {
-            "group": "Typescript",
+            "group": "APIs",
             "pages": [
-              "reference/js/client",
-              "reference/js/collection"
+              {
+                "group": "Chroma Core API",
+                "openapi": {
+                  "source": "openapi.json",
+                  "directory": "reference/chroma-api"
+                }
+              },
+              {
+                "group": "Chroma Sync API",
+                "openapi": {
+                  "source": "sync.openapi.json",
+                  "directory": "reference/sync-api"
+                }
+              }
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "X",
-          "href": "https://x.com/trychroma",
-          "icon": "x-twitter"
-        },
-        {
-          "anchor": "Discord",
-          "href": "https://discord.gg/MMeYNTmh3x",
-          "icon": "discord"
-        },
-        {
-          "anchor": "Changelog",
-          "href": "https://www.trychroma.com/changelog",
-          "icon": "rss"
-        }
+    ]
+  },
+  "api": {
+    "examples": {
+      "languages": [
+        "curl",
+        "terminal",
+        "python",
+        "typescript",
+        "rust"
       ]
     }
   },
   "logo": {
-    "light": "/light-logo.svg",
-    "dark": "/dark-logo.svg"
+    "light": "/images/light-logo.svg",
+    "dark": "/images/dark-logo.svg"
   },
   "navbar": {
+    "links": [
+      {
+        "label": "GitHub",
+        "icon": "github",
+        "href": "https://github.com/chroma-core/chroma"
+      }
+    ],
     "primary": {
-      "type": "github",
-      "href": "https://github.com/chroma-core/chroma"
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://trychroma.com/login"
     }
   },
   "contextual": {
@@ -293,7 +289,6 @@
       "view",
       "chatgpt",
       "claude",
-      "perplexity",
       "mcp",
       "cursor",
       "vscode"
@@ -301,15 +296,37 @@
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/trychroma",
       "github": "https://github.com/chroma-core/chroma",
-      "discord": "https://discord.gg/MMeYNTmh3x"
-    }
+      "x": "https://x.com/trychroma",
+      "discord": "https://discord.gg/MMeYNTmh3x",
+      "youtube": "https://youtube.com/@trychroma"
+    },
+    "links": [
+      {
+        "items": [
+          {
+            "label": "Enterprise",
+            "href": "https://trychroma.com/enterprise"
+          },
+          {
+            "label": "Pricing",
+            "href": "https://trychroma.com/pricing"
+          },
+          {
+            "label": "Changelog",
+            "href": "https://trychroma.com/changelog"
+          }
+        ]
+      }
+    ]
   },
   "integrations": {
     "posthog": {
       "apiKey": "phc_M1NrBVW8hgvKCGYxVtYusnbBvpVq9sKpE7FJMew9suK",
       "sessionRecording": false
+    },
+    "gtm": {
+      "tagId": "GTM-T8MGS4GJ"
     }
   }
 }

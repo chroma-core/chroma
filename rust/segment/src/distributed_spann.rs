@@ -109,7 +109,11 @@ impl SpannSegmentWriter {
         metrics: SpannMetrics,
         cmek: Option<Cmek>,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
-        if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
+        if !matches!(
+            segment.r#type,
+            SegmentType::Spann | SegmentType::QuantizedSpann
+        ) || segment.scope != SegmentScope::VECTOR
+        {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
 
@@ -118,6 +122,8 @@ impl SpannSegmentWriter {
         } else {
             &Schema::try_from(&collection.config).map_err(SpannSegmentWriterError::InvalidSchema)?
         };
+
+        // TODO(Sanket): Construct the quantized spann writer here based on config.
 
         let params = schema
             .get_internal_spann_config()
@@ -468,7 +474,11 @@ impl<'me> SpannSegmentReader<'me> {
         dimensionality: usize,
         adaptive_search_nprobe: bool,
     ) -> Result<SpannSegmentReader<'me>, SpannSegmentReaderError> {
-        if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
+        if !matches!(
+            segment.r#type,
+            SegmentType::Spann | SegmentType::QuantizedSpann
+        ) || segment.scope != SegmentScope::VECTOR
+        {
             return Err(SpannSegmentReaderError::InvalidArgument);
         }
         let schema = collection.schema.as_ref().ok_or_else(|| {

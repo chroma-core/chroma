@@ -163,6 +163,7 @@ type SpannIndexConfig struct {
 	EfConstruction        *int     `json:"ef_construction,omitempty"`
 	EfSearch              *int     `json:"ef_search,omitempty"`
 	MaxNeighbors          *int     `json:"max_neighbors,omitempty"`
+	Quantize              bool     `json:"quantize,omitempty"`
 }
 
 type VectorIndexType struct {
@@ -252,9 +253,15 @@ type ValueTypes struct {
 	Boolean      *BoolValueType         `json:"bool,omitempty"`
 }
 
+// Cmek represents a customer-managed encryption key configuration
+type Cmek struct {
+	Gcp *string `json:"gcp,omitempty"`
+}
+
 type Schema struct {
 	Defaults                 ValueTypes            `json:"defaults"`
 	Keys                     map[string]ValueTypes `json:"keys"`
+	Cmek                     *Cmek                 `json:"cmek,omitempty"`
 	SourceAttachedFunctionID *string               `json:"source_attached_function_id,omitempty"`
 }
 

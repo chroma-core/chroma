@@ -460,13 +460,7 @@ impl FrontendServer {
         (status = 503, description = "Service Unavailable", body = ErrorResponse),
     ),
     extensions(
-        ("x-codeSamples" = json!([
-            {
-                "lang": "curl",
-                "label": "Healthcheck",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/healthcheck'"
-            }
-        ]))
+        ("x-codeSamples" = json!([]))
     )
 )]
 async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse {
@@ -504,9 +498,9 @@ async fn healthcheck(State(server): State<FrontendServer>) -> impl IntoResponse 
                 "source": "timestamp = client.heartbeat()"
             },
             {
-                "lang": "curl",
+                "lang": "rust",
                 "label": "Heartbeat",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/heartbeat'"
+                "source": "let timestamp = client.heartbeat().await?;"
             }
         ]))
     )
@@ -556,6 +550,9 @@ async fn pre_flight_checks(
         (status = 200, description = "Reset successful", body = bool),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    extensions(
+        ("x-hidden" = json!(true))
     )
 )]
 async fn reset(
@@ -600,11 +597,6 @@ async fn reset(
                 "lang": "python",
                 "label": "Get version",
                 "source": "version = client.get_version()"
-            },
-            {
-                "lang": "curl",
-                "label": "Get version",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/version'"
             }
         ]))
     )
@@ -835,11 +827,6 @@ pub struct CreateDatabasePayload {
                 "lang": "terminal",
                 "label": "Create Database",
                 "source": "chroma db create my-new-db"
-            },
-            {
-                "lang": "curl",
-                "label": "Create Database",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my-new-db\"}'"
             }
         ]))
     )
@@ -922,11 +909,6 @@ struct ListDatabasesParams {
                 "lang": "terminal",
                 "label": "List Databases",
                 "source": "chroma db list"
-            },
-            {
-                "lang": "curl",
-                "label": "List Databases",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1034,11 +1016,6 @@ async fn get_database(
                 "lang": "terminal",
                 "label": "Delete Database",
                 "source": "chroma db delete my-db"
-            },
-            {
-                "lang": "curl",
-                "label": "Delete Database",
-                "source": "curl -X DELETE 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1112,11 +1089,6 @@ struct ListCollectionsParams {
                 "lang": "rust",
                 "label": "List collections",
                 "source": "let collections = client.list_collections(10, Some(0)).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "List collections",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1203,11 +1175,6 @@ async fn list_collections(
                 "lang": "rust",
                 "label": "Count collections",
                 "source": "let count = client.count_collections().await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Count collections",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections_count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1289,11 +1256,6 @@ async fn count_collections(
                 "lang": "rust",
                 "label": "Create collection",
                 "source": "let collection = client.get_or_create_collection(\"my_collection\", None).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Create collection",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"my_collection\"}'"
             }
         ]))
     )
@@ -1402,11 +1364,6 @@ async fn create_collection(
                 "lang": "rust",
                 "label": "Get collection",
                 "source": "let collection = client.get_collection(\"my_collection\").await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Get collection",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1470,13 +1427,9 @@ async fn get_collection(
                 "lang": "python",
                 "label": "Get collection by CRN",
                 "source": "collection = client.get_collection_by_crn('my_tenant:my_database:my_collection')"
-            },
-            {
-                "lang": "curl",
-                "label": "Get collection by CRN",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/collections/my_tenant:my_database:my_collection' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
-        ]))
+        ])),
+        ("x-hidden" = json!(true))
     )
 )]
 async fn get_collection_by_crn(
@@ -1549,11 +1502,6 @@ async fn get_collection_by_crn(
                 "lang": "rust",
                 "label": "Update collection",
                 "source": "use chroma_types::Metadata;\nlet mut metadata = Metadata::new();\nmetadata.insert(\"key\".to_string(), \"value\".into());\ncollection.modify(Some(\"new_name\"), Some(metadata)).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Update collection",
-                "source": "curl -X PUT 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"name\": \"new_name\", \"metadata\": {\"key\": \"value\"}}'"
             }
         ]))
     )
@@ -1660,11 +1608,6 @@ async fn update_collection(
                 "lang": "rust",
                 "label": "Delete collection",
                 "source": "client.delete_collection(\"my_collection\").await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Delete collection",
-                "source": "curl -X DELETE 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -1737,11 +1680,6 @@ async fn delete_collection(
                 "lang": "rust",
                 "label": "Fork collection",
                 "source": "let forked = collection.fork(\"forked_collection\").await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Fork collection",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"new_name\": \"forked_collection\"}'"
             }
         ]))
     )
@@ -1843,11 +1781,6 @@ async fn fork_collection(
                 "lang": "rust",
                 "label": "Add records",
                 "source": "collection.add(\n    vec![\"id1\".to_string(), \"id2\".to_string()],\n    vec![vec![0.1, 0.2], vec![0.3, 0.4]],\n    Some(vec![Some(\"doc1\".to_string()), Some(\"doc2\".to_string())]),\n    None,\n    None\n).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Add records",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
             }
         ]))
     )
@@ -1981,11 +1914,6 @@ async fn collection_add(
                 "lang": "rust",
                 "label": "Update records",
                 "source": "use chroma_types::UpdateMetadata;\nlet mut metadata = UpdateMetadata::new();\nmetadata.insert(\"key\".to_string(), chroma_types::UpdateMetadataValue::Str(\"value\".to_string()));\ncollection.update(\n    vec![\"id1\".to_string()],\n    None,\n    Some(vec![Some(\"updated doc\".to_string())]),\n    None,\n    Some(vec![Some(metadata)])\n).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Update records",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\"], \"documents\": [\"updated doc\"], \"metadatas\": [{\"key\": \"value\"}]}'"
             }
         ]))
     )
@@ -2122,11 +2050,6 @@ async fn collection_update(
                 "lang": "rust",
                 "label": "Upsert records",
                 "source": "collection.upsert(\n    vec![\"id1\".to_string(), \"id2\".to_string()],\n    vec![vec![0.1, 0.2], vec![0.3, 0.4]],\n    Some(vec![Some(\"doc1\".to_string()), Some(\"doc2\".to_string())]),\n    None,\n    None\n).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Upsert records",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"], \"embeddings\": [[0.1, 0.2], [0.3, 0.4]], \"documents\": [\"doc1\", \"doc2\"]}'"
             }
         ]))
     )
@@ -2276,16 +2199,6 @@ async fn collection_upsert(
                 "lang": "rust",
                 "label": "Delete records by metadata filter",
                 "source": "use chroma_types::{Where, MetadataExpression, MetadataComparison, MetadataValue, PrimitiveOperator};\nlet where_clause = Where::Metadata(MetadataExpression {\n    key: \"category\".to_string(),\n    comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Str(\"old\".to_string())),\n});\ncollection.delete(None, Some(where_clause)).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Delete records by IDs",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
-            },
-            {
-                "lang": "curl",
-                "label": "Delete records by metadata filter",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"old\"}}'"
             }
         ]))
     )
@@ -2403,11 +2316,6 @@ async fn collection_delete(
                 "lang": "rust",
                 "label": "Count records",
                 "source": "let count = collection.count().await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Count records",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -2520,11 +2428,6 @@ async fn collection_count(
                 "lang": "rust",
                 "label": "Get indexing status",
                 "source": "let status = collection.get_indexing_status().await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Get indexing status",
-                "source": "curl -X GET 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status' \\\n  -H 'x-chroma-token: YOUR_API_KEY'"
             }
         ]))
     )
@@ -2658,16 +2561,6 @@ async fn indexing_status(
                 "lang": "rust",
                 "label": "Get records by metadata filter",
                 "source": "use chroma_types::{Where, MetadataExpression, MetadataComparison, MetadataValue, PrimitiveOperator, IncludeList};\nlet where_clause = Where::Metadata(MetadataExpression {\n    key: \"category\".to_string(),\n    comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Str(\"science\".to_string())),\n});\nlet response = collection.get(None, Some(where_clause), Some(10), None, None).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Get records by IDs",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"ids\": [\"id1\", \"id2\"]}'"
-            },
-            {
-                "lang": "curl",
-                "label": "Get records by metadata filter",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"where\": {\"category\": \"science\"}, \"limit\": 10}'"
             }
         ]))
     )
@@ -2844,16 +2737,6 @@ async fn collection_get(
                 "lang": "rust",
                 "label": "Query with metadata filter",
                 "source": "use chroma_types::{Where, MetadataExpression, MetadataComparison, MetadataValue, PrimitiveOperator};\nlet where_clause = Where::Metadata(MetadataExpression {\n    key: \"category\".to_string(),\n    comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, MetadataValue::Str(\"science\".to_string())),\n});\nlet results = collection.query(\n    vec![vec![0.1, 0.2, 0.3]],\n    Some(10),\n    Some(where_clause),\n    None,\n    None\n).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Query with embeddings",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}'"
-            },
-            {
-                "lang": "curl",
-                "label": "Query with text",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"query_texts\": [\"search text\"], \"n_results\": 10}'"
             }
         ]))
     )
@@ -3022,11 +2905,6 @@ async fn collection_query(
                 "lang": "rust",
                 "label": "Search with metadata filter",
                 "source": "use chroma_types::plan::{SearchPayload, ReadLevel};\nuse chroma_types::operator::{RankExpr, QueryVector, Key};\nlet search = SearchPayload::default()\n    .r#where(Key::field(\"category\").eq(\"science\"))\n    .rank(RankExpr::Knn {\n        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),\n        key: Key::Embedding,\n        limit: 100,\n        default: None,\n        return_rank: false,\n    })\n    .limit(Some(10), 0)\n    .select([Key::Document, Key::Score]);\nlet results = collection.search(vec![search]).await?;"
-            },
-            {
-                "lang": "curl",
-                "label": "Search with embeddings",
-                "source": "curl -X POST 'https://api.trychroma.com/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search' \\\n  -H 'x-chroma-token: YOUR_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"searches\": [{\"query_embeddings\": [[0.1, 0.2, 0.3]], \"n_results\": 10}]}'"
             }
         ]))
     )
