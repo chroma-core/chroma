@@ -1,0 +1,819 @@
+---
+title: "Python Reference"
+---
+
+## Installation
+
+<CodeGroup>
+```bash pip
+pip install chromadb
+```
+```bash poetry
+poetry add chromadb
+```
+```bash uv
+uv pip install chromadb
+```
+</CodeGroup>
+
+---
+
+## Clients
+
+### EphemeralClient
+
+Creates an in-memory instance of Chroma. This is useful for testing and development, but not recommended for production use.
+
+<ParamField path="settings" type="Optional[Settings]" />
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### PersistentClient
+
+Creates a persistent instance of Chroma that saves to disk. This is useful for testing and development, but not recommended for production use.
+
+<ParamField path="path" type="Union[str, Path]">
+  The directory to save Chroma's data to. Defaults to "./chroma".
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]" />
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### HttpClient
+
+Creates a client that connects to a remote Chroma server. This supports many clients connecting to the same server, and is the recommended way to
+use Chroma in production.
+
+<ParamField path="host" type="str">
+  The hostname of the Chroma server. Defaults to "localhost".
+</ParamField>
+
+<ParamField path="port" type="int">
+  The port of the Chroma server. Defaults to 8000.
+</ParamField>
+
+<ParamField path="ssl" type="bool">
+  Whether to use SSL to connect to the Chroma server. Defaults to False.
+</ParamField>
+
+<ParamField path="headers" type="Optional[Dict[str, str]]">
+  A dictionary of headers to send to the Chroma server. Defaults to {}.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]">
+  A dictionary of settings to communicate with the chroma server.
+</ParamField>
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### AsyncHttpClient
+
+Creates an async client that connects to a remote Chroma server. This supports many clients connecting to the same server, and is the recommended way to
+use Chroma in production.
+
+<ParamField path="host" type="str">
+  The hostname of the Chroma server. Defaults to "localhost".
+</ParamField>
+
+<ParamField path="port" type="int">
+  The port of the Chroma server. Defaults to 8000.
+</ParamField>
+
+<ParamField path="ssl" type="bool">
+  Whether to use SSL to connect to the Chroma server. Defaults to False.
+</ParamField>
+
+<ParamField path="headers" type="Optional[Dict[str, str]]">
+  A dictionary of headers to send to the Chroma server. Defaults to {}.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]">
+  A dictionary of settings to communicate with the chroma server.
+</ParamField>
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### CloudClient
+
+Creates a client to connect to a tenant and database on Chroma cloud.
+
+<ParamField path="tenant" type="Optional[str]">
+  The tenant to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single tenant. If provided, it will be validated against the API key's scope.
+</ParamField>
+
+<ParamField path="database" type="Optional[str]">
+  The database to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single database. If provided, it will be validated against the API key's scope.
+</ParamField>
+
+<ParamField path="api_key" type="Optional[str]">
+  The api key to use for this client.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]" />
+
+<ParamField path="cloud_host" type="str" />
+
+<ParamField path="cloud_port" type="int" />
+
+<ParamField path="enable_ssl" type="bool" />
+
+
+### AdminClient
+
+Creates an admin client that can be used to create tenants and databases.
+
+<ParamField path="settings" type="Settings" />
+
+
+---
+
+## Client Methods
+
+### heartbeat
+
+Get the current time in nanoseconds since epoch. Used to check if the server is alive.
+
+**Returns:** The current time in nanoseconds since epoch
+
+
+### list_collections
+
+List all collections.
+
+<ParamField path="limit" type="Optional[int]">
+  The maximum number of entries to return. Defaults to None.
+</ParamField>
+
+<ParamField path="offset" type="Optional[int]">
+  The number of entries to skip before returning. Defaults to None.
+</ParamField>
+
+**Returns:** A list of collections
+
+
+### count_collections
+
+Count the number of collections.
+
+**Returns:** The number of collections.
+
+
+### create_collection
+
+Create a new collection with the given name and metadata.
+
+<ParamField path="name" type="str" required>
+  The name of the collection to create.
+</ParamField>
+
+<ParamField path="schema" type="Optional[Schema]" />
+
+<ParamField path="configuration" type="Optional[CreateCollectionConfiguration]" />
+
+<ParamField path="metadata" type="Optional[Dict[str, Any]]">
+  Optional metadata to associate with the collection.
+</ParamField>
+
+<ParamField path="embedding_function" type="Optional[EmbeddingFunction[Optional[Embeddings]]]">
+  Optional function to use to embed documents.
+Uses the default embedding function if not provided.
+</ParamField>
+
+<ParamField path="data_loader" type="Optional[DataLoader[Optional[Embeddings]]]">
+  Optional function to use to load records (documents, images, etc.)
+</ParamField>
+
+<ParamField path="get_or_create" type="bool">
+  If True, return the existing collection if it exists.
+</ParamField>
+
+**Returns:** The newly created collection.
+
+**Raises:**
+
+- ValueError: If the collection already exists and get_or_create is False.
+- ValueError: If the collection name is invalid.
+
+
+### get_collection
+
+Get a collection with the given name.
+
+<ParamField path="name" type="str" required>
+  The name of the collection to get
+</ParamField>
+
+<ParamField path="embedding_function" type="Optional[EmbeddingFunction[Optional[Embeddings]]]">
+  Optional function to use to embed documents.
+Uses the default embedding function if not provided.
+</ParamField>
+
+<ParamField path="data_loader" type="Optional[DataLoader[Optional[Embeddings]]]">
+  Optional function to use to load records (documents, images, etc.)
+</ParamField>
+
+**Returns:** The collection
+
+**Raises:**
+
+- ValueError: If the collection does not exist
+
+
+### get_or_create_collection
+
+Get or create a collection with the given name and metadata. Args:
+    name: The name of the collection to get or create
+    metadata: Optional metadata to associate with the collection. If
+    the collection already exists, the metadata provided is ignored.
+    If the collection does not exist, the new collection will be created
+    with the provided metadata.
+    embedding_function: Optional function to use to embed documents
+    data_loader: Optional function to use to load records (documents, images, etc.)
+
+Returns:
+    The collection
+
+Examples:
+    ```python
+    client.get_or_create_collection("my_collection")
+    # collection(name="my_collection", metadata={})
+    ```
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="schema" type="Optional[Schema]" />
+
+<ParamField path="configuration" type="Optional[CreateCollectionConfiguration]" />
+
+<ParamField path="metadata" type="Optional[Dict[str, Any]]" />
+
+<ParamField path="embedding_function" type="Optional[EmbeddingFunction[Optional[Embeddings]]]" />
+
+<ParamField path="data_loader" type="Optional[DataLoader[Optional[Embeddings]]]" />
+
+
+### delete_collection
+
+Delete a collection with the given name.
+
+<ParamField path="name" type="str" required>
+  The name of the collection to delete.
+</ParamField>
+
+**Raises:**
+
+- ValueError: If the collection does not exist.
+
+
+### reset
+
+Resets the database. This will delete all collections and entries.
+
+**Returns:** True if the database was reset successfully.
+
+
+### get_version
+
+Get the version of Chroma.
+
+**Returns:** The version of Chroma
+
+
+### get_settings
+
+Get the settings used to initialize.
+
+**Returns:** The settings used to initialize.
+
+
+### get_max_batch_size
+
+Return the maximum number of records that can be created or mutated in a single call.
+
+
+---
+
+## Admin Client Methods
+
+### create_tenant
+
+Create a new tenant. Raises an error if the tenant already exists.
+
+<ParamField path="name" type="str" required />
+
+
+### get_tenant
+
+Get a tenant. Raises an error if the tenant does not exist.
+
+<ParamField path="name" type="str" required />
+
+
+### create_database
+
+Create a new database. Raises an error if the database already exists.
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="tenant" type="str" />
+
+
+### get_database
+
+Get a database. Raises an error if the database does not exist.
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="tenant" type="str">
+  The tenant of the database to get.
+</ParamField>
+
+
+### delete_database
+
+Delete a database. Raises an error if the database does not exist.
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="tenant" type="str">
+  The tenant of the database to delete.
+</ParamField>
+
+
+### list_databases
+
+List all databases for a tenant. Raises an error if the tenant does not exist.
+
+<ParamField path="limit" type="Optional[int]" />
+
+<ParamField path="offset" type="Optional[int]" />
+
+<ParamField path="tenant" type="str">
+  The tenant to list databases for.
+</ParamField>
+
+
+---
+
+## Collection Methods
+
+### count
+
+The total number of embeddings added to the database
+
+**Returns:** The total number of embeddings added to the database
+
+
+### add
+
+Add embeddings to the data store.
+
+<ParamField path="ids" type="Union[str, IDs]" required>
+  The ids of the embeddings you wish to add
+</ParamField>
+
+<ParamField path="embeddings" type="Optional[Embeddings]">
+  The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
+</ParamField>
+
+<ParamField path="metadatas" type="Union[Metadata, List[Metadata], None]">
+  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+</ParamField>
+
+<ParamField path="documents" type="Union[str, IDs, None]">
+  The documents to associate with the embeddings. Optional.
+</ParamField>
+
+<ParamField path="images" type="Optional[Embeddings]">
+  The images to associate with the embeddings. Optional.
+</ParamField>
+
+<ParamField path="uris" type="Union[str, IDs, None]">
+  The uris of the images to associate with the embeddings. Optional.
+</ParamField>
+
+**Returns:** None
+
+**Raises:**
+
+- ValueError: If you don't provide either embeddings or documents
+- ValueError: If the length of ids, embeddings, metadatas, or documents don't match
+- ValueError: If you don't provide an embedding function and don't provide embeddings
+- ValueError: If you provide both embeddings and documents
+- ValueError: If you provide an id that already exists
+
+
+### get
+
+Get embeddings and their associate data from the data store. If no ids or where filter is provided returns all embeddings up to limit starting at offset.
+
+<ParamField path="ids" type="Union[str, IDs, None]">
+  The ids of the embeddings to get. Optional.
+</ParamField>
+
+<ParamField path="where" type="Optional[Where]">
+  A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+</ParamField>
+
+<ParamField path="limit" type="Optional[int]">
+  The number of documents to return. Optional.
+</ParamField>
+
+<ParamField path="offset" type="Optional[int]">
+  The offset to start returning results from. Useful for paging results with limit. Optional.
+</ParamField>
+
+<ParamField path="where_document" type="Optional[Dict[Where, Union[str, List[Dict[Where, Union[str, List[WhereDocument]]]]]]]">
+  A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
+</ParamField>
+
+<ParamField path="include" type="List[Literal[documents, embeddings, metadatas, distances, uris, data]]">
+  A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
+</ParamField>
+
+**Returns:** A GetResult object containing the results.
+
+
+### peek
+
+Get the first few results in the database up to limit
+
+<ParamField path="limit" type="int">
+  The number of results to return.
+</ParamField>
+
+**Returns:** A GetResult object containing the results.
+
+
+### query
+
+Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
+
+<ParamField path="query_embeddings" type="Optional[Embeddings]">
+  The embeddings to get the closes neighbors of. Optional.
+</ParamField>
+
+<ParamField path="query_texts" type="Union[str, IDs, None]">
+  The document texts to get the closes neighbors of. Optional.
+</ParamField>
+
+<ParamField path="query_images" type="Optional[Embeddings]">
+  The images to get the closes neighbors of. Optional.
+</ParamField>
+
+<ParamField path="query_uris" type="Union[str, IDs, None]">
+  The URIs to be used with data loader. Optional.
+</ParamField>
+
+<ParamField path="ids" type="Union[str, IDs, None]">
+  A subset of ids to search within. Optional.
+</ParamField>
+
+<ParamField path="n_results" type="int">
+  The number of neighbors to return for each query_embedding or query_texts. Optional.
+</ParamField>
+
+<ParamField path="where" type="Optional[Where]">
+  A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
+</ParamField>
+
+<ParamField path="where_document" type="Optional[Dict[Where, Union[str, List[Dict[Where, Union[str, List[WhereDocument]]]]]]]">
+  A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
+</ParamField>
+
+<ParamField path="include" type="List[Literal[documents, embeddings, metadatas, distances, uris, data]]">
+  A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
+</ParamField>
+
+**Returns:** A QueryResult object containing the results.
+
+**Raises:**
+
+- ValueError: If you don't provide either query_embeddings, query_texts, or query_images
+- ValueError: If you provide both query_embeddings and query_texts
+- ValueError: If you provide both query_embeddings and query_images
+- ValueError: If you provide both query_texts and query_images
+
+
+### modify
+
+Modify the collection name or metadata
+
+<ParamField path="name" type="Optional[str]">
+  The updated name for the collection. Optional.
+</ParamField>
+
+<ParamField path="metadata" type="Optional[Dict[str, Any]]">
+  The updated metadata for the collection. Optional.
+</ParamField>
+
+<ParamField path="configuration" type="Optional[UpdateCollectionConfiguration]" />
+
+**Returns:** None
+
+
+### update
+
+Update the embeddings, metadatas or documents for provided ids.
+
+<ParamField path="ids" type="Union[str, IDs]" required>
+  The ids of the embeddings to update
+</ParamField>
+
+<ParamField path="embeddings" type="Optional[Embeddings]">
+  The embeddings to update. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
+</ParamField>
+
+<ParamField path="metadatas" type="Union[Metadata, List[Metadata], None]">
+  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+</ParamField>
+
+<ParamField path="documents" type="Union[str, IDs, None]">
+  The documents to associate with the embeddings. Optional.
+</ParamField>
+
+<ParamField path="images" type="Optional[Embeddings]">
+  The images to associate with the embeddings. Optional.
+</ParamField>
+
+<ParamField path="uris" type="Union[str, IDs, None]" />
+
+**Returns:** None
+
+
+### upsert
+
+Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
+
+<ParamField path="ids" type="Union[str, IDs]" required>
+  The ids of the embeddings to update
+</ParamField>
+
+<ParamField path="embeddings" type="Optional[Embeddings]">
+  The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
+</ParamField>
+
+<ParamField path="metadatas" type="Union[Metadata, List[Metadata], None]">
+  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
+</ParamField>
+
+<ParamField path="documents" type="Union[str, IDs, None]">
+  The documents to associate with the embeddings. Optional.
+</ParamField>
+
+<ParamField path="images" type="Optional[Embeddings]" />
+
+<ParamField path="uris" type="Union[str, IDs, None]" />
+
+**Returns:** None
+
+
+### delete
+
+Delete the embeddings based on ids and/or a where filter
+
+<ParamField path="ids" type="Optional[IDs]">
+  The ids of the embeddings to delete
+</ParamField>
+
+<ParamField path="where" type="Optional[Where]">
+  A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
+</ParamField>
+
+<ParamField path="where_document" type="Optional[Dict[Where, Union[str, List[Dict[Where, Union[str, List[WhereDocument]]]]]]]">
+  A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
+</ParamField>
+
+**Returns:** None
+
+**Raises:**
+
+- ValueError: If you don't provide either ids, where, or where_document
+
+
+---
+
+## Embedding Functions
+
+### EmbeddingFunction
+
+A protocol for embedding functions. To implement a new embedding function,
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `build_from_config()`, `default_space()`, `embed_query()`, `embed_with_retries()`, `get_config()`, `is_legacy()`, `name()`, `supported_spaces()`, `validate_config()`, `validate_config_update()`
+
+
+### SparseEmbeddingFunction
+
+A protocol for sparse vector functions. To implement a new sparse vector function,
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `build_from_config()`, `embed_query()`, `embed_with_retries()`, `get_config()`, `name()`, `validate_config()`, `validate_config_update()`
+
+
+---
+
+## Types
+
+### Embedding
+
+`Embedding[Tuple[Any, Ellipsis], dtype[Union[int32, float32]]]`
+
+
+### SparseVector
+
+Represents a sparse vector using parallel arrays for indices and values.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="indices" type="List[int]" />
+
+<ParamField path="values" type="List[float]" />
+
+<ParamField path="labels" type="Optional[IDs]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+### Schema
+
+Collection schema for configuring indexes and encryption.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="defaults" type="ValueTypes" />
+
+<ParamField path="keys" type="Dict[str, ValueTypes]" />
+
+<ParamField path="cmek" type="Optional[Cmek]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `create_index()`, `delete_index()`, `deserialize_from_json()`, `serialize_to_json()`, `set_cmek()`
+
+
+### Search
+
+Payload for hybrid search operations.
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `group_by()`, `limit()`, `rank()`, `select()`, `select_all()`, `to_dict()`, `where()`
+
+
+### Select
+
+Selection configuration for search results.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="keys" type="Set[Union[Key, str]]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+### Knn
+
+KNN-based ranking
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="query" type="Optional[Embeddings]" />
+
+<ParamField path="key" type="Union[Key, str]" />
+
+<ParamField path="limit" type="int" />
+
+<ParamField path="default" type="Optional[float]" />
+
+<ParamField path="return_rank" type="bool" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `abs()`, `exp()`, `from_dict()`, `log()`, `max()`, `min()`, `to_dict()`
+
+
+### Rrf
+
+Reciprocal Rank Fusion for combining multiple ranking strategies.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ranks" type="List[Rank]" />
+
+<ParamField path="k" type="int" />
+
+<ParamField path="weights" type="Optional[List[float]]" />
+
+<ParamField path="normalize" type="bool" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `abs()`, `exp()`, `from_dict()`, `log()`, `max()`, `min()`, `to_dict()`
+
+
+### GetResult
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ids" type="IDs" />
+
+<ParamField path="embeddings" type="Optional[Embeddings]" />
+
+<ParamField path="documents" type="Optional[IDs]" />
+
+<ParamField path="uris" type="Optional[IDs]" />
+
+<ParamField path="data" type="Optional[Optional[Embeddings]]" />
+
+<ParamField path="metadatas" type="Optional[List[Metadata]]" />
+
+<ParamField path="included" type="List[Literal[documents, embeddings, metadatas, distances, uris, data]]" />
+
+
+### QueryResult
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ids" type="List[IDs]" />
+
+<ParamField path="embeddings" type="Optional[Embeddings]" />
+
+<ParamField path="documents" type="Optional[List[IDs]]" />
+
+<ParamField path="uris" type="Optional[List[IDs]]" />
+
+<ParamField path="data" type="Optional[List[Optional[Embeddings]]]" />
+
+<ParamField path="metadatas" type="Optional[List[List[Metadata]]]" />
+
+<ParamField path="distances" type="Optional[List[List[float]]]" />
+
+<ParamField path="included" type="List[Literal[documents, embeddings, metadatas, distances, uris, data]]" />
+
+
+### SearchResult
+
+Column-major response from the search API with conversion methods.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ids" type="List[IDs]" />
+
+<ParamField path="documents" type="List[Optional[List[Optional[str]]]]" />
+
+<ParamField path="embeddings" type="List[Optional[List[Optional[List[float]]]]]" />
+
+<ParamField path="metadatas" type="List[Optional[List[Optional[Dict[str, Any]]]]]" />
+
+<ParamField path="scores" type="List[Optional[List[Optional[float]]]]" />
+
+<ParamField path="select" type="List[IDs]" />
+
+
+<span class="text-sm">Methods</span>
+
+`rows()`

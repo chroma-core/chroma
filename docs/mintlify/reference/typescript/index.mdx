@@ -1,0 +1,597 @@
+---
+title: "TypeScript Reference"
+---
+
+## Installation
+
+<CodeGroup>
+```bash npm
+npm install chromadb
+```
+```bash pnpm
+pnpm add chromadb
+```
+```bash bun
+bun add chromadb
+```
+```bash yarn
+yarn add chromadb
+```
+</CodeGroup>
+
+The TypeScript SDK also has multiple extensions for popular embedding providers. See the full list on the [integrations page](/integrations/chroma-integrations).
+
+---
+
+## Clients
+
+### ChromaClient
+
+Main client class for interacting with ChromaDB.
+Provides methods for managing collections and performing operations on them.
+
+<ParamField path="host" type="string | undefined">
+  The host address of the Chroma server. Defaults to 'localhost'
+</ParamField>
+
+<ParamField path="port" type="number | undefined">
+  The port number of the Chroma server. Defaults to 8000
+</ParamField>
+
+<ParamField path="ssl" type="boolean | undefined">
+  Whether to use SSL/HTTPS for connections. Defaults to false
+</ParamField>
+
+<ParamField path="tenant" type="string | undefined">
+  The tenant name in the Chroma server to connect to
+</ParamField>
+
+<ParamField path="database" type="string | undefined">
+  The database name to connect to
+</ParamField>
+
+<ParamField path="headers" type="Record<string, string> | undefined">
+  Additional HTTP headers to send with requests
+</ParamField>
+
+<ParamField path="fetchOptions" type="RequestInit | undefined">
+  Additional fetch options for HTTP requests
+</ParamField>
+
+<ParamField path="path" type="string | undefined" />
+
+<ParamField path="auth" type="Record<string, string> | undefined" />
+
+
+### CloudClient
+
+ChromaDB cloud client for connecting to hosted Chroma instances.
+Extends ChromaClient with cloud-specific authentication and configuration.
+
+<ParamField path="apiKey" type="string" />
+
+<ParamField path="host" type="string" />
+
+<ParamField path="port" type="number" />
+
+<ParamField path="tenant" type="string" />
+
+<ParamField path="database" type="string" />
+
+<ParamField path="fetchOptions" type="RequestInit" />
+
+
+### AdminClient
+
+Administrative client for managing ChromaDB tenants and databases.
+Provides methods for creating, deleting, and listing tenants and databases.
+
+<ParamField path="host" type="string" required>
+  The host address of the Chroma server
+</ParamField>
+
+<ParamField path="port" type="number" required>
+  The port number of the Chroma server
+</ParamField>
+
+<ParamField path="ssl" type="boolean" required>
+  Whether to use SSL/HTTPS for connections
+</ParamField>
+
+<ParamField path="headers" type="Record<string, string> | undefined">
+  Additional HTTP headers to send with requests
+</ParamField>
+
+<ParamField path="fetchOptions" type="RequestInit | undefined">
+  Additional fetch options for HTTP requests
+</ParamField>
+
+
+---
+
+## Client Methods
+
+### heartbeat
+
+Sends a heartbeat request to check server connectivity.
+
+**Returns:** Promise resolving to the server's nanosecond heartbeat timestamp
+
+
+### listCollections
+
+Lists all collections in the current database.
+
+<ParamField path="limit" type="number" required />
+
+<ParamField path="offset" type="number" required />
+
+**Returns:** Promise resolving to an array of Collection instances
+
+
+### countCollections
+
+Gets the total number of collections in the current database.
+
+**Returns:** Promise resolving to the collection count
+
+
+### createCollection
+
+Creates a new collection with the specified configuration.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="configuration" type="CreateCollectionConfiguration" />
+
+<ParamField path="metadata" type="CollectionMetadata" />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction | null" />
+
+<ParamField path="schema" type="Schema" />
+
+**Returns:** Promise resolving to the created Collection instance
+
+
+### getCollection
+
+Retrieves an existing collection by name.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction" />
+
+**Returns:** Promise resolving to the Collection instance
+
+
+### getOrCreateCollection
+
+Gets an existing collection or creates it if it doesn't exist.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="configuration" type="CreateCollectionConfiguration" />
+
+<ParamField path="metadata" type="CollectionMetadata" />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction | null" />
+
+<ParamField path="schema" type="Schema" />
+
+**Returns:** Promise resolving to the Collection instance
+
+
+### deleteCollection
+
+Deletes a collection and all its data.
+
+<ParamField path="name" type="string" required />
+
+
+### reset
+
+Resets the entire database, deleting all collections and data.
+
+**Returns:** Promise that resolves when the reset is complete
+
+
+### version
+
+Gets the version of the Chroma server.
+
+**Returns:** Promise resolving to the server version string
+
+
+---
+
+## Admin Client Methods
+
+### createTenant
+
+Creates a new tenant.
+
+<ParamField path="name" type="string" required />
+
+
+### getTenant
+
+Retrieves information about a specific tenant.
+
+<ParamField path="name" type="string" required />
+
+**Returns:** Promise resolving to the tenant name
+
+
+### createDatabase
+
+Creates a new database within a tenant.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="tenant" type="string" required />
+
+
+### getDatabase
+
+Retrieves information about a specific database.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="tenant" type="string" required />
+
+**Returns:** Promise resolving to database information
+
+
+### deleteDatabase
+
+Deletes a database and all its data.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="tenant" type="string" required />
+
+
+### listDatabases
+
+Lists all databases within a tenant.
+
+<ParamField path="args" type="ListDatabasesArgs" required>
+  Listing parameters including tenant and pagination
+</ParamField>
+
+**Returns:** Promise resolving to an array of database information
+
+
+---
+
+## Collection Methods
+
+### count
+
+Gets the total number of records in the collection
+
+
+### add
+
+Adds new records to the collection.
+
+<ParamField path="ids" type="string[]" required />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="metadatas" type="Metadata[]" />
+
+<ParamField path="documents" type="string[]" />
+
+<ParamField path="uris" type="string[]" />
+
+
+### get
+
+Retrieves records from the collection based on filters.
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="where" type="Where" />
+
+<ParamField path="limit" type="number" />
+
+<ParamField path="offset" type="number" />
+
+<ParamField path="whereDocument" type="WhereDocument" />
+
+<ParamField path="include" type="Include[]" />
+
+**Returns:** Promise resolving to matching records
+
+
+### peek
+
+Retrieves a preview of records from the collection.
+
+<ParamField path="limit" type="number" />
+
+**Returns:** Promise resolving to a sample of records
+
+
+### query
+
+Performs similarity search on the collection.
+
+<ParamField path="queryEmbeddings" type="Embeddings" />
+
+<ParamField path="queryTexts" type="string[]" />
+
+<ParamField path="queryURIs" type="string[]" />
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="nResults" type="number" />
+
+<ParamField path="where" type="Where" />
+
+<ParamField path="whereDocument" type="WhereDocument" />
+
+<ParamField path="include" type="Include[]" />
+
+**Returns:** Promise resolving to similar records ranked by distance
+
+
+### modify
+
+Modifies collection properties like name, metadata, or configuration.
+
+<ParamField path="name" type="string" />
+
+<ParamField path="metadata" type="CollectionMetadata" />
+
+<ParamField path="configuration" type="UpdateCollectionConfiguration" />
+
+
+### update
+
+Updates existing records in the collection.
+
+<ParamField path="ids" type="string[]" required />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="metadatas" type="Metadata[]" />
+
+<ParamField path="documents" type="string[]" />
+
+<ParamField path="uris" type="string[]" />
+
+
+### upsert
+
+Inserts new records or updates existing ones (upsert operation).
+
+<ParamField path="ids" type="string[]" required />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="metadatas" type="Metadata[]" />
+
+<ParamField path="documents" type="string[]" />
+
+<ParamField path="uris" type="string[]" />
+
+
+### delete
+
+Deletes records from the collection based on filters.
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="where" type="Where" />
+
+<ParamField path="whereDocument" type="WhereDocument" />
+
+
+### search
+
+Performs hybrid search on the collection using expression builders.
+
+<ParamField path="searches" type="SearchLike | SearchLike[]" required>
+  Single search payload or array of payloads
+</ParamField>
+
+<ParamField path="readLevel" type="ReadLevel" />
+
+**Returns:** Promise resolving to column-major search results
+
+
+---
+
+## Embedding Functions
+
+### EmbeddingFunction
+
+Interface for embedding functions.
+Embedding functions transform text documents into numerical representations
+that can be used for similarity search and other vector operations.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="name" type="string | undefined">
+  Optional name identifier for the embedding function
+</ParamField>
+
+
+<span class="text-sm">Methods</span>
+
+`buildFromConfig()`, `defaultSpace()`, `generate()`, `generateForQueries()`, `getConfig()`, `supportedSpaces()`, `validateConfig()`, `validateConfigUpdate()`
+
+
+### SparseEmbeddingFunction
+
+Interface for sparse embedding functions.
+Sparse embedding functions transform text documents into sparse numerical representations
+where only non-zero values are stored, making them efficient for high-dimensional spaces.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="name" type="string | undefined">
+  Optional name identifier for the embedding function
+</ParamField>
+
+
+<span class="text-sm">Methods</span>
+
+`buildFromConfig()`, `generate()`, `generateForQueries()`, `getConfig()`, `validateConfig()`, `validateConfigUpdate()`
+
+
+---
+
+## Types
+
+### CollectionMetadata
+
+Metadata that can be associated with a collection.
+Values must be boolean, number, or string types.
+
+`Record< string, boolean | number | string | SparseVector | null >`
+
+
+### Metadata
+
+Metadata that can be associated with individual records.
+Values must be boolean, number, or string types.
+
+`Record< string, boolean | number | string | SparseVector | null >`
+
+
+### Where
+
+Where clause for filtering records based on metadata.
+Supports field equality, comparison operators, and logical operators.
+
+`{ [key: string]: LiteralValue | OperatorExpression } | { $and: Where[] } | { $or: Where[] }`
+
+
+### WhereDocument
+
+Where clause for filtering based on document content.
+Supports text search operators and logical combinations.
+
+`{ $contains: string } | { $not_contains: string } | { $matches: string } | { $not_matches: string } | { $regex: string } | { $not_regex: string } | { $and: WhereDocument[] } | { $or: WhereDocument[] }`
+
+
+### GetResult
+
+Result class for get operations, containing retrieved records.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="documents" type="(string | null)[]" />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="include" type="Include[]" />
+
+<ParamField path="metadatas" type="(TMeta | null)[]" />
+
+<ParamField path="uris" type="(string | null)[]" />
+
+
+### QueryResult
+
+Result class for query operations, containing search results.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="distances" type="(number | null)[][]" />
+
+<ParamField path="documents" type="(string | null)[][]" />
+
+<ParamField path="embeddings" type="(Embedding | null)[][]" />
+
+<ParamField path="ids" type="string[][]" />
+
+<ParamField path="include" type="Include[]" />
+
+<ParamField path="metadatas" type="(TMeta | null)[][]" />
+
+<ParamField path="uris" type="(string | null)[][]" />
+
+
+### ReadLevel
+
+`"index_and_wal" | "index_only"`
+
+
+### IncludeEnum
+
+Enum specifying which fields to include in query results.
+
+`"distances" | "documents" | "embeddings" | "metadatas" | "uris"`
+
+
+### Search
+
+
+### Select
+
+
+### Knn
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="query" type="string | SparseVector | IterableInput<number>" />
+
+<ParamField path="key" type="string | Key | undefined" />
+
+<ParamField path="limit" type="number | undefined" />
+
+<ParamField path="default" type="number | null | undefined" />
+
+<ParamField path="returnRank" type="boolean | undefined" />
+
+
+### Rrf
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ranks" type="RankInput[]" />
+
+<ParamField path="k" type="number | undefined" />
+
+<ParamField path="weights" type="Embedding | undefined" />
+
+<ParamField path="normalize" type="boolean | undefined" />
+
+
+### SearchResult
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ids" type="string[][]" />
+
+<ParamField path="documents" type="((string | null)[] | null)[]" />
+
+<ParamField path="embeddings" type="((Embedding | null)[] | null)[]" />
+
+<ParamField path="metadatas" type="((Metadata | null)[] | null)[]" />
+
+<ParamField path="scores" type="((number | null)[] | null)[]" />
+
+<ParamField path="select" type="Key[][]" />
+
+
+### Schema
+
+Collection schema for configuring indexes and encryption.
+
+The schema controls how data is indexed and can optionally specify
+customer-managed encryption keys (CMEK) for data at rest.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="defaults" type="ValueTypes" />
+
+<ParamField path="keys" type="Record<string, ValueTypes>" />
+
+<ParamField path="cmek" type="Cmek | null" />

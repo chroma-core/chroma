@@ -42,3 +42,11 @@
   mask-repeat: no-repeat;
 }
 
+a[href="/reference/typescript"] [data-component-part="card-icon"] svg {
+  -webkit-mask-image: url("/images/typescript.svg") !important;
+  mask-image: url("/images/typescript.svg") !important;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
