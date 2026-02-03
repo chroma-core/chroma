@@ -193,6 +193,8 @@ def _test_add(
             documents=cast(List[str], record_set["documents"]),
         )
     )
+    if len(batches) == 1:
+        batches.append(batches[0])
     for batch_index, batch in enumerate(batches):
         if batch_index % 2 == 0:
             coll1.add(*batch)
