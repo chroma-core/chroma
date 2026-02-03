@@ -113,7 +113,7 @@ impl QuantizedClusterDelta {
         bit_util::round_upto_multiple_of_64(inner.prefix_size) // prefix strings
             + bit_util::round_upto_multiple_of_64(inner.key_size) // key data
             + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>()) // centers
-            + bit_util::round_upto_multiple_of_64(inner.vector_count * code_length) // codes
+            + bit_util::round_upto_multiple_of_64(inner.vector_count * code_length * size_of::<u8>()) // codes
             + bit_util::round_upto_multiple_of_64(inner.vector_count * size_of::<u32>()) * 2 // ids + versions
             + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3 // list offsets (i32)
             + K::offset_size(cluster_count) // key-specific offsets
@@ -179,7 +179,7 @@ impl QuantizedClusterDelta {
             let total_size = bit_util::round_upto_multiple_of_64(prefix_size) // prefix strings
                 + bit_util::round_upto_multiple_of_64(key_size) // key data
                 + bit_util::round_upto_multiple_of_64(cluster_count * dimension * size_of::<f32>()) // centers
-                + bit_util::round_upto_multiple_of_64(vector_count * code_length) // codes
+                + bit_util::round_upto_multiple_of_64(vector_count * code_length * size_of::<u8>()) // codes
                 + bit_util::round_upto_multiple_of_64(vector_count * size_of::<u32>()) * 2 // ids + versions
                 + bit_util::round_upto_multiple_of_64((cluster_count + 1) * 4) * 3 // list offsets (i32)
                 + K::offset_size(cluster_count); // key-specific offsets

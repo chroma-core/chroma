@@ -22,6 +22,9 @@ use crate::{
     quantization::Code, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
+/// Buffer for index resizing
+const RESERVE_BUFFER: usize = 128;
+
 /// Configuration for opening a USearch index.
 #[derive(Clone)]
 pub struct USearchIndexConfig {
@@ -199,9 +202,11 @@ impl VectorIndex for USearchIndex {
             .map(|center| Code::<_>::quantize(vector, center));
 
         let index = self.index.write();
-        if index.size() + self.tombstones.load(Ordering::SeqCst) >= index.capacity() {
+        if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
+            >= index.capacity()
+        {
             index
-                .reserve(index.capacity().max(128) * 2)
+                .reserve(index.capacity().max(RESERVE_BUFFER) * 2)
                 .map_err(|e| USearchError::Index(e.to_string()))?
         }
 
@@ -238,7 +243,7 @@ impl VectorIndex for USearchIndex {
     }
 
     fn remove(&self, key: u32) -> Result<(), Self::Error> {
-        self.tombstones.fetch_add(1, Ordering::SeqCst);
+        self.tombstones.fetch_add(1, Ordering::Relaxed);
         self.index
             .write()
             .remove(key as u64)
