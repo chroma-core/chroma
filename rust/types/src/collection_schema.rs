@@ -4381,6 +4381,7 @@ mod tests {
                 ef_search: 60,
                 max_neighbors: 24,
                 space: Space::Cosine,
+                center_drift_threshold: 0.125,
             }),
             embedding_function: None,
         };
@@ -4494,6 +4495,7 @@ mod tests {
                 ef_search: 60,
                 max_neighbors: 24,
                 space: Space::Cosine,
+                center_drift_threshold: 0.125,
             }),
             embedding_function: None,
         };
@@ -4713,6 +4715,7 @@ mod tests {
                 ef_search: 60,
                 max_neighbors: 24,
                 space: Space::Cosine,
+                center_drift_threshold: 0.125,
             }),
             embedding_function: None,
         };
