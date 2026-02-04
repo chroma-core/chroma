@@ -1,5 +1,86 @@
 use serde::{Deserialize, Serialize};
 
+/// Session pool configuration for Spanner connections.
+///
+/// The default values are tuned for production workloads with higher concurrency and longer
+/// timeouts than the library defaults.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpannerSessionPoolConfig {
+    /// How long to wait for a session before timing out.  Default: 30 seconds.
+    #[serde(default = "SpannerSessionPoolConfig::default_session_get_timeout_secs")]
+    pub session_get_timeout_secs: u64,
+    /// Maximum concurrent sessions.  Default: 400.
+    #[serde(default = "SpannerSessionPoolConfig::default_max_opened")]
+    pub max_opened: usize,
+    /// Minimum sessions to keep warm.  Default: 25.
+    #[serde(default = "SpannerSessionPoolConfig::default_min_opened")]
+    pub min_opened: usize,
+}
+
+impl SpannerSessionPoolConfig {
+    fn default_session_get_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_max_opened() -> usize {
+        400
+    }
+
+    fn default_min_opened() -> usize {
+        25
+    }
+}
+
+impl Default for SpannerSessionPoolConfig {
+    fn default() -> Self {
+        Self {
+            session_get_timeout_secs: Self::default_session_get_timeout_secs(),
+            max_opened: Self::default_max_opened(),
+            min_opened: Self::default_min_opened(),
+        }
+    }
+}
+
+/// Channel configuration for gRPC connections to Spanner.
+///
+/// Controls the number of gRPC channels and their timeouts.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpannerChannelConfig {
+    /// Number of gRPC channels.  Default: 4.
+    #[serde(default = "SpannerChannelConfig::default_num_channels")]
+    pub num_channels: usize,
+    /// Connection timeout in seconds.  Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    /// Request timeout in seconds.  Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl SpannerChannelConfig {
+    fn default_num_channels() -> usize {
+        4
+    }
+
+    fn default_connect_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_timeout_secs() -> u64 {
+        30
+    }
+}
+
+impl Default for SpannerChannelConfig {
+    fn default() -> Self {
+        Self {
+            num_channels: Self::default_num_channels(),
+            connect_timeout_secs: Self::default_connect_timeout_secs(),
+            timeout_secs: Self::default_timeout_secs(),
+        }
+    }
+}
+
 /// Configuration for connecting to a Spanner emulator (local development)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpannerEmulatorConfig {
@@ -15,6 +96,10 @@ pub struct SpannerEmulatorConfig {
     pub instance: String,
     #[serde(default = "SpannerEmulatorConfig::default_database")]
     pub database: String,
+    #[serde(default)]
+    pub session_pool: SpannerSessionPoolConfig,
+    #[serde(default)]
+    pub channel: SpannerChannelConfig,
 }
 
 impl Default for SpannerEmulatorConfig {
@@ -26,6 +111,8 @@ impl Default for SpannerEmulatorConfig {
             project: Self::default_project(),
             instance: Self::default_instance(),
             database: Self::default_database(),
+            session_pool: SpannerSessionPoolConfig::default(),
+            channel: SpannerChannelConfig::default(),
         }
     }
 }
@@ -69,6 +156,7 @@ impl SpannerEmulatorConfig {
     }
 }
 
+/// Configuration for connecting to Google Cloud Spanner.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpannerGcpConfig {
     #[serde(default = "SpannerGcpConfig::default_project")]
@@ -77,6 +165,10 @@ pub struct SpannerGcpConfig {
     pub instance: String,
     #[serde(default = "SpannerGcpConfig::default_database")]
     pub database: String,
+    #[serde(default)]
+    pub session_pool: SpannerSessionPoolConfig,
+    #[serde(default)]
+    pub channel: SpannerChannelConfig,
 }
 
 impl SpannerGcpConfig {
@@ -108,6 +200,8 @@ impl Default for SpannerGcpConfig {
             project: Self::default_project(),
             instance: Self::default_instance(),
             database: Self::default_database(),
+            session_pool: SpannerSessionPoolConfig::default(),
+            channel: SpannerChannelConfig::default(),
         }
     }
 }
@@ -123,10 +217,27 @@ pub enum SpannerConfig {
 }
 
 impl SpannerConfig {
+    /// Returns the database path in the format required by the Spanner client.
     pub fn database_path(&self) -> String {
         match self {
             Self::Emulator(e) => e.database_path(),
             Self::Gcp(g) => g.database_path(),
+        }
+    }
+
+    /// Returns the session pool configuration.
+    pub fn session_pool(&self) -> &SpannerSessionPoolConfig {
+        match self {
+            Self::Emulator(e) => &e.session_pool,
+            Self::Gcp(g) => &g.session_pool,
+        }
+    }
+
+    /// Returns the channel configuration.
+    pub fn channel(&self) -> &SpannerChannelConfig {
+        match self {
+            Self::Emulator(e) => &e.channel,
+            Self::Gcp(g) => &g.channel,
         }
     }
 }

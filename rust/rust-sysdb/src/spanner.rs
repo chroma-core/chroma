@@ -5,21 +5,43 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::time::Duration;
 
+use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
-use google_cloud_spanner::client::{Client, ClientConfig};
+use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
 use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::row::Row;
+use google_cloud_spanner::session::SessionConfig;
 use google_cloud_spanner::statement::Statement;
 use google_cloud_spanner::transaction_rw::ReadWriteTransaction;
 use thiserror::Error;
 use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
+
+/// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
+fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
+    let mut config = SessionConfig::default();
+    config.session_get_timeout = Duration::from_secs(cfg.session_get_timeout_secs);
+    config.max_opened = cfg.max_opened;
+    config.min_opened = cfg.min_opened;
+    config
+}
+
+/// Converts a SpannerChannelConfig to the library's ChannelConfig.
+fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
+    ChannelConfig {
+        num_channels: cfg.num_channels,
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        timeout: Duration::from_secs(cfg.timeout_secs),
+    }
+}
+
 use crate::types::{
     CollectionFilter, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
     CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
@@ -1524,10 +1546,14 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
         config: &SpannerBackendConfig<'a>,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let session_config = to_session_config(config.spanner.session_pool());
         let client = match config.spanner {
             SpannerConfig::Emulator(emulator) => {
+                let channel_config = to_channel_config(config.spanner.channel());
                 let client_config = ClientConfig {
                     environment: Environment::Emulator(emulator.grpc_endpoint()),
+                    session_config,
+                    channel_config,
                     ..Default::default()
                 };
 
@@ -1546,10 +1572,13 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
                 client
             }
             SpannerConfig::Gcp(gcp) => {
-                let client_config = ClientConfig::default().with_auth().await.map_err(|e| {
+                let channel_config = to_channel_config(config.spanner.channel());
+                let mut client_config = ClientConfig::default().with_auth().await.map_err(|e| {
                     Box::new(SpannerError::ConfigurationError(e.to_string()))
                         as Box<dyn ChromaError>
                 })?;
+                client_config.session_config = session_config;
+                client_config.channel_config = channel_config;
 
                 let client = Client::new(&gcp.database_path(), client_config)
                     .await
@@ -1608,6 +1637,8 @@ pub mod tests {
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
             database: "local-sysdb-database".to_string(),
+            session_pool: Default::default(),
+            channel: Default::default(),
         };
 
         let spanner_config = SpannerConfig::Emulator(emulator);
