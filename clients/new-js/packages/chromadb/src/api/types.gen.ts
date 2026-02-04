@@ -549,6 +549,7 @@ export type SpannConfiguration = {
  * Configuration for SPANN vector index algorithm parameters
  */
 export type SpannIndexConfig = {
+    center_drift_threshold?: number | null;
     ef_construction?: number | null;
     ef_search?: number | null;
     initial_lambda?: number | null;
