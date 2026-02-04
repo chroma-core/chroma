@@ -1689,7 +1689,7 @@ mod tests {
         let candidates = writer
             .navigate(&[1.0, 0.0, 0.0, 0.0], 5)
             .expect("navigate failed");
-        assert!(candidates.keys.len() >= 1);
+        assert!(!candidates.keys.is_empty());
 
         let selected = writer.rng_select(&candidates);
         // Should select at least the closest cluster
@@ -1825,7 +1825,7 @@ mod tests {
             .commit(&blockfile_provider, &usearch_provider)
             .await
             .expect("Failed to commit");
-        let file_ids = flusher.flush().await.expect("Failed to flush");
+        let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
 
         // =======================================================================
         // Phase 2: Reopen index with readers and test load operations
@@ -2408,7 +2408,7 @@ mod tests {
             .commit(&blockfile_provider, &usearch_provider)
             .await
             .expect("Failed to commit");
-        let file_ids = flusher.flush().await.expect("Failed to flush");
+        let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
 
         // =======================================================================
         // Reopen and modify
@@ -2462,7 +2462,7 @@ mod tests {
             .commit(&blockfile_provider, &usearch_provider)
             .await
             .expect("Failed to commit");
-        let file_ids = flusher.flush().await.expect("Failed to flush");
+        let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
 
         // =======================================================================
         // Verify invariants after reopen
@@ -2739,7 +2739,7 @@ mod tests {
                 .commit(&blockfile_provider, &usearch_provider)
                 .await
                 .expect("commit failed");
-            file_ids = flusher.flush().await.expect("flush failed");
+            file_ids = Box::pin(flusher.flush()).await.expect("flush failed");
 
             // --- Reopen ---
             let blockfile_provider = test_blockfile_provider(storage.clone());
