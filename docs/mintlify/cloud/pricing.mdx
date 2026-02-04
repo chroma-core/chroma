@@ -48,6 +48,23 @@ await collection.query({
     whereDocument: { "$contains": "hello world" }
 });
 ```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .r#where(Key::Document.contains("hello world"))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![1.0, 2.3, 1.1]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(10), 0);
+
+let results = collection.search(vec![search]).await?;
+```
 </CodeGroup>
 
 

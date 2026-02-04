@@ -23,6 +23,24 @@ await collection.update({
     documents: ["doc1", "doc2", "doc3", ...]
 })
 ```
+
+```rust Rust
+collection.update(
+    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+    Some(vec![
+        Some(vec![1.1, 2.3, 3.2]),
+        Some(vec![4.5, 6.9, 4.4]),
+        Some(vec![1.1, 2.3, 3.2]),
+    ]),
+    Some(vec![
+        Some("doc1".to_string()),
+        Some("doc2".to_string()),
+        Some("doc3".to_string()),
+    ]),
+    None,
+    None,
+).await?;
+```
 </CodeGroup>
 
 If an `id` is not found in the collection, an error will be logged and the update will be ignored. If `documents` are supplied without corresponding `embeddings`, the embeddings will be recomputed with the collection's embedding function.
@@ -56,6 +74,24 @@ await collection.upsert({
   ],
   documents: ["doc1", "doc2", "doc3"],
 });
+```
+
+```rust Rust
+collection.upsert(
+    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+    vec![
+        vec![1.1, 2.3, 3.2],
+        vec![4.5, 6.9, 4.4],
+        vec![1.1, 2.3, 3.2],
+    ],
+    Some(vec![
+        Some("doc1".to_string()),
+        Some("doc2".to_string()),
+        Some("doc3".to_string()),
+    ]),
+    None,
+    None,
+).await?;
 ```
 </CodeGroup>
 

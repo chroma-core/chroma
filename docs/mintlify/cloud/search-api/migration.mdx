@@ -92,6 +92,26 @@ const results2 = await collection.search(
   })
 );
 ```
+
+```rust Rust
+use chroma::types::{QueryVector, RankExpr, SearchPayload};
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), None, None, None)
+    .await?;
+
+let results2 = collection
+    .search(vec![SearchPayload::default()
+        .rank(RankExpr::Knn {
+            query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+            key: chroma::types::Key::Embedding,
+            limit: 10,
+            default: None,
+            return_rank: false,
+        })
+        .limit(Some(10), 0)])
+    .await?;
+```
 </CodeGroup>
 
 ### Document Filtering

@@ -144,4 +144,27 @@ await collection.query({
 ```
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+
+Use the Search API to filter on document content. You can combine `contains` and regex filters with metadata conditions.
+
+```rust
+use chroma::types::SearchPayload;
+use chroma::types::{Key, QueryVector, RankExpr};
+
+let search = SearchPayload::default()
+    .r#where(Key::Document.contains("search string"))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    });
+
+let results = collection.search(vec![search]).await?;
+```
+
+</Tab>
 </Tabs>

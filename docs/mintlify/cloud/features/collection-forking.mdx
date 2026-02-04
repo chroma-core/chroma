@@ -50,6 +50,26 @@ await forkedCollection.add({
   documents: ["new content"], // billed as incremental storage
 });
 ```
+
+```rust Rust
+let source_collection = client.get_collection("main-repo-index").await?;
+
+// Create a forked collection. Name must be unique within the database.
+let forked_collection = source_collection
+    .fork("main-repo-index-pr-1234")
+    .await?;
+
+// Changes are billed as incremental storage
+forked_collection
+    .add(
+        vec!["doc-pr-1".to_string()],
+        vec![vec![0.1, 0.2, 0.3]],
+        Some(vec![Some("new content".to_string())]),
+        None,
+        None,
+    )
+    .await?;
+```
 </CodeGroup>
 
 [In this notebook](https://github.com/chroma-core/chroma/blob/main/examples/advanced/forking.ipynb) you can find a comprehensive demo, where we index a codebase in a Chroma collection, and use forking to efficiently create collections for new branches.

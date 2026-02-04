@@ -63,6 +63,31 @@ chromaClient.heartbeat();
 
 </Tab>
 
+<Tab title="Rust" icon="rust">
+You can run a Chroma server in a Docker container, and access it using the Rust `ChromaHttpClient`. We provide images on both [docker.com](https://hub.docker.com/r/chromadb/chroma) and [ghcr.io](https://github.com/chroma-core/chroma/pkgs/container/chroma).
+
+To start the server, run:
+
+```terminal
+docker run -v ./chroma-data:/data -p 8000:8000 chromadb/chroma
+```
+
+This starts the server with the default configuration and stores data in `./chroma-data` (in your current working directory).
+
+The Rust client can then be configured to connect to the server running in the Docker container.
+
+```rust
+use chroma::ChromaHttpClient;
+
+let options = ChromaHttpClientOptions {
+    endpoint: "http://localhost:8000".parse()?,
+    ..Default::default()
+};
+let client = ChromaHttpClient::new(options);
+```
+
+</Tab>
+
 </Tabs>
 
 ## Configuration

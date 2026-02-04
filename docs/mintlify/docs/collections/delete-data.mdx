@@ -23,6 +23,13 @@ await collection.delete({
     ids: ["id1", "id2", "id3",...],
 })
 ```
+
+```rust Rust
+collection.delete(
+    Some(vec!["id1".to_string(), "id2".to_string(), "id3".to_string()]),
+    None,
+).await?;
+```
 </CodeGroup>
 
 `.delete` also supports the `where` filter. If no `ids` are supplied, it will delete all items in the collection that match the `where` filter.
@@ -40,5 +47,22 @@ await collection.delete({
     ids: ["id1", "id2", "id3",...], //ids
     where: {"chapter": "20"} //where
 })
+```
+
+```rust Rust
+use chroma::types::{MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where};
+
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "chapter".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Str("20".to_string()),
+    ),
+});
+
+collection.delete(
+    Some(vec!["id1".to_string(), "id2".to_string(), "id3".to_string()]),
+    Some(where_clause),
+).await?;
 ```
 </CodeGroup>

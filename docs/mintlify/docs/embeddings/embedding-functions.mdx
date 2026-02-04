@@ -260,4 +260,24 @@ export class MyEmbeddingFunction implements EmbeddingFunction {
 We welcome contributions! If you create an embedding function that you think would be useful to others, please consider [submitting a pull request](https://github.com/chroma-core/chroma).
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+
+The Rust client expects embeddings to be provided directly. Use your provider SDK to generate embeddings, then pass them to `add`, `query`, and other methods.
+
+```rust
+let embeddings = vec![vec![0.05, 0.06, -0.06]];
+
+collection
+    .add(
+        vec!["id1".to_string()],
+        embeddings,
+        Some(vec![Some("doc1".to_string())]),
+        None,
+        None,
+    )
+    .await?;
+```
+
+</Tab>
 </Tabs>

@@ -58,6 +58,18 @@ const collection = await client.createCollection({
 ```
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+Use the built-in BM25 sparse embedding helper, then pass embeddings to Chroma.
+
+```rust
+use chroma::embed::bm25::BM25SparseEmbeddingFunction;
+
+let bm25 = BM25SparseEmbeddingFunction::default_murmur3_abs();
+let sparse_vector = bm25.encode("document text")?;
+```
+
+</Tab>
 </Tabs>
 
 <Callout>

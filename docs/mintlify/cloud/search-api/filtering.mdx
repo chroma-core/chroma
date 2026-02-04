@@ -37,6 +37,14 @@ K.DOCUMENT.contains("machine learning");
 // Filter by document IDs
 K.ID.isIn(["doc1", "doc2", "doc3"]);
 ```
+
+```rust Rust
+use chroma::types::Key;
+
+Key::field("status").eq("active");
+Key::Document.contains("machine learning");
+Key::Id.is_in(["doc1", "doc2", "doc3"]);
+```
 </CodeGroup>
 
 ## Filterable Fields
@@ -82,6 +90,18 @@ K("price").gt(100);              // Greater than
 K("rating").gte(4.5);            // Greater than or equal
 K("stock").lt(10);               // Less than
 K("discount").lte(0.25);         // Less than or equal
+```
+
+```rust Rust
+use chroma::types::Key;
+
+Key::field("status").eq("published");
+Key::field("views").ne(0);
+Key::field("featured").eq(true);
+Key::field("price").gt(100);
+Key::field("rating").gte(4.5);
+Key::field("stock").lt(10);
+Key::field("discount").lte(0.25);
 ```
 </CodeGroup>
 
@@ -130,6 +150,17 @@ K.DOCUMENT.regex("\\bAPI\\b");                 // Match whole word "API" in docu
 // Note: String pattern matching on metadata fields not yet supported
 // K("title").contains("Python")               // NOT YET SUPPORTED
 // K("email").regex(".*@company\\.com$")       // NOT YET SUPPORTED
+```
+
+```rust Rust
+use chroma::types::Key;
+
+Key::Id.is_in(["doc1", "doc2", "doc3"]);
+Key::field("category").is_in(["tech", "science"]);
+Key::field("status").not_in(["draft", "deleted"]);
+Key::Document.contains("machine learning");
+Key::Document.not_contains("deprecated");
+Key::Document.regex(r"\bAPI\b");
 ```
 </CodeGroup>
 
@@ -182,6 +213,15 @@ K("status").eq("published")
     K("category").eq("tech").or(K("category").eq("science"))
   )
   .and(K("rating").gte(4.0));
+```
+
+```rust Rust
+use chroma::types::Key;
+
+(Key::field("status").eq("published")) & (Key::field("year").gte(2020));
+(Key::field("category").eq("tech")) | (Key::field("category").eq("science"));
+Key::Document.contains("AI") & Key::field("author").eq("Smith");
+Key::Id.is_in(["id1", "id2"]) | Key::field("featured").eq(true);
 ```
 </CodeGroup>
 
