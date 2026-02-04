@@ -10,6 +10,7 @@ path = "src/lib.rs"
 murmur3 = { workspace = true }
 
 async-trait = { workspace = true }
+google-cloud-spanner = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 parking_lot = { workspace = true }

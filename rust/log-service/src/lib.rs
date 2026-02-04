@@ -3078,18 +3078,27 @@ impl Configurable<LogServerConfig> for LogServer {
                 },
                 |t| async move {
                     let database_path = t.spanner.database_path().clone();
-                    let config = match t.spanner {
+                    let session_config = t.spanner.session_config();
+                    let channel_config = t.spanner.channel_config();
+                    let config = match &t.spanner {
                         SpannerConfig::Emulator(e) => SpannerClientConfig {
                             environment: Environment::Emulator(e.grpc_endpoint()),
+                            session_config,
+                            channel_config,
                             ..Default::default()
                         },
-                        SpannerConfig::Gcp(_) => SpannerClientConfig::default()
-                            .with_auth()
-                            .await
-                            .map_err(|e| -> Box<dyn ChromaError> {
-                            tracing::event!(Level::ERROR, name = "auth error", error =? e);
-                            Box::new(std::convert::Into::<Error>::into(e)) as _
-                        })?,
+                        SpannerConfig::Gcp(_) => {
+                            let mut config = SpannerClientConfig::default()
+                                .with_auth()
+                                .await
+                                .map_err(|e| -> Box<dyn ChromaError> {
+                                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                                    Box::new(std::convert::Into::<Error>::into(e)) as _
+                                })?;
+                            config.session_config = session_config;
+                            config.channel_config = channel_config;
+                            config
+                        }
                     };
                     let repl = t.repl.clone();
                     Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
@@ -4336,6 +4345,7 @@ mod tests {
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
             database: format!("local-logdb-{}", rand::thread_rng().gen::<u32>()),
+            ..Default::default()
         };
         let ctor_emulator = emulator.clone();
         let dtor_emulator = emulator;
@@ -4357,14 +4367,17 @@ mod tests {
                 ..Default::default()
             };
 
-            let database_path = ctor_emulator.database_path();
-            let spanner_config = SpannerClientConfig {
+            let spanner_cfg = SpannerConfig::Emulator(ctor_emulator.clone());
+            let database_path = spanner_cfg.database_path();
+            let spanner_client_config = SpannerClientConfig {
                 environment: Environment::Emulator(ctor_emulator.grpc_endpoint()),
+                session_config: spanner_cfg.session_config(),
+                channel_config: spanner_cfg.channel_config(),
                 ..Default::default()
             };
 
             spanner_migrations::run_migrations(
-                &SpannerConfig::Emulator(ctor_emulator.clone()),
+                &spanner_cfg,
                 None,
                 spanner_migrations::MigrationMode::Apply,
             )
@@ -4372,7 +4385,7 @@ mod tests {
             .expect("spanner migrations to apply");
 
             // Connect to Spanner emulator. Panics if emulator not available.
-            let spanner = SpannerClient::new(database_path, spanner_config)
+            let spanner = SpannerClient::new(database_path, spanner_client_config)
                 .await
                 .expect("Failed to connect to Spanner emulator. Is Tilt running?");
 

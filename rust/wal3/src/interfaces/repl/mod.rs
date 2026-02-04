@@ -156,7 +156,7 @@ impl ManifestManagerFactory for ReplicatedManifestManagerFactory {
 mod tests {
     use std::sync::Arc;
 
-    use chroma_config::spanner::SpannerEmulatorConfig;
+    use chroma_config::{SpannerConfig, SpannerEmulatorConfig};
     use google_cloud_gax::conn::Environment;
     use google_cloud_spanner::client::{Client, ClientConfig};
     use setsum::Setsum;
@@ -177,13 +177,18 @@ mod tests {
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
             database: "local-logdb-database".to_string(),
+            session_pool: Default::default(),
+            channel: Default::default(),
         }
     }
 
     async fn setup_spanner_client() -> Option<Client> {
         let emulator = emulator_config();
+        let spanner_config = SpannerConfig::Emulator(emulator.clone());
         let client_config = ClientConfig {
             environment: Environment::Emulator(emulator.grpc_endpoint()),
+            session_config: spanner_config.session_config(),
+            channel_config: spanner_config.channel_config(),
             ..Default::default()
         };
         match Client::new(&emulator.database_path(), client_config).await {
