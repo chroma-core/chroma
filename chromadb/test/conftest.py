@@ -13,6 +13,7 @@ from typing import (
     Sequence,
     Tuple,
     Callable,
+    Union,
     cast,
 )
 from uuid import UUID
@@ -436,9 +437,9 @@ def fastapi_server_basic_auth_valid_cred_single_user() -> Generator[System, None
             yield item
 
 
-def fastapi_server_basic_auth_valid_cred_multiple_users() -> (
-    Generator[System, None, None]
-):
+def fastapi_server_basic_auth_valid_cred_multiple_users() -> Generator[
+    System, None, None
+]:
     creds = {
         "user": "$2y$10$kY9hn.Wlfcj7n1Cnjmy1kuIhEFIVBsfbNWLQ5ahoKmdc2HLA4oP6i",
         "user2": "$2y$10$CymQ63tic/DRj8dD82915eoM4ke3d6RaNKU4dj4IVJlHyea0yeGDS",
@@ -531,9 +532,9 @@ users:
                 yield item
 
 
-def fastapi_fixture_admin_and_singleton_tenant_db_user() -> (
-    Generator[System, None, None]
-):
+def fastapi_fixture_admin_and_singleton_tenant_db_user() -> Generator[
+    System, None, None
+]:
     with tempfile.NamedTemporaryFile("w", suffix=".authn", delete=False) as f:
         f.write(
             """
@@ -741,16 +742,16 @@ def system_fixtures_auth() -> List[Callable[[], Generator[System, None, None]]]:
     return fixtures
 
 
-def system_fixtures_authn_rbac_authz() -> (
-    List[Callable[[], Generator[System, None, None]]]
-):
+def system_fixtures_authn_rbac_authz() -> List[
+    Callable[[], Generator[System, None, None]]
+]:
     fixtures = [fastapi_server_basic_authn_rbac_authz]
     return fixtures
 
 
-def system_fixtures_root_and_singleton_tenant_db_user() -> (
-    List[Callable[[], Generator[System, None, None]]]
-):
+def system_fixtures_root_and_singleton_tenant_db_user() -> List[
+    Callable[[], Generator[System, None, None]]
+]:
     fixtures = [fastapi_fixture_admin_and_singleton_tenant_db_user]
     return fixtures
 
@@ -830,7 +831,7 @@ class ClientFactories:
 
     _system: System
     # Need to track created clients so we can call .clear_system_cache() during teardown
-    _created_clients: List[ClientAPI] = []
+    _created_clients: List[Union[ClientAPI, AdminClient]] = []
 
     def __init__(self, system: System):
         self._system = system
@@ -913,7 +914,10 @@ def create_isolated_database(client: ClientAPI) -> None:
         admin_settings.chroma_api_impl = "chromadb.api.fastapi.FastAPI"
 
     admin = AdminClient(admin_settings)
-    database = "test_" + str(uuid.uuid4())
+    if os.environ.get("MULTI_REGION") == "true":
+        database = "tilt-spanning+test_" + str(uuid.uuid4())
+    else:
+        database = "test_" + str(uuid.uuid4())
     admin.create_database(database)
     client.set_database(database)
 
@@ -924,10 +928,12 @@ def client(system: System) -> Generator[ClientAPI, None, None]:
 
     if system.settings.chroma_api_impl == "chromadb.api.async_fastapi.AsyncFastAPI":
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system))
+        create_isolated_database(client)
         yield client
         client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system)
+        create_isolated_database(client)
         yield client
         client.clear_system_cache()
 
@@ -941,10 +947,12 @@ def http_client(system_http_server: System) -> Generator[ClientAPI, None, None]:
         == "chromadb.api.async_fastapi.AsyncFastAPI"
     ):
         client = cast(Any, AsyncClientCreatorSync.from_system_async(system_http_server))
+        create_isolated_database(client)
         yield client
         client.clear_system_cache()
     else:
         client = ClientCreator.from_system(system_http_server)
+        create_isolated_database(client)
         yield client
         client.clear_system_cache()
 
@@ -953,6 +961,7 @@ def http_client(system_http_server: System) -> Generator[ClientAPI, None, None]:
 def client_ssl(system_ssl: System) -> Generator[ClientAPI, None, None]:
     system_ssl.reset_state()
     client = ClientCreator.from_system(system_ssl)
+    create_isolated_database(client)
     yield client
     client.clear_system_cache()
 
@@ -993,8 +1002,7 @@ class ProducerFn(Protocol):
         collection_id: UUID,
         embeddings: Iterator[OperationRecord],
         n: int,
-    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]:
-        ...
+    ) -> Tuple[Sequence[OperationRecord], Sequence[SeqId]]: ...
 
 
 def produce_n_single(

@@ -99,6 +99,7 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @initialize(collection=collection_st)  # type: ignore
     def initialize(self, collection: strategies.Collection):
+        self.collection = None
         self.collection = self.client.create_collection(
             name=collection.name,
             metadata=collection.metadata,  # type: ignore[arg-type]
@@ -114,7 +115,8 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
 
     @overrides
     def teardown(self) -> None:
-        self.client.delete_collection(self.collection.name)
+        if self.collection is not None:
+            self.client.delete_collection(self.collection.name)
 
     @rule(
         target=embedding_ids,
