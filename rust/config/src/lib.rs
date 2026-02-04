@@ -4,7 +4,8 @@ pub mod registry;
 pub mod spanner;
 
 pub use spanner::{
-    SpannerConfig, SpannerEmulatorConfig, SpannerGcpConfig, SpannerSessionPoolConfig,
+    SpannerChannelConfig, SpannerConfig, SpannerEmulatorConfig, SpannerGcpConfig,
+    SpannerSessionPoolConfig,
 };
 
 use async_trait::async_trait;
