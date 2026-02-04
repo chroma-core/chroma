@@ -4404,6 +4404,7 @@ mod tests {
                 &spanner_cfg,
                 None,
                 spanner_migrations::MigrationMode::Apply,
+                Some(TEST_TOPOLOGY_NAME),
             )
             .await
             .expect("spanner migrations to apply");

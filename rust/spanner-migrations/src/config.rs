@@ -1,8 +1,9 @@
 //! Configuration for Spanner migrations.
 
 pub use chroma_config::spanner::SpannerConfig;
+use chroma_types::Topology;
 use figment::providers::{Env, Format, Yaml};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::default::Default;
 use std::env;
 
@@ -18,14 +19,18 @@ pub enum MigrationMode {
     Validate,
 }
 
+/// Topology-specific configuration
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct TopologySpannerConfig {
+    pub sysdb_spanner: SpannerConfig,
+    // NOTE(rescrv):  Until we plumb everything we will just say that there are two spanner
+    // configs.
+    pub logdb_spanner: SpannerConfig,
+}
+
 /// Migration-specific configuration
 #[derive(Deserialize)]
 pub struct MigrationConfig {
-    pub spanner: SpannerConfig,
-    #[serde(default)]
-    // NOTE(rescrv):  Until we plumb everything we will just say that there are two spanner
-    // configs.
-    pub logdb_spanner: Option<SpannerConfig>,
     #[serde(default)]
     pub migration_mode: MigrationMode,
     #[serde(default = "MigrationConfig::default_service_name")]
@@ -34,6 +39,8 @@ pub struct MigrationConfig {
     pub otel_endpoint: String,
     #[serde(default)]
     pub otel_filters: Vec<OtelFilter>,
+    #[serde(default)]
+    pub topologies: Vec<Topology<TopologySpannerConfig>>,
 }
 
 pub use chroma_tracing::OtelFilter;
@@ -60,20 +67,35 @@ impl RootConfig {
         let path =
             env::var(CONFIG_PATH_ENV_VAR).unwrap_or_else(|_| DEFAULT_CONFIG_PATH.to_string());
         println!("Loading config from: {}", path);
+
+        let config_content = std::fs::read_to_string(&path)
+            .expect("should be able to open and read config to string");
+
+        // Check if topologies section exists in the raw content
+        if config_content.contains("topologies:") {
+            println!("Found 'topologies:' section in config file");
+        } else {
+            println!("No 'topologies:' section found in config file");
+        }
+
         println!(
             r#"Full config is:
 ================================================================================
 {}
 ================================================================================
 "#,
-            std::fs::read_to_string(&path)
-                .expect("should be able to open and read config to string")
+            config_content
         );
 
         let f = figment::Figment::from(Yaml::file(&path))
             .merge(Env::prefixed("CHROMA_").map(|k| k.as_str().replace("__", ".").into()));
 
         let root: RootConfig = f.extract()?;
+        println!("Parsed RootConfig");
+        println!(
+            "Found {} topologies in rust-sysdb-migration",
+            root.rust_sysdb_migration.topologies.len()
+        );
         Ok(root.rust_sysdb_migration)
     }
 }

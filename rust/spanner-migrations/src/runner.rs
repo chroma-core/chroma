@@ -29,6 +29,7 @@ pub struct MigrationRunner {
     client: Client,
     admin_client: AdminClient,
     database_path: String,
+    topology_name: Option<String>,
 }
 
 // TODO(tanujnay112): Remove this backwards compatibility migration once all systems are updated
@@ -78,7 +79,13 @@ impl MigrationRunner {
             client,
             admin_client,
             database_path,
+            topology_name: None,
         }
+    }
+
+    pub fn with_topology(mut self, topology_name: String) -> Self {
+        self.topology_name = Some(topology_name);
+        self
     }
 
     // TODO(tanujnay112): Remove this method after all legacy hashes are migrated
@@ -223,8 +230,20 @@ impl MigrationRunner {
     }
 
     async fn execute_dml(&self, dml: &str) -> Result<(), MigrationError> {
+        let mut dml = dml.to_string();
+        let topo_placeholder_string = "@topo_name";
+        if dml.contains(topo_placeholder_string) {
+            if let Some(topology_name) = &self.topology_name {
+                // Wrap topology name in quotes to make it a valid SQL string literal
+                let quoted_topology = format!("'{}'", topology_name);
+                dml = dml.replace(topo_placeholder_string, &quoted_topology);
+            } else {
+                return Err(MigrationError::ClientError(
+                    "Found @topo_name in DML but no topology name provided".to_string(),
+                ));
+            }
+        }
         tracing::info!("Executing DML: {}", dml);
-        let dml = dml.to_string();
         self.client
             .read_write_transaction(|tx| {
                 let dml = dml.clone();

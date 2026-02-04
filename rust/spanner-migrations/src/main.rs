@@ -38,6 +38,10 @@ struct Args {
     /// Root directory for outputting migrations (used with generate-sum command).
     #[arg(long, global = true)]
     root: Option<String>,
+
+    /// Topology name for variable substitution in migrations.
+    #[arg(long)]
+    topology: Option<String>,
 }
 
 /// Available commands.
@@ -114,16 +118,52 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let run_sysdb = slug.is_none_or(|s| s == "spanner_sysdb");
     let run_logdb = slug.is_none_or(|s| s == "spanner_logdb");
 
-    if run_sysdb {
-        run_migrations(&config.spanner, Some("spanner_sysdb"), mode).await?;
+    // Get topologies from migration config
+    let topologies = &config.topologies;
+
+    println!("Found {} topologies in configuration", topologies.len());
+    if topologies.is_empty() {
+        return Err("No topologies defined in configuration".into());
     }
-    if run_logdb {
-        if let Some(logdb_spanner) = &config.logdb_spanner {
-            run_migrations(logdb_spanner, Some("spanner_logdb"), mode).await?;
-        } else if slug.is_some() {
-            return Err(
-                "Requested spanner_logdb migrations but logdb_spanner config is missing".into(),
-            );
+
+    // If topology is provided via CLI, filter topologies to match
+    let target_topologies: Vec<_> = if let Some(ref cli_topology) = args.topology {
+        topologies
+            .iter()
+            .filter(|t| t.name.to_string() == *cli_topology)
+            .collect()
+    } else {
+        // If no CLI topology provided, use all topologies from config
+        topologies.iter().collect()
+    };
+
+    if target_topologies.is_empty() {
+        if let Some(ref cli_topology) = args.topology {
+            return Err(format!("Topology '{}' not found in configuration", cli_topology).into());
+        } else {
+            return Err("No topologies available to process".into());
+        }
+    }
+
+    for topology in target_topologies {
+        println!("Topology: {}", topology.name);
+        if run_sysdb {
+            run_migrations(
+                &topology.config.sysdb_spanner,
+                Some("spanner_sysdb"),
+                mode,
+                Some(&topology.name.to_string()),
+            )
+            .await?;
+        }
+        if run_logdb {
+            run_migrations(
+                &topology.config.logdb_spanner,
+                Some("spanner_logdb"),
+                mode,
+                Some(&topology.name.to_string()),
+            )
+            .await?;
         }
     }
 

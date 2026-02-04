@@ -10,6 +10,7 @@ mod runner;
 pub use config::MigrationConfig;
 pub use config::MigrationMode;
 pub use config::RootConfig;
+pub use config::TopologySpannerConfig;
 pub use migrations::MigrationDir;
 pub use migrations::MIGRATION_DIRS;
 
@@ -105,6 +106,7 @@ fn validate_slug(slug: Option<&str>) -> Result<(), RunMigrationsError> {
 /// * `spanner_config` - The Spanner configuration specifying how to connect to the database.
 /// * `slug` - An optional filter to only run migrations for a specific migration directory.
 /// * `mode` - The migration mode (Apply or Validate).
+/// * `topology_name` - An optional topology name for variable substitution in migrations.
 ///
 /// # Errors
 ///
@@ -113,6 +115,7 @@ pub async fn run_migrations(
     spanner_config: &SpannerConfig,
     slug: Option<&str>,
     mode: MigrationMode,
+    topology_name: Option<&str>,
 ) -> Result<(), RunMigrationsError> {
     validate_slug(slug)?;
 
@@ -168,7 +171,11 @@ pub async fn run_migrations(
     let admin_client = AdminClient::new(admin_client_config)
         .await
         .map_err(|e| RunMigrationsError::CreateAdminClientError(e.to_string()))?;
-    let runner = MigrationRunner::new(client, admin_client, database_path);
+
+    let mut runner = MigrationRunner::new(client, admin_client, database_path);
+    if let Some(topology) = topology_name {
+        runner = runner.with_topology(topology.to_string());
+    }
 
     match mode {
         MigrationMode::Apply => {

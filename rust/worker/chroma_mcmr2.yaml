@@ -365,20 +365,26 @@ rust-sysdb-migration:
   otel_filters:
     - crate_name: "spanner_migration"
       filter_level: "trace"
-  spanner:
-    emulator:
-      host: "spanner.chroma.svc.cluster.local"
-      grpc_port: 9010
-      rest_port: 9020
-      project: "local-project"
-      instance: "test-instance"
-      database: "local-sysdb-database"
-  logdb_spanner:
-    emulator:
-      host: "spanner.chroma.svc.cluster.local"
-      grpc_port: 9010
-      rest_port: 9020
-      project: "local-project"
-      instance: "test-instance"
-      database: "local-logdb-database"
+  topologies:
+    - name: tilt-spanning
+      regions:
+      - tilt-config-1
+      - tilt-config-2
+      config:
+        sysdb_spanner:
+          emulator:
+            host: "spanner.chroma.svc.cluster.local"
+            grpc_port: 9010
+            rest_port: 9020
+            project: "local-project"
+            instance: "test-instance"
+            database: "local-sysdb-database"
+        logdb_spanner:
+          emulator:
+            host: "spanner.chroma.svc.cluster.local"
+            grpc_port: 9010
+            rest_port: 9020
+            project: "local-project"
+            instance: "test-instance"
+            database: "local-logdb-database"
   migration_mode: "apply"
