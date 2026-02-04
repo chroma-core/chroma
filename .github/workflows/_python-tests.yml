@@ -30,7 +30,7 @@ jobs:
           - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py --ignore-glob chromadb/test/property/test_add_mcmr.py"
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
-          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_add_mcmr.py --ignore-glob chromadb/test/property/test_cross_version_persist.py"
             parallelized: false  # Disabled to fix INTERNALERROR crashes in CI
 
     runs-on: ${{ inputs.runner }}
