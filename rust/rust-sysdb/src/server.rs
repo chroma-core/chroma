@@ -777,10 +777,28 @@ impl SysdbService {
             },
         };
 
+        // Handle empty segments like the Go sysdb - preserve existing segment info
+        let segments_to_use = if segments.is_empty() {
+            // If no new segments, preserve existing segment info from the latest version
+            version_file_pb
+                .version_history
+                .as_ref()
+                .and_then(|version_history| {
+                    version_history
+                        .versions
+                        .last()
+                        .and_then(|last_version| last_version.segment_info.as_ref())
+                        .map(|segment_info| segment_info.segment_compaction_info.clone())
+                })
+                .unwrap_or_else(|| segments.clone())
+        } else {
+            segments
+        };
+
         let new_version_info = chroma_types::chroma_proto::CollectionVersionInfo {
             version: new_version,
             segment_info: Some(chroma_types::chroma_proto::CollectionSegmentInfo {
-                segment_compaction_info: segments.clone(),
+                segment_compaction_info: segments_to_use,
             }),
             collection_info_mutable: None,
             created_at_secs: chrono::Utc::now().timestamp(),
@@ -1627,6 +1645,273 @@ mod tests {
         assert_eq!(
             final_version, 1,
             "Version should still be 1 after failed stale flush"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_empty_segments_preserves_existing(
+    ) {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        // Create collection with initial segments
+        let initial_segment_compaction_info = create_test_segment_compaction_info();
+        let segment_uuid =
+            SegmentUuid(Uuid::parse_str(&initial_segment_compaction_info[0].segment_id).unwrap());
+
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![
+                Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileRecord,
+                    scope: SegmentScope::RECORD,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: segment_uuid,
+                    r#type: SegmentType::HnswDistributed,
+                    scope: SegmentScope::VECTOR,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+            ],
+            index_schema: Default::default(),
+            get_or_create: false,
+        };
+
+        let _: crate::types::CreateCollectionResponse = backend
+            .create_collection(create_collection_req)
+            .await
+            .expect("Failed to create collection");
+
+        // First flush with segments to establish version history
+        let proto_req_first = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: initial_segment_compaction_info.clone(),
+            log_position: 100,
+            collection_version: 0,
+            total_records_post_compaction: 1000,
+            size_bytes_post_compaction: 5000,
+            schema_str: None,
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+
+        let request_first = Request::new(proto_req_first);
+        let response_first: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request_first).await;
+
+        assert!(
+            response_first.is_ok(),
+            "First flush should succeed: {:?}",
+            response_first.err()
+        );
+
+        // Second flush with EMPTY segments - should preserve existing segment info
+        let proto_req_empty = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: vec![], // Empty segments!
+            log_position: 200,
+            collection_version: 1, // Updated version
+            total_records_post_compaction: 1500,
+            size_bytes_post_compaction: 6000,
+            schema_str: None,
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+
+        let request_empty = Request::new(proto_req_empty);
+        let response_empty: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request_empty).await;
+
+        assert!(
+            response_empty.is_ok(),
+            "Empty segments flush should succeed: {:?}",
+            response_empty.err()
+        );
+
+        // Verify the version file was created and preserves existing segment info
+        let version_file_manager =
+            VersionFileManager::new(service.local_region_object_storage.clone());
+
+        // Get the updated collection to fetch the correct version file path
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter {
+                ids: Some(vec![collection_id]),
+                database_name: Some(database_name.clone()),
+                name: None,
+                tenant_id: None,
+                include_soft_deleted: false,
+                limit: None,
+                offset: None,
+                topology_name: None,
+            },
+        };
+        let backend = Backend::Spanner(backend.clone());
+        let collection_response = get_collection_req
+            .run(backend)
+            .await
+            .expect("Failed to get collection after flush");
+        let updated_collection = collection_response.collections.first().unwrap();
+
+        let version_file = version_file_manager
+            .fetch(updated_collection)
+            .await
+            .expect("Failed to fetch version file");
+
+        // Verify the latest version contains the preserved segment info
+        let latest_version = version_file
+            .version_history
+            .as_ref()
+            .unwrap()
+            .versions
+            .last()
+            .unwrap();
+
+        assert_eq!(latest_version.version, 2, "Latest version should be 2");
+
+        let segment_info = latest_version.segment_info.as_ref().unwrap();
+        assert_eq!(
+            segment_info.segment_compaction_info.len(),
+            1,
+            "Should preserve the original segment info even with empty flush"
+        );
+        assert_eq!(
+            segment_info.segment_compaction_info[0].segment_id,
+            initial_segment_compaction_info[0].segment_id,
+            "Should preserve the original segment ID"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_empty_segments_new_collection() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        // Create collection WITHOUT initial version history
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![],
+            index_schema: Default::default(),
+            get_or_create: false,
+        };
+
+        let _: crate::types::CreateCollectionResponse = backend
+            .create_collection(create_collection_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Flush with EMPTY segments on new collection - should handle correctly by not updating segments
+        // in new version.
+        let proto_req_empty = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: vec![],
+            log_position: 100,
+            collection_version: 0,
+            total_records_post_compaction: 1000,
+            size_bytes_post_compaction: 5000,
+            schema_str: None,
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+
+        let request_empty = Request::new(proto_req_empty);
+        let response_empty: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request_empty).await;
+
+        assert!(
+            response_empty.is_ok(),
+            "Empty segments flush on new collection should succeed: {:?}",
+            response_empty.err()
+        );
+
+        // Verify the version file was created with empty segment info (no history to preserve)
+        let version_file_manager =
+            VersionFileManager::new(service.local_region_object_storage.clone());
+
+        // Get the updated collection to fetch the correct version file path
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter {
+                ids: Some(vec![collection_id]),
+                database_name: Some(database_name.clone()),
+                name: None,
+                tenant_id: None,
+                include_soft_deleted: false,
+                limit: None,
+                offset: None,
+                topology_name: None,
+            },
+        };
+        let backend = Backend::Spanner(backend.clone());
+        let collection_response = get_collection_req
+            .run(backend)
+            .await
+            .expect("Failed to get collection after flush");
+        let updated_collection = collection_response.collections.first().unwrap();
+
+        let version_file = version_file_manager
+            .fetch(updated_collection)
+            .await
+            .expect("Failed to fetch version file");
+
+        // Verify the latest version contains empty segment info
+        let latest_version = version_file
+            .version_history
+            .as_ref()
+            .unwrap()
+            .versions
+            .last()
+            .unwrap();
+
+        assert_eq!(latest_version.version, 1, "Latest version should be 1");
+
+        let segment_info = latest_version.segment_info.as_ref().unwrap();
+        assert_eq!(
+            segment_info.segment_compaction_info.len(),
+            0,
+            "Should have empty segment info for new collection with empty flush"
         );
     }
 
