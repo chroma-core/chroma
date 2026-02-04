@@ -63,6 +63,25 @@ const result = await collection.search(search.rank(Knn({ query: queryEmbedding }
 const queryText = "What are the latest advances in quantum computing?";
 const result2 = await collection.search(search.rank(Knn({ query: queryText })));
 ```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .r#where(Key::field("category").eq("science"))
+    .limit(Some(10), 0)
+    .select([Key::Document, Key::Score]);
+
+let result = collection
+    .search(vec![search.rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.25, -0.15, 0.33]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })])
+    .await?;
+```
 </CodeGroup>
 
 <Callout>
@@ -103,6 +122,10 @@ import { Search, K, Knn } from 'chromadb';
 
 // Optional: For advanced features
 import { Rrf } from 'chromadb';  // For hybrid search
+```
+
+```rust Rust
+use chroma::types::{Key, RankExpr, SearchPayload};
 ```
 </CodeGroup>
 
@@ -190,6 +213,32 @@ for (const row of rows) {
   console.log(`Document: ${row.document?.substring(0, 100)}...`);
   console.log("---");
 }
+```
+
+```rust Rust
+use chroma::{ChromaHttpClient, ChromaHttpClientOptions};
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let client = ChromaHttpClient::new(ChromaHttpClientOptions::cloud(
+    "your-api-key",
+    "your-database",
+)?);
+let collection = client.get_collection("articles").await?;
+
+let search = SearchPayload::default()
+    .r#where((Key::field("category").eq("science")) & (Key::field("year").gte(2020)))
+    .limit(Some(5), 0)
+    .select([Key::Document, Key::Score, Key::field("title"), Key::field("author")]);
+
+let response = collection
+    .search(vec![search.rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.12, -0.34, 0.56]),
+        key: Key::Embedding,
+        limit: 5,
+        default: None,
+        return_rank: false,
+    })])
+    .await?;
 ```
 </CodeGroup>
 

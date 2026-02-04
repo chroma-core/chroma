@@ -116,6 +116,21 @@ chromaClient.heartbeat();
 
 </Tab>
 
+<Tab title="Rust" icon="rust">
+Once your Azure VM instance is up and running with Chroma, you can point the Rust client at the server's address and port `8000`.
+
+```rust
+use chroma::{ChromaHttpClient, ChromaHttpClientOptions};
+
+let mut options = ChromaHttpClientOptions::default();
+options.endpoint = "http://<Your Chroma instance IP>:8000".parse()?;
+
+let chroma_client = ChromaHttpClient::new(options);
+chroma_client.heartbeat().await?;
+```
+
+</Tab>
+
 </Tabs>
 
 ### Step 5: Clean Up (optional).

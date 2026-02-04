@@ -26,6 +26,12 @@ const collection = await client.createCollection({
   name: "my_collection",
 });
 ```
+
+```rust Rust
+let collection = client
+    .create_collection("my_collection", None, None)
+    .await?;
+```
 </CodeGroup>
 
 Note that collection names must be **unique** inside a Chroma database. If you try to create a collection with a name of an existing one, you will see an exception.
@@ -127,6 +133,29 @@ const collection = await client.createCollection({
 ```
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+The Rust client expects embeddings to be provided directly when using `add`, `get`, `search` and other functions. Use your provider SDK to generate embeddings, then pass them to Chroma.
+
+```rust
+collection.add(
+    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+    vec![
+        vec![1.1, 2.3, 3.2],
+        vec![4.5, 6.9, 4.4],
+        vec![1.1, 2.3, 3.2],
+    ],
+    Some(vec![
+        Some("lorem ipsum...".to_string()),
+        Some("doc2".to_string()),
+        Some("doc3".to_string()),
+    ]),
+    None,
+    None,
+).await?;
+```
+
+</Tab>
 </Tabs>
 
 ### Collection Metadata
@@ -156,6 +185,18 @@ let collection = await client.createCollection({
     created: new Date().toString(),
   },
 });
+```
+
+```rust Rust
+use chroma::types::Metadata;
+
+let mut metadata = Metadata::new();
+metadata.insert("description".to_string(), "my first Chroma collection".into());
+metadata.insert("created".to_string(), "2024-01-01T00:00:00Z".into());
+
+let collection = client
+    .create_collection("my_collection", None, Some(metadata))
+    .await?;
 ```
 </CodeGroup>
 
@@ -263,6 +304,21 @@ const [col1, col2] = client.getCollections([
   { name: "col1", embeddingFunction: openaiEF },
   { name: "col2", embeddingFunction: defaultEF },
 ]);
+```
+
+</Tab>
+
+<Tab title="Rust" icon="rust">
+Use the client to get collections or list them with pagination.
+
+```rust
+let collection = client.get_collection("my-collection").await?;
+
+let collection = client
+    .get_or_create_collection("my-collection", None, None)
+    .await?;
+
+let collections = client.list_collections(100, Some(0)).await?;
 ```
 
 </Tab>

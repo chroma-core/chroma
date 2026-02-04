@@ -98,6 +98,27 @@ const rrf = Rrf({
 const linear = Knn({ query: "machine learning" }).multiply(0.7)
   .add(Knn({ query: "deep learning" }).multiply(0.3));
 ```
+
+```rust Rust
+use chroma::types::{rrf, Key, QueryVector, RankExpr};
+
+let dense = RankExpr::Knn {
+    query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    key: Key::Embedding,
+    limit: 100,
+    default: None,
+    return_rank: true,
+};
+let sparse = RankExpr::Knn {
+    query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    key: Key::field("sparse_embedding"),
+    limit: 100,
+    default: None,
+    return_rank: true,
+};
+
+let rrf_rank = rrf(vec![dense, sparse], Some(60), None, false)?;
+```
 </CodeGroup>
 
 ## The return_rank Requirement

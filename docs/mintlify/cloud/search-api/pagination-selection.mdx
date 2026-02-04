@@ -36,6 +36,14 @@ const search2 = new Search().limit(10, 20);  // Skip first 20, return next 10
 // No limit - returns all matching results
 const search3 = new Search();  // Be careful with large collections!
 ```
+
+```rust Rust
+use chroma::types::SearchPayload;
+
+let search = SearchPayload::default().limit(Some(10), 0);
+let search = SearchPayload::default().limit(Some(10), 20);
+let search = SearchPayload::default();
+```
 </CodeGroup>
 
 ## Limit Parameters
@@ -88,6 +96,26 @@ function getPage(pageNumber: number, pageSize = 10) {
   return new Search().limit(pageSize, pageNumber * pageSize);
 }
 ```
+
+```rust Rust
+use chroma::types::SearchPayload;
+
+let page_size = 10;
+
+// Page 0: Results 1-10
+let page_0 = SearchPayload::default().limit(Some(page_size), 0);
+
+// Page 1: Results 11-20
+let page_1 = SearchPayload::default().limit(Some(page_size), 10);
+
+// Page 2: Results 21-30
+let page_2 = SearchPayload::default().limit(Some(page_size), 20);
+
+// General Formula
+fn get_page(page_number: usize, page_size: usize) -> SearchPayload {
+    SearchPayload::default().limit(Some(page_size), page_number * page_size)
+}
+```
 </CodeGroup>
 
 <Callout>
@@ -137,6 +165,27 @@ const search4 = new Search().select(K.DOCUMENT, K.SCORE, "title", "author");
 // Select all available fields
 const search5 = new Search().selectAll();
 // Returns: IDs, documents, embeddings, metadata, scores
+```
+
+```rust Rust
+// Default - returns IDs only
+use chroma::types::{Key, SearchPayload};
+
+let search = SearchPayload::default(); // IDs only
+
+// Select specific fields
+let search = SearchPayload::default().select([Key::Document, Key::Score]);
+
+// Select metadata fields
+let search = SearchPayload::default().select([Key::field("title"), Key::field("author")]);
+
+// Mix predefined and metadata fields
+let search = SearchPayload::default().select([
+    Key::Document,
+    Key::Score,
+    Key::field("title"),
+    Key::field("author"),
+]);
 ```
 </CodeGroup>
 

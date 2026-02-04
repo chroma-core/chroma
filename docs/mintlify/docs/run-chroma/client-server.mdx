@@ -69,4 +69,18 @@ const client = new ChromaClient({
 ```
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+
+You can connect to it by instantiating a new `ChromaHttpClient`:
+
+```rust
+let options = ChromaHttpClientOptions {
+    endpoint: "http://localhost:8000".parse()?,
+    ..Default::default()
+};
+let client = ChromaHttpClient::new(options);
+```
+
+</Tab>
 </Tabs>

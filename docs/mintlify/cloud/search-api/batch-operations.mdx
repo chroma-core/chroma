@@ -67,6 +67,41 @@ const searches = [
 // Execute all searches in one request
 const results = await collection.search(searches);
 ```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let searches = vec![
+    SearchPayload::default()
+        .r#where(Key::field("type").eq("article") & Key::field("year").gte(2024))
+        .rank(RankExpr::Knn {
+            query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+            key: Key::Embedding,
+            limit: 16,
+            default: None,
+            return_rank: false,
+        })
+        .limit(Some(5), 0)
+        .select([Key::Document, Key::Score, Key::field("title")]),
+    SearchPayload::default()
+        .r#where(Key::field("author").is_in(["Smith", "Jones"]))
+        .rank(RankExpr::Knn {
+            query: QueryVector::Dense(vec![0.2, 0.3, 0.4]),
+            key: Key::Embedding,
+            limit: 16,
+            default: None,
+            return_rank: false,
+        })
+        .limit(Some(10), 0)
+        .select([Key::Document, Key::Score, Key::field("title"), Key::field("author")]),
+    SearchPayload::default()
+        .r#where(Key::field("status").eq("featured"))
+        .limit(Some(20), 0)
+        .select([Key::field("title"), Key::field("date")]),
+];
+
+let results = collection.search(searches).await?;
+```
 </CodeGroup>
 
 ## Why Use Batch Operations
@@ -134,6 +169,14 @@ for (const [searchIndex, rows] of allRows.entries()) {
     console.log(`  - ${row.id}: ${row.metadata?.title ?? 'N/A'}`);
   }
 }
+```
+
+```rust Rust
+let results = collection.search(vec![search1, search2, search3]).await?;
+
+let ids_1 = &results.ids[0]; // IDs from search1
+let ids_2 = &results.ids[1]; // IDs from search2
+let ids_3 = &results.ids[2]; // IDs from search3
 ```
 </CodeGroup>
 

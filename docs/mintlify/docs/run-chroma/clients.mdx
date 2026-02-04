@@ -29,6 +29,16 @@ const client = new CloudClient({
   apiKey: "Chroma Cloud API key",
 });
 ```
+
+```rust Rust
+use chroma::{ChromaHttpClient, ChromaHttpClientOptions};
+
+let options = ChromaHttpClientOptions::cloud(
+    "ck-...",
+    "Database name",
+)?;
+let client = ChromaHttpClient::new(options);
+```
 </CodeGroup>
 
 The `CloudClient` can be instantiated just with the API key argument. In which case, we will resolve the tenant and DB from Chroma Cloud. Note our auto-resolution will work only if the provided API key is scoped to a single DB.
@@ -42,6 +52,12 @@ client = chromadb.CloudClient()
 
 ```typescript TypeScript
 const client = new CloudClient();
+```
+
+```rust Rust
+use chroma::ChromaHttpClient;
+
+let client = ChromaHttpClient::cloud()?;
 ```
 </CodeGroup>
 
@@ -141,6 +157,25 @@ The client object has a few useful convenience methods.
 ```typescript
 await client.heartbeat();
 await client.reset();
+```
+
+</Tab>
+
+<Tab title="Rust" icon="rust">
+The Rust client connects to a running Chroma server. For local persistence, run the server with a data path and connect over HTTP.
+
+```bash
+chroma run --path /db_path
+```
+
+```rust
+use chroma::{ChromaHttpClient, ChromaHttpClientOptions};
+
+let mut options = ChromaHttpClientOptions::default();
+options.endpoint = "http://localhost:8000".parse()?;
+
+let client = ChromaHttpClient::new(options);
+client.heartbeat().await?;
 ```
 
 </Tab>

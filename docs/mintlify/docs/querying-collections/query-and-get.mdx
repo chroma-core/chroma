@@ -249,4 +249,76 @@ await collection.query({
 ```
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+
+You can query a Chroma collection to run a similarity search using the .query method:
+
+```rust
+use chroma::types::IncludeList;
+
+// pub async fn query(
+//    &self,
+//    query_embeddings: Vec<Vec<f32>>,
+//    n_results: Option<u32>,
+//    where: Option<Where>,
+//    ids: Option<Vec<String>>,
+//    include: Option<IncludeList>,
+// ) -> Result<QueryResponse, ChromaHttpClientError>
+
+let results = collection
+    .query(
+        vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?;
+```
+
+Embeddings must be provided directly to the client.
+
+By default, Chroma will return 10 results per input query. You can modify this number using the n_results argument:
+
+```rust
+let results = collection
+    .query(
+        vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
+        Some(100),
+        None,
+        None,
+        None,
+    )
+    .await?;
+```
+
+The ids argument lets you constrain the search only to records with the IDs from the provided list:
+
+```rust
+let results = collection
+    .query(
+        vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
+        Some(5),
+        None,
+        Some(vec!["id1".to_string(), "id2".to_string()]),
+        None,
+    )
+    .await?;
+```
+
+
+```rust
+let response = collection
+    .get(
+        Some(vec!["id1".to_string(), "id2".to_string()]),
+        None,
+        Some(10),
+        Some(0),
+        Some(IncludeList::default_get()),
+    )
+    .await?;
+```
+
+</Tab>
 </Tabs>

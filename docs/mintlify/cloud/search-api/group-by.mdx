@@ -47,6 +47,30 @@ const search = new Search()
 
 const results = await collection.search(search);
 ```
+
+```rust Rust
+use chroma::types::{Aggregate, GroupBy, Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+        key: Key::Embedding,
+        limit: 16,
+        default: None,
+        return_rank: false,
+    })
+    .group_by(GroupBy {
+        keys: vec![Key::field("category")],
+        aggregate: Some(Aggregate::MinK {
+            keys: vec![Key::Score],
+            k: 3,
+        }),
+    })
+    .limit(Some(30), 0)
+    .select([Key::Document, Key::Score, Key::field("category")]);
+
+let results = collection.search(vec![search]).await?;
+```
 </CodeGroup>
 
 ## The GroupBy Class

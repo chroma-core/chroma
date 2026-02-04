@@ -70,6 +70,26 @@ const rank3 = Knn({ query: "AI research", limit: 100 }).multiply(0.5)
 // Documents in both lists:
 //   - Get first distance * 0.5 + second distance * 0.5
 ```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr};
+
+let rank1 = RankExpr::Knn {
+    query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    key: Key::Embedding,
+    limit: 16,
+    default: None,
+    return_rank: false,
+};
+
+let rank2 = RankExpr::Knn {
+    query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    key: Key::Embedding,
+    limit: 100,
+    default: None,
+    return_rank: false,
+};
+```
 </CodeGroup>
 
 <Warning>

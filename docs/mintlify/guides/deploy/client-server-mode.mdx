@@ -65,4 +65,23 @@ const client = new ChromaClient();
 
 </Tab>
 
+<Tab title="Rust" icon="rust">
+Chroma can also be configured to run in client/server mode. In this mode, the Rust client connects to a Chroma server running in a separate process.
+
+You can quickly experiment locally with Chroma in client/server mode by using our CLI:
+
+```terminal
+chroma run --path /db_path
+```
+
+Then connect to the Chroma server from your program:
+
+```rust
+use chroma::ChromaHttpClient;
+
+let client = ChromaHttpClient::new(Default::default());
+```
+
+</Tab>
+
 </Tabs>
