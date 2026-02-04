@@ -3,16 +3,36 @@ package embeddings
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/pkg/errors"
 )
+
+const (
+	// MaxImageFileSize is the maximum allowed size for image files (50 MB).
+	MaxImageFileSize = 50 * 1024 * 1024
+)
+
+// allowedImageExtensions is a set of valid image file extensions (lowercase, with dot).
+var allowedImageExtensions = map[string]struct{}{
+	".jpg":  {},
+	".jpeg": {},
+	".png":  {},
+	".gif":  {},
+	".webp": {},
+	".bmp":  {},
+	".tiff": {},
+	".tif":  {},
+}
 
 type EmbeddingModel string
 
@@ -258,6 +278,126 @@ type SparseEmbeddingFunction interface {
 	Name() string
 	// GetConfig returns the current configuration as a serializable map.
 	GetConfig() EmbeddingFunctionConfig
+}
+
+// ImageInputType represents the type of image input.
+type ImageInputType string
+
+const (
+	ImageInputTypeBase64   ImageInputType = "base64"
+	ImageInputTypeURL      ImageInputType = "url"
+	ImageInputTypeFilePath ImageInputType = "file"
+)
+
+// ImageInput represents an image that can be embedded.
+// Exactly one of Base64, URL, or FilePath must be set.
+type ImageInput struct {
+	Base64   string
+	URL      string
+	FilePath string
+}
+
+// NewImageInputFromBase64 creates an ImageInput from a base64-encoded string.
+func NewImageInputFromBase64(base64Data string) ImageInput {
+	return ImageInput{Base64: base64Data}
+}
+
+// NewImageInputFromURL creates an ImageInput from a URL.
+func NewImageInputFromURL(url string) ImageInput {
+	return ImageInput{URL: url}
+}
+
+// NewImageInputFromFile creates an ImageInput from a local file path.
+func NewImageInputFromFile(filePath string) ImageInput {
+	return ImageInput{FilePath: filePath}
+}
+
+// Type returns the type of the image input based on which field is set.
+func (i ImageInput) Type() ImageInputType {
+	if i.Base64 != "" {
+		return ImageInputTypeBase64
+	}
+	if i.URL != "" {
+		return ImageInputTypeURL
+	}
+	if i.FilePath != "" {
+		return ImageInputTypeFilePath
+	}
+	return ""
+}
+
+// Validate checks that exactly one input source is specified.
+func (i ImageInput) Validate() error {
+	count := 0
+	if i.Base64 != "" {
+		count++
+	}
+	if i.URL != "" {
+		count++
+	}
+	if i.FilePath != "" {
+		count++
+	}
+	if count == 0 {
+		return errors.New("image input must have exactly one of Base64, URL, or FilePath set")
+	}
+	if count > 1 {
+		return errors.New("image input must have exactly one of Base64, URL, or FilePath set, got multiple")
+	}
+	return nil
+}
+
+// ToBase64 converts the image input to a base64-encoded string.
+// For Base64 inputs, returns the value directly.
+// For URL inputs, returns an error (URLs should be passed directly to the API).
+// For FilePath inputs, reads the file and encodes it.
+func (i ImageInput) ToBase64(_ context.Context) (string, error) {
+	if err := i.Validate(); err != nil {
+		return "", err
+	}
+	switch i.Type() {
+	case ImageInputTypeBase64:
+		return i.Base64, nil
+	case ImageInputTypeURL:
+		return "", errors.New("URL inputs should be passed directly to the embedding API, not converted to base64")
+	case ImageInputTypeFilePath:
+		return i.readFileAsBase64()
+	default:
+		return "", errors.New("unknown image input type")
+	}
+}
+
+func (i ImageInput) readFileAsBase64() (string, error) {
+	ext := strings.ToLower(filepath.Ext(i.FilePath))
+	if _, ok := allowedImageExtensions[ext]; !ok {
+		return "", errors.Errorf("unsupported image file extension %q; allowed: .jpg, .jpeg, .png, .gif, .webp, .bmp, .tiff, .tif", ext)
+	}
+
+	f, err := os.Open(i.FilePath)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to open image file")
+	}
+	defer f.Close()
+
+	// Read up to MaxImageFileSize+1 to detect if file exceeds the limit
+	limitedReader := io.LimitReader(f, MaxImageFileSize+1)
+	data, err := io.ReadAll(limitedReader)
+	if err != nil {
+		return "", errors.Wrap(err, "failed to read image file")
+	}
+	if int64(len(data)) > MaxImageFileSize {
+		return "", errors.Errorf("image file size exceeds maximum of %d bytes", MaxImageFileSize)
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// MultimodalEmbeddingFunction extends EmbeddingFunction with image embedding capabilities.
+type MultimodalEmbeddingFunction interface {
+	EmbeddingFunction
+	// EmbedImages returns embeddings for a batch of images.
+	EmbedImages(ctx context.Context, images []ImageInput) ([]Embedding, error)
+	// EmbedImage returns an embedding for a single image.
+	EmbedImage(ctx context.Context, image ImageInput) (Embedding, error)
 }
 
 // Closeable is an optional interface for embedding functions that hold resources.
