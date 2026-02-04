@@ -58,6 +58,17 @@ func NewTextSlogLogger() (*SlogLogger, error) {
 	}, nil
 }
 
+// NewInfoSlogLogger creates a new SlogLogger with info level (no debug output)
+func NewInfoSlogLogger() (*SlogLogger, error) {
+	opts := &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	return &SlogLogger{
+		logger: slog.New(handler),
+	}, nil
+}
+
 // Debug logs a message at debug level
 func (s *SlogLogger) Debug(msg string, fields ...Field) {
 	s.logger.Debug(msg, convertFieldsToAttrs(fields)...)
