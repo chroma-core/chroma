@@ -43,12 +43,6 @@ const embedder = new ChromaCloudSpladeEmbeddingFunction({
 
 // use directly
 const sparseEmbeddings = await embedder.generate(["document1", "document2"]);
-
-// pass documents to query for .add and .query
-const collection = await client.createCollection({
-  name: "name",
-  embeddingFunction: embedder,
-});
 ```
 
 </Tab>
