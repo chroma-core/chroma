@@ -1516,9 +1516,11 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
         let session_config = config.spanner.session_config();
         let client = match config.spanner {
             SpannerConfig::Emulator(emulator) => {
+                let channel_config = config.spanner.channel_config();
                 let client_config = ClientConfig {
                     environment: Environment::Emulator(emulator.grpc_endpoint()),
                     session_config,
+                    channel_config,
                     ..Default::default()
                 };
 
@@ -1537,11 +1539,13 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
                 client
             }
             SpannerConfig::Gcp(gcp) => {
+                let channel_config = config.spanner.channel_config();
                 let mut client_config = ClientConfig::default().with_auth().await.map_err(|e| {
                     Box::new(SpannerError::ConfigurationError(e.to_string()))
                         as Box<dyn ChromaError>
                 })?;
                 client_config.session_config = session_config;
+                client_config.channel_config = channel_config;
 
                 let client = Client::new(&gcp.database_path(), client_config)
                     .await
@@ -1601,6 +1605,7 @@ pub mod tests {
             instance: "test-instance".to_string(),
             database: "local-sysdb-database".to_string(),
             session_pool: Default::default(),
+            channel: Default::default(),
         };
 
         let spanner_config = SpannerConfig::Emulator(emulator);

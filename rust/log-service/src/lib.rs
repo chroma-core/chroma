@@ -3079,10 +3079,12 @@ impl Configurable<LogServerConfig> for LogServer {
                 |t| async move {
                     let database_path = t.spanner.database_path().clone();
                     let session_config = t.spanner.session_config();
+                    let channel_config = t.spanner.channel_config();
                     let config = match &t.spanner {
                         SpannerConfig::Emulator(e) => SpannerClientConfig {
                             environment: Environment::Emulator(e.grpc_endpoint()),
                             session_config,
+                            channel_config,
                             ..Default::default()
                         },
                         SpannerConfig::Gcp(_) => {
@@ -3094,6 +3096,7 @@ impl Configurable<LogServerConfig> for LogServer {
                                     Box::new(std::convert::Into::<Error>::into(e)) as _
                                 })?;
                             config.session_config = session_config;
+                            config.channel_config = channel_config;
                             config
                         }
                     };
@@ -4369,6 +4372,7 @@ mod tests {
             let spanner_client_config = SpannerClientConfig {
                 environment: Environment::Emulator(ctor_emulator.grpc_endpoint()),
                 session_config: spanner_cfg.session_config(),
+                channel_config: spanner_cfg.channel_config(),
                 ..Default::default()
             };
 

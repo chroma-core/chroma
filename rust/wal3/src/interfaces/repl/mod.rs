@@ -178,6 +178,7 @@ mod tests {
             instance: "test-instance".to_string(),
             database: "local-logdb-database".to_string(),
             session_pool: Default::default(),
+            channel: Default::default(),
         }
     }
 
@@ -187,6 +188,7 @@ mod tests {
         let client_config = ClientConfig {
             environment: Environment::Emulator(emulator.grpc_endpoint()),
             session_config: spanner_config.session_config(),
+            channel_config: spanner_config.channel_config(),
             ..Default::default()
         };
         match Client::new(&emulator.database_path(), client_config).await {

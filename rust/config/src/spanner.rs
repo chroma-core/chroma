@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use google_cloud_spanner::client::ChannelConfig;
 use google_cloud_spanner::session::SessionConfig;
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,55 @@ impl Default for SpannerSessionPoolConfig {
     }
 }
 
+/// Channel configuration for gRPC connections to Spanner.
+///
+/// Controls the number of gRPC channels and their timeouts.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct SpannerChannelConfig {
+    /// Number of gRPC channels.  Default: 4.
+    #[serde(default = "SpannerChannelConfig::default_num_channels")]
+    pub num_channels: usize,
+    /// Connection timeout in seconds.  Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_connect_timeout_secs")]
+    pub connect_timeout_secs: u64,
+    /// Request timeout in seconds.  Default: 30.
+    #[serde(default = "SpannerChannelConfig::default_timeout_secs")]
+    pub timeout_secs: u64,
+}
+
+impl SpannerChannelConfig {
+    fn default_num_channels() -> usize {
+        4
+    }
+
+    fn default_connect_timeout_secs() -> u64 {
+        30
+    }
+
+    fn default_timeout_secs() -> u64 {
+        30
+    }
+
+    /// Converts this configuration to the library's `ChannelConfig`.
+    pub fn to_channel_config(&self) -> ChannelConfig {
+        ChannelConfig {
+            num_channels: self.num_channels,
+            connect_timeout: Duration::from_secs(self.connect_timeout_secs),
+            timeout: Duration::from_secs(self.timeout_secs),
+        }
+    }
+}
+
+impl Default for SpannerChannelConfig {
+    fn default() -> Self {
+        Self {
+            num_channels: Self::default_num_channels(),
+            connect_timeout_secs: Self::default_connect_timeout_secs(),
+            timeout_secs: Self::default_timeout_secs(),
+        }
+    }
+}
+
 /// Configuration for connecting to a Spanner emulator (local development)
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpannerEmulatorConfig {
@@ -70,6 +120,8 @@ pub struct SpannerEmulatorConfig {
     pub database: String,
     #[serde(default)]
     pub session_pool: SpannerSessionPoolConfig,
+    #[serde(default)]
+    pub channel: SpannerChannelConfig,
 }
 
 impl Default for SpannerEmulatorConfig {
@@ -82,6 +134,7 @@ impl Default for SpannerEmulatorConfig {
             instance: Self::default_instance(),
             database: Self::default_database(),
             session_pool: SpannerSessionPoolConfig::default(),
+            channel: SpannerChannelConfig::default(),
         }
     }
 }
@@ -125,6 +178,7 @@ impl SpannerEmulatorConfig {
     }
 }
 
+/// Configuration for connecting to Google Cloud Spanner.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SpannerGcpConfig {
     #[serde(default = "SpannerGcpConfig::default_project")]
@@ -135,6 +189,8 @@ pub struct SpannerGcpConfig {
     pub database: String,
     #[serde(default)]
     pub session_pool: SpannerSessionPoolConfig,
+    #[serde(default)]
+    pub channel: SpannerChannelConfig,
 }
 
 impl SpannerGcpConfig {
@@ -167,6 +223,7 @@ impl Default for SpannerGcpConfig {
             instance: Self::default_instance(),
             database: Self::default_database(),
             session_pool: SpannerSessionPoolConfig::default(),
+            channel: SpannerChannelConfig::default(),
         }
     }
 }
@@ -195,6 +252,14 @@ impl SpannerConfig {
         match self {
             Self::Emulator(e) => e.session_pool.to_session_config(),
             Self::Gcp(g) => g.session_pool.to_session_config(),
+        }
+    }
+
+    /// Returns the channel configuration for gRPC connections.
+    pub fn channel_config(&self) -> ChannelConfig {
+        match self {
+            Self::Emulator(e) => e.channel.to_channel_config(),
+            Self::Gcp(g) => g.channel.to_channel_config(),
         }
     }
 }
