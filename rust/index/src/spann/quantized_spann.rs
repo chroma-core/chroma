@@ -1456,8 +1456,9 @@ mod tests {
         BlockfileWriterOptions,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, DataRecord, InternalSpannConfiguration, Space};
+    use chroma_types::{CollectionUuid, DataRecord, SpannIndexConfig};
     use rand::{Rng, SeedableRng};
     use tempfile::TempDir;
 
@@ -1472,24 +1473,31 @@ mod tests {
     const TEST_DIMENSION: usize = 4;
     const TEST_EPSILON: f32 = 1e-5;
 
-    fn test_params() -> InternalSpannConfiguration {
-        InternalSpannConfiguration {
-            space: Space::Cosine,
-            write_nprobe: 4,
-            nreplica_count: 2,
-            write_rng_epsilon: 4.0,
-            write_rng_factor: 1.0,
-            split_threshold: 8,
-            merge_threshold: 2,
-            reassign_neighbor_count: 6,
-            center_drift_threshold: 0.125,
-            search_nprobe: 4,
-            search_rng_epsilon: 4.0,
-            search_rng_factor: 1.0,
-            ef_construction: 32,
-            ef_search: 16,
-            ..Default::default()
+    fn test_config() -> SpannIndexConfig {
+        SpannIndexConfig {
+            write_nprobe: Some(4),
+            nreplica_count: Some(2),
+            write_rng_epsilon: Some(4.0),
+            write_rng_factor: Some(1.0),
+            split_threshold: Some(8),
+            merge_threshold: Some(2),
+            reassign_neighbor_count: Some(6),
+            center_drift_threshold: Some(0.125),
+            search_nprobe: Some(4),
+            search_rng_epsilon: Some(4.0),
+            search_rng_factor: Some(1.0),
+            ef_construction: Some(32),
+            ef_search: Some(16),
+            num_samples_kmeans: None,
+            initial_lambda: None,
+            num_centers_to_merge_to: None,
+            max_neighbors: Some(8),
+            quantize: true,
         }
+    }
+
+    fn test_distance_function() -> DistanceFunction {
+        DistanceFunction::Cosine
     }
 
     fn test_storage(tmp_dir: &TempDir) -> Storage {
@@ -1523,8 +1531,9 @@ mod tests {
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
             CollectionUuid::new(),
+            test_config(),
             TEST_DIMENSION,
-            test_params(),
+            test_distance_function(),
             None,
             "".to_string(),
             &usearch_provider,
@@ -1537,15 +1546,15 @@ mod tests {
         // =======================================================================
 
         // --- upgrade ---
-        let v1 = writer.upgrade(1);
+        let v1 = writer.upgrade_version(1);
         assert_eq!(v1, 1);
         assert_eq!(writer.versions.get(&1).map(|v| *v), Some(1));
 
-        let v2 = writer.upgrade(1);
+        let v2 = writer.upgrade_version(1);
         assert_eq!(v2, 2);
         assert_eq!(writer.versions.get(&1).map(|v| *v), Some(2));
 
-        let v3 = writer.upgrade(2);
+        let v3 = writer.upgrade_version(2);
         assert_eq!(v3, 1);
         assert_eq!(writer.versions.get(&2).map(|v| *v), Some(1));
 
@@ -1637,19 +1646,24 @@ mod tests {
         assert!(result.keys.contains(&cluster_id_1));
 
         // --- append ---
-        let code: Arc<[u8]> = Arc::from([0u8; 8]);
-        let v10 = writer.upgrade(10);
-        let new_len = writer.append(cluster_id_1, 10, v10, code.clone());
+        // Create a test embedding for point 10 and quantize it relative to center1
+        let emb_10 = [1.0f32, 0.1, 0.0, 0.0];
+        let code_10: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_10, &center1).as_ref().into();
+        let v10 = writer.upgrade_version(10);
+        let new_len = writer.append(cluster_id_1, 10, v10, code_10.clone());
         assert_eq!(new_len, Some(1));
 
         // Verify delta has the point
-        let delta = writer.deltas.get(&cluster_id_1).expect("delta not found");
+        let delta = writer
+            .cluster_deltas
+            .get(&cluster_id_1)
+            .expect("delta not found");
         assert!(delta.ids.contains(&10));
         assert_eq!(delta.length, 1);
 
         // Append to non-existent cluster returns None
-        let v11 = writer.upgrade(11);
-        let bad_append = writer.append(999, 11, v11, code.clone());
+        let v11 = writer.upgrade_version(11);
+        let bad_append = writer.append(999, 11, v11, code_10.clone());
         assert!(bad_append.is_none());
 
         // --- spawn more clusters for RNG test ---
@@ -1768,8 +1782,9 @@ mod tests {
         // =======================================================================
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
             collection_id,
+            test_config(),
             TEST_DIMENSION,
-            test_params(),
+            test_distance_function(),
             None,
             "".to_string(),
             &usearch_provider,
@@ -1779,16 +1794,23 @@ mod tests {
 
         // Spawn a cluster and add points 100, 101, 102
         let center: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
-        let code: Arc<[u8]> = Arc::from([0u8; 8]);
+
+        // Create properly quantized codes for each embedding relative to the center
+        let emb_100 = [1.0f32, 0.0, 0.0, 0.0];
+        let emb_101 = [0.0f32, 1.0, 0.0, 0.0];
+        let emb_102 = [0.0f32, 0.0, 1.0, 0.0];
+        let code_100: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_100, &center).as_ref().into();
+        let code_101: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_101, &center).as_ref().into();
+        let code_102: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_102, &center).as_ref().into();
 
         // Get versions via upgrade()
-        let v100 = writer.upgrade(100);
-        let v101 = writer.upgrade(101);
-        let v102 = writer.upgrade(102);
+        let v100 = writer.upgrade_version(100);
+        let v101 = writer.upgrade_version(101);
+        let v102 = writer.upgrade_version(102);
 
         let delta = QuantizedDelta {
             center: center.clone(),
-            codes: vec![code.clone(), code.clone(), code.clone()],
+            codes: vec![code_100, code_101, code_102],
             ids: vec![100, 101, 102],
             length: 3,
             versions: vec![v100, v101, v102],
@@ -1825,8 +1847,9 @@ mod tests {
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
             collection_id,
+            test_config(),
             TEST_DIMENSION,
-            test_params(),
+            test_distance_function(),
             file_ids,
             None,
             "".to_string(),
@@ -1840,7 +1863,10 @@ mod tests {
         // --- load ---
         // After open, delta exists but ids/codes/versions are empty (only length is set)
         {
-            let delta = writer.deltas.get(&cluster_id).expect("delta not found");
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id)
+                .expect("delta not found");
             assert_eq!(delta.length, 3);
             assert!(delta.ids.is_empty(), "ids should be empty before load");
         }
@@ -1849,7 +1875,10 @@ mod tests {
         writer.load(cluster_id).await.expect("load failed");
 
         {
-            let delta = writer.deltas.get(&cluster_id).expect("delta not found");
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id)
+                .expect("delta not found");
             assert_eq!(delta.ids.len(), 3);
             assert!(delta.ids.contains(&100));
             assert!(delta.ids.contains(&101));
@@ -1900,13 +1929,23 @@ mod tests {
         // Spawn a new cluster with points 200, 201
         let center2: Arc<[f32]> = Arc::from([0.0f32, 0.0, 0.0, 1.0]);
 
+        // Create properly quantized codes
+        let emb_200 = [0.0f32, 0.0, 0.0, 1.0];
+        let emb_201 = [0.0f32, 0.0, 0.5, 0.5];
+        let code_200: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_200, &center2)
+            .as_ref()
+            .into();
+        let code_201: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_201, &center2)
+            .as_ref()
+            .into();
+
         // Get versions via upgrade()
-        let v200 = writer.upgrade(200);
-        let v201 = writer.upgrade(201);
+        let v200 = writer.upgrade_version(200);
+        let v201 = writer.upgrade_version(201);
 
         let delta2 = QuantizedDelta {
             center: center2,
-            codes: vec![code.clone(), code.clone()],
+            codes: vec![code_200, code_201],
             ids: vec![200, 201],
             length: 2,
             versions: vec![v200, v201],
@@ -1914,7 +1953,7 @@ mod tests {
         let cluster_id_2 = writer.spawn(delta2).expect("spawn failed");
 
         // Invalidate 201 by upgrading its version
-        writer.upgrade(201); // Now version is 2, but cluster has version 1
+        writer.upgrade_version(201); // Now version is 2, but cluster has version 1
 
         // Verify embedding 200 not in cache before detach
         assert!(writer.embeddings.get(&200).is_none());
@@ -1928,7 +1967,7 @@ mod tests {
         assert_eq!(detached.ids, vec![200, 201]);
 
         // Cluster should be removed from deltas
-        assert!(writer.deltas.get(&cluster_id_2).is_none());
+        assert!(writer.cluster_deltas.get(&cluster_id_2).is_none());
 
         // Embedding for valid point 200 should be loaded
         assert!(writer.embeddings.get(&200).is_some());
@@ -1937,14 +1976,28 @@ mod tests {
         // Spawn a cluster with points 300, 301, 302
         let center3: Arc<[f32]> = Arc::from([0.5f32, 0.0, 0.5, 0.0]);
 
+        // Create properly quantized codes
+        let emb_300 = [0.5f32, 0.0, 0.5, 0.0];
+        let emb_301 = [0.5f32, 0.5, 0.0, 0.0];
+        let emb_302 = [0.0f32, 0.5, 0.5, 0.0];
+        let code_300: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_300, &center3)
+            .as_ref()
+            .into();
+        let code_301: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_301, &center3)
+            .as_ref()
+            .into();
+        let code_302: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_302, &center3)
+            .as_ref()
+            .into();
+
         // Get versions via upgrade()
-        let v300 = writer.upgrade(300);
-        let v301 = writer.upgrade(301);
-        let v302 = writer.upgrade(302);
+        let v300 = writer.upgrade_version(300);
+        let v301 = writer.upgrade_version(301);
+        let v302 = writer.upgrade_version(302);
 
         let delta3 = QuantizedDelta {
             center: center3,
-            codes: vec![code.clone(), code.clone(), code.clone()],
+            codes: vec![code_300, code_301, code_302],
             ids: vec![300, 301, 302],
             length: 3,
             versions: vec![v300, v301, v302],
@@ -1952,11 +2005,14 @@ mod tests {
         let cluster_id_3 = writer.spawn(delta3).expect("spawn failed");
 
         // Invalidate 301 by upgrading its version
-        writer.upgrade(301); // Now version is 2
+        writer.upgrade_version(301); // Now version is 2
 
         // Before scrub: all 3 points in delta
         {
-            let delta = writer.deltas.get(&cluster_id_3).expect("delta not found");
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id_3)
+                .expect("delta not found");
             assert_eq!(delta.ids.len(), 3);
             assert_eq!(delta.length, 3);
         }
@@ -1971,7 +2027,10 @@ mod tests {
 
         // After scrub: only points 300, 302 remain
         {
-            let delta = writer.deltas.get(&cluster_id_3).expect("delta not found");
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id_3)
+                .expect("delta not found");
             assert_eq!(delta.ids.len(), 2);
             assert_eq!(delta.length, 2);
             assert!(delta.ids.contains(&300));
@@ -1991,8 +2050,9 @@ mod tests {
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
             CollectionUuid::new(),
+            test_config(),
             TEST_DIMENSION,
-            test_params(),
+            test_distance_function(),
             None,
             "".to_string(),
             &usearch_provider,
@@ -2004,15 +2064,15 @@ mod tests {
         // Step 1: insert (empty index -> spawn)
         // =======================================================================
         // First insert on empty index should spawn a new cluster
-        assert_eq!(writer.deltas.len(), 0);
+        assert_eq!(writer.cluster_deltas.len(), 0);
 
         writer
             .add(1, &[1.0, 0.0, 0.0, 0.0])
             .await
             .expect("add failed");
 
-        assert_eq!(writer.deltas.len(), 1);
-        let first_cluster_id = *writer.deltas.iter().next().unwrap().key();
+        assert_eq!(writer.cluster_deltas.len(), 1);
+        let first_cluster_id = *writer.cluster_deltas.iter().next().unwrap().key();
 
         // =======================================================================
         // Step 2: insert (append to existing cluster)
@@ -2026,12 +2086,12 @@ mod tests {
         }
 
         // Still only 1 cluster
-        assert_eq!(writer.deltas.len(), 1);
+        assert_eq!(writer.cluster_deltas.len(), 1);
 
         // Cluster should have 5 points
         {
             let delta = writer
-                .deltas
+                .cluster_deltas
                 .get(&first_cluster_id)
                 .expect("delta not found");
             assert_eq!(delta.length, 5);
@@ -2054,8 +2114,8 @@ mod tests {
         let misplaced_emb_1 = writer.rotate(&[0.9, 0.1, 0.0, 0.0]);
         let misplaced_emb_2 = writer.rotate(&[-0.9, 0.1, 0.0, 0.0]);
 
-        let v100 = writer.upgrade(100);
-        let v101 = writer.upgrade(101);
+        let v100 = writer.upgrade_version(100);
+        let v101 = writer.upgrade_version(101);
 
         // Populate embeddings cache
         writer.embeddings.insert(100, misplaced_emb_1.clone());
@@ -2079,7 +2139,7 @@ mod tests {
         let neighbor_cluster_id = writer.spawn(neighbor_delta).expect("spawn failed");
 
         // Now we have 2 clusters
-        assert_eq!(writer.deltas.len(), 2);
+        assert_eq!(writer.cluster_deltas.len(), 2);
 
         // mixed_center close to neighbor so navigate from mixed_center finds neighbor
         // After split, points will move to centers near [1,0,0,0] and [-1,0,0,0]
@@ -2091,7 +2151,7 @@ mod tests {
 
         // Group A: 5 points near [1, 0, 0, 0] - will form one split cluster
         for id in 50..55 {
-            let v = writer.upgrade(id);
+            let v = writer.upgrade_version(id);
             let emb = writer.rotate(&[1.0, 0.0, 0.0, 0.0]);
             let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
                 .as_ref()
@@ -2104,7 +2164,7 @@ mod tests {
 
         // Group B: 5 points near [-1, 0, 0, 0] - will form another split cluster
         for id in 55..60 {
-            let v = writer.upgrade(id);
+            let v = writer.upgrade_version(id);
             let emb = writer.rotate(&[-1.0, 0.0, 0.0, 0.0]);
             let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
                 .as_ref()
@@ -2125,7 +2185,7 @@ mod tests {
         let mixed_cluster_id = writer.spawn(mixed_delta).expect("spawn failed");
 
         // Now we have 3 clusters: first_cluster, neighbor, mixed
-        assert_eq!(writer.deltas.len(), 3);
+        assert_eq!(writer.cluster_deltas.len(), 3);
 
         // Trigger balance on the mixed cluster - should split into 2
         writer
@@ -2137,9 +2197,9 @@ mod tests {
         // mixed_cluster splits into 2, so we have: first_cluster + neighbor + 2 from split = 4
         // (mixed_cluster itself may be dropped and replaced by 2 new ones)
         assert!(
-            writer.deltas.len() >= 3,
+            writer.cluster_deltas.len() >= 3,
             "Expected at least 3 clusters after split, got {}",
-            writer.deltas.len()
+            writer.cluster_deltas.len()
         );
 
         // Verify the misplaced points got reassigned
@@ -2149,7 +2209,7 @@ mod tests {
         let v101_current = *writer.versions.get(&101).expect("version not found");
 
         // Either neighbor cluster was dropped, or the points' versions were upgraded (reassigned)
-        let neighbor_dropped = writer.deltas.get(&neighbor_cluster_id).is_none();
+        let neighbor_dropped = writer.cluster_deltas.get(&neighbor_cluster_id).is_none();
         let points_were_reassigned = v100_current > v100 || v101_current > v101;
         assert!(
             neighbor_dropped || points_were_reassigned,
@@ -2163,10 +2223,10 @@ mod tests {
         let isolated_center: Arc<[f32]> = writer.rotate(&[0.0, 0.0, 0.0, 1.0]);
 
         // Add 4 points, will invalidate 3 to trigger merge
-        let v200 = writer.upgrade(200);
-        let v201 = writer.upgrade(201);
-        let v202 = writer.upgrade(202);
-        let v203 = writer.upgrade(203);
+        let v200 = writer.upgrade_version(200);
+        let v201 = writer.upgrade_version(201);
+        let v202 = writer.upgrade_version(202);
+        let v203 = writer.upgrade_version(203);
 
         // Create embeddings and codes for isolated cluster points
         let emb_200 = writer.rotate(&[0.0, 0.0, 0.0, 1.0]);
@@ -2201,12 +2261,12 @@ mod tests {
         };
         let isolated_cluster_id = writer.spawn(isolated_delta).expect("spawn failed");
 
-        let clusters_before_merge = writer.deltas.len();
+        let clusters_before_merge = writer.cluster_deltas.len();
 
         // Invalidate 3 points, leaving only 1 valid (below merge_threshold of 2)
-        writer.upgrade(201);
-        writer.upgrade(202);
-        writer.upgrade(203);
+        writer.upgrade_version(201);
+        writer.upgrade_version(202);
+        writer.upgrade_version(203);
 
         // Trigger balance - should scrub (remove invalid) then merge (below threshold)
         writer
@@ -2216,13 +2276,13 @@ mod tests {
 
         // Isolated cluster should be dropped (merged into neighbor)
         assert!(
-            writer.deltas.get(&isolated_cluster_id).is_none(),
+            writer.cluster_deltas.get(&isolated_cluster_id).is_none(),
             "Isolated cluster should have been merged"
         );
 
         // Should have one fewer cluster
         assert_eq!(
-            writer.deltas.len(),
+            writer.cluster_deltas.len(),
             clusters_before_merge - 1,
             "One cluster should have been removed by merge"
         );
@@ -2230,7 +2290,7 @@ mod tests {
         // Point 200 should now be in some other cluster (reassigned during merge)
         // Check that it exists somewhere with current version
         let current_v200 = *writer.versions.get(&200).expect("version not found");
-        let point_200_found = writer.deltas.iter().any(|entry| {
+        let point_200_found = writer.cluster_deltas.iter().any(|entry| {
             entry
                 .value()
                 .ids
@@ -2305,8 +2365,9 @@ mod tests {
 
         let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
             collection_id,
+            test_config(),
             TEST_DIMENSION,
-            test_params(),
+            test_distance_function(),
             None,
             "".to_string(),
             &usearch_provider,
@@ -2362,7 +2423,7 @@ mod tests {
 
             // --- Pre-commit verification ---
             // For each delta, verify all point versions <= global version
-            for delta in writer.deltas.iter() {
+            for delta in writer.cluster_deltas.iter() {
                 for (id, ver) in delta.ids.iter().zip(delta.versions.iter()) {
                     let global = *writer
                         .versions
@@ -2408,8 +2469,9 @@ mod tests {
 
             writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
                 collection_id,
+                test_config(),
                 TEST_DIMENSION,
-                test_params(),
+                test_distance_function(),
                 file_ids.clone(),
                 None,
                 "".to_string(),
@@ -2448,16 +2510,20 @@ mod tests {
         }
 
         // --- Load all clusters and verify delta consistency ---
-        let cluster_ids = writer.deltas.iter().map(|e| *e.key()).collect::<Vec<_>>();
+        let cluster_ids = writer
+            .cluster_deltas
+            .iter()
+            .map(|e| *e.key())
+            .collect::<Vec<_>>();
 
         for cluster_id in &cluster_ids {
             // Get length before load (from blockfile metadata, already set during open)
-            let length_before = writer.deltas.get(cluster_id).unwrap().length;
+            let length_before = writer.cluster_deltas.get(cluster_id).unwrap().length;
 
             writer.load(*cluster_id).await.expect("load failed");
 
             // After load, verify ids/codes/versions lengths match
-            let delta = writer.deltas.get(cluster_id).unwrap();
+            let delta = writer.cluster_deltas.get(cluster_id).unwrap();
             assert_eq!(
                 delta.ids.len(),
                 length_before,
@@ -2498,7 +2564,7 @@ mod tests {
             let id = id as u32;
             let global = *writer.versions.get(&id).expect("missing ID");
 
-            let has_current_copy = writer.deltas.iter().any(|delta| {
+            let has_current_copy = writer.cluster_deltas.iter().any(|delta| {
                 delta
                     .ids
                     .iter()
