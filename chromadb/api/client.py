@@ -134,12 +134,18 @@ class Client(SharedSystemClient, ClientAPI):
     # Note - we could do this in less verbose ways, but they break type checking
     @override
     def heartbeat(self) -> int:
+        """Return the server time in nanoseconds since epoch."""
         return self._server.heartbeat()
 
     @override
     def list_collections(
         self, limit: Optional[int] = None, offset: Optional[int] = None
     ) -> Sequence[Collection]:
+        """List collections for the current tenant and database, with pagination.
+
+        Returns:
+            Sequence[Collection]: Collection objects for the current tenant.
+        """
         return [
             Collection(client=self._server, model=model)
             for model in self._server.list_collections(
@@ -149,6 +155,7 @@ class Client(SharedSystemClient, ClientAPI):
 
     @override
     def count_collections(self) -> int:
+        """Return the number of collections in the current database."""
         return self._server.count_collections(
             tenant=self.tenant, database=self.database
         )
@@ -166,6 +173,26 @@ class Client(SharedSystemClient, ClientAPI):
         data_loader: Optional[DataLoader[Loadable]] = None,
         get_or_create: bool = False,
     ) -> Collection:
+        """Create a collection with optional configuration and metadata.
+
+        If using a schema, do not provide `embedding_function`. Instead,
+        provide the `embedding_function` as part of the schema.
+
+        Args:
+            name: Collection name.
+            schema: Optional collection schema for indexes and encryption.
+            configuration: Optional collection configuration.
+            metadata: Optional collection metadata.
+            embedding_function: Optional embedding function for the collection.
+            data_loader: Optional data loader for documents with URIs.
+            get_or_create: Whether to return an existing collection if present.
+
+        Returns:
+            Collection: The created collection.
+
+        Raises:
+            ValueError: If the embedding function conflicts with configuration.
+        """
         if configuration is None:
             configuration = {}
 
@@ -205,6 +232,19 @@ class Client(SharedSystemClient, ClientAPI):
         ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        """Get a collection by name.
+
+        Args:
+            name: Collection name.
+            embedding_function: Optional embedding function for the collection.
+            data_loader: Optional data loader for documents with URIs.
+
+        Returns:
+            Collection: The requested collection.
+
+        Raises:
+            ValueError: If the embedding function conflicts with configuration.
+        """
         model = self._server.get_collection(
             name=name,
             tenant=self.tenant,
@@ -235,6 +275,26 @@ class Client(SharedSystemClient, ClientAPI):
         ] = DefaultEmbeddingFunction(),  # type: ignore
         data_loader: Optional[DataLoader[Loadable]] = None,
     ) -> Collection:
+        """Get an existing collection or create a new one.
+
+        If the collection does not exist, it will be created. If the collection
+        already exists, the schema, configuration, and metadata arguments
+        will be ignored.
+
+        Args:
+            name: Collection name.
+            schema: Optional collection schema for indexes and encryption.
+            configuration: Optional collection configuration.
+            metadata: Optional collection metadata.
+            embedding_function: Optional embedding function for the collection.
+            data_loader: Optional data loader for URI-backed data.
+
+        Returns:
+            Collection: The existing or newly created collection.
+
+        Raises:
+            ValueError: If the embedding function does not match the collection's embedding function.
+        """
         if configuration is None:
             configuration = {}
 
@@ -499,6 +559,8 @@ class Client(SharedSystemClient, ClientAPI):
 
 
 class AdminClient(SharedSystemClient, AdminAPI):
+    """Admin client for managing tenants and databases."""
+
     _server: ServerAPI
 
     def __init__(self, settings: Settings = Settings()) -> None:
@@ -507,14 +569,35 @@ class AdminClient(SharedSystemClient, AdminAPI):
 
     @override
     def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Create a database in a tenant.
+
+        Args:
+            name: Database name.
+            tenant: Tenant that owns the database.
+        """
         return self._server.create_database(name=name, tenant=tenant)
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        """Get a database by name.
+
+        Args:
+            name: Database name.
+            tenant: Tenant that owns the database.
+
+        Returns:
+            Database: The database record.
+        """
         return self._server.get_database(name=name, tenant=tenant)
 
     @override
     def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database by name.
+
+        Args:
+            name: Database name.
+            tenant: Tenant that owns the database.
+        """
         return self._server.delete_database(name=name, tenant=tenant)
 
     @override

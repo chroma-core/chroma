@@ -395,7 +395,7 @@ class NotRegex(Where):
 
 # Field proxy for building Where conditions
 class Key:
-    """Field proxy for building Where conditions with operator overloading.
+    """Field proxy for building Where filter expressions.
 
     The Key class allows for readable field references using either:
     1. Predefined constants for special fields: K.EMBEDDING, K.DOCUMENT, K.SCORE, etc.
@@ -596,7 +596,7 @@ class Projection:
 # Rank expression types for hybrid search
 @dataclass
 class Rank:
-    """Base class for Rank expressions (algebraic data type).
+    """Base class for rank expressions.
 
     Supports arithmetic operations for combining rank expressions:
         - Addition: rank1 + rank2, rank + 0.5
@@ -1018,7 +1018,7 @@ class Mul(Rank):
 
 @dataclass
 class Knn(Rank):
-    """KNN-based ranking
+    """KNN-based ranking expression.
 
     Args:
         query: The query for KNN search. Can be:
@@ -1120,7 +1120,7 @@ class Val(Rank):
 
 @dataclass
 class Rrf(Rank):
-    """Reciprocal Rank Fusion for combining multiple ranking strategies.
+    """Reciprocal Rank Fusion for combining ranking strategies.
 
     RRF formula: score = -sum(weight_i / (k + rank_i)) for each ranking strategy
     The negative is used because RRF produces higher scores for better results,

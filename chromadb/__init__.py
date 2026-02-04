@@ -170,13 +170,18 @@ def EphemeralClient(
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
-    """
-    Creates an in-memory instance of Chroma. This is useful for testing and
-    development, but not recommended for production use.
+    """Create an in-memory client for local use.
+
+    This client stores all data in memory and does not persist to disk.
+    It is intended for testing and development.
 
     Args:
-        tenant: The tenant to use for this client. Defaults to the default tenant.
-        database: The database to use for this client. Defaults to the default database.
+        settings: Optional settings to override defaults.
+        tenant: Tenant name to use for requests. Defaults to the default tenant.
+        database: Database name to use for requests. Defaults to the default database.
+
+    Returns:
+        ClientAPI: A configured client instance.
     """
     if settings is None:
         settings = Settings()
@@ -195,14 +200,19 @@ def PersistentClient(
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
-    """
-    Creates a persistent instance of Chroma that saves to disk. This is useful for
-    testing and development, but not recommended for production use.
+    """Create a persistent client that stores data on disk.
+
+    This client is intended for local development and testing. For production,
+    prefer a server-backed Chroma instance.
 
     Args:
-        path: The directory to save Chroma's data to. Defaults to "./chroma".
-        tenant: The tenant to use for this client. Defaults to the default tenant.
-        database: The database to use for this client. Defaults to the default database.
+        path: Directory to store persisted data.
+        settings: Optional settings to override defaults.
+        tenant: Tenant name to use for requests.
+        database: Database name to use for requests.
+
+    Returns:
+        ClientAPI: A configured client instance.
     """
     if settings is None:
         settings = Settings()
@@ -228,8 +238,8 @@ def RustClient(
 
     Args:
         path: An optional directory to save Chroma's data to. The client is ephemeral if a None value is provided. Defaults to None.
-        tenant: The tenant to use for this client. Defaults to the default tenant.
-        database: The database to use for this client. Defaults to the default database.
+        tenant: The tenant to use for this client.
+        database: The database to use for this client.
     """
     if settings is None:
         settings = Settings()
@@ -254,19 +264,22 @@ def HttpClient(
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> ClientAPI:
-    """
-    Creates a client that connects to a remote Chroma server. This supports
-    many clients connecting to the same server, and is the recommended way to
-    use Chroma in production.
+    """Create a client that connects to a Chroma server.
 
     Args:
-        host: The hostname of the Chroma server. Defaults to "localhost".
-        port: The port of the Chroma server. Defaults to 8000.
-        ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
-        headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
-        settings: A dictionary of settings to communicate with the chroma server.
-        tenant: The tenant to use for this client. Defaults to the default tenant.
-        database: The database to use for this client. Defaults to the default database.
+        host: Hostname of the Chroma server.
+        port: HTTP port of the Chroma server.
+        ssl: Whether to enable SSL for the connection.
+        headers: Optional headers to send with each request.
+        settings: Optional settings to override defaults.
+        tenant: Tenant name to use for requests.
+        database: Database name to use for requests.
+
+    Returns:
+        ClientAPI: A configured client instance.
+
+    Raises:
+        ValueError: If settings specify a different host or port.
     """
 
     if settings is None:
@@ -305,19 +318,25 @@ async def AsyncHttpClient(
     tenant: str = DEFAULT_TENANT,
     database: str = DEFAULT_DATABASE,
 ) -> AsyncClientAPI:
-    """
-    Creates an async client that connects to a remote Chroma server. This supports
-    many clients connecting to the same server, and is the recommended way to
-    use Chroma in production.
+    """Create an async client that connects to a Chroma HTTP server.
+
+    This supports multiple clients connecting to the same server and is the
+    recommended production configuration.
 
     Args:
-        host: The hostname of the Chroma server. Defaults to "localhost".
-        port: The port of the Chroma server. Defaults to 8000.
-        ssl: Whether to use SSL to connect to the Chroma server. Defaults to False.
-        headers: A dictionary of headers to send to the Chroma server. Defaults to {}.
-        settings: A dictionary of settings to communicate with the chroma server.
-        tenant: The tenant to use for this client. Defaults to the default tenant.
-        database: The database to use for this client. Defaults to the default database.
+        host: Hostname of the Chroma server.
+        port: HTTP port of the Chroma server.
+        ssl: Whether to enable SSL for the connection.
+        headers: Optional headers to send with each request.
+        settings: Optional settings to override defaults.
+        tenant: Tenant name to use for requests.
+        database: Database name to use for requests.
+
+    Returns:
+        AsyncClientAPI: A configured async client instance.
+
+    Raises:
+        ValueError: If settings specify a different host or port.
     """
 
     if settings is None:
@@ -359,13 +378,21 @@ def CloudClient(
     cloud_port: int = 443,
     enable_ssl: bool = True,
 ) -> ClientAPI:
-    """
-    Creates a client to connect to a tenant and database on Chroma cloud.
+    """Create a client for Chroma Cloud.
+
+    If not provided, `tenant`, `database`, and `api_key` will be inferred from the environment variables `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`.
 
     Args:
-        tenant: The tenant to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single tenant. If provided, it will be validated against the API key's scope.
-        database: The database to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single database. If provided, it will be validated against the API key's scope.
-        api_key: The api key to use for this client.
+        tenant: Tenant name to use, or None to infer from credentials.
+        database: Database name to use, or None to infer from credentials.
+        api_key: API key for Chroma Cloud.
+        settings: Optional settings to override defaults.
+
+    Returns:
+        ClientAPI: A configured client instance.
+
+    Raises:
+        ValueError: If no API key is provided or available in the environment.
     """
 
     required_args = [
@@ -434,9 +461,5 @@ def Client(
 
 
 def AdminClient(settings: Settings = Settings()) -> AdminAPI:
-    """
-
-    Creates an admin client that can be used to create tenants and databases.
-
-    """
+    """Create an admin client for tenant and database management."""
     return AdminClientCreator(settings=settings)
