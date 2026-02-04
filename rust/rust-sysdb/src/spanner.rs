@@ -599,12 +599,6 @@ impl SpannerBackend {
                                 "index_schema",
                                 "created_at",
                                 "updated_at",
-                                "version",
-                                "last_compacted_offset",
-                                "total_records_post_compaction",
-                                "size_bytes_post_compaction",
-                                "num_versions",
-                                "compaction_failure_count",
                             ],
                             &[
                                 &collection_id,
@@ -612,12 +606,6 @@ impl SpannerBackend {
                                 &index_schema_json,
                                 &commit_ts,
                                 &commit_ts,
-                                &(0i64),  // initial version
-                                &(0i64),  // initial last_compacted_offset
-                                &(0i64),  // initial total_records_post_compaction
-                                &(0i64),  // initial size_bytes_post_compaction
-                                &(0i64),  // initial num_versions
-                                &(0i64),  // initial compaction_failure_count
                             ],
                         ));
                     }
@@ -1462,7 +1450,7 @@ impl SpannerBackend {
                             num_versions = @num_active_versions,
                             compaction_failure_count = 0,
                             index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
-                            WHERE collection_id = @collection_id AND version = @current_version AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
+                            WHERE collection_id = @collection_id AND (version = @current_version OR version IS NULL) AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
                     );
                     update_stmt.add_param("collection_id", &collection_id);
                     update_stmt.add_param("new_version", &(new_version as i64));
