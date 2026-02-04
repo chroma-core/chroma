@@ -1,3 +1,5 @@
+#![recursion_limit = "8192"]
+
 use worker::query_service_entrypoint;
 
 #[cfg(not(target_env = "msvc"))]

@@ -84,3 +84,7 @@ harness = false
 [[bench]]
 name = "fast_writer"
 harness = false
+
+[[bench]]
+name = "binary_quantized"
+harness = false

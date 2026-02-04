@@ -1,3 +1,6 @@
+// Increased for ASAN builds which expand type complexity
+#![recursion_limit = "8192"]
+
 mod compactor;
 mod server;
 mod utils;

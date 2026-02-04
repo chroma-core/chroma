@@ -201,30 +201,25 @@ impl VectorIndex for USearchIndex {
     type Error = USearchError;
 
     fn add(&self, key: u32, vector: &[f32]) -> Result<(), Self::Error> {
-        let need_resize = {
-            let index = self.index.read().expect("?");
-            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
-            raw_size + 128 >= index.capacity()
-        };
-
-        if need_resize {
-            let index = self.index.write().expect("?");
-            let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
-            if raw_size + 128 >= index.capacity() {
-                let new_capacity = (index.capacity() * 2).max(128);
-                // Reserve capacity and thread slots (128 threads should cover most workloads)
-                index
-                    .reserve_capacity_and_threads(new_capacity, 128)
-                    .map_err(|e| USearchError::Index(e.to_string()))?;
-            }
+        // SAFETY: USearch is NOT thread-safe for concurrent add/remove operations.
+        // See: https://github.com/unum-cloud/USearch/issues/697
+        // We must use write lock to serialize all mutations.
+        let index = self.index.write().expect("?");
+        let raw_size = index.size() + self.tombstones.load(Ordering::Relaxed);
+        if raw_size + 128 >= index.capacity() {
+            let new_capacity = (index.capacity() * 2).max(128);
+            // Reserve capacity and thread slots (128 threads should cover most workloads)
+            index
+                .reserve_capacity_and_threads(new_capacity, 128)
+                .map_err(|e| USearchError::Index(e.to_string()))?;
         }
 
         if let Some(center) = &self.quantization_center {
             let code = Code::<_>::quantize(vector, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
-            self.index.read().expect("?").add(key as u64, i8_slice)
+            index.add(key as u64, i8_slice)
         } else {
-            self.index.read().expect("?").add(key as u64, vector)
+            index.add(key as u64, vector)
         }
         .map_err(|e| USearchError::Index(e.to_string()))
     }
@@ -254,9 +249,12 @@ impl VectorIndex for USearchIndex {
     }
 
     fn remove(&self, key: u32) -> Result<(), Self::Error> {
+        // SAFETY: USearch is NOT thread-safe for concurrent add/remove operations.
+        // See: https://github.com/unum-cloud/USearch/issues/697
+        // We must use write lock to serialize all mutations.
         self.tombstones.fetch_add(1, Ordering::Relaxed);
         self.index
-            .read()
+            .write()
             .expect("?")
             .remove(key as u64)
             .map_err(|e| USearchError::Index(e.to_string()))?;

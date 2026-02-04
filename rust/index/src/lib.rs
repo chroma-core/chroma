@@ -1,3 +1,4 @@
+pub mod binary_quantized;
 pub mod config;
 pub mod fulltext;
 mod hnsw;
