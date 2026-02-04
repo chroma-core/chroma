@@ -232,6 +232,13 @@
             ]
           },
           {
+            "group": "Beta SDKs",
+            "pages": [
+              "reference/kotlin",
+              "reference/swift"
+            ]
+          },
+          {
             "group": "APIs",
             "pages": [
               {
@@ -334,5 +341,15 @@
     "gtm": {
       "tagId": "GTM-T8MGS4GJ"
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/reference/chroma-reference",
+      "destination": "/reference/overview"
+    },
+    {
+      "source": "/reference/js/:slug*",
+      "destination": "/reference/typescript/"
+    }
+  ]
 }
