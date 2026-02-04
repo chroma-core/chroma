@@ -5,18 +5,26 @@ name: Roboflow
 
 # Roboflow
 
-You can use [Roboflow Inference](https://inference.roboflow.com) with Chroma to calculate multi-modal text and image embeddings with CLIP. through the `RoboflowEmbeddingFunction` class. Inference can be used through the Roboflow cloud, or run on your hardware.
+You can use [Roboflow Inference](https://inference.roboflow.com) with Chroma to calculate multi-modal text and image embeddings with CLIP through the `RoboflowEmbeddingFunction`. Inference can be used through the Roboflow cloud, or run on your hardware.
+
+{% Banner type="tip" %}
+Visit Roboflow Inference [documentation](https://inference.roboflow.com/foundation/clip/) for more information about the CLIP embedding API.
+{% /Banner %}
 
 ## Roboflow Cloud Inference
 
 To run Inference through the Roboflow cloud, you will need an API key. [Learn how to retrieve a Roboflow API key](https://docs.roboflow.com/api-reference/authentication#retrieve-an-api-key).
 
-You can pass it directly on creation of the `RoboflowEmbeddingFunction`:
+{% Tabs %}
+
+{% Tab label="python" %}
+
+You can pass the API key directly when creating the `RoboflowEmbeddingFunction`:
 
 ```python
 from chromadb.utils.embedding_functions import RoboflowEmbeddingFunction
 
-roboflow_ef = RoboflowEmbeddingFunction(api_key=API_KEY)
+roboflow_ef = RoboflowEmbeddingFunction(api_key="YOUR_API_KEY")
 ```
 
 Alternatively, you can set your API key as an environment variable:
@@ -32,6 +40,85 @@ from chromadb.utils.embedding_functions import RoboflowEmbeddingFunction
 
 roboflow_ef = RoboflowEmbeddingFunction()
 ```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+The Go client supports both text and image embeddings with Roboflow CLIP, enabling cross-modal similarity search.
+
+```go
+import (
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/roboflow"
+)
+
+// Create with API key directly
+ef, err := roboflow.NewRoboflowEmbeddingFunction(
+    roboflow.WithAPIKey("YOUR_API_KEY"),
+)
+
+// Or use environment variable (ROBOFLOW_API_KEY)
+ef, err := roboflow.NewRoboflowEmbeddingFunction(
+    roboflow.WithEnvAPIKey(),
+)
+```
+
+### Text Embeddings
+
+```go
+// Embed text documents
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "a photo of a dog",
+    "a photo of a cat",
+})
+
+// Embed a single query
+embedding, err := ef.EmbedQuery(ctx, "a cute puppy")
+```
+
+### Image Embeddings
+
+The Go client supports image embeddings from multiple sources:
+
+```go
+import "github.com/chroma-core/chroma/clients/go/pkg/embeddings"
+
+// From URL - passed directly to Roboflow API
+image := embeddings.NewImageInputFromURL("https://example.com/image.png")
+embedding, err := ef.EmbedImage(ctx, image)
+
+// From local file
+image := embeddings.NewImageInputFromFile("/path/to/image.png")
+embedding, err := ef.EmbedImage(ctx, image)
+
+// From base64-encoded data
+image := embeddings.NewImageInputFromBase64("iVBORw0KGgo...")
+embedding, err := ef.EmbedImage(ctx, image)
+
+// Batch image embeddings
+images := []embeddings.ImageInput{
+    embeddings.NewImageInputFromURL("https://example.com/dog.png"),
+    embeddings.NewImageInputFromURL("https://example.com/cat.png"),
+}
+embeddings, err := ef.EmbedImages(ctx, images)
+```
+
+### CLIP Model Versions
+
+You can select different CLIP model versions:
+
+```go
+ef, err := roboflow.NewRoboflowEmbeddingFunction(
+    roboflow.WithEnvAPIKey(),
+    roboflow.WithCLIPVersion(roboflow.CLIPVersionViTL14),
+)
+```
+
+Available versions: `CLIPVersionViTB16` (default), `CLIPVersionViTB32`, `CLIPVersionViTL14`, `CLIPVersionViTL14336px`, `CLIPVersionRN50`, `CLIPVersionRN101`, `CLIPVersionRN50x4`, `CLIPVersionRN50x16`, `CLIPVersionRN50x64`
+
+{% /Tab %}
+
+{% /Tabs %}
 
 ## Local Inference
 
@@ -55,13 +142,34 @@ inference server start
 
 Your Inference server will run at `http://localhost:9001`.
 
-Then, you can create the `RoboflowEmbeddingFunction`:
+{% Tabs %}
+
+{% Tab label="python" %}
 
 ```python
 from chromadb.utils.embedding_functions import RoboflowEmbeddingFunction
 
-roboflow_ef = RoboflowEmbeddingFunction(api_key=API_KEY, server_url="http://localhost:9001")
+roboflow_ef = RoboflowEmbeddingFunction(
+    api_key="YOUR_API_KEY",
+    server_url="http://localhost:9001"
+)
 ```
+
+{% /Tab %}
+
+{% Tab label="go" %}
+
+```go
+ef, err := roboflow.NewRoboflowEmbeddingFunction(
+    roboflow.WithAPIKey("YOUR_API_KEY"),
+    roboflow.WithBaseURL("http://localhost:9001"),
+    roboflow.WithInsecure(), // Required for HTTP endpoints
+)
+```
+
+{% /Tab %}
+
+{% /Tabs %}
 
 This function will calculate embeddings using your local Inference server instead of the Roboflow cloud.
 
