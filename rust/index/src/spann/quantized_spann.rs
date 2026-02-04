@@ -839,10 +839,32 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
-        // === Step 0: Check center drift and rebuild centroid indexes if needed ===
+        // === Step 0: Pre-scrub cleanup ===
+        let mut mutated_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in &mutated_cluster_ids {
+            self.scrub(*cluster_id).await?;
+        }
+
+        let zero_length_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (entry.value().length == 0).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in zero_length_cluster_ids {
+            self.detach(cluster_id).await?;
+            self.drop(cluster_id)?;
+        }
+
+        // === Step 1: Check center drift and rebuild centroid indexes if needed ===
         self.rebuild_on_drift(usearch_provider).await?;
 
-        // === Step 1: Create blockfile writers ===
+        // === Step 2: Create blockfile writers ===
         let mut qc_options =
             BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
         let mut sm_options =
@@ -876,22 +898,9 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .await
             .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
 
-        // === Step 2: Write quantized_cluster data ===
+        // === Step 3: Write quantized_cluster data ===
         let quantized_cluster_flusher = {
-            let mut mutated_cluster_ids = self
-                .cluster_deltas
-                .iter()
-                .filter_map(|entry| {
-                    (entry.value().length == 0 || !entry.value().ids.is_empty())
-                        .then_some(*entry.key())
-                })
-                .collect::<Vec<_>>();
-
-            for cluster_id in &mutated_cluster_ids {
-                self.scrub(*cluster_id).await?;
-            }
-
-            // Add deleted cluster ids
+            // Add tombstoned cluster ids (need to delete from blockfile)
             for cluster_id in self.tombstones.iter() {
                 mutated_cluster_ids.push(*cluster_id);
             }
@@ -901,11 +910,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
             // Apply changes in order
             for cluster_id in mutated_cluster_ids {
-                if let Some(delta) = self
-                    .cluster_deltas
-                    .get(&cluster_id)
-                    .filter(|delta| delta.length > 0)
-                {
+                if let Some(delta) = self.cluster_deltas.get(&cluster_id) {
                     let codes = delta
                         .codes
                         .iter()
@@ -936,19 +941,13 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 3: Write scalar_metadata ===
-        // Stores: next_cluster_id, lengths, versions
-        // Always create fresh, write in alphabetical prefix order: length < next < version
-        // NOTE: Must come after Step 2 because scrubbing may change lengths
+        // === Step 4: Write scalar_metadata ===
         let scalar_metadata_flusher = {
             // 1. PREFIX_LENGTH - sorted by cluster_id
             let mut lengths = self
                 .cluster_deltas
                 .iter()
-                .filter_map(|entry| {
-                    let len = entry.value().length as u32;
-                    (len > 0).then_some((*entry.key(), len))
-                })
+                .map(|entry| (*entry.key(), entry.value().length as u32))
                 .collect::<Vec<_>>();
             lengths.sort_unstable();
             for (cluster_id, length) in lengths {
@@ -985,9 +984,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 4: Write embedding_metadata ===
-        // Stores: quantization center and rotation matrix columns
-        // Write in alphabetical prefix order: center < rotation
+        // === Step 5: Write embedding_metadata ===
         let embedding_metadata_flusher = {
             // 1. PREFIX_CENTER - quantization center (always write, may be updated)
             embedding_metadata_writer
@@ -1902,15 +1899,18 @@ mod tests {
         let loaded_100 = writer
             .embeddings
             .get(&100)
-            .expect("embedding 100 not found");
+            .expect("embedding 100 not found")
+            .clone();
         let loaded_101 = writer
             .embeddings
             .get(&101)
-            .expect("embedding 101 not found");
+            .expect("embedding 101 not found")
+            .clone();
         let loaded_102 = writer
             .embeddings
             .get(&102)
-            .expect("embedding 102 not found");
+            .expect("embedding 102 not found")
+            .clone();
 
         assert!(
             writer.distance(&loaded_100, &expected_rotated_100) < TEST_EPSILON,
@@ -2302,6 +2302,292 @@ mod tests {
             point_200_found,
             "Point 200 should exist in some cluster after merge"
         );
+    }
+
+    #[tokio::test]
+    async fn test_open_commit() {
+        // =======================================================================
+        // Setup
+        // =======================================================================
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+        let collection_id = CollectionUuid::new();
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        let test_vector = [1.0f32, 2.0, 3.0, 4.0];
+        let expected_rotated = writer.rotate(&test_vector);
+
+        // --- Cluster A: normal cluster ---
+        let center_a: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
+        let v10 = writer.upgrade_version(10);
+        let v11 = writer.upgrade_version(11);
+        let v12 = writer.upgrade_version(12);
+        let code_a: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[1.0, 0.0, 0.0, 0.0], &center_a)
+            .as_ref()
+            .into();
+        let delta_a = QuantizedDelta {
+            center: center_a.clone(),
+            codes: vec![code_a.clone(), code_a.clone(), code_a.clone()],
+            ids: vec![10, 11, 12],
+            length: 3,
+            versions: vec![v10, v11, v12],
+        };
+        let cluster_a = writer.spawn(delta_a).expect("spawn A failed");
+
+        // --- Cluster B: partial invalidation ---
+        let center_b: Arc<[f32]> = Arc::from([0.0f32, 1.0, 0.0, 0.0]);
+        let v20 = writer.upgrade_version(20);
+        let v21 = writer.upgrade_version(21);
+        let v22 = writer.upgrade_version(22);
+        let v23 = writer.upgrade_version(23);
+        let code_b: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 1.0, 0.0, 0.0], &center_b)
+            .as_ref()
+            .into();
+        let delta_b = QuantizedDelta {
+            center: center_b.clone(),
+            codes: vec![
+                code_b.clone(),
+                code_b.clone(),
+                code_b.clone(),
+                code_b.clone(),
+            ],
+            ids: vec![20, 21, 22, 23],
+            length: 4,
+            versions: vec![v20, v21, v22, v23],
+        };
+        let cluster_b = writer.spawn(delta_b).expect("spawn B failed");
+
+        // --- Cluster C: full invalidation ---
+        let center_c: Arc<[f32]> = Arc::from([0.0f32, 0.0, 1.0, 0.0]);
+        let v30 = writer.upgrade_version(30);
+        let v31 = writer.upgrade_version(31);
+        let code_c: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 1.0, 0.0], &center_c)
+            .as_ref()
+            .into();
+        let delta_c = QuantizedDelta {
+            center: center_c.clone(),
+            codes: vec![code_c.clone(), code_c.clone()],
+            ids: vec![30, 31],
+            length: 2,
+            versions: vec![v30, v31],
+        };
+        let cluster_c = writer.spawn(delta_c).expect("spawn C failed");
+
+        // --- Cluster D: tombstoned ---
+        let center_d: Arc<[f32]> = Arc::from([0.0f32, 0.0, 0.0, 1.0]);
+        let v40 = writer.upgrade_version(40);
+        let v41 = writer.upgrade_version(41);
+        let code_d: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 0.0, 1.0], &center_d)
+            .as_ref()
+            .into();
+        let delta_d = QuantizedDelta {
+            center: center_d.clone(),
+            codes: vec![code_d.clone(), code_d.clone()],
+            ids: vec![40, 41],
+            length: 2,
+            versions: vec![v40, v41],
+        };
+        let cluster_d = writer.spawn(delta_d).expect("spawn D failed");
+
+        let next_cluster_id_after_spawn = writer.next_cluster_id.load(Ordering::Relaxed);
+
+        let flusher = writer
+            .commit(&blockfile_provider, &usearch_provider)
+            .await
+            .expect("Failed to commit");
+        let file_ids = flusher.flush().await.expect("Failed to flush");
+
+        // =======================================================================
+        // Reopen and modify
+        // =======================================================================
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            file_ids,
+            None,
+            "".to_string(),
+            None, // no raw embedding reader needed
+            &blockfile_provider,
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to open writer");
+
+        let actual_rotated = writer.rotate(&test_vector);
+        assert!(
+            writer.distance(&expected_rotated, &actual_rotated) < TEST_EPSILON,
+            "Rotation matrix should be preserved across open"
+        );
+
+        // --- Cluster A: add more points ---
+        writer.load(cluster_a).await.expect("load A failed");
+        let v13 = writer.upgrade_version(13);
+        let v14 = writer.upgrade_version(14);
+        writer.append(cluster_a, 13, v13, code_a.clone());
+        writer.append(cluster_a, 14, v14, code_a.clone());
+
+        // --- Cluster B: invalidate points 21 and 23 ---
+        writer.load(cluster_b).await.expect("load B failed");
+        writer.upgrade_version(21);
+        writer.upgrade_version(23);
+
+        // --- Cluster C: invalidate all points ---
+        writer.load(cluster_c).await.expect("load C failed");
+        writer.upgrade_version(30);
+        writer.upgrade_version(31);
+
+        // --- Cluster D: detach and drop ---
+        writer.detach(cluster_d).await.expect("detach D failed");
+        writer.drop(cluster_d).expect("drop D failed");
+
+        let flusher = writer
+            .commit(&blockfile_provider, &usearch_provider)
+            .await
+            .expect("Failed to commit");
+        let file_ids = flusher.flush().await.expect("Failed to flush");
+
+        // =======================================================================
+        // Verify invariants after reopen
+        // =======================================================================
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            file_ids,
+            None,
+            "".to_string(),
+            None,
+            &blockfile_provider,
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to open writer after modifications");
+
+        // --- rotation matrix ---
+        let actual_rotated = writer.rotate(&test_vector);
+        assert!(
+            writer.distance(&expected_rotated, &actual_rotated) < TEST_EPSILON,
+            "Rotation matrix should be preserved after second open"
+        );
+
+        // --- next_cluster_id ---
+        assert_eq!(
+            writer.next_cluster_id.load(Ordering::Relaxed),
+            next_cluster_id_after_spawn,
+            "next_cluster_id should be preserved"
+        );
+
+        // --- cluster A: exists with 5 points ---
+        assert!(
+            writer.cluster_deltas.contains_key(&cluster_a),
+            "Cluster A should exist"
+        );
+        {
+            let delta = writer.cluster_deltas.get(&cluster_a).unwrap();
+            assert_eq!(delta.length, 5, "Cluster A should have 5 points");
+        }
+        writer.load(cluster_a).await.expect("load A failed");
+        {
+            let delta = writer.cluster_deltas.get(&cluster_a).unwrap();
+            assert_eq!(delta.ids.len(), 5);
+            assert!(delta.ids.contains(&10));
+            assert!(delta.ids.contains(&11));
+            assert!(delta.ids.contains(&12));
+            assert!(delta.ids.contains(&13));
+            assert!(delta.ids.contains(&14));
+        }
+
+        // --- cluster B: exists with 2 points (scrubbed) ---
+        assert!(
+            writer.cluster_deltas.contains_key(&cluster_b),
+            "Cluster B should exist"
+        );
+        {
+            let delta = writer.cluster_deltas.get(&cluster_b).unwrap();
+            assert_eq!(
+                delta.length, 2,
+                "Cluster B should have 2 points after scrub"
+            );
+        }
+        writer.load(cluster_b).await.expect("load B failed");
+        {
+            let delta = writer.cluster_deltas.get(&cluster_b).unwrap();
+            assert_eq!(delta.ids.len(), 2);
+            assert!(delta.ids.contains(&20), "Point 20 should survive");
+            assert!(delta.ids.contains(&22), "Point 22 should survive");
+            assert!(!delta.ids.contains(&21), "Point 21 should be scrubbed");
+            assert!(!delta.ids.contains(&23), "Point 23 should be scrubbed");
+        }
+
+        // --- cluster C: deleted (all points scrubbed) ---
+        assert!(
+            !writer.cluster_deltas.contains_key(&cluster_c),
+            "Cluster C should not exist (all points invalidated)"
+        );
+
+        // --- cluster D: deleted (tombstoned) ---
+        assert!(
+            !writer.cluster_deltas.contains_key(&cluster_d),
+            "Cluster D should not exist (tombstoned)"
+        );
+
+        // --- tombstones empty ---
+        assert!(
+            writer.tombstones.is_empty(),
+            "Tombstones should be empty after reopen"
+        );
+
+        // --- versions ---
+        for id in [10, 11, 12, 13, 14] {
+            assert!(
+                writer.versions.contains_key(&id),
+                "Version for point {} should exist",
+                id
+            );
+        }
+        assert_eq!(*writer.versions.get(&20).unwrap(), 1);
+        assert_eq!(*writer.versions.get(&22).unwrap(), 1);
+        assert_eq!(*writer.versions.get(&21).unwrap(), 2);
+        assert_eq!(*writer.versions.get(&23).unwrap(), 2);
+        assert_eq!(*writer.versions.get(&30).unwrap(), 2);
+        assert_eq!(*writer.versions.get(&31).unwrap(), 2);
+        assert!(writer.versions.contains_key(&40));
+        assert!(writer.versions.contains_key(&41));
+
+        // --- centroid indexes ---
+        let nav_result = writer.navigate(&center_a, 10).expect("navigate failed");
+        assert!(nav_result.keys.contains(&cluster_a));
+
+        let nav_result = writer.navigate(&center_b, 10).expect("navigate failed");
+        assert!(nav_result.keys.contains(&cluster_b));
+
+        let all_nav = writer
+            .navigate(&[0.0, 0.0, 0.0, 0.0], 100)
+            .expect("navigate failed");
+        assert!(!all_nav.keys.contains(&cluster_c));
+        assert!(!all_nav.keys.contains(&cluster_d));
     }
 
     #[tokio::test]
