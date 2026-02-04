@@ -3,7 +3,10 @@ pub mod helpers;
 pub mod registry;
 pub mod spanner;
 
-pub use spanner::{SpannerConfig, SpannerEmulatorConfig};
+pub use spanner::{
+    SpannerChannelConfig, SpannerConfig, SpannerEmulatorConfig, SpannerGcpConfig,
+    SpannerSessionPoolConfig,
+};
 
 use async_trait::async_trait;
 use chroma_error::ChromaError;

@@ -13,13 +13,34 @@ pub use config::RootConfig;
 pub use migrations::MigrationDir;
 pub use migrations::MIGRATION_DIRS;
 
-use chroma_config::spanner::SpannerConfig;
+use std::time::Duration;
+
+use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
 use google_cloud_gax::conn::Environment;
 use google_cloud_spanner::admin::client::Client as AdminClient;
 use google_cloud_spanner::admin::AdminClientConfig;
-use google_cloud_spanner::client::{Client, ClientConfig};
+use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
+use google_cloud_spanner::session::SessionConfig;
 use runner::MigrationRunner;
 use thiserror::Error;
+
+/// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
+fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
+    let mut config = SessionConfig::default();
+    config.session_get_timeout = Duration::from_secs(cfg.session_get_timeout_secs);
+    config.max_opened = cfg.max_opened;
+    config.min_opened = cfg.min_opened;
+    config
+}
+
+/// Converts a SpannerChannelConfig to the library's ChannelConfig.
+fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
+    ChannelConfig {
+        num_channels: cfg.num_channels,
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        timeout: Duration::from_secs(cfg.timeout_secs),
+    }
+}
 
 /// Errors that can occur during migration execution.
 #[derive(Error, Debug)]
@@ -95,14 +116,18 @@ pub async fn run_migrations(
 ) -> Result<(), RunMigrationsError> {
     validate_slug(slug)?;
 
+    let session_config = to_session_config(spanner_config.session_pool());
     let (database_path, client_config, admin_client_config) = match spanner_config {
         SpannerConfig::Emulator(emulator) => {
             if let Err(e) = bootstrap::bootstrap_emulator(emulator).await {
                 return Err(RunMigrationsError::BootstrapEmulatorError(e.to_string()));
             }
 
+            let channel_config = to_channel_config(spanner_config.channel());
             let client_config = ClientConfig {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
+                session_config,
+                channel_config,
                 ..Default::default()
             };
             let admin_client_config = AdminClientConfig {
@@ -116,10 +141,13 @@ pub async fn run_migrations(
             (emulator.database_path(), client_config, admin_client_config)
         }
         SpannerConfig::Gcp(gcp) => {
-            let client_config = ClientConfig::default()
+            let channel_config = to_channel_config(spanner_config.channel());
+            let mut client_config = ClientConfig::default()
                 .with_auth()
                 .await
                 .map_err(|e| RunMigrationsError::ClientConfigError(e.to_string()))?;
+            client_config.session_config = session_config;
+            client_config.channel_config = channel_config;
             let admin_client_config = AdminClientConfig::default()
                 .with_auth()
                 .await
