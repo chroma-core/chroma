@@ -60,6 +60,8 @@ pub fn default_repl_options() -> ReplicatedFragmentOptions {
         minimum_failures_to_exclude_replica: 100,
         decimation_interval_secs: 3600,
         slow_writer_tolerance_secs: 30,
+        enable_read_repair: false,
+        max_concurrent_read_repairs: 16,
     }
 }
 

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use google_cloud_spanner::client::Client;
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use chroma_storage::Storage;
@@ -32,11 +33,13 @@ pub fn create_repl_factories(
 ) {
     assert!(preferred < storages.len());
     assert_eq!(regions.len(), storages.len());
+    let read_repair_semaphore = Arc::new(Semaphore::new(repl_options.max_concurrent_read_repairs));
     let fragment_manager_factory = ReplicatedFragmentManagerFactory {
         write: write_options.clone(),
         repl: repl_options.clone(),
         preferred,
         storages,
+        read_repair_semaphore,
     };
     let local_region = regions[preferred].clone();
     let manifest_manager_factory = ReplicatedManifestManagerFactory {
@@ -54,9 +57,11 @@ pub struct ReplicatedFragmentManagerFactory {
     repl: ReplicatedFragmentOptions,
     preferred: usize,
     storages: Arc<Vec<StorageWrapper>>,
+    read_repair_semaphore: Arc<Semaphore>,
 }
 
 impl ReplicatedFragmentManagerFactory {
+    /// Creates a new ReplicatedFragmentManagerFactory.
     pub fn new(
         write: LogWriterOptions,
         repl: ReplicatedFragmentOptions,
@@ -64,11 +69,13 @@ impl ReplicatedFragmentManagerFactory {
         storages: Arc<Vec<StorageWrapper>>,
     ) -> Self {
         assert!(preferred < storages.len());
+        let read_repair_semaphore = Arc::new(Semaphore::new(repl.max_concurrent_read_repairs));
         Self {
             write,
             repl,
             preferred,
             storages,
+            read_repair_semaphore,
         }
     }
 }
@@ -96,7 +103,12 @@ impl FragmentManagerFactory for ReplicatedFragmentManagerFactory {
 
     async fn make_consumer(&self) -> Result<Self::Consumer, Error> {
         let storages = Arc::clone(&self.storages);
-        Ok(FragmentReader::new(self.preferred, storages))
+        Ok(FragmentReader::new(
+            self.repl.clone(),
+            self.preferred,
+            storages,
+            Arc::clone(&self.read_repair_semaphore),
+        ))
     }
 }
 
@@ -226,13 +238,15 @@ mod tests {
             minimum_failures_to_exclude_replica: 100,
             decimation_interval_secs: 3600,
             slow_writer_tolerance_secs: 30,
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
         };
-        let factory = ReplicatedFragmentManagerFactory {
-            write: LogWriterOptions::default(),
-            repl: options,
-            preferred: 0,
+        let factory = ReplicatedFragmentManagerFactory::new(
+            LogWriterOptions::default(),
+            options,
+            0,
             storages,
-        };
+        );
 
         let result = factory.make_publisher().await;
         assert!(
@@ -257,13 +271,15 @@ mod tests {
             minimum_failures_to_exclude_replica: 100,
             decimation_interval_secs: 3600,
             slow_writer_tolerance_secs: 30,
+            enable_read_repair: false,
+            max_concurrent_read_repairs: 16,
         };
-        let factory = ReplicatedFragmentManagerFactory {
-            write: LogWriterOptions::default(),
-            repl: options,
-            preferred: 0,
+        let factory = ReplicatedFragmentManagerFactory::new(
+            LogWriterOptions::default(),
+            options,
+            0,
             storages,
-        };
+        );
 
         let result = factory.make_consumer().await;
         assert!(
