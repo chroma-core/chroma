@@ -15,11 +15,12 @@ use crate::hnsw_configuration::Space;
 use crate::metadata::{MetadataComparison, MetadataValueType, Where};
 use crate::operator::QueryVector;
 use crate::{
-    default_batch_size, default_construction_ef, default_construction_ef_spann,
-    default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
-    default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
-    default_num_threads, default_quantize, default_reassign_neighbor_count, default_resize_factor,
-    default_search_ef, default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
+    default_batch_size, default_center_drift_threshold, default_construction_ef,
+    default_construction_ef_spann, default_initial_lambda, default_m, default_m_spann,
+    default_merge_threshold, default_nreplica_count, default_num_centers_to_merge_to,
+    default_num_samples_kmeans, default_num_threads, default_quantize,
+    default_reassign_neighbor_count, default_resize_factor, default_search_ef,
+    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
     default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
     default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
     HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
@@ -792,6 +793,7 @@ impl Schema {
                         ef_construction: Some(default_construction_ef_spann()),
                         ef_search: Some(default_search_ef_spann()),
                         max_neighbors: Some(default_m_spann()),
+                        center_drift_threshold: None,
                         quantize: default_quantize(),
                     }),
                 },
@@ -886,6 +888,7 @@ impl Schema {
                                 ef_construction: Some(default_construction_ef_spann()),
                                 ef_search: Some(default_search_ef_spann()),
                                 max_neighbors: Some(default_m_spann()),
+                                center_drift_threshold: None,
                                 quantize: default_quantize(),
                             }),
                         },
@@ -1647,6 +1650,9 @@ impl Schema {
                     ef_construction: user.ef_construction.or(default.ef_construction),
                     ef_search: user.ef_search.or(default.ef_search),
                     max_neighbors: user.max_neighbors.or(default.max_neighbors),
+                    center_drift_threshold: user
+                        .center_drift_threshold
+                        .or(default.center_drift_threshold),
                     quantize: default_quantize(), // Always false - quantization is set programmatically
                 }))
             }
@@ -2718,6 +2724,9 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.1, max = 1.0))]
+    pub center_drift_threshold: Option<f32>,
     /// Enable quantization for vector search (cloud-only feature)
     #[serde(default = "default_quantize", skip_serializing_if = "is_false")]
     pub quantize: bool,
@@ -2808,6 +2817,11 @@ impl SpannIndexConfig {
         }
         if let Some(max_neighbors) = self.max_neighbors {
             if max_neighbors != default_m_spann() {
+                return false;
+            }
+        }
+        if let Some(center_drift_threshold) = self.center_drift_threshold {
+            if center_drift_threshold != default_center_drift_threshold() {
                 return false;
             }
         }
@@ -2976,6 +2990,7 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     ef_construction: Some(spann_config.ef_construction),
                     ef_search: Some(spann_config.ef_search),
                     max_neighbors: Some(spann_config.max_neighbors),
+                    center_drift_threshold: None,
                     quantize: default_quantize(),
                 }),
             },
@@ -3346,6 +3361,7 @@ mod tests {
                         ef_construction: Some(50),
                         ef_search: Some(40),
                         max_neighbors: Some(20),
+                        center_drift_threshold: None,
                         quantize: false,
                     });
                 }
@@ -3523,6 +3539,7 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
+            center_drift_threshold: None,
             quantize: false,
         };
 
@@ -3543,6 +3560,7 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
+            center_drift_threshold: None,
             quantize: false,
         };
 
@@ -3581,6 +3599,7 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
+            center_drift_threshold: None,
             quantize: false,
         };
 
@@ -3601,6 +3620,7 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
+            center_drift_threshold: None,
             quantize: true, // This should be rejected
         };
 
@@ -3633,6 +3653,7 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
+            center_drift_threshold: None,
             quantize: true, // This should be rejected
         };
 
@@ -3675,6 +3696,7 @@ mod tests {
             ef_construction: Some(180),
             ef_search: Some(170),
             max_neighbors: Some(32),
+            center_drift_threshold: None,
             quantize: false,
         };
 
@@ -3790,6 +3812,7 @@ mod tests {
                 ef_construction: None,
                 ef_search: None,
                 max_neighbors: None,
+                center_drift_threshold: None,
                 quantize: false,
             }), // Add SPANN config
         };
@@ -6170,6 +6193,7 @@ mod tests {
                         ef_construction,
                         ef_search,
                         max_neighbors,
+                        center_drift_threshold: None,
                         quantize: false,
                     },
                 )
@@ -6355,6 +6379,7 @@ mod tests {
                         ef_construction: Some(spann_config.ef_construction),
                         ef_search: Some(spann_config.ef_search),
                         max_neighbors: Some(spann_config.max_neighbors),
+                        center_drift_threshold: None,
                         quantize: false,
                     }),
                 },
@@ -6520,6 +6545,7 @@ mod tests {
                 ef_construction: Some(config.ef_construction),
                 ef_search: Some(config.ef_search),
                 max_neighbors: Some(config.max_neighbors),
+                center_drift_threshold: None,
                 quantize: false,
             })
         }

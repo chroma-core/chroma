@@ -1610,6 +1610,8 @@ class SpannIndexConfig(BaseModel):
             "ef_construction",
             "ef_search",
             "max_neighbors",
+            "center_drift_threshold",
+            "quantize",
         ]
     )
 

@@ -72,6 +72,10 @@ pub fn default_quantize() -> bool {
     false
 }
 
+pub fn default_center_drift_threshold() -> f32 {
+    0.125
+}
+
 fn default_space_spann() -> Space {
     Space::L2
 }
