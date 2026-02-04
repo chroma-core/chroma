@@ -682,7 +682,7 @@ func TestCreateCollection(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+			client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 			require.NoError(t, err)
 			tt.sendRequest(client)
 			err = client.Close()
@@ -705,7 +705,7 @@ func TestClientClose(t *testing.T) {
 			w.WriteHeader(http.StatusNotFound)
 		}
 	}))
-	client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+	client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 	require.NoError(t, err)
 	err = client.Close()
 	require.NoError(t, err)
@@ -714,7 +714,7 @@ func TestClientClose(t *testing.T) {
 
 func TestClientSetup(t *testing.T) {
 	t.Run("With default tenant and database", func(t *testing.T) {
-		client, err := NewHTTPClient(WithBaseURL("http://localhost:8080"), WithDebug())
+		client, err := NewHTTPClient(WithBaseURL("http://localhost:8080"), WithLogger(testLogger()))
 		require.NoError(t, err)
 		require.NotNil(t, client)
 		require.Equal(t, NewDefaultTenant(), client.CurrentTenant())
@@ -724,7 +724,7 @@ func TestClientSetup(t *testing.T) {
 	t.Run("With env tenant and database", func(t *testing.T) {
 		t.Setenv("CHROMA_TENANT", "test_tenant")
 		t.Setenv("CHROMA_DATABASE", "test_db")
-		client, err := NewHTTPClient(WithBaseURL("http://localhost:8080"), WithDebug())
+		client, err := NewHTTPClient(WithBaseURL("http://localhost:8080"), WithLogger(testLogger()))
 		require.NoError(t, err)
 		require.NotNil(t, client)
 		require.Equal(t, NewTenant("test_tenant"), client.CurrentTenant())
