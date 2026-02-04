@@ -87,7 +87,7 @@ func TestCollectionAddIntegration(t *testing.T) {
 	if chromaURL == "" {
 		chromaURL = endpoint
 	}
-	c, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug())
+	c, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()))
 	require.NoError(t, err)
 
 	// For Chroma versions < 1.0.0, disable EF config storage as they don't support it

@@ -125,7 +125,7 @@ func TestCollectionAdd(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+			client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 			require.NoError(t, err)
 			collection := &CollectionImpl{
 				name:              "test",
@@ -243,7 +243,7 @@ func TestCollectionUpdate(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+			client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 			require.NoError(t, err)
 			collection := &CollectionImpl{
 				name:              "test",
@@ -361,7 +361,7 @@ func TestCollectionUpsert(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+			client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 			require.NoError(t, err)
 			collection := &CollectionImpl{
 				name:              "test",
@@ -465,7 +465,7 @@ func TestCollectionDelete(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+			client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 			require.NoError(t, err)
 			collection := &CollectionImpl{
 				name:              "test",
@@ -504,7 +504,7 @@ func TestCollectionCount(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+	client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 	require.NoError(t, err)
 	collection := &CollectionImpl{
 		name:              "test",
@@ -605,7 +605,7 @@ func TestCollectionQuery(t *testing.T) {
 		}
 	}))
 
-	client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+	client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 	require.NoError(t, err)
 
 	collection := &CollectionImpl{
@@ -646,7 +646,7 @@ func TestCollectionModifyName(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+	client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 	require.NoError(t, err)
 	collection := &CollectionImpl{
 		name:              "test",
@@ -685,7 +685,7 @@ func TestCollectionModifyMetadata(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+	client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 	require.NoError(t, err)
 	collection := &CollectionImpl{
 		name:              "test",
@@ -847,7 +847,7 @@ func TestCollectionGet(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			client, err := NewHTTPClient(WithBaseURL(server.URL), WithDebug())
+			client, err := NewHTTPClient(WithBaseURL(server.URL), WithLogger(testLogger()))
 			require.NoError(t, err)
 			collection := &CollectionImpl{
 				name:              "test",
