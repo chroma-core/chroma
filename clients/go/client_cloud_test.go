@@ -29,7 +29,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		require.NoError(t, err)
 	}
 	client, err := NewCloudClient(
-		WithDebug(),
+		WithLogger(testLogger()),
 		WithDatabaseAndTenant(os.Getenv("CHROMA_DATABASE"), os.Getenv("CHROMA_TENANT")),
 		WithCloudAPIKey(os.Getenv("CHROMA_API_KEY")),
 	)
@@ -1274,7 +1274,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 	t.Run("Without API Key", func(t *testing.T) {
 		t.Setenv("CHROMA_API_KEY", "")
 		client, err := NewCloudClient(
-			WithDebug(),
+			WithLogger(testLogger()),
 			WithDatabaseAndTenant("test_database", "test_tenant"),
 		)
 		require.Error(t, err)
@@ -1286,7 +1286,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		t.Setenv("CHROMA_TENANT", "")
 		t.Setenv("CHROMA_DATABASE", "")
 		client, err := NewCloudClient(
-			WithDebug(),
+			WithLogger(testLogger()),
 			WithCloudAPIKey("test"),
 		)
 		require.Error(t, err)
@@ -1297,7 +1297,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		t.Setenv("CHROMA_TENANT", "test_tenant")
 		t.Setenv("CHROMA_DATABASE", "test_database")
 		client, err := NewCloudClient(
-			WithDebug(),
+			WithLogger(testLogger()),
 			WithCloudAPIKey("test"),
 		)
 		require.NoError(t, err)
@@ -1311,7 +1311,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		t.Setenv("CHROMA_DATABASE", "test_database")
 		t.Setenv("CHROMA_API_KEY", "test")
 		client, err := NewCloudClient(
-			WithDebug(),
+			WithLogger(testLogger()),
 		)
 		require.NoError(t, err)
 		require.NotNil(t, client)
@@ -1329,7 +1329,7 @@ func TestCloudClientHTTPIntegration(t *testing.T) {
 		t.Setenv("CHROMA_DATABASE", "test_database")
 		t.Setenv("CHROMA_API_KEY", "test")
 		client, err := NewCloudClient(
-			WithDebug(),
+			WithLogger(testLogger()),
 			WithCloudAPIKey("different_test_key"),
 			WithDatabaseAndTenant("other_db", "other_tenant"),
 		)

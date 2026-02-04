@@ -121,7 +121,7 @@ func TestClientHTTPIntegration(t *testing.T) {
 	if chromaURL == "" {
 		chromaURL = endpoint
 	}
-	c, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug())
+	c, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()))
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		require.NoError(t, c.Close())
@@ -653,7 +653,7 @@ func TestClientHTTPIntegrationWithBasicAuth(t *testing.T) {
 		chromaURL = endpoint
 	}
 	t.Run("success auth", func(t *testing.T) {
-		c, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug(), WithAuth(NewBasicAuthCredentialsProvider("admin", "password123")))
+		c, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()), WithAuth(NewBasicAuthCredentialsProvider("admin", "password123")))
 		require.NoError(t, err)
 		require.NotNil(t, c)
 		collections, err := c.ListCollections(ctx)
@@ -661,7 +661,7 @@ func TestClientHTTPIntegrationWithBasicAuth(t *testing.T) {
 		require.Equal(t, 0, len(collections))
 	})
 	t.Run("wrong auth", func(t *testing.T) {
-		wrongAuthClient, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug(), WithAuth(NewBasicAuthCredentialsProvider("admin", "wrong_password")))
+		wrongAuthClient, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()), WithAuth(NewBasicAuthCredentialsProvider("admin", "wrong_password")))
 		require.NoError(t, err)
 		_, err = wrongAuthClient.ListCollections(ctx)
 		require.Error(t, err)
@@ -718,7 +718,7 @@ func TestClientHTTPIntegrationWithBearerAuthorizationHeaderAuth(t *testing.T) {
 		chromaURL = endpoint
 	}
 	t.Run("success auth", func(t *testing.T) {
-		c, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug(), WithAuth(NewTokenAuthCredentialsProvider(token, AuthorizationTokenHeader)))
+		c, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()), WithAuth(NewTokenAuthCredentialsProvider(token, AuthorizationTokenHeader)))
 		require.NoError(t, err)
 		require.NotNil(t, c)
 		collections, err := c.ListCollections(ctx)
@@ -726,7 +726,7 @@ func TestClientHTTPIntegrationWithBearerAuthorizationHeaderAuth(t *testing.T) {
 		require.Equal(t, 0, len(collections))
 	})
 	t.Run("wrong auth", func(t *testing.T) {
-		wrongAuthClient, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug(), WithAuth(NewTokenAuthCredentialsProvider("wrong_token", AuthorizationTokenHeader)))
+		wrongAuthClient, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()), WithAuth(NewTokenAuthCredentialsProvider("wrong_token", AuthorizationTokenHeader)))
 		require.NoError(t, err)
 		_, err = wrongAuthClient.ListCollections(ctx)
 		require.Error(t, err)
@@ -785,7 +785,7 @@ func TestClientHTTPIntegrationWithBearerXChromaTokenHeaderAuth(t *testing.T) {
 		chromaURL = endpoint
 	}
 	t.Run("success auth", func(t *testing.T) {
-		c, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug(), WithAuth(NewTokenAuthCredentialsProvider(token, XChromaTokenHeader)))
+		c, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()), WithAuth(NewTokenAuthCredentialsProvider(token, XChromaTokenHeader)))
 		require.NoError(t, err)
 		require.NotNil(t, c)
 		collections, err := c.ListCollections(ctx)
@@ -793,7 +793,7 @@ func TestClientHTTPIntegrationWithBearerXChromaTokenHeaderAuth(t *testing.T) {
 		require.Equal(t, 0, len(collections))
 	})
 	t.Run("wrong auth", func(t *testing.T) {
-		wrongAuthClient, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug(), WithAuth(NewTokenAuthCredentialsProvider("wrong_token", XChromaTokenHeader)))
+		wrongAuthClient, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()), WithAuth(NewTokenAuthCredentialsProvider("wrong_token", XChromaTokenHeader)))
 		require.NoError(t, err)
 		_, err = wrongAuthClient.ListCollections(ctx)
 		require.Error(t, err)
@@ -884,7 +884,7 @@ func TestClientHTTPIntegrationWithSSL(t *testing.T) {
 	chromaURL = strings.ReplaceAll(endpoint, "http://", "https://")
 	time.Sleep(5 * time.Second)
 	t.Run("Test with insecure client", func(t *testing.T) {
-		client, err := NewHTTPClient(WithBaseURL(chromaURL), WithInsecure(), WithDebug())
+		client, err := NewHTTPClient(WithBaseURL(chromaURL), WithInsecure(), WithLogger(testLogger()))
 		require.NoError(t, err)
 		version, err := client.GetVersion(ctx)
 		require.NoError(t, err)
@@ -892,7 +892,7 @@ func TestClientHTTPIntegrationWithSSL(t *testing.T) {
 	})
 
 	t.Run("Test without SSL", func(t *testing.T) {
-		client, err := NewHTTPClient(WithBaseURL(chromaURL), WithDebug())
+		client, err := NewHTTPClient(WithBaseURL(chromaURL), WithLogger(testLogger()))
 		require.NoError(t, err)
 		_, err = client.GetVersion(ctx)
 		require.Error(t, err)
@@ -900,7 +900,7 @@ func TestClientHTTPIntegrationWithSSL(t *testing.T) {
 	})
 
 	t.Run("Test with SSL", func(t *testing.T) {
-		client, err := NewHTTPClient(WithBaseURL(chromaURL), WithSSLCert(certPath), WithDebug())
+		client, err := NewHTTPClient(WithBaseURL(chromaURL), WithSSLCert(certPath), WithLogger(testLogger()))
 		require.NoError(t, err)
 		version, err := client.GetVersion(ctx)
 		require.NoError(t, err)
