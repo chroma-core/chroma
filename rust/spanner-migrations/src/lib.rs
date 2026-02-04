@@ -95,18 +95,14 @@ pub async fn run_migrations(
 ) -> Result<(), RunMigrationsError> {
     validate_slug(slug)?;
 
-    let session_config = spanner_config.session_config();
     let (database_path, client_config, admin_client_config) = match spanner_config {
         SpannerConfig::Emulator(emulator) => {
             if let Err(e) = bootstrap::bootstrap_emulator(emulator).await {
                 return Err(RunMigrationsError::BootstrapEmulatorError(e.to_string()));
             }
 
-            let channel_config = spanner_config.channel_config();
             let client_config = ClientConfig {
                 environment: Environment::Emulator(emulator.grpc_endpoint()),
-                session_config,
-                channel_config,
                 ..Default::default()
             };
             let admin_client_config = AdminClientConfig {
@@ -120,13 +116,10 @@ pub async fn run_migrations(
             (emulator.database_path(), client_config, admin_client_config)
         }
         SpannerConfig::Gcp(gcp) => {
-            let channel_config = spanner_config.channel_config();
-            let mut client_config = ClientConfig::default()
+            let client_config = ClientConfig::default()
                 .with_auth()
                 .await
                 .map_err(|e| RunMigrationsError::ClientConfigError(e.to_string()))?;
-            client_config.session_config = session_config;
-            client_config.channel_config = channel_config;
             let admin_client_config = AdminClientConfig::default()
                 .with_auth()
                 .await
