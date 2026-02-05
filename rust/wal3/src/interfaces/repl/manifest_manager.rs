@@ -8,7 +8,7 @@ use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::statement::Statement;
 use setsum::Setsum;
-use tonic::{Code, Status};
+use tonic::Code;
 use uuid::Uuid;
 
 use crate::interfaces::{ManifestConsumer, ManifestPublisher, PositionWitness};
