@@ -1637,7 +1637,7 @@ impl LogServer {
             .collect::<Vec<_>>();
 
         let stream = futures::stream::iter(dirty_futures);
-        let mut buffered = stream.buffer_unordered(50);
+        let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency);
         while let Some(res) = buffered.next().await {
             if let Err(err) = res {
                 tracing::error!(error = ?err);
@@ -1754,12 +1754,12 @@ impl LogServer {
             });
         }
         if !futures.is_empty() {
-            for (collection_id, rollup) in futures::future::join_all(futures)
-                .await
-                .into_iter()
-                .flatten()
-            {
-                rollups.insert(collection_id, rollup);
+            let stream = futures::stream::iter(futures);
+            let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency);
+            while let Some(result) = buffered.next().await {
+                if let Some((key, rollup)) = result {
+                    rollups.insert(key, rollup);
+                }
             }
         }
         Ok(())
@@ -2948,6 +2948,8 @@ pub struct LogServerConfig {
     pub grpc_shutdown_grace_period: Duration,
     #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
     pub grpc_max_concurrent_streams: u32,
+    #[serde(default = "LogServerConfig::default_rollup_concurrency")]
+    pub rollup_concurrency: usize,
     #[serde(default)]
     pub regions_and_topologies:
         Option<MultiCloudMultiRegionConfiguration<RegionalStorageConfig, TopologicalStorageConfig>>,
@@ -3020,6 +3022,11 @@ impl LogServerConfig {
     fn default_grpc_max_concurrent_streams() -> u32 {
         1000
     }
+
+    /// Maximum number of concurrent operations during dirty log rollup.
+    fn default_rollup_concurrency() -> usize {
+        50
+    }
 }
 
 impl Default for LogServerConfig {
@@ -3045,6 +3052,7 @@ impl Default for LogServerConfig {
             max_decoding_message_size: Self::default_max_decoding_message_size(),
             grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
             grpc_max_concurrent_streams: Self::default_grpc_max_concurrent_streams(),
+            rollup_concurrency: Self::default_rollup_concurrency(),
             regions_and_topologies: None,
         }
     }
