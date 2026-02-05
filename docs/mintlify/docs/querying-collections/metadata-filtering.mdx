@@ -19,6 +19,20 @@ await collection.query({
   where: { page: 10 },
 });
 ```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "page".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Int(10),
+    ),
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
+```
 </CodeGroup>
 
 In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
@@ -38,6 +52,16 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
         <Operator>: <Value>
     }
 }
+```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "metadata_field".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Str("value".to_string()),
+    ),
+});
 ```
 </CodeGroup>
 
@@ -71,6 +95,16 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
     }
 }
 ```
+
+```rust Rust
+let direct = Where::Metadata(MetadataExpression {
+    key: "metadata_field".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Str("search_string".to_string()),
+    ),
+});
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is greater than 10:
@@ -88,6 +122,20 @@ await collection.query({
   queryTexts: ["first query", "second query"],
   where: { page: { $gt: 10 } },
 });
+```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "page".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::GreaterThan,
+        MetadataValue::Int(10),
+    ),
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
 ```
 </CodeGroup>
 
@@ -127,6 +175,10 @@ An `$and` operator will return results that match all the filters in the list.
     ]
 }
 ```
+
+```rust Rust
+let filter = Key::field("metadata_field").gte(5) & Key::field("metadata_field").lte(10);
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is between 5 and 10:
@@ -151,6 +203,21 @@ await collection.query({
     $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
   },
 });
+```
+
+```rust Rust
+let search = SearchPayload::default()
+    .r#where(Key::field("page").gte(5) & Key::field("page").lte(10))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(10), 0);
+
+let results = collection.search(vec![search]).await?;
 ```
 </CodeGroup>
 
@@ -186,6 +253,11 @@ An `$or` operator will return results that match any of the filters in the list.
     ]
 }
 ```
+
+```rust Rust
+let filter = Key::field("metadata_field").eq("value1")
+    | Key::field("metadata_field").eq("value2");
+```
 </CodeGroup>
 
 For example, here we get all records whose `color` metadata field is `red` or `blue`:
@@ -208,6 +280,13 @@ await collection.get({
     or: [{ color: "red" }, { color: "blue" }],
   },
 });
+```
+
+```rust Rust
+let search = SearchPayload::default()
+    .r#where(Key::field("color").eq("red") | Key::field("color").eq("blue"));
+
+let results = collection.search(vec![search]).await?;
 ```
 </CodeGroup>
 
@@ -236,6 +315,10 @@ An `$in` operator will return results where the metadata attribute is part of a 
     }
 }
 ```
+
+```rust Rust
+let filter = Key::field("metadata_field").is_in(["value1", "value2", "value3"]);
+```
 </CodeGroup>
 
 An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
@@ -256,6 +339,10 @@ An `$nin` operator will return results where the metadata attribute is not part 
     }
 }
 ```
+
+```rust Rust
+let filter = Key::field("metadata_field").not_in(["value1", "value2", "value3"]);
+```
 </CodeGroup>
 
 For example, here we get all records whose `author` metadata field is in a list of possible values:
@@ -275,6 +362,13 @@ await collection.get({
     author: { $in: ["Rowling", "Fitzgerald", "Herbert"] },
   },
 });
+```
+
+```rust Rust
+let search = SearchPayload::default()
+    .r#where(Key::field("author").is_in(["Rowling", "Fitzgerald", "Herbert"]));
+
+let results = collection.search(vec![search]).await?;
 ```
 </CodeGroup>
 
@@ -299,5 +393,23 @@ await collection.query({
     where: { metadata_field: "is_equal_to_this" },
     whereDocument: { "$contains": "search_string" }
 })
+```
+
+```rust Rust
+let search = SearchPayload::default()
+    .r#where(
+        Key::field("metadata_field").eq("is_equal_to_this")
+            & Key::Document.contains("search_string"),
+    )
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(10), 0);
+
+let results = collection.search(vec![search]).await?;
 ```
 </CodeGroup>

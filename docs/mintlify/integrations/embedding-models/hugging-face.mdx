@@ -2,6 +2,10 @@
 title: Hugging Face
 ---
 
+Chroma provides wrappers for both dense and sparse embedding models from Hugging Face.
+
+## Dense Embeddings
+
 Chroma provides a convenient wrapper around HuggingFace's embedding API. This embedding function runs remotely on HuggingFace's servers, and requires an API key. You can get an API key by signing up for an account at [HuggingFace](https://huggingface.co/).
 
 ```python
@@ -13,3 +17,21 @@ huggingface_ef = embedding_functions.HuggingFaceEmbeddingFunction(
 ```
 
 You can pass in an optional `model_name` argument, which lets you choose which HuggingFace model to use. By default, Chroma uses `sentence-transformers/all-MiniLM-L6-v2`. You can see a list of all available models [here](https://huggingface.co/models).
+
+## Sparse Embeddings
+
+Chroma also supports sparse embedding models from Hugging Face using `HuggingFaceSparseEmbeddingFunction`.
+
+This embedding function requires the `sentence_transformers` package, which you can install with `pip install sentence_transformers`.
+
+```python
+from chromadb.utils.embedding_functions import HuggingFaceSparseEmbeddingFunction
+
+ef = HuggingFaceSparseEmbeddingFunction(
+    model_name="BAAI/bge-m3",
+    device="cpu"
+)
+
+texts = ["Hello, world!", "How are you?"]
+sparse_embeddings = ef(texts)
+```

@@ -4,7 +4,7 @@ description: "Learn how to query and retrieve data from Chroma collections."
 ---
 import { Callout } from '/snippets/callout.mdx';
 
-<Callout title={"New Search API Available"}>
+<Callout title="New Search API Available">
 Dense vector search, hybrid search, and more are available in the new powerful [Search API](/cloud/search-api/overview) for Chroma Cloud databases.
 </Callout>
 
@@ -207,7 +207,7 @@ By default, Chroma returns 10 results per input query. You can modify this numbe
 let results = collection
     .query(
         vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
-        Some(100), # n_results
+        Some(100), // n_results
         None,
         None,
         None,
@@ -223,7 +223,7 @@ let results = collection
         vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
         Some(5),
         None,
-        Some(vec!["id1".to_string(), "id2".to_string()]), # ids
+        Some(vec!["id1".to_string(), "id2".to_string()]), // ids
         None,
     )
     .await?;
@@ -331,7 +331,7 @@ const result = await collection.get();
 const first_document = {
     id: result["ids"][0],
     document: result["documents"][0],
-    metadatas: result["metadatas][0]
+    metadatas: result["metadatas"][0]
 }
 
 // Use the .rows() function for easy iteration
