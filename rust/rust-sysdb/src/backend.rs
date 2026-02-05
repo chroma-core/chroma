@@ -66,11 +66,12 @@ use crate::config::SpannerBackendConfig;
 use crate::spanner::SpannerBackend;
 use crate::types::SysDbError;
 use crate::types::{
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
-    FlushCompactionResponse, GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse,
-    GetCollectionsRequest, GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse,
-    GetTenantsRequest, GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -309,6 +310,18 @@ impl Backend {
     ) -> Result<GetCollectionsResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.get_collections(req).await,
+        }
+    }
+
+    /// Count collections for a tenant, optionally filtered by database.
+    ///
+    /// Returns the count of non-deleted collections.
+    pub async fn count_collections(
+        &self,
+        req: CountCollectionsRequest,
+    ) -> Result<CountCollectionsResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.count_collections(req).await,
         }
     }
 

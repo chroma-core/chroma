@@ -780,6 +780,38 @@ impl Runnable for GetCollectionsRequest {
     }
 }
 
+impl Assignable for CountCollectionsRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Route by topology prefix in database name if available
+        if let Some(ref db_name) = self.database_name {
+            vec![factory.backend_from_database_name(db_name)]
+        } else {
+            // When no database filter, fan out to all backends to get total count
+            factory.get_all_backends()
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CountCollectionsRequest {
+    type Response = CountCollectionsResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut total = 0u64;
+
+        // Clone the request for each backend call
+        for backend in backends {
+            let count = backend.count_collections(self.clone()).await?.count;
+            total += count;
+        }
+
+        Ok(CountCollectionsResponse { count: total })
+    }
+}
+
 #[async_trait::async_trait]
 impl Runnable for GetCollectionWithSegmentsRequest {
     type Response = GetCollectionWithSegmentsResponse;
@@ -1320,6 +1352,49 @@ impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
         Ok(chroma_proto::GetCollectionsResponse {
             collections: collections?,
         })
+    }
+}
+
+/// Internal request for counting collections.
+#[derive(Debug, Clone)]
+pub struct CountCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: Option<DatabaseName>,
+}
+
+impl TryFrom<chroma_proto::CountCollectionsRequest> for CountCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CountCollectionsRequest) -> Result<Self, Self::Error> {
+        let database_name = match req.database {
+            Some(db_str) if !db_str.is_empty() => {
+                let db_name = DatabaseName::new(&db_str).ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "database name must be at least 3 characters, got '{}'",
+                        db_str
+                    ))
+                })?;
+                Some(db_name)
+            }
+            _ => None,
+        };
+
+        Ok(Self {
+            tenant_id: req.tenant,
+            database_name,
+        })
+    }
+}
+
+/// Internal response for counting collections.
+#[derive(Debug, Clone)]
+pub struct CountCollectionsResponse {
+    pub count: u64,
+}
+
+impl From<CountCollectionsResponse> for chroma_proto::CountCollectionsResponse {
+    fn from(r: CountCollectionsResponse) -> Self {
+        chroma_proto::CountCollectionsResponse { count: r.count }
     }
 }
 
