@@ -447,7 +447,10 @@ def _query_results_are_correct_shape(
 ) -> None:
     for result_type in ["distances", "embeddings", "documents", "metadatas"]:
         assert query_results[result_type] is not None  # type: ignore[literal-required]
-        print(list(map(len, query_results[result_type])), n_results)
+        if not all(
+            len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
+            ):
+            print(query_results, n_results)
         assert all(
             len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
         )
