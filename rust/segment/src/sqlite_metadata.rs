@@ -648,7 +648,9 @@ impl IntoSqliteExpr for MetadataExpression {
                     | MetadataValue::IntArray(_)
                     | MetadataValue::FloatArray(_)
                     | MetadataValue::StringArray(_) => {
-                        unimplemented!("Primitive comparison with array metadata values is not supported")
+                        unimplemented!(
+                            "Primitive comparison with array metadata values is not supported"
+                        )
                     }
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
