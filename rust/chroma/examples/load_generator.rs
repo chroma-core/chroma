@@ -7,7 +7,7 @@
 //!
 //! - Dual endpoint support (api.trychroma.com and europe-west1.gcp.devchroma.com)
 //! - Configurable number of collections, tasks, batch size, and duration
-//! - Round-robin collection selection within each task
+//! - Random collection selection within each task to avoid concurrency hotspots
 //! - Gaussian Mixture Model (GMM) for realistic embedding generation
 //!
 //! # Usage
@@ -327,7 +327,7 @@ async fn get_or_create_collection_with_retry(
     Err(last_error.unwrap())
 }
 
-/// Runs a worker task that performs upserts in a round-robin fashion across collections.
+/// Runs a worker task that performs upserts with random collection selection.
 async fn run_worker(
     collections: Vec<ChromaCollection>,
     collection_semaphores: Vec<Arc<Semaphore>>,
@@ -337,7 +337,6 @@ async fn run_worker(
 ) {
     let mut rng = StdRng::seed_from_u64(seed);
     let mut record_counter: u64 = 0;
-    let mut collection_idx: usize = 0;
     let num_collections = collections.len();
 
     while ctx.start_time.elapsed() < ctx.duration {
@@ -357,10 +356,10 @@ async fn run_worker(
             _ => break,
         }
 
-        // Round-robin collection selection
+        // Random collection selection to avoid concurrency hotspots
+        let collection_idx = rng.gen_range(0..num_collections);
         let collection = &collections[collection_idx];
         let semaphore = &collection_semaphores[collection_idx];
-        collection_idx = (collection_idx + 1) % num_collections;
 
         // Acquire permit to limit outstanding ops per collection
         let permit = match semaphore.clone().acquire_owned().await {
