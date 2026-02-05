@@ -104,6 +104,7 @@ impl Configurable<SysdbMcmrConfig> for BackendFactory {
                 spanner: &topology.config().spanner,
                 regions: topology.regions().to_vec(),
                 local_region: local_region_name.clone(),
+                topology_name: topology.name().clone(),
             };
             let backend = SpannerBackend::try_from_config(&backend_config, registry).await?;
             topology_to_backend.insert(topology.name().clone(), backend);
@@ -344,6 +345,13 @@ impl Backend {
     ) -> Result<FlushCompactionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.flush_collection_compaction(req).await,
+        }
+    }
+
+    /// Reset the database state by deleting all data and recreating default entities.
+    pub async fn reset(&self) -> Result<(), SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.reset().await,
         }
     }
 

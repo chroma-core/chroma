@@ -35,3 +35,8 @@ futures = { workspace = true }
 chroma-segment = { workspace = true }
 backon = { workspace = true }
 tempfile = "3.8"
+spanner-migrations = { path = "../spanner-migrations" }
+google-cloud-googleapis = { workspace = true }
+
+[dev-dependencies]
+serial_test = "3.0"

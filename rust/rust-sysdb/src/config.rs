@@ -1,6 +1,6 @@
 use chroma_storage::config::{RegionalStorage, TopologicalStorage};
 use chroma_tracing::{OtelFilter, OtelFilterLevel};
-use chroma_types::{MultiCloudMultiRegionConfiguration, RegionName};
+use chroma_types::{MultiCloudMultiRegionConfiguration, RegionName, TopologyName};
 use figment::providers::{Env, Format, Yaml};
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +16,8 @@ pub struct SpannerBackendConfig<'a> {
     pub regions: Vec<RegionName>,
     /// The local region for this instance (used for reads).
     pub local_region: RegionName,
+    /// The topology name for this backend (used for migrations).
+    pub topology_name: TopologyName,
 }
 
 const DEFAULT_CONFIG_PATH: &str = "./chroma_config.yaml";
