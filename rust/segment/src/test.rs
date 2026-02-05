@@ -20,10 +20,10 @@ use chroma_types::{
     },
     plan::{Count, Get, Knn},
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
-    DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata,
-    Where, CHROMA_KEY,
+    ContainsOperator, DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata,
+    MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
+    OperationRecord, PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator,
+    UpdateMetadata, Where, CHROMA_KEY,
 };
 use regex::Regex;
 use std::collections::BinaryHeap;
@@ -587,6 +587,28 @@ impl CheckRecord for MetadataExpression {
                 match set_operator {
                     SetOperator::In => contains,
                     SetOperator::NotIn => !contains,
+                }
+            }
+            MetadataComparison::Contains(contains_operator, query_value) => {
+                // Check if the stored array metadata field contains the query scalar value
+                let found = match (stored, query_value) {
+                    (Some(MetadataValue::BoolArray(arr)), MetadataValue::Bool(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::IntArray(arr)), MetadataValue::Int(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::FloatArray(arr)), MetadataValue::Float(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::StringArray(arr)), MetadataValue::Str(val)) => {
+                        arr.contains(val)
+                    }
+                    _ => false,
+                };
+                match contains_operator {
+                    ContainsOperator::Contains => found,
+                    ContainsOperator::NotContains => !found,
                 }
             }
         }

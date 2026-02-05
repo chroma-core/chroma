@@ -19,9 +19,10 @@ use chroma_types::{
         literal_expr::{LiteralExpr, NgramLiteralProvider},
         ChromaRegex, ChromaRegexError,
     },
-    BooleanOperator, Chunk, CompositeExpression, DataRecord, DocumentExpression, DocumentOperator,
-    LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
-    MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
+    BooleanOperator, Chunk, CompositeExpression, ContainsOperator, DataRecord, DocumentExpression,
+    DocumentOperator, LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression,
+    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap,
+    Where,
 };
 use futures::future::try_join_all;
 use roaring::RoaringBitmap;
@@ -492,6 +493,18 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
                     SetOperator::NotIn => child_evaluations
                         .into_iter()
                         .fold(SignedRoaringBitmap::full(), BitAnd::bitand),
+                }
+            }
+            // Array contains: because arrays are stored exploded in the index
+            // (each element indexed individually), a "contains" check is simply
+            // an equality lookup on the scalar value.
+            MetadataComparison::Contains(contains_operator, metadata_value) => {
+                let bitmap = metadata_provider
+                    .filter_by_metadata(&self.key, metadata_value, &PrimitiveOperator::Equal)
+                    .await?;
+                match contains_operator {
+                    ContainsOperator::Contains => SignedRoaringBitmap::Include(bitmap),
+                    ContainsOperator::NotContains => SignedRoaringBitmap::Exclude(bitmap),
                 }
             }
         };

@@ -511,6 +511,18 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for UpdateMetadataValue {
                     .map_err(|_| UpdateMetadataValueConversionError::InvalidValue)?;
                 Ok(UpdateMetadataValue::SparseVector(sparse))
             }
+            Some(chroma_proto::update_metadata_value::Value::BoolListValue(value)) => {
+                Ok(UpdateMetadataValue::BoolArray(value.values.clone()))
+            }
+            Some(chroma_proto::update_metadata_value::Value::IntListValue(value)) => {
+                Ok(UpdateMetadataValue::IntArray(value.values.clone()))
+            }
+            Some(chroma_proto::update_metadata_value::Value::DoubleListValue(value)) => {
+                Ok(UpdateMetadataValue::FloatArray(value.values.clone()))
+            }
+            Some(chroma_proto::update_metadata_value::Value::StringListValue(value)) => {
+                Ok(UpdateMetadataValue::StringArray(value.values.clone()))
+            }
             // Used to communicate that the user wants to delete this key.
             None => Ok(UpdateMetadataValue::None),
         }
@@ -543,16 +555,26 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     ),
                 ),
             },
-            // Array types are not yet supported in protobuf
-            // TODO: support protobuf for these
-            UpdateMetadataValue::BoolArray(_)
-            | UpdateMetadataValue::IntArray(_)
-            | UpdateMetadataValue::FloatArray(_)
-            | UpdateMetadataValue::StringArray(_) => {
-                unimplemented!(
-                    "Array types in UpdateMetadataValue are not yet supported in protobuf"
-                )
-            }
+            UpdateMetadataValue::BoolArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::BoolListValue(
+                    chroma_proto::BoolListValue { values },
+                )),
+            },
+            UpdateMetadataValue::IntArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::IntListValue(
+                    chroma_proto::IntListValue { values },
+                )),
+            },
+            UpdateMetadataValue::FloatArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::DoubleListValue(
+                    chroma_proto::DoubleListValue { values },
+                )),
+            },
+            UpdateMetadataValue::StringArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringListValue(
+                    chroma_proto::StringListValue { values },
+                )),
+            },
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
         }
     }
@@ -1044,6 +1066,18 @@ impl TryFrom<&chroma_proto::UpdateMetadataValue> for MetadataValue {
                     .map_err(|_| MetadataValueConversionError::SparseVectorLengthMismatch)?;
                 Ok(MetadataValue::SparseVector(sparse))
             }
+            Some(chroma_proto::update_metadata_value::Value::BoolListValue(value)) => {
+                Ok(MetadataValue::BoolArray(value.values.clone()))
+            }
+            Some(chroma_proto::update_metadata_value::Value::IntListValue(value)) => {
+                Ok(MetadataValue::IntArray(value.values.clone()))
+            }
+            Some(chroma_proto::update_metadata_value::Value::DoubleListValue(value)) => {
+                Ok(MetadataValue::FloatArray(value.values.clone()))
+            }
+            Some(chroma_proto::update_metadata_value::Value::StringListValue(value)) => {
+                Ok(MetadataValue::StringArray(value.values.clone()))
+            }
             _ => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -1075,14 +1109,26 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
                     ),
                 ),
             },
-            // Array types don't have proto equivalents yet.
-            // TODO: Add proto support for array metadata values.
-            MetadataValue::BoolArray(_)
-            | MetadataValue::IntArray(_)
-            | MetadataValue::FloatArray(_)
-            | MetadataValue::StringArray(_) => {
-                panic!("Array metadata values cannot be converted to proto yet")
-            }
+            MetadataValue::BoolArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::BoolListValue(
+                    chroma_proto::BoolListValue { values },
+                )),
+            },
+            MetadataValue::IntArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::IntListValue(
+                    chroma_proto::IntListValue { values },
+                )),
+            },
+            MetadataValue::FloatArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::DoubleListValue(
+                    chroma_proto::DoubleListValue { values },
+                )),
+            },
+            MetadataValue::StringArray(values) => chroma_proto::UpdateMetadataValue {
+                value: Some(chroma_proto::update_metadata_value::Value::StringListValue(
+                    chroma_proto::StringListValue { values },
+                )),
+            },
         }
     }
 }
@@ -1394,6 +1440,15 @@ impl serde::Serialize for Where {
                         .map_err(serde::ser::Error::custom)?;
                         inner_map.insert(op_key.to_string(), values_json);
                     }
+                    MetadataComparison::Contains(op, value) => {
+                        let op_key = match op {
+                            ContainsOperator::Contains => "$contains",
+                            ContainsOperator::NotContains => "$not_contains",
+                        };
+                        let value_json =
+                            serde_json::to_value(value).map_err(serde::ser::Error::custom)?;
+                        inner_map.insert(op_key.to_string(), value_json);
+                    }
                 }
 
                 outer_map.serialize_entry(&meta.key, &inner_map)?;
@@ -1504,6 +1559,7 @@ impl Where {
                     MetadataSetValue::Float(items) => items.len() as u64,
                     MetadataSetValue::Str(items) => items.len() as u64,
                 },
+                MetadataComparison::Contains(_, _) => 1,
             },
         }
     }
@@ -1713,6 +1769,30 @@ impl std::fmt::Display for MetadataExpression {
             MetadataComparison::Set(op, set_value) => {
                 write!(f, "{} {} {}", self.key, op, set_value)
             }
+            MetadataComparison::Contains(op, value) => {
+                write!(f, "{} {} {}", self.key, op, value)
+            }
+        }
+    }
+}
+
+/// Helper to convert a `GenericComparator` and a `MetadataValue` into either a
+/// `MetadataComparison::Primitive` (for EQ/NE) or `MetadataComparison::Contains`
+/// (for CONTAINS/NOT_CONTAINS).
+fn generic_comparator_to_metadata_comparison(
+    comparator: chroma_proto::GenericComparator,
+    value: MetadataValue,
+) -> MetadataComparison {
+    match comparator {
+        chroma_proto::GenericComparator::Eq | chroma_proto::GenericComparator::Ne => {
+            // SAFETY: We just matched Eq | Ne, so try_into() will always succeed.
+            MetadataComparison::Primitive(comparator.try_into().unwrap(), value)
+        }
+        chroma_proto::GenericComparator::ArrayContains => {
+            MetadataComparison::Contains(ContainsOperator::Contains, value)
+        }
+        chroma_proto::GenericComparator::ArrayNotContains => {
+            MetadataComparison::Contains(ContainsOperator::NotContains, value)
         }
     }
 }
@@ -1727,8 +1807,8 @@ impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
         let comparison = match proto_comparison {
             chroma_proto::direct_comparison::Comparison::SingleStringOperand(
                 single_string_comparison,
-            ) => MetadataComparison::Primitive(
-                single_string_comparison.comparator().into(),
+            ) => generic_comparator_to_metadata_comparison(
+                single_string_comparison.comparator(),
                 MetadataValue::Str(single_string_comparison.value),
             ),
             chroma_proto::direct_comparison::Comparison::StringListOperand(
@@ -1739,25 +1819,29 @@ impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
             ),
             chroma_proto::direct_comparison::Comparison::SingleIntOperand(
                 single_int_comparison,
-            ) => MetadataComparison::Primitive(
-                match single_int_comparison
+            ) => {
+                let comparator = single_int_comparison
                     .comparator
                     .ok_or(WhereConversionError::cause(
                         "Invalid scalar integer operator",
-                    ))? {
+                    ))?;
+                let value = MetadataValue::Int(single_int_comparison.value);
+                match comparator {
                     chroma_proto::single_int_comparison::Comparator::GenericComparator(op) => {
-                        chroma_proto::GenericComparator::try_from(op)
-                            .map_err(WhereConversionError::cause)?
-                            .into()
+                        let generic = chroma_proto::GenericComparator::try_from(op)
+                            .map_err(WhereConversionError::cause)?;
+                        generic_comparator_to_metadata_comparison(generic, value)
                     }
                     chroma_proto::single_int_comparison::Comparator::NumberComparator(op) => {
-                        chroma_proto::NumberComparator::try_from(op)
-                            .map_err(WhereConversionError::cause)?
-                            .into()
+                        MetadataComparison::Primitive(
+                            chroma_proto::NumberComparator::try_from(op)
+                                .map_err(WhereConversionError::cause)?
+                                .into(),
+                            value,
+                        )
                     }
-                },
-                MetadataValue::Int(single_int_comparison.value),
-            ),
+                }
+            }
             chroma_proto::direct_comparison::Comparison::IntListOperand(int_list_comparison) => {
                 MetadataComparison::Set(
                     int_list_comparison.list_operator().into(),
@@ -1766,24 +1850,27 @@ impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
             }
             chroma_proto::direct_comparison::Comparison::SingleDoubleOperand(
                 single_double_comparison,
-            ) => MetadataComparison::Primitive(
-                match single_double_comparison
+            ) => {
+                let comparator = single_double_comparison
                     .comparator
-                    .ok_or(WhereConversionError::cause("Invalid scalar float operator"))?
-                {
+                    .ok_or(WhereConversionError::cause("Invalid scalar float operator"))?;
+                let value = MetadataValue::Float(single_double_comparison.value);
+                match comparator {
                     chroma_proto::single_double_comparison::Comparator::GenericComparator(op) => {
-                        chroma_proto::GenericComparator::try_from(op)
-                            .map_err(WhereConversionError::cause)?
-                            .into()
+                        let generic = chroma_proto::GenericComparator::try_from(op)
+                            .map_err(WhereConversionError::cause)?;
+                        generic_comparator_to_metadata_comparison(generic, value)
                     }
                     chroma_proto::single_double_comparison::Comparator::NumberComparator(op) => {
-                        chroma_proto::NumberComparator::try_from(op)
-                            .map_err(WhereConversionError::cause)?
-                            .into()
+                        MetadataComparison::Primitive(
+                            chroma_proto::NumberComparator::try_from(op)
+                                .map_err(WhereConversionError::cause)?
+                                .into(),
+                            value,
+                        )
                     }
-                },
-                MetadataValue::Float(single_double_comparison.value),
-            ),
+                }
+            }
             chroma_proto::direct_comparison::Comparison::DoubleListOperand(
                 double_list_comparison,
             ) => MetadataComparison::Set(
@@ -1798,8 +1885,8 @@ impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
             }
             chroma_proto::direct_comparison::Comparison::SingleBoolOperand(
                 single_bool_comparison,
-            ) => MetadataComparison::Primitive(
-                single_bool_comparison.comparator().into(),
+            ) => generic_comparator_to_metadata_comparison(
+                single_bool_comparison.comparator(),
                 MetadataValue::Bool(single_bool_comparison.value),
             ),
         };
@@ -1837,6 +1924,19 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                 MetadataSetValue::Float(vec) => chroma_proto::direct_comparison::Comparison::DoubleListOperand(chroma_proto::DoubleListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
                 MetadataSetValue::Str(vec) => chroma_proto::direct_comparison::Comparison::StringListOperand(chroma_proto::StringListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
             },
+            MetadataComparison::Contains(contains_operator, metadata_value) => {
+                let comparator = chroma_proto::GenericComparator::from(contains_operator) as i32;
+                match metadata_value {
+                    MetadataValue::Bool(value) => chroma_proto::direct_comparison::Comparison::SingleBoolOperand(chroma_proto::SingleBoolComparison { value, comparator }),
+                    MetadataValue::Int(value) => chroma_proto::direct_comparison::Comparison::SingleIntOperand(chroma_proto::SingleIntComparison { value, comparator: Some(chroma_proto::single_int_comparison::Comparator::GenericComparator(comparator)) }),
+                    MetadataValue::Float(value) => chroma_proto::direct_comparison::Comparison::SingleDoubleOperand(chroma_proto::SingleDoubleComparison { value, comparator: Some(chroma_proto::single_double_comparison::Comparator::GenericComparator(comparator)) }),
+                    MetadataValue::Str(value) => chroma_proto::direct_comparison::Comparison::SingleStringOperand(chroma_proto::SingleStringComparison { value, comparator }),
+                    MetadataValue::SparseVector(_) => return Err(WhereConversionError::Cause("Contains comparison with sparse vector is not supported".to_string())),
+                    MetadataValue::BoolArray(_) | MetadataValue::IntArray(_) | MetadataValue::FloatArray(_) | MetadataValue::StringArray(_) => {
+                        return Err(WhereConversionError::Cause("Contains comparison value must be a scalar, not an array".to_string()))
+                    }
+                }
+            },
         };
         Ok(Self {
             key: value.key,
@@ -1850,6 +1950,9 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
+    /// Array contains: check if an array metadata field contains (or does not
+    /// contain) a specific scalar value.
+    Contains(ContainsOperator, MetadataValue),
 }
 
 impl std::fmt::Display for MetadataComparison {
@@ -1907,11 +2010,19 @@ impl std::fmt::Display for PrimitiveOperator {
     }
 }
 
-impl From<chroma_proto::GenericComparator> for PrimitiveOperator {
-    fn from(value: chroma_proto::GenericComparator) -> Self {
+impl TryFrom<chroma_proto::GenericComparator> for PrimitiveOperator {
+    type Error = WhereConversionError;
+
+    fn try_from(value: chroma_proto::GenericComparator) -> Result<Self, Self::Error> {
         match value {
-            chroma_proto::GenericComparator::Eq => Self::Equal,
-            chroma_proto::GenericComparator::Ne => Self::NotEqual,
+            chroma_proto::GenericComparator::Eq => Ok(Self::Equal),
+            chroma_proto::GenericComparator::Ne => Ok(Self::NotEqual),
+            chroma_proto::GenericComparator::ArrayContains
+            | chroma_proto::GenericComparator::ArrayNotContains => {
+                Err(WhereConversionError::cause(
+                    "ArrayContains/ArrayNotContains cannot be converted to PrimitiveOperator",
+                ))
+            }
         }
     }
 }
@@ -1986,6 +2097,32 @@ impl From<SetOperator> for chroma_proto::ListOperator {
         match value {
             SetOperator::In => Self::In,
             SetOperator::NotIn => Self::Nin,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
+pub enum ContainsOperator {
+    Contains,
+    NotContains,
+}
+
+impl std::fmt::Display for ContainsOperator {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let op_str = match self {
+            ContainsOperator::Contains => "contains",
+            ContainsOperator::NotContains => "not_contains",
+        };
+        write!(f, "{}", op_str)
+    }
+}
+
+impl From<ContainsOperator> for chroma_proto::GenericComparator {
+    fn from(value: ContainsOperator) -> Self {
+        match value {
+            ContainsOperator::Contains => Self::ArrayContains,
+            ContainsOperator::NotContains => Self::ArrayNotContains,
         }
     }
 }
