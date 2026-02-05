@@ -375,6 +375,11 @@
         "label": "25k",
         "icon": "x-twitter",
         "href": "https://x.com/trychroma"
+      },
+      {
+        "label": "",
+        "href": "https://discord.gg/dSHcBEMSk7",
+        "type": "discord"
       }
     ],
     "primary": {
