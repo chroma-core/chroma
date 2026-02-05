@@ -172,7 +172,7 @@
         "pages": [
           "integrations/chroma-integrations",
           {
-            "group": "Embedding Models",
+            "group": "Dense Embedding Models",
             "pages": [
               "integrations/embedding-models/openai",
               "integrations/embedding-models/cohere",
@@ -194,9 +194,15 @@
               "integrations/embedding-models/cloudflare-workers-ai",
               "integrations/embedding-models/amazon-bedrock",
               "integrations/embedding-models/baseten",
+              "integrations/embedding-models/chroma-cloud-qwen"
+            ]
+          },
+          {
+            "group": "Sparse Embedding Models",
+            "pages": [
               "integrations/embedding-models/chroma-bm25",
-              "integrations/embedding-models/chroma-cloud-qwen",
-              "integrations/embedding-models/chroma-cloud-splade"
+              "integrations/embedding-models/chroma-cloud-splade",
+              "integrations/embedding-models/hugging-face"
             ]
           },
           {
