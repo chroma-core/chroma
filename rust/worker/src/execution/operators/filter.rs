@@ -130,15 +130,20 @@ impl<'me> MetadataLogReader<'me> {
                 user_id_to_offset_id.insert(log.get_user_id(), log.get_offset_id());
                 let log_metadata = log.merged_metadata();
                 for (key, val) in log_metadata {
-                    if let MetadataValue::SparseVector(_) = val {
+                    if matches!(val, MetadataValue::SparseVector(_)) {
                         continue;
                     }
-                    compact_metadata
-                        .entry(key)
-                        .or_default()
-                        .entry(val)
-                        .or_default()
-                        .insert(log.get_offset_id());
+                    // Explode array values into individual scalar entries so
+                    // that equality-based contains queries work against the
+                    // in-memory index, mirroring the blockfile exploded index.
+                    // Scalars pass through as a single-element iterator.
+                    let values = compact_metadata.entry(key).or_default();
+                    for scalar in val.into_scalars() {
+                        values
+                            .entry(scalar)
+                            .or_default()
+                            .insert(log.get_offset_id());
+                    }
                 }
                 if let Some(doc) = log.merged_document_ref() {
                     document.insert(log.get_offset_id(), doc);

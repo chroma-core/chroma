@@ -730,6 +730,30 @@ impl MetadataValue {
             MetadataValue::StringArray(_) => MetadataValueType::StringArray,
         }
     }
+
+    /// Explode a metadata value into individual scalar entries for indexing.
+    ///
+    /// - Array values are expanded: each element becomes its own scalar.
+    /// - Scalar values (Bool, Int, Float, Str) yield themselves.
+    /// - SparseVector and other non-indexable types should be filtered out
+    ///   by the caller before invoking this method.
+    pub fn into_scalars(self) -> Box<dyn Iterator<Item = MetadataValue>> {
+        match self {
+            MetadataValue::BoolArray(arr) => {
+                Box::new(arr.into_iter().map(MetadataValue::Bool))
+            }
+            MetadataValue::IntArray(arr) => {
+                Box::new(arr.into_iter().map(MetadataValue::Int))
+            }
+            MetadataValue::FloatArray(arr) => {
+                Box::new(arr.into_iter().map(MetadataValue::Float))
+            }
+            MetadataValue::StringArray(arr) => {
+                Box::new(arr.into_iter().map(MetadataValue::Str))
+            }
+            scalar => Box::new(std::iter::once(scalar)),
+        }
+    }
 }
 
 impl From<&MetadataValue> for MetadataValueType {
