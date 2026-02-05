@@ -46,6 +46,7 @@ def test_get_builtins_holds() -> None:
         "OpenAIEmbeddingFunction",
         "OpenCLIPEmbeddingFunction",
         "RoboflowEmbeddingFunction",
+        "RunPodEmbeddingFunction",
         "SentenceTransformerEmbeddingFunction",
         "Text2VecEmbeddingFunction",
         "ChromaLangchainEmbeddingFunction",

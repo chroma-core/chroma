@@ -51,7 +51,8 @@
     "@chroma-core/chroma-bm25": "workspace:^",
     "@chroma-core/chroma-cloud-qwen": "workspace:^",
     "@chroma-core/chroma-cloud-splade": "workspace:^",
-    "@chroma-core/sentence-transformer": "workspace:^"
+    "@chroma-core/sentence-transformer": "workspace:^",
+    "@chroma-core/runpod": "workspace:^"
   },
   "engines": {
     "node": ">=20"

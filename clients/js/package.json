@@ -65,7 +65,8 @@
   },
   "dependencies": {
     "cliui": "^8.0.1",
-    "isomorphic-fetch": "^3.0.0"
+    "isomorphic-fetch": "^3.0.0",
+    "runpod-sdk": "^1.1.2"
   },
   "peerDependencies": {
     "@google/generative-ai": "^0.1.1",
@@ -94,6 +95,14 @@
   "pnpm": {
     "overrides": {
       "whatwg-url": "13.0.0"
-    }
+    },
+    "ignoredBuiltDependencies": [
+      "bcrypt",
+      "cpu-features",
+      "esbuild",
+      "protobufjs",
+      "sharp",
+      "ssh2"
+    ]
   }
 }

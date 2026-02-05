@@ -30,6 +30,7 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Together AI](./embedding-models/together-ai.md)                        | ✓      | ✓          |
 | [Mistral](./embedding-models/mistral.md)                                | ✓      | ✓          |
 | [Morph](./embedding-models/morph.md)                                    | ✓      | ✓          |
+| [RunPod](./embedding-models/runpod.md)                                  | ✓      | ✓          |
 
 ---
 
