@@ -81,7 +81,7 @@ petgraph = { version = "0.8.1" }
 base64 = "0.22"
 bitpacking = "0.9"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
-google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner" }
+google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner", features = ["trace"] }
 google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }
 google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"] }
 
