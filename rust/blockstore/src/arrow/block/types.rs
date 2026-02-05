@@ -547,6 +547,43 @@ impl Block {
         Ok(bytes)
     }
 
+    /// Compute the absolute byte offset of a specific buffer within the serialized block bytes.
+    ///
+    /// For record segment blockfiles storing DataRecord values, the buffer layout is:
+    /// 0: prefix offsets, 1: prefix data, 2: key data, 3: struct validity,
+    /// 4: id offsets, 5: id data, 6: embedding validity, 7: embedding values,
+    /// 8: metadata offsets, 9: metadata data, 10: document offsets, 11: document data
+    ///
+    /// The embedding Float32 values buffer is at index 7.
+    pub fn get_value_buffer_offset(bytes: &[u8], buffer_index: usize) -> Option<u64> {
+        let footer = read_arrow_footer(bytes).ok()?;
+        let (_, record_batch_offset, _, _) = read_record_batch_range(footer).ok()?;
+
+        // Get metadata length from the record batch definition
+        let record_batch_definitions = footer.recordBatches()?;
+        let record_batch_definition = record_batch_definitions.get(0);
+        let metadata_length = record_batch_definition.metaDataLength() as usize;
+
+        // Parse the record batch message to get buffer offsets
+        let buffer = &bytes[record_batch_offset..];
+        let buf = match buffer[..4] == [0xff; 4] {
+            true => &buffer[8..],
+            false => &buffer[4..],
+        };
+        let message = root_as_message(buf).ok()?;
+        let record_batch = message.header_as_record_batch()?;
+        let buffers = record_batch.buffers()?;
+
+        if buffer_index >= buffers.len() {
+            return None;
+        }
+
+        let buffer_offset_in_body = buffers.get(buffer_index).offset() as u64;
+
+        // Absolute offset = record_batch_offset + metadata_length + buffer_offset_in_body
+        Some(record_batch_offset as u64 + metadata_length as u64 + buffer_offset_in_body)
+    }
+
     /// Load a block from bytes in Arrow IPC format with the given id.
     /// ### Notes
     /// - This copies the input bytes. If you have owned bytes (Vec<u8> or Bytes),

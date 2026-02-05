@@ -860,6 +860,52 @@ impl RecordSegmentReader<'_> {
         self.id_to_data.get("", offset_id).await
     }
 
+    /// Fetch just the embedding for a given offset_id using byte-range reads.
+    ///
+    /// This method is more efficient than `get_data_for_offset_id` when only the
+    /// embedding is needed, as it avoids loading the entire block from storage.
+    ///
+    /// # Arguments
+    /// * `offset_id` - The offset ID of the record
+    /// * `embedding_dimension` - The dimension of the embedding (number of f32 values)
+    ///
+    /// # Returns
+    /// * `Ok(Some(embedding))` - The embedding as a Vec<f32>
+    /// * `Ok(None)` - The blockfile doesn't support byte-range reads (older version)
+    /// * `Err(_)` - Error during fetch
+    ///
+    /// # Prototype Limitation
+    /// Assumes offset_ids are contiguous (no deletes). This method uses the sparse
+    /// index's byte offset tracking which requires contiguous IDs.
+    pub async fn get_embedding_for_offset_id(
+        &self,
+        offset_id: u32,
+        embedding_dimension: usize,
+    ) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>> {
+        // Each f32 is 4 bytes
+        let value_size = embedding_dimension * std::mem::size_of::<f32>();
+
+        let bytes = self
+            .id_to_data
+            .get_value_bytes("", offset_id, value_size)
+            .await?;
+
+        match bytes {
+            Some(bytes) => {
+                // Convert bytes to f32 slice
+                // SAFETY: We know the bytes are aligned properly from Arrow IPC format
+                // and have the correct length (embedding_dimension * 4)
+                let embedding: Vec<f32> = bytes
+                    .chunks_exact(4)
+                    .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+                    .collect();
+
+                Ok(Some(embedding))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub async fn data_exists_for_user_id(
         &self,
         user_id: &str,

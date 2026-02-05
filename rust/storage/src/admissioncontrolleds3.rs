@@ -721,6 +721,20 @@ impl AdmissionControlledS3Storage {
             .map(|(bytes, _e_tag)| bytes)
     }
 
+    /// Fetch a byte range from storage.
+    /// Note: This bypasses admission control for simplicity.
+    pub async fn get_range(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
+        match &self.storage {
+            ACStorageProvider::S3(s3) => s3.get_range(key, start, end).await,
+            ACStorageProvider::Object(obj) => obj.get_range(key, start, end).await,
+        }
+    }
+
     pub async fn fetch<FetchReturn, FetchFn, FetchFut>(
         &self,
         key: &str,
