@@ -381,6 +381,13 @@ impl Arbitrary for TestWhereFilter {
                                 MetadataValue::SparseVector(_) => {
                                     unreachable!("Metadata expression should not use sparse vector")
                                 }
+                                // TODO: Add support for these in proptests
+                                MetadataValue::BoolArray(_) |
+                                MetadataValue::IntArray(_) |
+                                MetadataValue::FloatArray(_) |
+                                MetadataValue::StringArray(_) => {
+                                    unreachable!("Metadata set expression should not use array types. Use MetadataExpression instead.")
+                                }
                             },
                         ),
                     })
