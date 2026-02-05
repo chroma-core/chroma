@@ -839,10 +839,32 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
-        // === Step 0: Check center drift and rebuild centroid indexes if needed ===
+        // === Step 0: Pre-scrub cleanup ===
+        let mut mutated_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in &mutated_cluster_ids {
+            self.scrub(*cluster_id).await?;
+        }
+
+        let zero_length_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (entry.value().length == 0).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in zero_length_cluster_ids {
+            self.detach(cluster_id).await?;
+            self.drop(cluster_id)?;
+        }
+
+        // === Step 1: Check center drift and rebuild centroid indexes if needed ===
         self.rebuild_on_drift(usearch_provider).await?;
 
-        // === Step 1: Create blockfile writers ===
+        // === Step 2: Create blockfile writers ===
         let mut qc_options =
             BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
         let mut sm_options =
@@ -876,22 +898,9 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .await
             .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
 
-        // === Step 2: Write quantized_cluster data ===
+        // === Step 3: Write quantized_cluster data ===
         let quantized_cluster_flusher = {
-            let mut mutated_cluster_ids = self
-                .cluster_deltas
-                .iter()
-                .filter_map(|entry| {
-                    (entry.value().length == 0 || !entry.value().ids.is_empty())
-                        .then_some(*entry.key())
-                })
-                .collect::<Vec<_>>();
-
-            for cluster_id in &mutated_cluster_ids {
-                self.scrub(*cluster_id).await?;
-            }
-
-            // Add deleted cluster ids
+            // Add tombstoned cluster ids (need to delete from blockfile)
             for cluster_id in self.tombstones.iter() {
                 mutated_cluster_ids.push(*cluster_id);
             }
@@ -901,11 +910,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
             // Apply changes in order
             for cluster_id in mutated_cluster_ids {
-                if let Some(delta) = self
-                    .cluster_deltas
-                    .get(&cluster_id)
-                    .filter(|delta| delta.length > 0)
-                {
+                if let Some(delta) = self.cluster_deltas.get(&cluster_id) {
                     let codes = delta
                         .codes
                         .iter()
@@ -936,19 +941,13 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 3: Write scalar_metadata ===
-        // Stores: next_cluster_id, lengths, versions
-        // Always create fresh, write in alphabetical prefix order: length < next < version
-        // NOTE: Must come after Step 2 because scrubbing may change lengths
+        // === Step 4: Write scalar_metadata ===
         let scalar_metadata_flusher = {
             // 1. PREFIX_LENGTH - sorted by cluster_id
             let mut lengths = self
                 .cluster_deltas
                 .iter()
-                .filter_map(|entry| {
-                    let len = entry.value().length as u32;
-                    (len > 0).then_some((*entry.key(), len))
-                })
+                .map(|entry| (*entry.key(), entry.value().length as u32))
                 .collect::<Vec<_>>();
             lengths.sort_unstable();
             for (cluster_id, length) in lengths {
@@ -985,9 +984,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 4: Write embedding_metadata ===
-        // Stores: quantization center and rotation matrix columns
-        // Write in alphabetical prefix order: center < rotation
+        // === Step 5: Write embedding_metadata ===
         let embedding_metadata_flusher = {
             // 1. PREFIX_CENTER - quantization center (always write, may be updated)
             embedding_metadata_writer
@@ -1441,5 +1438,1441 @@ impl QuantizedSpannFlusher {
             raw_centroid_id,
             scalar_metadata_id,
         })
+    }
+}
+#[cfg(test)]
+mod tests {
+    use std::sync::{atomic::Ordering, Arc};
+
+    use chroma_blockstore::{
+        arrow::{
+            config::TEST_MAX_BLOCK_SIZE_BYTES,
+            provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+        },
+        provider::BlockfileProvider,
+        BlockfileWriterOptions,
+    };
+    use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+    use chroma_distance::DistanceFunction;
+    use chroma_storage::{local::LocalStorage, Storage};
+    use chroma_types::{CollectionUuid, DataRecord, SpannIndexConfig};
+    use rand::{Rng, SeedableRng};
+    use tempfile::TempDir;
+
+    use crate::{
+        quantization::Code,
+        usearch::{USearchIndex, USearchIndexProvider},
+        VectorIndex,
+    };
+
+    use super::{QuantizedDelta, QuantizedSpannIndexWriter};
+
+    const TEST_DIMENSION: usize = 4;
+    const TEST_EPSILON: f32 = 1e-5;
+
+    fn test_config() -> SpannIndexConfig {
+        SpannIndexConfig {
+            write_nprobe: Some(4),
+            nreplica_count: Some(2),
+            write_rng_epsilon: Some(4.0),
+            write_rng_factor: Some(1.0),
+            split_threshold: Some(8),
+            merge_threshold: Some(2),
+            reassign_neighbor_count: Some(6),
+            center_drift_threshold: Some(0.125),
+            search_nprobe: Some(4),
+            search_rng_epsilon: Some(4.0),
+            search_rng_factor: Some(1.0),
+            ef_construction: Some(32),
+            ef_search: Some(16),
+            num_samples_kmeans: None,
+            initial_lambda: None,
+            num_centers_to_merge_to: None,
+            max_neighbors: Some(8),
+            quantize: true,
+        }
+    }
+
+    fn test_distance_function() -> DistanceFunction {
+        DistanceFunction::Cosine
+    }
+
+    fn test_storage(tmp_dir: &TempDir) -> Storage {
+        Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()))
+    }
+
+    fn test_blockfile_provider(storage: Storage) -> BlockfileProvider {
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            16,
+        );
+        BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider)
+    }
+
+    fn test_usearch_provider(storage: Storage) -> USearchIndexProvider {
+        let usearch_cache = new_non_persistent_cache_for_test();
+        USearchIndexProvider::new(storage, usearch_cache)
+    }
+
+    #[tokio::test]
+    async fn test_basic_operations() {
+        // === Setup ===
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let usearch_provider = test_usearch_provider(storage);
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            CollectionUuid::new(),
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        // =======================================================================
+        // Level 0: Pure/Accessor Operations
+        // =======================================================================
+
+        // --- upgrade ---
+        let v1 = writer.upgrade_version(1);
+        assert_eq!(v1, 1);
+        assert_eq!(writer.versions.get(&1).map(|v| *v), Some(1));
+
+        let v2 = writer.upgrade_version(1);
+        assert_eq!(v2, 2);
+        assert_eq!(writer.versions.get(&1).map(|v| *v), Some(2));
+
+        let v3 = writer.upgrade_version(2);
+        assert_eq!(v3, 1);
+        assert_eq!(writer.versions.get(&2).map(|v| *v), Some(1));
+
+        // --- is_valid ---
+        assert!(writer.is_valid(1, 2)); // current version
+        assert!(!writer.is_valid(1, 1)); // stale
+        assert!(!writer.is_valid(1, 3)); // future
+        assert!(!writer.is_valid(999, 1)); // unknown id
+
+        // --- distance (Cosine) ---
+        // Cosine distance = 1 - cos(theta)
+        // Identical vectors: cos = 1, distance = 0
+        assert!(writer.distance(&[1.0, 0.0, 0.0, 0.0], &[1.0, 0.0, 0.0, 0.0]) < TEST_EPSILON);
+        // Opposite vectors: cos = -1, distance = 2
+        assert!(
+            (writer.distance(&[1.0, 0.0, 0.0, 0.0], &[-1.0, 0.0, 0.0, 0.0]) - 2.0).abs()
+                < TEST_EPSILON
+        );
+        // Orthogonal vectors: cos = 0, distance = 1
+        assert!(
+            (writer.distance(&[1.0, 0.0, 0.0, 0.0], &[0.0, 1.0, 0.0, 0.0]) - 1.0).abs()
+                < TEST_EPSILON
+        );
+
+        // --- rotate ---
+        // For cosine space: normalize first, then rotate. Rotation preserves norm.
+        let rotated = writer.rotate(&[1.0, 0.0, 0.0, 0.0]);
+        assert_eq!(rotated.len(), TEST_DIMENSION);
+        let norm = rotated.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm - 1.0).abs() < TEST_EPSILON,
+            "Expected norm ~1.0, got {}",
+            norm
+        );
+
+        // Non-unit vector should also result in norm ~1.0 after rotation (due to normalization)
+        let rotated2 = writer.rotate(&[2.0, 0.0, 0.0, 0.0]);
+        let norm2 = rotated2.iter().map(|x| x * x).sum::<f32>().sqrt();
+        assert!(
+            (norm2 - 1.0).abs() < TEST_EPSILON,
+            "Expected norm ~1.0, got {}",
+            norm2
+        );
+
+        // --- centroid (no clusters yet) ---
+        assert!(writer.centroid(1).is_none());
+        assert!(writer.centroid(999).is_none());
+
+        // --- navigate (no clusters yet) ---
+        let result = writer
+            .navigate(&[1.0, 0.0, 0.0, 0.0], 5)
+            .expect("navigate failed");
+        assert!(result.keys.is_empty());
+
+        // --- rng_select (empty candidates) ---
+        let empty_result = writer.rng_select(&result);
+        assert!(empty_result.keys.is_empty());
+
+        // =======================================================================
+        // Level 1: Simple Mutations
+        // =======================================================================
+
+        // --- spawn ---
+        let center1: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
+        let delta1 = QuantizedDelta {
+            center: center1.clone(),
+            codes: vec![],
+            ids: vec![],
+            length: 0,
+            versions: vec![],
+        };
+        let next_id_before = writer.next_cluster_id.load(Ordering::Relaxed);
+        let cluster_id_1 = writer.spawn(delta1).expect("spawn failed");
+        assert_eq!(cluster_id_1, next_id_before);
+        assert_eq!(
+            writer.next_cluster_id.load(Ordering::Relaxed),
+            next_id_before + 1
+        );
+
+        // Verify centroid is retrievable
+        let retrieved_center = writer.centroid(cluster_id_1).expect("centroid not found");
+        assert_eq!(retrieved_center.as_ref(), center1.as_ref());
+
+        // --- navigate (with cluster) ---
+        let result = writer
+            .navigate(&[1.0, 0.0, 0.0, 0.0], 5)
+            .expect("navigate failed");
+        assert!(!result.keys.is_empty());
+        assert!(result.keys.contains(&cluster_id_1));
+
+        // --- append ---
+        // Create a test embedding for point 10 and quantize it relative to center1
+        let emb_10 = [1.0f32, 0.1, 0.0, 0.0];
+        let code_10: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_10, &center1).as_ref().into();
+        let v10 = writer.upgrade_version(10);
+        let new_len = writer.append(cluster_id_1, 10, v10, code_10.clone());
+        assert_eq!(new_len, Some(1));
+
+        // Verify delta has the point
+        let delta = writer
+            .cluster_deltas
+            .get(&cluster_id_1)
+            .expect("delta not found");
+        assert!(delta.ids.contains(&10));
+        assert_eq!(delta.length, 1);
+
+        // Append to non-existent cluster returns None
+        let v11 = writer.upgrade_version(11);
+        let bad_append = writer.append(999, 11, v11, code_10.clone());
+        assert!(bad_append.is_none());
+
+        // --- spawn more clusters for RNG test ---
+        let center2: Arc<[f32]> = Arc::from([0.0f32, 1.0, 0.0, 0.0]);
+        let delta2 = QuantizedDelta {
+            center: center2,
+            codes: vec![],
+            ids: vec![],
+            length: 0,
+            versions: vec![],
+        };
+        let cluster_id_2 = writer.spawn(delta2).expect("spawn failed");
+
+        let center3: Arc<[f32]> = Arc::from([0.0f32, 0.0, 1.0, 0.0]);
+        let delta3 = QuantizedDelta {
+            center: center3,
+            codes: vec![],
+            ids: vec![],
+            length: 0,
+            versions: vec![],
+        };
+        let cluster_id_3 = writer.spawn(delta3).expect("spawn failed");
+
+        // --- rng_select (with multiple clusters) ---
+        // Query near cluster 1
+        let candidates = writer
+            .navigate(&[1.0, 0.0, 0.0, 0.0], 5)
+            .expect("navigate failed");
+        assert!(!candidates.keys.is_empty());
+
+        let selected = writer.rng_select(&candidates);
+        // Should select at least the closest cluster
+        assert!(!selected.keys.is_empty());
+        // First selected should be cluster_id_1 (closest to query)
+        assert_eq!(selected.keys[0], cluster_id_1);
+
+        // --- drop ---
+        writer.drop(cluster_id_2).expect("drop failed");
+
+        // Verify tombstone
+        assert!(writer.tombstones.contains(&cluster_id_2));
+
+        // Navigate should NOT return dropped cluster
+        let result = writer
+            .navigate(&[0.0, 1.0, 0.0, 0.0], 5)
+            .expect("navigate failed");
+        assert!(!result.keys.contains(&cluster_id_2));
+
+        // But centroid still returns Some (delta still exists until detach)
+        assert!(writer.centroid(cluster_id_2).is_some());
+
+        // Verify remaining clusters are still navigable
+        let result = writer
+            .navigate(&[1.0, 0.0, 0.0, 0.0], 5)
+            .expect("navigate failed");
+        assert!(result.keys.contains(&cluster_id_1));
+        assert!(result.keys.contains(&cluster_id_3));
+    }
+
+    #[tokio::test]
+    async fn test_load_and_scrub_operations() {
+        // =======================================================================
+        // Setup: Create raw embedding blockfile with test data
+        // =======================================================================
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+        let collection_id = CollectionUuid::new();
+
+        // Raw embeddings for test points (distinct vectors for each id)
+        let raw_embeddings = vec![
+            (100u32, [1.0f32, 0.0, 0.0, 0.0]),
+            (101, [0.0, 1.0, 0.0, 0.0]),
+            (102, [0.0, 0.0, 1.0, 0.0]),
+            (200, [0.0, 0.0, 0.0, 1.0]),
+            (201, [0.5, 0.5, 0.0, 0.0]), // Will be invalidated
+            (300, [0.5, 0.0, 0.5, 0.0]),
+            (301, [0.0, 0.5, 0.5, 0.0]), // Will be invalidated
+            (302, [0.0, 0.0, 0.5, 0.5]),
+        ];
+
+        // Create and populate raw embedding blockfile
+        let raw_writer = blockfile_provider
+            .write::<u32, &DataRecord<'_>>(
+                BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            )
+            .await
+            .expect("Failed to create raw embedding writer");
+
+        for (id, embedding) in &raw_embeddings {
+            let record = DataRecord {
+                id: "",
+                embedding: embedding.as_slice(),
+                metadata: None,
+                document: None,
+            };
+            raw_writer
+                .set("", *id, &record)
+                .await
+                .expect("Failed to write raw embedding");
+        }
+
+        let raw_flusher = raw_writer
+            .commit::<u32, &DataRecord<'_>>()
+            .await
+            .expect("Failed to commit raw embeddings");
+        let raw_embedding_id = raw_flusher.id();
+        raw_flusher
+            .flush::<u32, &DataRecord<'_>>()
+            .await
+            .expect("Failed to flush raw embeddings");
+
+        // =======================================================================
+        // Phase 1: Create index, add points, commit, flush
+        // =======================================================================
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        // Spawn a cluster and add points 100, 101, 102
+        let center: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
+
+        // Create properly quantized codes for each embedding relative to the center
+        let emb_100 = [1.0f32, 0.0, 0.0, 0.0];
+        let emb_101 = [0.0f32, 1.0, 0.0, 0.0];
+        let emb_102 = [0.0f32, 0.0, 1.0, 0.0];
+        let code_100: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_100, &center).as_ref().into();
+        let code_101: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_101, &center).as_ref().into();
+        let code_102: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_102, &center).as_ref().into();
+
+        // Get versions via upgrade()
+        let v100 = writer.upgrade_version(100);
+        let v101 = writer.upgrade_version(101);
+        let v102 = writer.upgrade_version(102);
+
+        let delta = QuantizedDelta {
+            center: center.clone(),
+            codes: vec![code_100, code_101, code_102],
+            ids: vec![100, 101, 102],
+            length: 3,
+            versions: vec![v100, v101, v102],
+        };
+        let cluster_id = writer.spawn(delta).expect("spawn failed");
+
+        // Capture expected rotated embeddings for later verification
+        // These are the raw embeddings from raw_embeddings array rotated by the current rotation matrix
+        let expected_rotated_100 = writer.rotate(&[1.0, 0.0, 0.0, 0.0]);
+        let expected_rotated_101 = writer.rotate(&[0.0, 1.0, 0.0, 0.0]);
+        let expected_rotated_102 = writer.rotate(&[0.0, 0.0, 1.0, 0.0]);
+
+        // Commit and flush
+        let flusher = writer
+            .commit(&blockfile_provider, &usearch_provider)
+            .await
+            .expect("Failed to commit");
+        let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
+
+        // =======================================================================
+        // Phase 2: Reopen index with readers and test load operations
+        // =======================================================================
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        // Create raw embedding reader
+        let raw_reader = blockfile_provider
+            .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
+                raw_embedding_id,
+                "".to_string(),
+            ))
+            .await
+            .expect("Failed to open raw embedding reader");
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            file_ids,
+            None,
+            "".to_string(),
+            Some(raw_reader),
+            &blockfile_provider,
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to open writer");
+
+        // --- load ---
+        // After open, delta exists but ids/codes/versions are empty (only length is set)
+        {
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id)
+                .expect("delta not found");
+            assert_eq!(delta.length, 3);
+            assert!(delta.ids.is_empty(), "ids should be empty before load");
+        }
+
+        // Call load to populate delta from blockfile
+        writer.load(cluster_id).await.expect("load failed");
+
+        {
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id)
+                .expect("delta not found");
+            assert_eq!(delta.ids.len(), 3);
+            assert!(delta.ids.contains(&100));
+            assert!(delta.ids.contains(&101));
+            assert!(delta.ids.contains(&102));
+        }
+
+        // --- load_raw ---
+        // Verify embeddings cache is empty
+        assert!(writer.embeddings.get(&100).is_none());
+        assert!(writer.embeddings.get(&101).is_none());
+        assert!(writer.embeddings.get(&102).is_none());
+
+        // Load raw embeddings
+        writer
+            .load_raw(&[100, 101, 102])
+            .await
+            .expect("load_raw failed");
+
+        // Verify embeddings are now in cache and rotated consistently
+        // The rotation matrix was persisted and reloaded, so rotate() should produce same results
+        let loaded_100 = writer
+            .embeddings
+            .get(&100)
+            .expect("embedding 100 not found")
+            .clone();
+        let loaded_101 = writer
+            .embeddings
+            .get(&101)
+            .expect("embedding 101 not found")
+            .clone();
+        let loaded_102 = writer
+            .embeddings
+            .get(&102)
+            .expect("embedding 102 not found")
+            .clone();
+
+        assert!(
+            writer.distance(&loaded_100, &expected_rotated_100) < TEST_EPSILON,
+            "rotation mismatch for id 100"
+        );
+        assert!(
+            writer.distance(&loaded_101, &expected_rotated_101) < TEST_EPSILON,
+            "rotation mismatch for id 101"
+        );
+        assert!(
+            writer.distance(&loaded_102, &expected_rotated_102) < TEST_EPSILON,
+            "rotation mismatch for id 102"
+        );
+
+        // --- detach ---
+        // Spawn a new cluster with points 200, 201
+        let center2: Arc<[f32]> = Arc::from([0.0f32, 0.0, 0.0, 1.0]);
+
+        // Create properly quantized codes
+        let emb_200 = [0.0f32, 0.0, 0.0, 1.0];
+        let emb_201 = [0.0f32, 0.0, 0.5, 0.5];
+        let code_200: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_200, &center2)
+            .as_ref()
+            .into();
+        let code_201: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_201, &center2)
+            .as_ref()
+            .into();
+
+        // Get versions via upgrade()
+        let v200 = writer.upgrade_version(200);
+        let v201 = writer.upgrade_version(201);
+
+        let delta2 = QuantizedDelta {
+            center: center2,
+            codes: vec![code_200, code_201],
+            ids: vec![200, 201],
+            length: 2,
+            versions: vec![v200, v201],
+        };
+        let cluster_id_2 = writer.spawn(delta2).expect("spawn failed");
+
+        // Invalidate 201 by upgrading its version
+        writer.upgrade_version(201); // Now version is 2, but cluster has version 1
+
+        // Verify embedding 200 not in cache before detach
+        assert!(writer.embeddings.get(&200).is_none());
+
+        // Detach cluster - should load raw embeddings for valid point (200) only
+        let detached = writer
+            .detach(cluster_id_2)
+            .await
+            .expect("detach failed")
+            .expect("expected delta");
+        assert_eq!(detached.ids, vec![200, 201]);
+
+        // Cluster should be removed from deltas
+        assert!(writer.cluster_deltas.get(&cluster_id_2).is_none());
+
+        // Embedding for valid point 200 should be loaded
+        assert!(writer.embeddings.get(&200).is_some());
+
+        // --- scrub ---
+        // Spawn a cluster with points 300, 301, 302
+        let center3: Arc<[f32]> = Arc::from([0.5f32, 0.0, 0.5, 0.0]);
+
+        // Create properly quantized codes
+        let emb_300 = [0.5f32, 0.0, 0.5, 0.0];
+        let emb_301 = [0.5f32, 0.5, 0.0, 0.0];
+        let emb_302 = [0.0f32, 0.5, 0.5, 0.0];
+        let code_300: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_300, &center3)
+            .as_ref()
+            .into();
+        let code_301: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_301, &center3)
+            .as_ref()
+            .into();
+        let code_302: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_302, &center3)
+            .as_ref()
+            .into();
+
+        // Get versions via upgrade()
+        let v300 = writer.upgrade_version(300);
+        let v301 = writer.upgrade_version(301);
+        let v302 = writer.upgrade_version(302);
+
+        let delta3 = QuantizedDelta {
+            center: center3,
+            codes: vec![code_300, code_301, code_302],
+            ids: vec![300, 301, 302],
+            length: 3,
+            versions: vec![v300, v301, v302],
+        };
+        let cluster_id_3 = writer.spawn(delta3).expect("spawn failed");
+
+        // Invalidate 301 by upgrading its version
+        writer.upgrade_version(301); // Now version is 2
+
+        // Before scrub: all 3 points in delta
+        {
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id_3)
+                .expect("delta not found");
+            assert_eq!(delta.ids.len(), 3);
+            assert_eq!(delta.length, 3);
+        }
+
+        // Scrub should remove invalid point 301
+        let new_len = writer
+            .scrub(cluster_id_3)
+            .await
+            .expect("scrub failed")
+            .expect("expected length");
+        assert_eq!(new_len, 2);
+
+        // After scrub: only points 300, 302 remain
+        {
+            let delta = writer
+                .cluster_deltas
+                .get(&cluster_id_3)
+                .expect("delta not found");
+            assert_eq!(delta.ids.len(), 2);
+            assert_eq!(delta.length, 2);
+            assert!(delta.ids.contains(&300));
+            assert!(!delta.ids.contains(&301)); // Removed
+            assert!(delta.ids.contains(&302));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_balance_operations() {
+        // =======================================================================
+        // Setup
+        // =======================================================================
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let usearch_provider = test_usearch_provider(storage);
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            CollectionUuid::new(),
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        // =======================================================================
+        // Step 1: insert (empty index -> spawn)
+        // =======================================================================
+        // First insert on empty index should spawn a new cluster
+        assert_eq!(writer.cluster_deltas.len(), 0);
+
+        writer
+            .add(1, &[1.0, 0.0, 0.0, 0.0])
+            .await
+            .expect("add failed");
+
+        assert_eq!(writer.cluster_deltas.len(), 1);
+        let first_cluster_id = *writer.cluster_deltas.iter().next().unwrap().key();
+
+        // =======================================================================
+        // Step 2: insert (append to existing cluster)
+        // =======================================================================
+        // Insert more points near the same center - should append, not spawn
+        for id in 2..=5 {
+            writer
+                .add(id, &[1.0, 0.0, 0.0, 0.0])
+                .await
+                .expect("add failed");
+        }
+
+        // Still only 1 cluster
+        assert_eq!(writer.cluster_deltas.len(), 1);
+
+        // Cluster should have 5 points
+        {
+            let delta = writer
+                .cluster_deltas
+                .get(&first_cluster_id)
+                .expect("delta not found");
+            assert_eq!(delta.length, 5);
+        }
+
+        // =======================================================================
+        // Step 3: split with reassign (triggered by balance)
+        // =======================================================================
+        // Geometry:
+        // - neighbor_center: [0, 1, 0, 0]
+        // - mixed_center: [0, 0.9, 0.1, 0] (close to neighbor, so navigate finds it)
+        // - After split, new centers will be near [1, 0, 0, 0] and [-1, 0, 0, 0]
+        // - Misplaced points [0.9, 0.1, 0, 0] and [-0.9, 0.1, 0, 0] in neighbor
+        //   are closer to the new split centers than to neighbor_center
+
+        // Neighbor cluster with incorrectly assigned points
+        let neighbor_center: Arc<[f32]> = writer.rotate(&[0.0, 1.0, 0.0, 0.0]);
+
+        // Points that are closer to [1, 0, 0, 0] or [-1, 0, 0, 0] than to [0, 1, 0, 0]
+        let misplaced_emb_1 = writer.rotate(&[0.9, 0.1, 0.0, 0.0]);
+        let misplaced_emb_2 = writer.rotate(&[-0.9, 0.1, 0.0, 0.0]);
+
+        let v100 = writer.upgrade_version(100);
+        let v101 = writer.upgrade_version(101);
+
+        // Populate embeddings cache
+        writer.embeddings.insert(100, misplaced_emb_1.clone());
+        writer.embeddings.insert(101, misplaced_emb_2.clone());
+
+        // Create proper quantization codes
+        let code_100: Arc<[u8]> = Code::<Vec<u8>>::quantize(&misplaced_emb_1, &neighbor_center)
+            .as_ref()
+            .into();
+        let code_101: Arc<[u8]> = Code::<Vec<u8>>::quantize(&misplaced_emb_2, &neighbor_center)
+            .as_ref()
+            .into();
+
+        let neighbor_delta = QuantizedDelta {
+            center: neighbor_center.clone(),
+            codes: vec![code_100, code_101],
+            ids: vec![100, 101],
+            length: 2,
+            versions: vec![v100, v101],
+        };
+        let neighbor_cluster_id = writer.spawn(neighbor_delta).expect("spawn failed");
+
+        // Now we have 2 clusters
+        assert_eq!(writer.cluster_deltas.len(), 2);
+
+        // mixed_center close to neighbor so navigate from mixed_center finds neighbor
+        // After split, points will move to centers near [1,0,0,0] and [-1,0,0,0]
+        let mixed_center: Arc<[f32]> = writer.rotate(&[0.0, 0.9, 0.1, 0.0]);
+
+        let mut mixed_ids = vec![];
+        let mut mixed_versions = vec![];
+        let mut mixed_codes = vec![];
+
+        // Group A: 5 points near [1, 0, 0, 0] - will form one split cluster
+        for id in 50..55 {
+            let v = writer.upgrade_version(id);
+            let emb = writer.rotate(&[1.0, 0.0, 0.0, 0.0]);
+            let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
+                .as_ref()
+                .into();
+            writer.embeddings.insert(id, emb);
+            mixed_ids.push(id);
+            mixed_versions.push(v);
+            mixed_codes.push(code);
+        }
+
+        // Group B: 5 points near [-1, 0, 0, 0] - will form another split cluster
+        for id in 55..60 {
+            let v = writer.upgrade_version(id);
+            let emb = writer.rotate(&[-1.0, 0.0, 0.0, 0.0]);
+            let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
+                .as_ref()
+                .into();
+            writer.embeddings.insert(id, emb);
+            mixed_ids.push(id);
+            mixed_versions.push(v);
+            mixed_codes.push(code);
+        }
+
+        let mixed_delta = QuantizedDelta {
+            center: mixed_center,
+            codes: mixed_codes,
+            ids: mixed_ids,
+            length: 10,
+            versions: mixed_versions,
+        };
+        let mixed_cluster_id = writer.spawn(mixed_delta).expect("spawn failed");
+
+        // Now we have 3 clusters: first_cluster, neighbor, mixed
+        assert_eq!(writer.cluster_deltas.len(), 3);
+
+        // Trigger balance on the mixed cluster - should split into 2
+        writer
+            .balance(mixed_cluster_id)
+            .await
+            .expect("balance failed");
+
+        // After split, we should have more clusters
+        // mixed_cluster splits into 2, so we have: first_cluster + neighbor + 2 from split = 4
+        // (mixed_cluster itself may be dropped and replaced by 2 new ones)
+        assert!(
+            writer.cluster_deltas.len() >= 3,
+            "Expected at least 3 clusters after split, got {}",
+            writer.cluster_deltas.len()
+        );
+
+        // Verify the misplaced points got reassigned
+        // The reassignment upgrades the version, so the old entries in neighbor cluster
+        // are now stale. We verify that the current version is higher than the original.
+        let v100_current = *writer.versions.get(&100).expect("version not found");
+        let v101_current = *writer.versions.get(&101).expect("version not found");
+
+        // Either neighbor cluster was dropped, or the points' versions were upgraded (reassigned)
+        let neighbor_dropped = writer.cluster_deltas.get(&neighbor_cluster_id).is_none();
+        let points_were_reassigned = v100_current > v100 || v101_current > v101;
+        assert!(
+            neighbor_dropped || points_were_reassigned,
+            "Misplaced points should have been reassigned (versions upgraded)"
+        );
+
+        // =======================================================================
+        // Step 4: merge (triggered by balance after scrub)
+        // =======================================================================
+        // Spawn a small cluster far from others: [0, 0, 0, 1]
+        let isolated_center: Arc<[f32]> = writer.rotate(&[0.0, 0.0, 0.0, 1.0]);
+
+        // Add 4 points, will invalidate 3 to trigger merge
+        let v200 = writer.upgrade_version(200);
+        let v201 = writer.upgrade_version(201);
+        let v202 = writer.upgrade_version(202);
+        let v203 = writer.upgrade_version(203);
+
+        // Create embeddings and codes for isolated cluster points
+        let emb_200 = writer.rotate(&[0.0, 0.0, 0.0, 1.0]);
+        let emb_201 = writer.rotate(&[0.0, 0.0, 0.1, 0.9]);
+        let emb_202 = writer.rotate(&[0.0, 0.1, 0.0, 0.9]);
+        let emb_203 = writer.rotate(&[0.1, 0.0, 0.0, 0.9]);
+
+        writer.embeddings.insert(200, emb_200.clone());
+        writer.embeddings.insert(201, emb_201.clone());
+        writer.embeddings.insert(202, emb_202.clone());
+        writer.embeddings.insert(203, emb_203.clone());
+
+        let code_200: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_200, &isolated_center)
+            .as_ref()
+            .into();
+        let code_201: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_201, &isolated_center)
+            .as_ref()
+            .into();
+        let code_202: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_202, &isolated_center)
+            .as_ref()
+            .into();
+        let code_203: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_203, &isolated_center)
+            .as_ref()
+            .into();
+
+        let isolated_delta = QuantizedDelta {
+            center: isolated_center,
+            codes: vec![code_200, code_201, code_202, code_203],
+            ids: vec![200, 201, 202, 203],
+            length: 4,
+            versions: vec![v200, v201, v202, v203],
+        };
+        let isolated_cluster_id = writer.spawn(isolated_delta).expect("spawn failed");
+
+        let clusters_before_merge = writer.cluster_deltas.len();
+
+        // Invalidate 3 points, leaving only 1 valid (below merge_threshold of 2)
+        writer.upgrade_version(201);
+        writer.upgrade_version(202);
+        writer.upgrade_version(203);
+
+        // Trigger balance - should scrub (remove invalid) then merge (below threshold)
+        writer
+            .balance(isolated_cluster_id)
+            .await
+            .expect("balance failed");
+
+        // Isolated cluster should be dropped (merged into neighbor)
+        assert!(
+            writer.cluster_deltas.get(&isolated_cluster_id).is_none(),
+            "Isolated cluster should have been merged"
+        );
+
+        // Should have one fewer cluster
+        assert_eq!(
+            writer.cluster_deltas.len(),
+            clusters_before_merge - 1,
+            "One cluster should have been removed by merge"
+        );
+
+        // Point 200 should now be in some other cluster (reassigned during merge)
+        // Check that it exists somewhere with current version
+        let current_v200 = *writer.versions.get(&200).expect("version not found");
+        let point_200_found = writer.cluster_deltas.iter().any(|entry| {
+            entry
+                .value()
+                .ids
+                .iter()
+                .zip(entry.value().versions.iter())
+                .any(|(id, ver)| *id == 200 && *ver == current_v200)
+        });
+        assert!(
+            point_200_found,
+            "Point 200 should exist in some cluster after merge"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_open_commit() {
+        // =======================================================================
+        // Setup
+        // =======================================================================
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+        let collection_id = CollectionUuid::new();
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        let test_vector = [1.0f32, 2.0, 3.0, 4.0];
+        let expected_rotated = writer.rotate(&test_vector);
+
+        // --- Cluster A: normal cluster ---
+        let center_a: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
+        let v10 = writer.upgrade_version(10);
+        let v11 = writer.upgrade_version(11);
+        let v12 = writer.upgrade_version(12);
+        let code_a: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[1.0, 0.0, 0.0, 0.0], &center_a)
+            .as_ref()
+            .into();
+        let delta_a = QuantizedDelta {
+            center: center_a.clone(),
+            codes: vec![code_a.clone(), code_a.clone(), code_a.clone()],
+            ids: vec![10, 11, 12],
+            length: 3,
+            versions: vec![v10, v11, v12],
+        };
+        let cluster_a = writer.spawn(delta_a).expect("spawn A failed");
+
+        // --- Cluster B: partial invalidation ---
+        let center_b: Arc<[f32]> = Arc::from([0.0f32, 1.0, 0.0, 0.0]);
+        let v20 = writer.upgrade_version(20);
+        let v21 = writer.upgrade_version(21);
+        let v22 = writer.upgrade_version(22);
+        let v23 = writer.upgrade_version(23);
+        let code_b: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 1.0, 0.0, 0.0], &center_b)
+            .as_ref()
+            .into();
+        let delta_b = QuantizedDelta {
+            center: center_b.clone(),
+            codes: vec![
+                code_b.clone(),
+                code_b.clone(),
+                code_b.clone(),
+                code_b.clone(),
+            ],
+            ids: vec![20, 21, 22, 23],
+            length: 4,
+            versions: vec![v20, v21, v22, v23],
+        };
+        let cluster_b = writer.spawn(delta_b).expect("spawn B failed");
+
+        // --- Cluster C: full invalidation ---
+        let center_c: Arc<[f32]> = Arc::from([0.0f32, 0.0, 1.0, 0.0]);
+        let v30 = writer.upgrade_version(30);
+        let v31 = writer.upgrade_version(31);
+        let code_c: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 1.0, 0.0], &center_c)
+            .as_ref()
+            .into();
+        let delta_c = QuantizedDelta {
+            center: center_c.clone(),
+            codes: vec![code_c.clone(), code_c.clone()],
+            ids: vec![30, 31],
+            length: 2,
+            versions: vec![v30, v31],
+        };
+        let cluster_c = writer.spawn(delta_c).expect("spawn C failed");
+
+        // --- Cluster D: tombstoned ---
+        let center_d: Arc<[f32]> = Arc::from([0.0f32, 0.0, 0.0, 1.0]);
+        let v40 = writer.upgrade_version(40);
+        let v41 = writer.upgrade_version(41);
+        let code_d: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 0.0, 1.0], &center_d)
+            .as_ref()
+            .into();
+        let delta_d = QuantizedDelta {
+            center: center_d.clone(),
+            codes: vec![code_d.clone(), code_d.clone()],
+            ids: vec![40, 41],
+            length: 2,
+            versions: vec![v40, v41],
+        };
+        let cluster_d = writer.spawn(delta_d).expect("spawn D failed");
+
+        let next_cluster_id_after_spawn = writer.next_cluster_id.load(Ordering::Relaxed);
+
+        let flusher = writer
+            .commit(&blockfile_provider, &usearch_provider)
+            .await
+            .expect("Failed to commit");
+        let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
+
+        // =======================================================================
+        // Reopen and modify
+        // =======================================================================
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            file_ids,
+            None,
+            "".to_string(),
+            None, // no raw embedding reader needed
+            &blockfile_provider,
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to open writer");
+
+        let actual_rotated = writer.rotate(&test_vector);
+        assert!(
+            writer.distance(&expected_rotated, &actual_rotated) < TEST_EPSILON,
+            "Rotation matrix should be preserved across open"
+        );
+
+        // --- Cluster A: add more points ---
+        writer.load(cluster_a).await.expect("load A failed");
+        let v13 = writer.upgrade_version(13);
+        let v14 = writer.upgrade_version(14);
+        writer.append(cluster_a, 13, v13, code_a.clone());
+        writer.append(cluster_a, 14, v14, code_a.clone());
+
+        // --- Cluster B: invalidate points 21 and 23 ---
+        writer.load(cluster_b).await.expect("load B failed");
+        writer.upgrade_version(21);
+        writer.upgrade_version(23);
+
+        // --- Cluster C: invalidate all points ---
+        writer.load(cluster_c).await.expect("load C failed");
+        writer.upgrade_version(30);
+        writer.upgrade_version(31);
+
+        // --- Cluster D: detach and drop ---
+        writer.detach(cluster_d).await.expect("detach D failed");
+        writer.drop(cluster_d).expect("drop D failed");
+
+        let flusher = writer
+            .commit(&blockfile_provider, &usearch_provider)
+            .await
+            .expect("Failed to commit");
+        let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
+
+        // =======================================================================
+        // Verify invariants after reopen
+        // =======================================================================
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            file_ids,
+            None,
+            "".to_string(),
+            None,
+            &blockfile_provider,
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to open writer after modifications");
+
+        // --- rotation matrix ---
+        let actual_rotated = writer.rotate(&test_vector);
+        assert!(
+            writer.distance(&expected_rotated, &actual_rotated) < TEST_EPSILON,
+            "Rotation matrix should be preserved after second open"
+        );
+
+        // --- next_cluster_id ---
+        assert_eq!(
+            writer.next_cluster_id.load(Ordering::Relaxed),
+            next_cluster_id_after_spawn,
+            "next_cluster_id should be preserved"
+        );
+
+        // --- cluster A: exists with 5 points ---
+        assert!(
+            writer.cluster_deltas.contains_key(&cluster_a),
+            "Cluster A should exist"
+        );
+        {
+            let delta = writer.cluster_deltas.get(&cluster_a).unwrap();
+            assert_eq!(delta.length, 5, "Cluster A should have 5 points");
+        }
+        writer.load(cluster_a).await.expect("load A failed");
+        {
+            let delta = writer.cluster_deltas.get(&cluster_a).unwrap();
+            assert_eq!(delta.ids.len(), 5);
+            assert!(delta.ids.contains(&10));
+            assert!(delta.ids.contains(&11));
+            assert!(delta.ids.contains(&12));
+            assert!(delta.ids.contains(&13));
+            assert!(delta.ids.contains(&14));
+        }
+
+        // --- cluster B: exists with 2 points (scrubbed) ---
+        assert!(
+            writer.cluster_deltas.contains_key(&cluster_b),
+            "Cluster B should exist"
+        );
+        {
+            let delta = writer.cluster_deltas.get(&cluster_b).unwrap();
+            assert_eq!(
+                delta.length, 2,
+                "Cluster B should have 2 points after scrub"
+            );
+        }
+        writer.load(cluster_b).await.expect("load B failed");
+        {
+            let delta = writer.cluster_deltas.get(&cluster_b).unwrap();
+            assert_eq!(delta.ids.len(), 2);
+            assert!(delta.ids.contains(&20), "Point 20 should survive");
+            assert!(delta.ids.contains(&22), "Point 22 should survive");
+            assert!(!delta.ids.contains(&21), "Point 21 should be scrubbed");
+            assert!(!delta.ids.contains(&23), "Point 23 should be scrubbed");
+        }
+
+        // --- cluster C: deleted (all points scrubbed) ---
+        assert!(
+            !writer.cluster_deltas.contains_key(&cluster_c),
+            "Cluster C should not exist (all points invalidated)"
+        );
+
+        // --- cluster D: deleted (tombstoned) ---
+        assert!(
+            !writer.cluster_deltas.contains_key(&cluster_d),
+            "Cluster D should not exist (tombstoned)"
+        );
+
+        // --- tombstones empty ---
+        assert!(
+            writer.tombstones.is_empty(),
+            "Tombstones should be empty after reopen"
+        );
+
+        // --- versions ---
+        for id in [10, 11, 12, 13, 14] {
+            assert!(
+                writer.versions.contains_key(&id),
+                "Version for point {} should exist",
+                id
+            );
+        }
+        assert_eq!(*writer.versions.get(&20).unwrap(), 1);
+        assert_eq!(*writer.versions.get(&22).unwrap(), 1);
+        assert_eq!(*writer.versions.get(&21).unwrap(), 2);
+        assert_eq!(*writer.versions.get(&23).unwrap(), 2);
+        assert_eq!(*writer.versions.get(&30).unwrap(), 2);
+        assert_eq!(*writer.versions.get(&31).unwrap(), 2);
+        assert!(writer.versions.contains_key(&40));
+        assert!(writer.versions.contains_key(&41));
+
+        // --- centroid indexes ---
+        let nav_result = writer.navigate(&center_a, 10).expect("navigate failed");
+        assert!(nav_result.keys.contains(&cluster_a));
+
+        let nav_result = writer.navigate(&center_b, 10).expect("navigate failed");
+        assert!(nav_result.keys.contains(&cluster_b));
+
+        let all_nav = writer
+            .navigate(&[0.0, 0.0, 0.0, 0.0], 100)
+            .expect("navigate failed");
+        assert!(!all_nav.keys.contains(&cluster_c));
+        assert!(!all_nav.keys.contains(&cluster_d));
+    }
+
+    #[tokio::test]
+    async fn test_persist() {
+        // === Constants ===
+        const SEED: u64 = 42;
+        const BATCH_SIZE: usize = 1_000;
+        const CHUNK_SIZE: usize = 200;
+        const NUM_CYCLES: usize = 4;
+        const TOTAL_VECTORS: usize = BATCH_SIZE * NUM_CYCLES; // 4K
+
+        // === Setup ===
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let collection_id = CollectionUuid::new();
+
+        // Generate all embeddings upfront with fixed seed RNG
+        let embeddings = {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(SEED);
+            Arc::new(
+                (0..TOTAL_VECTORS)
+                    .map(|_| [rng.gen(), rng.gen(), rng.gen(), rng.gen()])
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        // Create raw embedding blockfile with all 40K embeddings
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let raw_writer = blockfile_provider
+            .write::<u32, &DataRecord<'_>>(
+                BlockfileWriterOptions::new("".to_string()).ordered_mutations(),
+            )
+            .await
+            .expect("Failed to create raw embedding writer");
+
+        for (id, embedding) in embeddings.iter().enumerate() {
+            let record = DataRecord {
+                id: "",
+                embedding: embedding.as_slice(),
+                metadata: None,
+                document: None,
+            };
+            raw_writer
+                .set("", id as u32, &record)
+                .await
+                .expect("Failed to write raw embedding");
+        }
+
+        let raw_flusher = raw_writer
+            .commit::<u32, &DataRecord<'_>>()
+            .await
+            .expect("Failed to commit raw embeddings");
+        let raw_embedding_id = raw_flusher.id();
+        raw_flusher
+            .flush::<u32, &DataRecord<'_>>()
+            .await
+            .expect("Failed to flush raw embeddings");
+
+        // Create initial writer
+        let usearch_provider = test_usearch_provider(storage.clone());
+
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            collection_id,
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        let mut file_ids;
+
+        // === Cycle Loop ===
+        for cycle in 0..NUM_CYCLES {
+            let start_id = cycle * BATCH_SIZE;
+            let end_id = start_id + BATCH_SIZE;
+
+            // --- Verify previous cycle data (cycles 1-3) ---
+            if cycle > 0 {
+                // Check version map has all previous IDs
+                for id in 0..start_id {
+                    assert!(
+                        writer.versions.contains_key(&(id as u32)),
+                        "Cycle {}: missing ID {} in version map",
+                        cycle,
+                        id
+                    );
+                }
+            }
+
+            // --- Concurrent insert ---
+            let writer_arc = Arc::new(writer);
+            let mut handles = vec![];
+
+            for chunk_start in (start_id..end_id).step_by(CHUNK_SIZE) {
+                let chunk_end = (chunk_start + CHUNK_SIZE).min(end_id);
+                let writer_clone = Arc::clone(&writer_arc);
+                let embeddings_clone = Arc::clone(&embeddings);
+
+                handles.push(tokio::spawn(async move {
+                    for id in chunk_start..chunk_end {
+                        writer_clone
+                            .add(id as u32, &embeddings_clone[id])
+                            .await
+                            .expect("add failed");
+                    }
+                }));
+            }
+
+            for handle in handles {
+                handle.await.expect("task panicked");
+            }
+
+            writer = Arc::try_unwrap(writer_arc)
+                .unwrap_or_else(|_| panic!("Arc still has multiple owners"));
+
+            // --- Pre-commit verification ---
+            // For each delta, verify all point versions <= global version
+            for delta in writer.cluster_deltas.iter() {
+                for (id, ver) in delta.ids.iter().zip(delta.versions.iter()) {
+                    let global = *writer
+                        .versions
+                        .get(id)
+                        .expect("ID not found in version map");
+                    assert!(
+                        *ver <= global,
+                        "Cycle {}: version in delta ({}) exceeds global ({}) for ID {}",
+                        cycle,
+                        ver,
+                        global,
+                        id
+                    );
+                }
+            }
+
+            // --- Capture rotation before flush ---
+            let mut rng = rand::rngs::StdRng::seed_from_u64(SEED + cycle as u64);
+            let test_vec = [rng.gen(), rng.gen(), rng.gen(), rng.gen()];
+            let expected_rotated = writer.rotate(&test_vec);
+
+            // --- Commit + Flush ---
+            let blockfile_provider = test_blockfile_provider(storage.clone());
+            let usearch_provider = test_usearch_provider(storage.clone());
+
+            let flusher = writer
+                .commit(&blockfile_provider, &usearch_provider)
+                .await
+                .expect("commit failed");
+            file_ids = Box::pin(flusher.flush()).await.expect("flush failed");
+
+            // --- Reopen ---
+            let blockfile_provider = test_blockfile_provider(storage.clone());
+            let usearch_provider = test_usearch_provider(storage.clone());
+
+            let raw_reader = blockfile_provider
+                .read::<u32, DataRecord<'static>>(BlockfileReaderOptions::new(
+                    raw_embedding_id,
+                    "".to_string(),
+                ))
+                .await
+                .expect("Failed to open raw embedding reader");
+
+            writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                collection_id,
+                test_config(),
+                TEST_DIMENSION,
+                test_distance_function(),
+                file_ids.clone(),
+                None,
+                "".to_string(),
+                Some(raw_reader),
+                &blockfile_provider,
+                &usearch_provider,
+            )
+            .await
+            .expect("Failed to reopen writer");
+
+            // --- Verify rotation matrix consistency after reopen ---
+            let actual_rotated = writer.rotate(&test_vec);
+            assert!(
+                writer.distance(&expected_rotated, &actual_rotated) < TEST_EPSILON,
+                "Cycle {}: rotation matrix changed after persistence",
+                cycle
+            );
+        }
+
+        // === Final Verification ===
+        assert_eq!(
+            writer.versions.len(),
+            TOTAL_VECTORS,
+            "Expected {} IDs in version map, got {}",
+            TOTAL_VECTORS,
+            writer.versions.len()
+        );
+
+        // Verify all IDs are present in version map
+        for id in 0..TOTAL_VECTORS {
+            assert!(
+                writer.versions.contains_key(&(id as u32)),
+                "Final: missing ID {} in version map",
+                id
+            );
+        }
+
+        // --- Load all clusters and verify delta consistency ---
+        let cluster_ids = writer
+            .cluster_deltas
+            .iter()
+            .map(|e| *e.key())
+            .collect::<Vec<_>>();
+
+        for cluster_id in &cluster_ids {
+            // Get length before load (from blockfile metadata, already set during open)
+            let length_before = writer.cluster_deltas.get(cluster_id).unwrap().length;
+
+            writer.load(*cluster_id).await.expect("load failed");
+
+            // After load, verify ids/codes/versions lengths match
+            let delta = writer.cluster_deltas.get(cluster_id).unwrap();
+            assert_eq!(
+                delta.ids.len(),
+                length_before,
+                "Cluster {}: loaded ids length ({}) != expected length ({})",
+                cluster_id,
+                delta.ids.len(),
+                length_before
+            );
+            assert_eq!(
+                delta.codes.len(),
+                length_before,
+                "Cluster {}: loaded codes length mismatch",
+                cluster_id
+            );
+            assert_eq!(
+                delta.versions.len(),
+                length_before,
+                "Cluster {}: loaded versions length mismatch",
+                cluster_id
+            );
+
+            // Verify all versions in delta <= global version
+            for (id, ver) in delta.ids.iter().zip(delta.versions.iter()) {
+                let global = *writer.versions.get(id).expect("missing from version map");
+                assert!(
+                    *ver <= global,
+                    "Cluster {}: version in delta ({}) exceeds global ({}) for ID {}",
+                    cluster_id,
+                    ver,
+                    global,
+                    id
+                );
+            }
+        }
+
+        // --- Verify each vector has at least one up-to-date copy ---
+        for id in 0..TOTAL_VECTORS {
+            let id = id as u32;
+            let global = *writer.versions.get(&id).expect("missing ID");
+
+            let has_current_copy = writer.cluster_deltas.iter().any(|delta| {
+                delta
+                    .ids
+                    .iter()
+                    .zip(delta.versions.iter())
+                    .any(|(did, dver)| *did == id && *dver == global)
+            });
+
+            assert!(
+                has_current_copy,
+                "ID {} has no up-to-date copy in any cluster (global version: {})",
+                id, global
+            );
+        }
+
+        // --- Verify raw centroid index contains all cluster IDs ---
+        for cluster_id in &cluster_ids {
+            let result = writer.raw_centroid.get(*cluster_id);
+            assert!(
+                result.is_ok() && result.unwrap().is_some(),
+                "Cluster {} not found in raw_centroid index",
+                cluster_id
+            );
+        }
     }
 }
