@@ -2107,6 +2107,19 @@ impl Schema {
                     }),
                 },
             },
+            // Array types use the same indexes as their scalar counterparts
+            MetadataValueType::BoolArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Bool)
+            }
+            MetadataValueType::IntArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Int)
+            }
+            MetadataValueType::FloatArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Float)
+            }
+            MetadataValueType::StringArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Str)
+            }
         }
     }
 
@@ -2200,6 +2213,31 @@ impl Schema {
             MetadataValueType::SparseVector => {
                 if value_types.sparse_vector.is_none() {
                     value_types.sparse_vector = self.defaults.sparse_vector.clone();
+                    return true;
+                }
+            }
+            // Array types use the same indexes as their scalar counterparts
+            MetadataValueType::BoolArray => {
+                if value_types.boolean.is_none() {
+                    value_types.boolean = self.defaults.boolean.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::IntArray => {
+                if value_types.int.is_none() {
+                    value_types.int = self.defaults.int.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::FloatArray => {
+                if value_types.float.is_none() {
+                    value_types.float = self.defaults.float.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::StringArray => {
+                if value_types.string.is_none() {
+                    value_types.string = self.defaults.string.clone();
                     return true;
                 }
             }

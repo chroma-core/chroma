@@ -88,6 +88,12 @@ fn construct_upsert_metadata_stmt<
             MetadataValue::SparseVector(_) => {
                 todo!("Sparse vector is not yet supported for local")
             }
+            MetadataValue::BoolArray(_)
+            | MetadataValue::IntArray(_)
+            | MetadataValue::FloatArray(_)
+            | MetadataValue::StringArray(_) => {
+                todo!("Array metadata values are not yet supported for local")
+            }
         })?;
     }
     Ok(stmt)

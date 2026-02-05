@@ -350,6 +350,14 @@ impl MetadataProvider<'_> {
                     MetadataValue::SparseVector(_) => {
                         unimplemented!("Comparison with sparse vector is not supported")
                     }
+                    MetadataValue::BoolArray(_)
+                    | MetadataValue::IntArray(_)
+                    | MetadataValue::FloatArray(_)
+                    | MetadataValue::StringArray(_) => {
+                        unimplemented!(
+                            "Primitive comparison with array metadata values is not supported"
+                        )
+                    }
                 };
                 if let Some(reader) = metadata_index_reader {
                     async {
