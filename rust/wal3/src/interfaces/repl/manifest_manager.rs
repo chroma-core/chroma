@@ -8,7 +8,7 @@ use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::statement::Statement;
 use setsum::Setsum;
-use tonic::Code;
+use tonic::{Code, Status};
 use uuid::Uuid;
 
 use crate::interfaces::{ManifestConsumer, ManifestPublisher, PositionWitness};
@@ -118,10 +118,18 @@ impl ManifestManager {
                 let mutations = mutations.clone();
                 Box::pin(async move {
                     tx.buffer_write(mutations);
-                    Ok::<_, Error>(())
+                    Ok::<_, google_cloud_spanner::session::SessionError>(())
                 })
             })
-            .await?;
+            .await
+            .map_err(|err| match err {
+                google_cloud_spanner::session::SessionError::GRPC(status)
+                    if status.code() == Code::AlreadyExists =>
+                {
+                    Error::LogContentionRetry
+                }
+                err => err.into(),
+            })?;
         Ok(())
     }
 
