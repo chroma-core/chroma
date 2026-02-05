@@ -7952,51 +7952,6 @@ pub mod tests {
     }
 
     #[tokio::test]
-    async fn test_k8s_mcmr_integration_count_collections() {
-        let Some(backend) = setup_test_backend().await else {
-            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
-        };
-
-        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
-
-        // Test counting with database filter
-        let count_req = CountCollectionsRequest {
-            tenant_id: tenant_id.clone(),
-            database_name: Some(db_name.clone()),
-        };
-        let result = backend.count_collections(count_req).await;
-        assert!(
-            result.is_ok(),
-            "Failed to count collections with database filter: {:?}",
-            result.err()
-        );
-        let count_with_db = result.unwrap().count;
-        println!("Collections count with database filter: {}", count_with_db);
-
-        // Test counting without database filter (should include all backends)
-        let count_req = CountCollectionsRequest {
-            tenant_id: tenant_id.clone(),
-            database_name: None,
-        };
-        let result = backend.count_collections(count_req).await;
-        assert!(
-            result.is_ok(),
-            "Failed to count collections without database filter: {:?}",
-            result.err()
-        );
-        let count_all = result.unwrap().count;
-        println!("Collections count without database filter: {}", count_all);
-
-        // The count without database filter should be >= count with database filter
-        assert!(
-            count_all >= count_with_db,
-            "Count without database filter ({}) should be >= count with database filter ({})",
-            count_all,
-            count_with_db
-        );
-    }
-
-    #[tokio::test]
     async fn test_k8s_mcmr_integration_reset_non_emulator_config_fails() {
         use crate::config::SpannerBackendConfig;
         use chroma_config::spanner::SpannerGcpConfig;
@@ -8049,5 +8004,116 @@ pub mod tests {
                 error
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_count_collections() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Verify count is zero at the beginning
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections at start: {:?}",
+            result.err()
+        );
+        let initial_count = result.unwrap().count;
+        assert_eq!(initial_count, 0, "Should start with zero collections");
+
+        // Create some test collections to count
+        let collection1_id = CollectionUuid(Uuid::new_v4());
+        let collection2_id = CollectionUuid(Uuid::new_v4());
+
+        // Create first collection
+        let create_req1 = CreateCollectionRequest {
+            id: collection1_id,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+            name: "test_collection_1".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection1_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+        let _result1 = backend.create_collection(create_req1).await;
+
+        // Create second collection
+        let create_req2 = CreateCollectionRequest {
+            id: collection2_id,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+            name: "test_collection_2".to_string(),
+            dimension: Some(256),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection2_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+        let _result2 = backend.create_collection(create_req2).await;
+
+        // Test counting with database filter
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections with database filter: {:?}",
+            result.err()
+        );
+        let count_with_db = result.unwrap().count;
+        println!("Collections count with database filter: {}", count_with_db);
+
+        // Test counting without database filter (should include all backends)
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: None,
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections without database filter: {:?}",
+            result.err()
+        );
+        let count_all = result.unwrap().count;
+        println!("Collections count without database filter: {}", count_all);
+
+        // Should have exactly 2 collections with database filter
+        assert_eq!(
+            count_with_db, 2,
+            "Should count exactly 2 collections with database filter"
+        );
+
+        // The count without database filter should be >= count with database filter
+        assert!(
+            count_all >= count_with_db,
+            "Count without database filter ({}) should be >= count with database filter ({})",
+            count_all,
+            count_with_db
+        );
     }
 }
