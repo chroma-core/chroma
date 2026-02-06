@@ -739,18 +739,10 @@ impl MetadataValue {
     ///   by the caller before invoking this method.
     pub fn into_scalars(self) -> Box<dyn Iterator<Item = MetadataValue>> {
         match self {
-            MetadataValue::BoolArray(arr) => {
-                Box::new(arr.into_iter().map(MetadataValue::Bool))
-            }
-            MetadataValue::IntArray(arr) => {
-                Box::new(arr.into_iter().map(MetadataValue::Int))
-            }
-            MetadataValue::FloatArray(arr) => {
-                Box::new(arr.into_iter().map(MetadataValue::Float))
-            }
-            MetadataValue::StringArray(arr) => {
-                Box::new(arr.into_iter().map(MetadataValue::Str))
-            }
+            MetadataValue::BoolArray(arr) => Box::new(arr.into_iter().map(MetadataValue::Bool)),
+            MetadataValue::IntArray(arr) => Box::new(arr.into_iter().map(MetadataValue::Int)),
+            MetadataValue::FloatArray(arr) => Box::new(arr.into_iter().map(MetadataValue::Float)),
+            MetadataValue::StringArray(arr) => Box::new(arr.into_iter().map(MetadataValue::Str)),
             scalar => Box::new(std::iter::once(scalar)),
         }
     }
