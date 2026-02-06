@@ -1440,7 +1440,7 @@ impl serde::Serialize for Where {
                         .map_err(serde::ser::Error::custom)?;
                         inner_map.insert(op_key.to_string(), values_json);
                     }
-                    MetadataComparison::Contains(op, value) => {
+                    MetadataComparison::ArrayContains(op, value) => {
                         let op_key = match op {
                             ContainsOperator::Contains => "$contains",
                             ContainsOperator::NotContains => "$not_contains",
@@ -1559,7 +1559,7 @@ impl Where {
                     MetadataSetValue::Float(items) => items.len() as u64,
                     MetadataSetValue::Str(items) => items.len() as u64,
                 },
-                MetadataComparison::Contains(_, _) => 1,
+                MetadataComparison::ArrayContains(_, _) => 1,
             },
         }
     }
@@ -1769,7 +1769,7 @@ impl std::fmt::Display for MetadataExpression {
             MetadataComparison::Set(op, set_value) => {
                 write!(f, "{} {} {}", self.key, op, set_value)
             }
-            MetadataComparison::Contains(op, value) => {
+            MetadataComparison::ArrayContains(op, value) => {
                 write!(f, "{} {} {}", self.key, op, value)
             }
         }
@@ -1785,14 +1785,15 @@ fn generic_comparator_to_metadata_comparison(
 ) -> MetadataComparison {
     match comparator {
         chroma_proto::GenericComparator::Eq | chroma_proto::GenericComparator::Ne => {
-            // SAFETY: We just matched Eq | Ne, so try_into() will always succeed.
+            // SAFETY: We just matched Eq | Ne, so try_into() a
+            // PrimitiveOperator will always succeed.
             MetadataComparison::Primitive(comparator.try_into().unwrap(), value)
         }
         chroma_proto::GenericComparator::ArrayContains => {
-            MetadataComparison::Contains(ContainsOperator::Contains, value)
+            MetadataComparison::ArrayContains(ContainsOperator::Contains, value)
         }
         chroma_proto::GenericComparator::ArrayNotContains => {
-            MetadataComparison::Contains(ContainsOperator::NotContains, value)
+            MetadataComparison::ArrayContains(ContainsOperator::NotContains, value)
         }
     }
 }
@@ -1925,7 +1926,7 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                 MetadataSetValue::Float(vec) => chroma_proto::direct_comparison::Comparison::DoubleListOperand(chroma_proto::DoubleListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
                 MetadataSetValue::Str(vec) => chroma_proto::direct_comparison::Comparison::StringListOperand(chroma_proto::StringListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
             },
-            MetadataComparison::Contains(contains_operator, metadata_value) => {
+            MetadataComparison::ArrayContains(contains_operator, metadata_value) => {
                 let comparator = chroma_proto::GenericComparator::from(contains_operator) as i32;
                 match metadata_value {
                     MetadataValue::Bool(value) => chroma_proto::direct_comparison::Comparison::SingleBoolOperand(chroma_proto::SingleBoolComparison { value, comparator }),
@@ -1953,7 +1954,7 @@ pub enum MetadataComparison {
     Set(SetOperator, MetadataSetValue),
     /// Array contains: check if an array metadata field contains (or does not
     /// contain) a specific scalar value.
-    Contains(ContainsOperator, MetadataValue),
+    ArrayContains(ContainsOperator, MetadataValue),
 }
 
 impl std::fmt::Display for MetadataComparison {
@@ -1982,7 +1983,7 @@ impl std::fmt::Display for MetadataComparison {
                 };
                 write!(f, "Set({}, {})", op, type_name)
             }
-            MetadataComparison::Contains(op, val) => {
+            MetadataComparison::ArrayContains(op, val) => {
                 let type_name = match val {
                     MetadataValue::Bool(_) => "Bool",
                     MetadataValue::Int(_) => "Int",
@@ -1994,7 +1995,7 @@ impl std::fmt::Display for MetadataComparison {
                     MetadataValue::FloatArray(_) => "FloatArray",
                     MetadataValue::StringArray(_) => "StringArray",
                 };
-                write!(f, "Contains({}, {})", op, type_name)
+                write!(f, "ArrayContains({}, {})", op, type_name)
             }
         }
     }

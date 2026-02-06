@@ -771,7 +771,7 @@ impl IntoSqliteExpr for MetadataExpression {
                     }
                 }
             }
-            MetadataComparison::Contains(_, _) => {
+            MetadataComparison::ArrayContains(_, _) => {
                 unimplemented!(
                     "Array contains queries are not yet supported in the SQLite metadata path"
                 )

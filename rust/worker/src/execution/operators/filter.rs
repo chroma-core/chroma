@@ -498,7 +498,7 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
             // Array contains: because arrays are stored exploded in the index
             // (each element indexed individually), a "contains" check is simply
             // an equality lookup on the scalar value.
-            MetadataComparison::Contains(contains_operator, metadata_value) => {
+            MetadataComparison::ArrayContains(contains_operator, metadata_value) => {
                 let bitmap = metadata_provider
                     .filter_by_metadata(&self.key, metadata_value, &PrimitiveOperator::Equal)
                     .await?;

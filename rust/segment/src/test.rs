@@ -589,8 +589,11 @@ impl CheckRecord for MetadataExpression {
                     SetOperator::NotIn => !contains,
                 }
             }
-            MetadataComparison::Contains(contains_operator, query_value) => {
-                // Check if the stored array metadata field contains the query scalar value
+            MetadataComparison::ArrayContains(contains_operator, query_value) => {
+                // Check if the stored metadata field contains the query scalar value.
+                // Note: Scalars are treated as singleton arrays to match blockfile behavior,
+                // where arrays are "exploded" in the index (each element indexed individually)
+                // and scalars/array-elements are indistinguishable in the inverted index.
                 let found = match (stored, query_value) {
                     (Some(MetadataValue::BoolArray(arr)), MetadataValue::Bool(val)) => {
                         arr.contains(val)
@@ -604,6 +607,12 @@ impl CheckRecord for MetadataExpression {
                     (Some(MetadataValue::StringArray(arr)), MetadataValue::Str(val)) => {
                         arr.contains(val)
                     }
+                    (Some(MetadataValue::Bool(scalar)), MetadataValue::Bool(val)) => scalar == val,
+                    (Some(MetadataValue::Int(scalar)), MetadataValue::Int(val)) => scalar == val,
+                    (Some(MetadataValue::Float(scalar)), MetadataValue::Float(val)) => {
+                        scalar == val
+                    }
+                    (Some(MetadataValue::Str(scalar)), MetadataValue::Str(val)) => scalar == val,
                     _ => false,
                 };
                 match contains_operator {
