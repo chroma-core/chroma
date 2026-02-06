@@ -816,7 +816,7 @@ mod tests {
         // Non-string values should be rejected, not silently treated as metadata.
         let payloads = [
             json!({"#document": {"$contains": 42}}),
-            json!({"#document": {"$contains": 3.14}}),
+            json!({"#document": {"$contains": 2.72}}),
             json!({"#document": {"$contains": true}}),
             json!({"#document": {"$not_contains": 42}}),
             json!({"#document": {"$not_contains": false}}),
