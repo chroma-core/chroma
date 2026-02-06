@@ -352,7 +352,7 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
                 };
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: crate::MetadataComparison::Contains(
+                    comparison: crate::MetadataComparison::ArrayContains(
                         contains_op,
                         crate::MetadataValue::Str(operand_str.to_string()),
                     ),
@@ -393,9 +393,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         if operand.is_boolean() {
             let operand_bool = operand.as_bool().unwrap();
             if let Some(contains_op) = parse_contains_operator(operator) {
+                // $contains/$not_contains on "#document" requires a string operand.
+                if key == "#document" {
+                    return Err(WhereValidationError::WhereClause);
+                }
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: crate::MetadataComparison::Contains(
+                    comparison: crate::MetadataComparison::ArrayContains(
                         contains_op,
                         crate::MetadataValue::Bool(operand_bool),
                     ),
@@ -420,9 +424,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         if operand.is_f64() {
             let operand_f64 = operand.as_f64().unwrap();
             if let Some(contains_op) = parse_contains_operator(operator) {
+                // $contains/$not_contains on "#document" requires a string operand.
+                if key == "#document" {
+                    return Err(WhereValidationError::WhereClause);
+                }
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: crate::MetadataComparison::Contains(
+                    comparison: crate::MetadataComparison::ArrayContains(
                         contains_op,
                         crate::MetadataValue::Float(operand_f64),
                     ),
@@ -455,9 +463,13 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
         if operand.is_i64() {
             let operand_i64 = operand.as_i64().unwrap();
             if let Some(contains_op) = parse_contains_operator(operator) {
+                // $contains/$not_contains on "#document" requires a string operand.
+                if key == "#document" {
+                    return Err(WhereValidationError::WhereClause);
+                }
                 return Ok(Where::Metadata(MetadataExpression {
                     key: key.clone(),
-                    comparison: crate::MetadataComparison::Contains(
+                    comparison: crate::MetadataComparison::ArrayContains(
                         contains_op,
                         crate::MetadataValue::Int(operand_i64),
                     ),
@@ -683,35 +695,35 @@ mod tests {
         let expected_results = [
             Where::Metadata(MetadataExpression {
                 key: "tags".to_string(),
-                comparison: crate::MetadataComparison::Contains(
+                comparison: crate::MetadataComparison::ArrayContains(
                     ContainsOperator::Contains,
                     crate::MetadataValue::Str("action".to_string()),
                 ),
             }),
             Where::Metadata(MetadataExpression {
                 key: "tags".to_string(),
-                comparison: crate::MetadataComparison::Contains(
+                comparison: crate::MetadataComparison::ArrayContains(
                     ContainsOperator::NotContains,
                     crate::MetadataValue::Str("comedy".to_string()),
                 ),
             }),
             Where::Metadata(MetadataExpression {
                 key: "scores".to_string(),
-                comparison: crate::MetadataComparison::Contains(
+                comparison: crate::MetadataComparison::ArrayContains(
                     ContainsOperator::Contains,
                     crate::MetadataValue::Int(42),
                 ),
             }),
             Where::Metadata(MetadataExpression {
                 key: "ratings".to_string(),
-                comparison: crate::MetadataComparison::Contains(
+                comparison: crate::MetadataComparison::ArrayContains(
                     ContainsOperator::Contains,
                     crate::MetadataValue::Float(4.5),
                 ),
             }),
             Where::Metadata(MetadataExpression {
                 key: "flags".to_string(),
-                comparison: crate::MetadataComparison::Contains(
+                comparison: crate::MetadataComparison::ArrayContains(
                     ContainsOperator::Contains,
                     crate::MetadataValue::Bool(true),
                 ),
@@ -787,7 +799,7 @@ mod tests {
         // produces the same result.
         let original = Where::Metadata(MetadataExpression {
             key: "tags".to_string(),
-            comparison: crate::MetadataComparison::Contains(
+            comparison: crate::MetadataComparison::ArrayContains(
                 ContainsOperator::Contains,
                 crate::MetadataValue::Str("action".to_string()),
             ),
@@ -796,5 +808,138 @@ mod tests {
         let json_value: Value = serde_json::from_str(&json_str).unwrap();
         let parsed = parse_where(&json_value).expect("Round-trip parsing should succeed");
         assert_eq!(original, parsed);
+    }
+
+    #[test]
+    fn test_document_contains_rejects_non_string_operand() {
+        // $contains / $not_contains on "#document" must have a string operand.
+        // Non-string values should be rejected, not silently treated as metadata.
+        let payloads = [
+            json!({"#document": {"$contains": 42}}),
+            json!({"#document": {"$contains": 3.14}}),
+            json!({"#document": {"$contains": true}}),
+            json!({"#document": {"$not_contains": 42}}),
+            json!({"#document": {"$not_contains": false}}),
+        ];
+        for payload in &payloads {
+            let result = parse_where(payload);
+            assert!(
+                result.is_err(),
+                "Expected error for non-string #document contains, but got Ok for: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_where_in_nin_typed_arrays() {
+        // $in / $nin with integer, boolean, and float arrays.
+        let payloads = [
+            // int $in
+            json!({"scores": {"$in": [1, 2, 3]}}),
+            // int $nin
+            json!({"scores": {"$nin": [10, 20]}}),
+            // bool $in
+            json!({"flags": {"$in": [true, false]}}),
+            // float $in
+            json!({"ratings": {"$in": [1.5, 2.5, 3.5]}}),
+        ];
+
+        let expected_results = [
+            Where::Metadata(MetadataExpression {
+                key: "scores".to_string(),
+                comparison: crate::MetadataComparison::Set(
+                    crate::SetOperator::In,
+                    crate::MetadataSetValue::Int(vec![1, 2, 3]),
+                ),
+            }),
+            Where::Metadata(MetadataExpression {
+                key: "scores".to_string(),
+                comparison: crate::MetadataComparison::Set(
+                    crate::SetOperator::NotIn,
+                    crate::MetadataSetValue::Int(vec![10, 20]),
+                ),
+            }),
+            Where::Metadata(MetadataExpression {
+                key: "flags".to_string(),
+                comparison: crate::MetadataComparison::Set(
+                    crate::SetOperator::In,
+                    crate::MetadataSetValue::Bool(vec![true, false]),
+                ),
+            }),
+            Where::Metadata(MetadataExpression {
+                key: "ratings".to_string(),
+                comparison: crate::MetadataComparison::Set(
+                    crate::SetOperator::In,
+                    crate::MetadataSetValue::Float(vec![1.5, 2.5, 3.5]),
+                ),
+            }),
+        ];
+
+        for (payload, expected_result) in payloads.iter().zip(expected_results.iter()) {
+            let result = parse_where(payload);
+            assert!(
+                result.is_ok(),
+                "Parsing failed for payload: {}: {:?}",
+                serde_json::to_string_pretty(payload).unwrap(),
+                result
+            );
+            assert_eq!(
+                result.unwrap(),
+                *expected_result,
+                "Parsed result did not match expected result: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_where_in_mixed_types_rejected() {
+        // $in / $nin arrays with mixed types should be rejected because the
+        // parser requires all elements to match the type of the first element.
+        let payloads = [
+            json!({"key": {"$in": ["a", 1]}}),
+            json!({"key": {"$in": [1, "b"]}}),
+            json!({"key": {"$nin": [true, 1]}}),
+        ];
+        for payload in &payloads {
+            let result = parse_where(payload);
+            assert!(
+                result.is_err(),
+                "Expected error for mixed-type array, but got Ok for: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_where_in_empty_array_rejected() {
+        // $in / $nin with an empty array should be rejected.
+        let payloads = [json!({"key": {"$in": []}}), json!({"key": {"$nin": []}})];
+        for payload in &payloads {
+            let result = parse_where(payload);
+            assert!(
+                result.is_err(),
+                "Expected error for empty array, but got Ok for: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
+    }
+
+    #[test]
+    fn test_parse_where_contains_not_valid_with_array_operand() {
+        // $contains / $not_contains expect a scalar operand, not an array.
+        let payloads = [
+            json!({"tags": {"$contains": ["a", "b"]}}),
+            json!({"tags": {"$not_contains": [1, 2]}}),
+        ];
+        for payload in &payloads {
+            let result = parse_where(payload);
+            assert!(
+                result.is_err(),
+                "Expected error for array operand in $contains, but got Ok for: {}",
+                serde_json::to_string_pretty(payload).unwrap(),
+            );
+        }
     }
 }
