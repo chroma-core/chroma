@@ -226,7 +226,9 @@ class Settings(BaseSettings):  # type: ignore
     # Telemetry
     # =========
 
-    chroma_product_telemetry_impl: str = "chromadb.telemetry.product.ProductTelemetryClient"
+    chroma_product_telemetry_impl: str = (
+        "chromadb.telemetry.product.ProductTelemetryClient"
+    )
     # Required for backwards compatibility
     chroma_telemetry_impl: str = chroma_product_telemetry_impl
 
