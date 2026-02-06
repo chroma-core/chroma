@@ -2911,7 +2911,11 @@ mod tests {
         });
         let plan = make_get_plan(&cas, Some(eq_original));
         let result = reader.get(plan).await.expect("get");
-        assert_eq!(result.result.records.len(), 0, "Original scalar should be gone");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Original scalar should be gone"
+        );
 
         // Intermediate array must be gone.
         let contains_mid = Where::Metadata(MetadataExpression {
@@ -2923,7 +2927,11 @@ mod tests {
         });
         let plan = make_get_plan(&cas, Some(contains_mid));
         let result = reader.get(plan).await.expect("get");
-        assert_eq!(result.result.records.len(), 0, "Intermediate array should be gone");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Intermediate array should be gone"
+        );
 
         // Final scalar must be queryable.
         let eq_final = Where::Metadata(MetadataExpression {
@@ -2941,7 +2949,11 @@ mod tests {
         let plan = make_get_plan(&cas, None);
         let result = reader.get(plan).await.expect("get");
         assert_eq!(
-            result.result.records[0].metadata.as_ref().unwrap().get("tags"),
+            result.result.records[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .get("tags"),
             Some(&MetadataValue::Str("final_scalar".to_string()))
         );
     }
@@ -3006,7 +3018,11 @@ mod tests {
         });
         let plan = make_get_plan(&cas, Some(eq_red));
         let result = reader.get(plan).await.expect("get");
-        assert_eq!(result.result.records.len(), 0, "Old color scalar should be gone");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Old color scalar should be gone"
+        );
 
         // "color" new array must be queryable.
         let contains_blue = Where::Metadata(MetadataExpression {
@@ -3030,7 +3046,11 @@ mod tests {
         });
         let plan = make_get_plan(&cas, Some(contains_old_a));
         let result = reader.get(plan).await.expect("get");
-        assert_eq!(result.result.records.len(), 0, "Old tags array should be gone");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Old tags array should be gone"
+        );
 
         // "tags" new scalar must be queryable.
         let eq_new_scalar = Where::Metadata(MetadataExpression {
