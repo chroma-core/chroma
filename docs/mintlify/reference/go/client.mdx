@@ -1,0 +1,322 @@
+---
+title: "Go Client Reference"
+---
+
+## Installation
+
+```bash
+go get github.com/chroma-core/chroma/clients/go
+```
+
+---
+
+## Clients
+
+### NewHTTPClient
+
+Creates a new HTTP client to connect to a Chroma server.
+
+```go
+client, err := chroma.NewHTTPClient(options...)
+```
+
+<ParamField path="WithBaseURL(url)" type="string">
+  The base URL of the Chroma server. Defaults to `"http://localhost:8000/api/v2"`.
+</ParamField>
+
+<ParamField path="WithTenant(tenant)" type="string">
+  The tenant name to connect to.
+</ParamField>
+
+<ParamField path="WithDatabaseAndTenant(db, tenant)" type="string, string">
+  Set both database and tenant.
+</ParamField>
+
+<ParamField path="WithDefaultDatabaseAndTenant()" type="">
+  Use default database and tenant.
+</ParamField>
+
+<ParamField path="WithAuth(provider)" type="CredentialsProvider">
+  Authentication provider for the client.
+</ParamField>
+
+<ParamField path="WithDefaultHeaders(headers)" type="map[string]string">
+  Additional HTTP headers to send with requests.
+</ParamField>
+
+<ParamField path="WithTimeout(timeout)" type="time.Duration">
+  Request timeout.
+</ParamField>
+
+<ParamField path="WithSSLCert(certPath)" type="string">
+  Path to custom SSL certificate (PEM format).
+</ParamField>
+
+<ParamField path="WithInsecure()" type="">
+  Skip SSL verification (not for production).
+</ParamField>
+
+<ParamField path="WithLogger(logger)" type="logger.Logger">
+  Custom logger for the client.
+</ParamField>
+
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewHTTPClient(
+    chroma.WithBaseURL("http://localhost:8000/api/v2"),
+    chroma.WithDatabaseAndTenant("my_database", "my_tenant"),
+)
+defer client.Close()
+```
+
+### NewCloudClient
+
+Creates a client configured for Chroma Cloud.
+
+```go
+client, err := chroma.NewCloudClient(apiKey, options...)
+```
+
+<ParamField path="apiKey" type="string">
+  Chroma Cloud API key. Can also be set via `CHROMA_API_KEY` environment variable.
+</ParamField>
+
+```go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewCloudClient(
+    os.Getenv("CHROMA_API_KEY"),
+    chroma.WithDatabaseAndTenant("my_database", "my_tenant"),
+)
+defer client.Close()
+```
+
+---
+
+## Methods
+
+### Heartbeat
+
+Checks if the Chroma server is alive.
+
+```go
+err := client.Heartbeat(ctx)
+```
+
+**Returns:** `error` - nil if the server is reachable.
+
+### GetVersion
+
+Returns the version of the Chroma server.
+
+```go
+version, err := client.GetVersion(ctx)
+```
+
+**Returns:** `string` - The server version string.
+
+### CreateCollection
+
+Creates a new collection with the specified name and options.
+
+```go
+collection, err := client.CreateCollection(ctx, name, options...)
+```
+
+<ParamField path="name" type="string" required>
+  The name of the collection.
+</ParamField>
+
+<ParamField path="WithCollectionMetadataCreate(metadata)" type="CollectionMetadata">
+  Metadata for the collection.
+</ParamField>
+
+<ParamField path="WithEmbeddingFunctionCreate(ef)" type="EmbeddingFunction">
+  Embedding function to use.
+</ParamField>
+
+<ParamField path="WithHNSWSpaceCreate(metric)" type="DistanceMetric">
+  Distance metric (L2, Cosine, IP).
+</ParamField>
+
+<ParamField path="WithHNSWMCreate(m)" type="int">
+  HNSW M parameter.
+</ParamField>
+
+<ParamField path="WithHNSWConstructionEfCreate(ef)" type="int">
+  HNSW construction EF.
+</ParamField>
+
+<ParamField path="WithHNSWSearchEfCreate(ef)" type="int">
+  HNSW search EF.
+</ParamField>
+
+<ParamField path="WithSchemaCreate(schema)" type="*Schema">
+  Collection schema configuration.
+</ParamField>
+
+<ParamField path="WithDatabaseCreate(database)" type="Database">
+  Create in a specific database.
+</ParamField>
+
+**Returns:** `Collection` - The created collection.
+
+```go
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithCollectionMetadataCreate(
+        chroma.NewMetadata(chroma.NewStringAttribute("description", "My collection")),
+    ),
+)
+```
+
+### GetCollection
+
+Gets a collection with the specified name.
+
+```go
+collection, err := client.GetCollection(ctx, name, options...)
+```
+
+<ParamField path="name" type="string" required>
+  The name of the collection.
+</ParamField>
+
+<ParamField path="WithEmbeddingFunctionGet(ef)" type="EmbeddingFunction">
+  Embedding function to use with the collection.
+</ParamField>
+
+<ParamField path="WithDatabaseGet(database)" type="Database">
+  Get from a specific database.
+</ParamField>
+
+**Returns:** `Collection` - The retrieved collection.
+
+```go
+collection, err := client.GetCollection(ctx, "my_collection")
+```
+
+### GetOrCreateCollection
+
+Gets a collection with the specified name, or creates it if it doesn't exist. Accepts the same options as `CreateCollection`.
+
+```go
+collection, err := client.GetOrCreateCollection(ctx, name, options...)
+```
+
+**Returns:** `Collection` - The retrieved or created collection.
+
+```go
+collection, err := client.GetOrCreateCollection(ctx, "my_collection",
+    chroma.WithCollectionMetadataCreate(
+        chroma.NewMetadata(chroma.NewStringAttribute("description", "My collection")),
+    ),
+)
+```
+
+### DeleteCollection
+
+Deletes a collection with the specified name.
+
+```go
+err := client.DeleteCollection(ctx, name, options...)
+```
+
+<ParamField path="name" type="string" required>
+  The name of the collection to delete.
+</ParamField>
+
+<ParamField path="WithDatabaseDelete(database)" type="Database">
+  Delete from a specific database.
+</ParamField>
+
+```go
+err := client.DeleteCollection(ctx, "my_collection")
+```
+
+### ListCollections
+
+Lists all collections.
+
+```go
+collections, err := client.ListCollections(ctx, options...)
+```
+
+<ParamField path="ListWithLimit(limit)" type="int">
+  Maximum number of collections to return. Default: 100.
+</ParamField>
+
+<ParamField path="ListWithOffset(offset)" type="int">
+  Number of collections to skip. Default: 0.
+</ParamField>
+
+<ParamField path="WithDatabaseList(database)" type="Database">
+  List from a specific database.
+</ParamField>
+
+**Returns:** `[]Collection` - Array of collections.
+
+```go
+collections, err := client.ListCollections(ctx,
+    chroma.ListWithLimit(10),
+    chroma.ListWithOffset(0),
+)
+```
+
+### CountCollections
+
+Counts all collections.
+
+```go
+count, err := client.CountCollections(ctx)
+```
+
+**Returns:** `int` - The number of collections.
+
+### Reset
+
+Resets the database, deleting all collections and data. Requires `ALLOW_RESET=true` on the server.
+
+```go
+err := client.Reset(ctx)
+```
+
+### UseTenant
+
+Sets the current tenant for subsequent operations.
+
+```go
+err := client.UseTenant(ctx, chroma.NewTenant("my_tenant"))
+```
+
+### UseDatabase
+
+Sets the current database for subsequent operations.
+
+```go
+err := client.UseDatabase(ctx, chroma.NewDatabase("my_database", chroma.NewTenant("my_tenant")))
+```
+
+### CreateTenant
+
+Creates a new tenant.
+
+```go
+tenant, err := client.CreateTenant(ctx, chroma.NewTenant("my_tenant"))
+```
+
+### CreateDatabase
+
+Creates a new database.
+
+```go
+db, err := client.CreateDatabase(ctx, chroma.NewDatabase("my_database", chroma.NewTenant("my_tenant")))
+```
+
+### Close
+
+Closes the client and releases resources.
+
+```go
+err := client.Close()
+```

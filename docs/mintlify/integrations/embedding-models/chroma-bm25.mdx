@@ -64,6 +64,32 @@ let sparse_vector = bm25.encode("document text")?;
 ```
 
 </Tab>
+<Tab title="Go" icon="golang">
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/bm25"
+)
+
+// Create BM25 embedding function
+ef, err := bm25.NewBM25EmbeddingFunction(
+    bm25.WithK(1.2),
+    bm25.WithB(0.75),
+    bm25.WithAvgDocLength(256.0),
+    bm25.WithTokenMaxLength(40),
+)
+
+// Use directly
+sparseEmbeddings, err := ef.EmbedDocuments(ctx, []string{"Hello, world!", "How are you?"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+</Tab>
 </Tabs>
 
 <Callout>

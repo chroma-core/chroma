@@ -4,7 +4,9 @@ title: Ollama
 
 Chroma provides a convenient wrapper around [Ollama](https://github.com/ollama/ollama)'s [embeddings API](https://github.com/ollama/ollama/blob/main/docs/api.md#generate-embeddings). You can use the `OllamaEmbeddingFunction` embedding function to generate embeddings for your documents with a [model](https://github.com/ollama/ollama?tab=readme-ov-file#model-library) of your choice.
 
-<CodeGroup>
+<Tabs>
+
+<Tab title="Python" icon="python">
 
 ```python Python
 from chromadb.utils.embedding_functions.ollama_embedding_function import (
@@ -19,6 +21,10 @@ ollama_ef = OllamaEmbeddingFunction(
 embeddings = ollama_ef(["This is my first text to embed",
                         "This is my second document"])
 ```
+
+</Tab>
+
+<Tab title="TypeScript" icon="js">
 
 ```typescript TypeScript
 // npm install @chroma-core/ollama
@@ -43,4 +49,41 @@ collection = await client.getCollection({
 })
 ```
 
-</CodeGroup>
+</Tab>
+
+<Tab title="Go" icon="golang">
+
+```bash
+go get github.com/chroma-core/chroma/clients/go/pkg/embeddings/ollama
+```
+
+```go Go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/ollama"
+)
+
+// Create Ollama embedding function
+ef, err := ollama.NewOllamaEmbeddingFunction(
+    ollama.WithBaseURL("http://localhost:11434"),
+    ollama.WithModel("llama2"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+</Tab>
+
+</Tabs>

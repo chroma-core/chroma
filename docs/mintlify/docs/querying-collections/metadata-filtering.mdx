@@ -32,6 +32,12 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(chroma.EqInt("page", 10)),
+)
 ```
 </CodeGroup>
 
@@ -62,6 +68,13 @@ let where_clause = Where::Metadata(MetadataExpression {
         MetadataValue::Str("value".to_string()),
     ),
 });
+
+```go Go
+// Go uses type-safe filter functions
+chroma.EqString("field", "value")   // $eq for strings
+chroma.EqInt("field", 10)           // $eq for integers
+chroma.GtInt("field", 10)           // $gt
+chroma.LtFloat("field", 5.5)        // $lt
 ```
 </CodeGroup>
 
@@ -104,6 +117,10 @@ let direct = Where::Metadata(MetadataExpression {
         MetadataValue::Str("search_string".to_string()),
     ),
 });
+
+```go Go
+// In Go, use explicit equality functions
+chroma.EqString("metadata_field", "search_string")
 ```
 </CodeGroup>
 
@@ -136,6 +153,12 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(chroma.GtInt("page", 10)),
+)
 ```
 </CodeGroup>
 
@@ -197,6 +220,13 @@ let where_clause = Where::Composite(CompositeExpression {
     ],
 });
 ```
+
+```go Go
+chroma.And(
+    chroma.GteInt("field", 5),
+    chroma.LteInt("field", 10),
+)
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is between 5 and 10:
@@ -247,6 +277,18 @@ let where_clause = Where::Composite(CompositeExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+```
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(
+        chroma.And(
+            chroma.GteInt("page", 5),
+            chroma.LteInt("page", 10),
+        ),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -304,6 +346,13 @@ let where_clause = Where::Composite(CompositeExpression {
     ],
 });
 ```
+
+```go Go
+chroma.Or(
+    chroma.EqString("color", "red"),
+    chroma.EqString("color", "blue"),
+)
+```
 </CodeGroup>
 
 For example, here we get all records whose `color` metadata field is `red` or `blue`:
@@ -353,6 +402,17 @@ let results = collection
     .get(None, Some(where_clause), None, None, None)
     .await?;
 ```
+
+```go Go
+results, err := collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.Or(
+            chroma.EqString("color", "red"),
+            chroma.EqString("color", "blue"),
+        ),
+    ),
+)
+```
 </CodeGroup>
 
 ## Using Inclusion Operators
@@ -394,6 +454,10 @@ let where_clause = Where::Metadata(MetadataExpression {
     ),
 });
 ```
+
+```go Go
+chroma.InString("metadata_field", "value1", "value2", "value3")
+```
 </CodeGroup>
 
 An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
@@ -427,6 +491,10 @@ let where_clause = Where::Metadata(MetadataExpression {
         ]),
     ),
 });
+```
+
+```go Go
+chroma.NinString("metadata_field", "value1", "value2", "value3")
 ```
 </CodeGroup>
 
@@ -465,6 +533,14 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .get(None, Some(where_clause), None, None, None)
     .await?;
+```
+
+```go Go
+results, err := collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.InString("author", "Rowling", "Fitzgerald", "Herbert"),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -689,5 +765,14 @@ let where_clause = Where::Composite(CompositeExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+```
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("doc10", "thus spake zarathustra"),
+    chroma.WithNResults(10),
+    chroma.WithWhere(chroma.EqString("metadata_field", "is_equal_to_this")),
+    chroma.WithWhereDocument(chroma.Contains("search_string")),
+)
 ```
 </CodeGroup>
