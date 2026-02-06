@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -149,7 +148,7 @@ func (c *Client) embed(ctx context.Context, texts []string, forQuery bool) ([][]
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := chttp.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read response")
 	}
