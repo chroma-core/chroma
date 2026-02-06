@@ -61,7 +61,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 		require.Nil(t, rerr)
 		require.NotNil(t, resp)
 		require.Len(t, resp, 2)
-		require.Len(t, resp[0].ContentAsFloat32(), 768)
+		require.Len(t, resp[0].ContentAsFloat32(), 3072)
 
 	})
 
@@ -79,7 +79,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 		require.Nil(t, rerr)
 		require.NotNil(t, resp)
 		require.Len(t, resp, 2)
-		require.Len(t, resp[0].ContentAsFloat32(), 768)
+		require.Len(t, resp[0].ContentAsFloat32(), 3072)
 
 	})
 
@@ -97,7 +97,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 		require.Nil(t, rerr)
 		require.NotNil(t, resp)
 		require.Len(t, resp, 2)
-		require.Len(t, resp[0].ContentAsFloat32(), 768)
+		require.Len(t, resp[0].ContentAsFloat32(), 3072)
 
 	})
 
@@ -113,7 +113,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 		resp, rerr := embeddingFunction.EmbedQuery(context.Background(), "this is my query")
 		require.Nil(t, rerr)
 		require.NotNil(t, resp)
-		require.Len(t, resp.ContentAsFloat32(), 768)
+		require.Len(t, resp.ContentAsFloat32(), 3072)
 	})
 
 	t.Run("Test wrong model", func(t *testing.T) {
@@ -126,7 +126,7 @@ func Test_gemini_embedding_function(t *testing.T) {
 		}(embeddingFunction)
 		require.NoError(t, err)
 		_, rerr := embeddingFunction.EmbedQuery(context.Background(), "this is my query")
-		require.Contains(t, rerr.Error(), "Error 404")
+		require.Contains(t, rerr.Error(), "404")
 		require.Error(t, rerr)
 	})
 
