@@ -260,7 +260,32 @@ export const validateMetadata = (metadata?: Metadata) => {
     throw new ChromaValueError("Expected metadata to be non-empty");
   }
 
-  const isValidMetadataValue = (v: unknown): boolean => {
+  const validateMetadataListValue = (key: string, v: unknown[]): void => {
+    if (v.length === 0) {
+      throw new ChromaValueError(
+        `Expected metadata list value for key '${key}' to be non-empty`,
+      );
+    }
+    const firstType = typeof v[0];
+    for (const item of v) {
+      if (
+        typeof item !== "string" &&
+        typeof item !== "number" &&
+        typeof item !== "boolean"
+      ) {
+        throw new ChromaValueError(
+          `Expected metadata list value for key '${key}' to contain only strings, numbers, or booleans, got ${typeof item}`,
+        );
+      }
+      if (typeof item !== firstType) {
+        throw new ChromaValueError(
+          `Expected metadata list value for key '${key}' to contain only the same type, got mixed types`,
+        );
+      }
+    }
+  };
+
+  for (const [key, v] of Object.entries(metadata)) {
     if (
       v === null ||
       v === undefined ||
@@ -268,25 +293,17 @@ export const validateMetadata = (metadata?: Metadata) => {
       typeof v === "number" ||
       typeof v === "boolean"
     ) {
-      return true;
+      continue;
     }
     if (validateSparseVector(v)) {
-      return true;
+      continue;
     }
     if (Array.isArray(v)) {
-      return v.every(
-        (item) =>
-          typeof item === "string" ||
-          typeof item === "number" ||
-          typeof item === "boolean",
-      );
+      validateMetadataListValue(key, v);
+      continue;
     }
-    return false;
-  };
-
-  if (!Object.values(metadata).every(isValidMetadataValue)) {
     throw new ChromaValueError(
-      "Expected metadata values to be a string, number, boolean, SparseVector, typed array (string[], number[], boolean[]), or null",
+      `Expected metadata value for key '${key}' to be a string, number, boolean, SparseVector, typed array (string[], number[], boolean[]), or null`,
     );
   }
 };
@@ -305,7 +322,8 @@ type SerializedMetadataValue =
   | SparseVector
   | Array<boolean>
   | Array<number>
-  | Array<string>;
+  | Array<string>
+  | null;
 
 export type SerializedMetadata = Record<string, SerializedMetadataValue>;
 
@@ -574,12 +592,30 @@ export const validateWhere = (where: Where) => {
       }
 
       if (
-        !["$gt", "$gte", "$lt", "$lte", "$ne", "$eq", "$in", "$nin"].includes(
-          operator,
-        )
+        ["$contains", "$not_contains"].includes(operator) &&
+        !["string", "number", "boolean"].includes(typeof operand)
       ) {
         throw new ChromaValueError(
-          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got ${operator}`,
+          `Expected operand value to be a string, number, or boolean for ${operator}, but got ${typeof operand}`,
+        );
+      }
+
+      if (
+        ![
+          "$gt",
+          "$gte",
+          "$lt",
+          "$lte",
+          "$ne",
+          "$eq",
+          "$in",
+          "$nin",
+          "$contains",
+          "$not_contains",
+        ].includes(operator)
+      ) {
+        throw new ChromaValueError(
+          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $contains, $not_contains, but got ${operator}`,
         );
       }
 

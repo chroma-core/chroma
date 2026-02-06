@@ -116,8 +116,13 @@ class SparseVector:
         )
 
 
-Metadata = Mapping[str, Optional[Union[str, int, float, bool, SparseVector]]]
-UpdateMetadata = Mapping[str, Union[int, float, str, bool, SparseVector, None]]
+MetadataListValue = List[Union[str, int, float, bool]]
+Metadata = Mapping[
+    str, Optional[Union[str, int, float, bool, SparseVector, MetadataListValue]]
+]
+UpdateMetadata = Mapping[
+    str, Union[int, float, str, bool, SparseVector, MetadataListValue, None]
+]
 PyVector = Union[Sequence[float], Sequence[int]]
 Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
 # Metadata Query Grammar
@@ -132,9 +137,11 @@ WhereOperator = Union[
     Literal["$eq"],
 ]
 InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
+ArrayContainsOperator = Union[Literal["$contains"], Literal["$not_contains"]]
 OperatorExpression = Union[
     Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
     Dict[InclusionExclusionOperator, List[LiteralValue]],
+    Dict[ArrayContainsOperator, LiteralValue],
 ]
 
 Where = Dict[

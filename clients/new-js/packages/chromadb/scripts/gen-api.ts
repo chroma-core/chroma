@@ -34,10 +34,10 @@ const main = async () => {
     const typesPath = join(__dirname, "../src/api/types.gen.ts");
     let typesContent = await readFile(typesPath, "utf-8");
 
-    // Fix the HashMap type to include null and remove duplicate number
+    // Fix the HashMap type to include null, arrays, and remove duplicate number
     typesContent = typesContent.replace(
-      /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string \| SparseVector;\s*};/,
-      "export type HashMap = {\n  [key: string]: boolean | number | string | SparseVector | null;\n};",
+      /export type HashMap = \{\s*\[key: string\]: boolean \| number \| number \| string \| SparseVector[^}]*};/,
+      "export type HashMap = {\n  [key: string]: boolean | number | string | SparseVector | Array<boolean> | Array<number> | Array<string> | null;\n};",
     );
 
     await writeFile(typesPath, typesContent);

@@ -877,18 +877,10 @@ def test_where_valid_operators(client):
     with pytest.raises(ValueError):
         collection.get(where={"$or": []})
 
+    # $contains on a metadata key is now valid (array contains).
+    # But a bare $contains at the top level (no field key) is still invalid.
     with pytest.raises(ValueError):
-        collection.get(where={"a": {"$contains": "test"}})
-
-    with pytest.raises(ValueError):
-        collection.get(
-            where={
-                "$or": [
-                    {"a": {"$contains": "first"}},  # invalid
-                    {"$contains": "second"},  # valid
-                ]
-            }
-        )
+        collection.get(where={"$contains": "test"})
 
 
 # TODO: Define the dimensionality of these embeddingds in terms of the default record
@@ -1954,7 +1946,7 @@ def test_sparse_vector_in_metadata_validation():
     with pytest.raises(
         ValueError, match="indices and values must have the same length"
     ):
-        invalid_metadata = {
+        invalid_metadata = {  # type: ignore
             "text": "invalid",
             "sparse_embedding": SparseVector(indices=[0, 1], values=[0.1]),
         }
@@ -1966,13 +1958,13 @@ def test_sparse_vector_in_metadata_validation():
     }
     with pytest.raises(
         ValueError,
-        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, list, or None",
     ):
         validate_metadata(invalid_metadata_2)
 
     # Test 5: Invalid sparse vector - negative index (construction fails)
     with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
-        invalid_metadata_3 = {
+        invalid_metadata_3 = {  # type: ignore
             "text": "negative index",
             "sparse_embedding": SparseVector(
                 indices=[0, -1, 2], values=[0.1, 0.2, 0.3]
@@ -1981,7 +1973,7 @@ def test_sparse_vector_in_metadata_validation():
 
     # Test 6: Invalid sparse vector - non-numeric value (construction fails)
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
-        invalid_metadata_4 = {
+        invalid_metadata_4 = {  # type: ignore
             "text": "non-numeric value",
             "sparse_embedding": SparseVector(
                 indices=[0, 1], values=[0.1, "not_a_number"]
@@ -2004,7 +1996,7 @@ def test_sparse_vector_in_metadata_validation():
     }
     with pytest.raises(
         ValueError,
-        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, list, or None",
     ):
         validate_metadata(metadata_nested)
 
@@ -2142,6 +2134,77 @@ def test_sparse_vector_dict_format_normalization():
     assert isinstance(normalized5["sparse1"], SparseVector)
     assert isinstance(normalized5["sparse2"], SparseVector)
     assert normalized5["regular"] == 42
+
+
+def test_list_metadata_validation():
+    """Test that list metadata values are properly validated."""
+    from chromadb.api.types import validate_metadata, validate_update_metadata
+
+    # Valid list metadata
+    validate_metadata({"tags": ["action", "comedy"]})
+    validate_metadata({"scores": [1, 2, 3]})
+    validate_metadata({"ratings": [4.5, 3.2]})
+    validate_metadata({"flags": [True, False, True]})
+
+    # Lists can coexist with scalars
+    validate_metadata({"tags": ["a", "b"], "count": 5, "name": "test"})
+
+    # Empty list rejected
+    with pytest.raises(ValueError, match="non-empty"):
+        validate_metadata({"tags": []})
+
+    # Mixed types rejected
+    with pytest.raises(ValueError, match="same type"):
+        validate_metadata({"tags": ["a", 1]})
+
+    with pytest.raises(ValueError, match="same type"):
+        validate_metadata({"vals": [1, 1.5]})
+
+    with pytest.raises(ValueError, match="same type"):
+        validate_metadata({"vals": [True, "yes"]})
+
+    # Nested list rejected
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_metadata({"tags": [["nested"]]})
+
+    # validate_update_metadata also accepts lists
+    validate_update_metadata({"tags": ["action", "comedy"]})
+    validate_update_metadata({"scores": [1, 2, 3]})
+
+    # validate_update_metadata still allows None (for deletion)
+    validate_update_metadata({"tags": None})
+
+    # Empty list rejected in update too
+    with pytest.raises(ValueError, match="non-empty"):
+        validate_update_metadata({"tags": []})
+
+
+def test_where_contains_validation():
+    """Test that $contains/$not_contains are accepted in where clauses for metadata."""
+    from chromadb.api.types import validate_where
+
+    # All scalar types accepted
+    validate_where({"tags": {"$contains": "action"}})
+    validate_where({"scores": {"$contains": 42}})
+    validate_where({"ratings": {"$contains": 4.5}})
+    validate_where({"flags": {"$contains": True}})
+
+    # $not_contains
+    validate_where({"tags": {"$not_contains": "draft"}})
+    validate_where({"scores": {"$not_contains": 0}})
+
+    # List operand rejected (contains checks a single value, not a list)
+    with pytest.raises(ValueError):
+        validate_where({"tags": {"$contains": ["a", "b"]}})
+
+    # Dict operand rejected
+    with pytest.raises(ValueError):
+        validate_where({"tags": {"$contains": {"nested": True}}})
+
+    # Still works inside $and/$or
+    validate_where(
+        {"$and": [{"tags": {"$contains": "action"}}, {"year": {"$gt": 2020}}]}
+    )
 
 
 def test_sparse_vector_dict_format_in_record_set():
@@ -2961,6 +3024,106 @@ class TestWhereFromDict:
         # $not_regex
         where = Where.from_dict({"text": {"$not_regex": r"\d+"}})
         assert isinstance(where, NotRegex)
+
+    def test_array_contains_operators(self):
+        """Test $contains/$not_contains with all scalar types for metadata array queries."""
+        from chromadb.execution.expression.operator import Where, Contains, NotContains
+
+        # String
+        where = Where.from_dict({"tags": {"$contains": "action"}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"tags": {"$contains": "action"}}
+
+        # Integer
+        where = Where.from_dict({"scores": {"$contains": 42}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"scores": {"$contains": 42}}
+
+        # Float
+        where = Where.from_dict({"ratings": {"$contains": 4.5}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"ratings": {"$contains": 4.5}}
+
+        # Boolean
+        where = Where.from_dict({"flags": {"$contains": True}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"flags": {"$contains": True}}
+
+        # $not_contains
+        where = Where.from_dict({"tags": {"$not_contains": "draft"}})
+        assert isinstance(where, NotContains)
+        assert where.to_dict() == {"tags": {"$not_contains": "draft"}}
+
+        where = Where.from_dict({"scores": {"$not_contains": 0}})
+        assert isinstance(where, NotContains)
+        assert where.to_dict() == {"scores": {"$not_contains": 0}}
+
+    def test_array_contains_invalid_operands(self):
+        """Test $contains/$not_contains reject invalid operand types."""
+        import pytest
+        from chromadb.execution.expression.operator import Where
+
+        with pytest.raises(TypeError, match="\\$contains requires"):
+            Where.from_dict({"tags": {"$contains": [1, 2]}})
+
+        with pytest.raises(TypeError, match="\\$not_contains requires"):
+            Where.from_dict({"tags": {"$not_contains": {"nested": True}}})
+
+    def test_array_contains_round_trip(self):
+        """Test $contains round-trips through to_dict/from_dict."""
+        from chromadb.execution.expression.operator import Where, Key
+
+        cases = [
+            Key("tags").contains("action"),
+            Key("scores").contains(42),
+            Key("ratings").contains(4.5),
+            Key("flags").contains(True),
+            Key("tags").not_contains("draft"),
+        ]
+        for original in cases:
+            d = original.to_dict()
+            restored = Where.from_dict(d)
+            assert restored.to_dict() == d, f"Round-trip failed for {d}"
+
+    def test_array_contains_in_composite(self):
+        """Test $contains combined with other operators via $and/$or."""
+        from chromadb.execution.expression.operator import Where, And, Key
+
+        where = (Key("tags").contains("action")) & (Key("year") > 2020)
+        assert isinstance(where, And)
+        d = where.to_dict()
+        restored = Where.from_dict(d)
+        assert restored.to_dict() == d
+
+    def test_document_contains_requires_string(self):
+        """Key.DOCUMENT.contains/not_contains must receive a string."""
+        import pytest
+        from chromadb.execution.expression.operator import Key
+
+        # String is fine
+        expr = Key.DOCUMENT.contains("hello")
+        assert expr.to_dict() == {"#document": {"$contains": "hello"}}
+
+        expr = Key.DOCUMENT.not_contains("hello")
+        assert expr.to_dict() == {"#document": {"$not_contains": "hello"}}
+
+        # Non-string types must be rejected
+        for bad_value in [42, 3.14, True, False]:
+            with pytest.raises(
+                TypeError, match="\\$contains on #document requires a string"
+            ):
+                Key.DOCUMENT.contains(bad_value)
+
+            with pytest.raises(
+                TypeError, match="\\$not_contains on #document requires a string"
+            ):
+                Key.DOCUMENT.not_contains(bad_value)
+
+        # Metadata keys still accept non-string scalars
+        assert Key("scores").contains(42).to_dict() == {"scores": {"$contains": 42}}
+        assert Key("flags").not_contains(True).to_dict() == {
+            "flags": {"$not_contains": True}
+        }
 
     def test_logical_operators(self):
         """Test logical operator conversions."""
