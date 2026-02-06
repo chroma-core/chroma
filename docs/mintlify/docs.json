@@ -228,6 +228,13 @@
             "pages": [
               "reference/python",
               "reference/typescript",
+              {
+                "group": "Go",
+                "pages": [
+                  "reference/go/client",
+                  "reference/go/collection"
+                ]
+              },
               "reference/rust"
             ]
           },
@@ -261,6 +268,7 @@
         "terminal",
         "python",
         "typescript",
+        "go",
         "rust"
       ]
     }

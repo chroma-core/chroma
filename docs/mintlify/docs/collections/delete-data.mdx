@@ -23,6 +23,10 @@ await collection.delete({
     ids: ["id1", "id2", "id3",...],
 })
 ```
+
+```go Go
+err := collection.Delete(ctx, chroma.WithIDs("id1", "id2", "id3"))
+```
 </CodeGroup>
 
 `.delete` also supports the `where` filter. If no `ids` are supplied, it will delete all items in the collection that match the `where` filter.
@@ -40,5 +44,12 @@ await collection.delete({
     ids: ["id1", "id2", "id3",...], //ids
     where: {"chapter": "20"} //where
 })
+```
+
+```go Go
+err := collection.Delete(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithWhere(chroma.EqString("chapter", "20")),
+)
 ```
 </CodeGroup>

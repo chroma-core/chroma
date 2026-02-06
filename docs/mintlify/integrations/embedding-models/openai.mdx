@@ -33,7 +33,7 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 
 To use the OpenAI embedding models on other platforms such as Azure, you can use the `api_base` and `api_type` parameters:
 
-```python
+```python Python
 import chromadb.utils.embedding_functions as embedding_functions
 openai_ef = embedding_functions.OpenAIEmbeddingFunction(
     api_key_env_var="OPENAI_API_KEY",
@@ -50,7 +50,7 @@ openai_ef = embedding_functions.OpenAIEmbeddingFunction(
 
 You can pass in an optional `model` argument, which lets you choose which OpenAI embeddings model to use. By default, Chroma uses `text-embedding-3-small`.
 
-```typescript
+```typescript TypeScript
 // npm install @chroma-core/openai
 
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
@@ -75,6 +75,42 @@ collection = await client.getCollection({
     embeddingFunction: embeddingFunction,
 });
 ```
+
+</Tab>
+
+<Tab title="Go" icon="golang">
+
+You can install the Go embedding package with:
+
+```bash
+go get github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai
+```
+
+```go Go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+// Create OpenAI embedding function
+ef, err := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+Available models: `openai.TextEmbeddingAda002`, `openai.TextEmbedding3Small`, `openai.TextEmbedding3Large`
 
 </Tab>
 

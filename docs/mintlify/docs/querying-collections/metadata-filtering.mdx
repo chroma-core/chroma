@@ -19,6 +19,13 @@ await collection.query({
   where: { page: 10 },
 });
 ```
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(chroma.EqInt("page", 10)),
+)
+```
 </CodeGroup>
 
 In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
@@ -38,6 +45,14 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
         <Operator>: <Value>
     }
 }
+```
+
+```go Go
+// Go uses type-safe filter functions
+chroma.EqString("field", "value")   // $eq for strings
+chroma.EqInt("field", 10)           // $eq for integers
+chroma.GtInt("field", 10)           // $gt
+chroma.LtFloat("field", 5.5)        // $lt
 ```
 </CodeGroup>
 
@@ -71,6 +86,11 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
     }
 }
 ```
+
+```go Go
+// In Go, use explicit equality functions
+chroma.EqString("metadata_field", "search_string")
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is greater than 10:
@@ -88,6 +108,13 @@ await collection.query({
   queryTexts: ["first query", "second query"],
   where: { page: { $gt: 10 } },
 });
+```
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(chroma.GtInt("page", 10)),
+)
 ```
 </CodeGroup>
 
@@ -127,6 +154,13 @@ An `$and` operator will return results that match all the filters in the list.
     ]
 }
 ```
+
+```go Go
+chroma.And(
+    chroma.GteInt("field", 5),
+    chroma.LteInt("field", 10),
+)
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is between 5 and 10:
@@ -151,6 +185,18 @@ await collection.query({
     $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
   },
 });
+```
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(
+        chroma.And(
+            chroma.GteInt("page", 5),
+            chroma.LteInt("page", 10),
+        ),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -186,6 +232,13 @@ An `$or` operator will return results that match any of the filters in the list.
     ]
 }
 ```
+
+```go Go
+chroma.Or(
+    chroma.EqString("color", "red"),
+    chroma.EqString("color", "blue"),
+)
+```
 </CodeGroup>
 
 For example, here we get all records whose `color` metadata field is `red` or `blue`:
@@ -208,6 +261,17 @@ await collection.get({
     or: [{ color: "red" }, { color: "blue" }],
   },
 });
+```
+
+```go Go
+results, err := collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.Or(
+            chroma.EqString("color", "red"),
+            chroma.EqString("color", "blue"),
+        ),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -236,6 +300,10 @@ An `$in` operator will return results where the metadata attribute is part of a 
     }
 }
 ```
+
+```go Go
+chroma.InString("metadata_field", "value1", "value2", "value3")
+```
 </CodeGroup>
 
 An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
@@ -256,6 +324,10 @@ An `$nin` operator will return results where the metadata attribute is not part 
     }
 }
 ```
+
+```go Go
+chroma.NinString("metadata_field", "value1", "value2", "value3")
+```
 </CodeGroup>
 
 For example, here we get all records whose `author` metadata field is in a list of possible values:
@@ -275,6 +347,14 @@ await collection.get({
     author: { $in: ["Rowling", "Fitzgerald", "Herbert"] },
   },
 });
+```
+
+```go Go
+results, err := collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.InString("author", "Rowling", "Fitzgerald", "Herbert"),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -299,5 +379,14 @@ await collection.query({
     where: { metadata_field: "is_equal_to_this" },
     whereDocument: { "$contains": "search_string" }
 })
+```
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("doc10", "thus spake zarathustra"),
+    chroma.WithNResults(10),
+    chroma.WithWhere(chroma.EqString("metadata_field", "is_equal_to_this")),
+    chroma.WithWhereDocument(chroma.Contains("search_string")),
+)
 ```
 </CodeGroup>
