@@ -574,12 +574,30 @@ export const validateWhere = (where: Where) => {
       }
 
       if (
-        !["$gt", "$gte", "$lt", "$lte", "$ne", "$eq", "$in", "$nin"].includes(
-          operator,
-        )
+        ["$contains", "$not_contains"].includes(operator) &&
+        !["string", "number", "boolean"].includes(typeof operand)
       ) {
         throw new ChromaValueError(
-          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got ${operator}`,
+          `Expected operand value to be a string, number, or boolean for ${operator}, but got ${typeof operand}`,
+        );
+      }
+
+      if (
+        ![
+          "$gt",
+          "$gte",
+          "$lt",
+          "$lte",
+          "$ne",
+          "$eq",
+          "$in",
+          "$nin",
+          "$contains",
+          "$not_contains",
+        ].includes(operator)
+      ) {
+        throw new ChromaValueError(
+          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $contains, $not_contains, but got ${operator}`,
         );
       }
 

@@ -1035,8 +1035,27 @@ def validate_ids(ids: IDs) -> IDs:
     return ids
 
 
+def _validate_metadata_list_value(key: str, value: list) -> None:
+    """Validates a list metadata value: must be non-empty and homogeneously typed."""
+    if len(value) == 0:
+        raise ValueError(
+            f"Expected metadata list value for key '{key}' to be non-empty"
+        )
+    first_type = type(value[0])
+    # Normalize: bool must be checked before int since isinstance(True, int) is True
+    if isinstance(value[0], bool):
+        first_type = bool
+    for item in value:
+        item_type = bool if isinstance(item, bool) else type(item)
+        if item_type is not first_type or item_type not in (str, int, float, bool):
+            raise ValueError(
+                f"Expected metadata list value for key '{key}' to contain only str, int, float, or bool "
+                f"and all elements must be the same type, got {value}"
+            )
+
+
 def validate_metadata(metadata: Metadata) -> Metadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, SparseVectors, or lists thereof"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(
             f"Expected metadata to be a dict or None, got {type(metadata).__name__} as metadata"
@@ -1059,18 +1078,20 @@ def validate_metadata(metadata: Metadata) -> Metadata:
         # Check if value is a SparseVector (validation happens in __post_init__)
         if isinstance(value, SparseVector):
             pass  # Already validated in SparseVector.__post_init__
+        elif isinstance(value, list):
+            _validate_metadata_list_value(key, value)
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value} which is a {type(value).__name__}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, or list, got {value} which is a {type(value).__name__}"
             )
     return metadata
 
 
 def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
-    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, or SparseVectors"""
+    """Validates metadata to ensure it is a dictionary of strings to strings, ints, floats, bools, SparseVectors, or lists thereof"""
     if not isinstance(metadata, dict) and metadata is not None:
         raise ValueError(
             f"Expected metadata to be a dict or None, got {type(metadata)}"
@@ -1085,12 +1106,14 @@ def validate_update_metadata(metadata: UpdateMetadata) -> UpdateMetadata:
         # Check if value is a SparseVector (validation happens in __post_init__)
         if isinstance(value, SparseVector):
             pass  # Already validated in SparseVector.__post_init__
+        elif isinstance(value, list):
+            _validate_metadata_list_value(key, value)
         # isinstance(True, int) evaluates to True, so we need to check for bools separately
         elif not isinstance(value, bool) and not isinstance(
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float, bool, SparseVector, or None, got {value}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value}"
             )
     return metadata
 
@@ -1201,6 +1224,12 @@ def validate_where(where: Where) -> None:
                         raise ValueError(
                             f"Expected operand value to be an list for operator {operator}, got {operand}"
                         )
+                # $contains/$not_contains: scalar operand (checks if array field contains value)
+                if operator in ["$contains", "$not_contains"]:
+                    if not isinstance(operand, (str, int, float, bool)):
+                        raise ValueError(
+                            f"Expected operand value to be a str, int, float, or bool for operator {operator}, got {operand}"
+                        )
                 if operator not in [
                     "$gt",
                     "$gte",
@@ -1210,15 +1239,17 @@ def validate_where(where: Where) -> None:
                     "$eq",
                     "$in",
                     "$nin",
+                    "$contains",
+                    "$not_contains",
                 ]:
                     raise ValueError(
                         f"Expected where operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, "
-                        f"got {operator}"
+                        f"$contains, $not_contains, got {operator}"
                     )
 
-                if not isinstance(operand, (str, int, float, list)):
+                if not isinstance(operand, (str, int, float, bool, list)):
                     raise ValueError(
-                        f"Expected where operand value to be a str, int, float, or list of those type, got {operand}"
+                        f"Expected where operand value to be a str, int, float, bool, or list of those type, got {operand}"
                     )
                 if isinstance(operand, list) and (
                     len(operand) == 0

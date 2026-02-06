@@ -11,9 +11,9 @@ use thiserror::Error;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
-    DocumentExpression, DocumentOperator, Metadata, MetadataComparison, MetadataExpression,
-    MetadataSetValue, MetadataValue, PrimitiveOperator, ScalarEncoding, SetOperator, SparseVector,
-    Where,
+    ContainsOperator, DocumentExpression, DocumentOperator, Metadata, MetadataComparison,
+    MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, ScalarEncoding,
+    SetOperator, SparseVector, Where,
 };
 
 use super::error::QueryConversionError;
@@ -2018,10 +2018,12 @@ impl Key {
         })
     }
 
-    /// Creates a substring filter (case-sensitive, document content only).
+    /// Creates a document substring filter (case-sensitive).
     ///
-    /// Note: Currently only works with `Key::Document`. Pattern must have at least
-    /// 3 literal characters for accurate results.
+    /// Only valid on `Key::Document`. Pattern must have at least 3 literal
+    /// characters for accurate results.
+    ///
+    /// For metadata array contains, use [`contains_value`](Key::contains_value).
     ///
     /// # Examples
     ///
@@ -2038,9 +2040,12 @@ impl Key {
         })
     }
 
-    /// Creates a negative substring filter (case-sensitive, document content only).
+    /// Creates a negative document substring filter (case-sensitive).
     ///
-    /// Note: Currently only works with `Key::Document`.
+    /// Only valid on `Key::Document`.
+    ///
+    /// For metadata array not-contains, use
+    /// [`not_contains_value`](Key::not_contains_value).
     ///
     /// # Examples
     ///
@@ -2054,6 +2059,43 @@ impl Key {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::NotContains,
             pattern: text.into(),
+        })
+    }
+
+    /// Checks whether a metadata array field contains the given scalar value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("tags").contains_value("action");
+    /// let filter = Key::field("scores").contains_value(42);
+    /// let filter = Key::field("ratings").contains_value(4.5);
+    /// let filter = Key::field("flags").contains_value(true);
+    /// ```
+    pub fn contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Contains(ContainsOperator::Contains, value.into()),
+        })
+    }
+
+    /// Checks that a metadata array field does **not** contain the given scalar
+    /// value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("tags").not_contains_value("draft");
+    /// let filter = Key::field("scores").not_contains_value(0);
+    /// ```
+    pub fn not_contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Contains(ContainsOperator::NotContains, value.into()),
         })
     }
 
@@ -2395,15 +2437,15 @@ impl TryFrom<GroupBy> for chroma_proto::GroupByOperator {
 /// fn process_results(records: Vec<SearchRecord>) {
 ///     for record in records {
 ///         println!("ID: {}", record.id);
-///         
+///
 ///         if let Some(score) = record.score {
 ///             println!("  Score: {:.3}", score);
 ///         }
-///         
+///
 ///         if let Some(doc) = record.document {
 ///             println!("  Document: {}", doc);
 ///         }
-///         
+///
 ///         if let Some(meta) = record.metadata {
 ///             println!("  Metadata: {:?}", meta);
 ///         }
@@ -2476,7 +2518,7 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
 ///
 /// fn process_search_result(result: SearchPayloadResult) {
 ///     println!("Found {} results", result.records.len());
-///     
+///
 ///     for (i, record) in result.records.iter().enumerate() {
 ///         println!("{}. {} (score: {:?})", i + 1, record.id, record.score);
 ///     }
@@ -2535,7 +2577,7 @@ impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
 /// fn process_single_search(result: SearchResult) {
 ///     // Single search, so results[0] contains our records
 ///     let records = &result.results[0].records;
-///     
+///
 ///     for record in records {
 ///         println!("{}: score={:?}", record.id, record.score);
 ///     }
