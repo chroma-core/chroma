@@ -251,7 +251,7 @@
                 "group": "Chroma Core API",
                 "openapi": {
                   "source": "openapi.json",
-                  "directory": "api-reference"
+                  "directory": "/reference/chroma-api"
                 },
                 "pages": [
                   {
@@ -367,9 +367,14 @@
   "navbar": {
     "links": [
       {
-        "label": "26k",
         "icon": "github",
+        "label": "26k",
         "href": "https://github.com/chroma-core/chroma"
+      },
+      {
+        "icon": "discord",
+        "label": "11k",
+        "href": "https://discord.gg/MMeYNTmh3x"
       },
       {
         "label": "25k",
@@ -443,6 +448,14 @@
     {
       "source": "/reference/js/:slug*",
       "destination": "/reference/typescript/"
+    },
+    {
+      "source": "/reference/python/client",
+      "destination": "/reference/python"
+    },
+    {
+      "source": "/reference/python/collection",
+      "destination": "/reference/python"
     }
   ]
 }
