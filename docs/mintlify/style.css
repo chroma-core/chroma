@@ -42,6 +42,15 @@
   mask-repeat: no-repeat;
 }
 
+/* Override "Powered by Mintlify" → "Mintlify is powered by Chroma" */
+a[href*="mintlify.com?utm_campaign=poweredBy"] span {
+  display: none;
+}
+
+a[href*="mintlify.com?utm_campaign=poweredBy"]::after {
+  content: "is powered by Chroma";
+}
+
 a[href="/reference/typescript"] [data-component-part="card-icon"] svg {
   -webkit-mask-image: url("/images/typescript.svg") !important;
   mask-image: url("/images/typescript.svg") !important;
