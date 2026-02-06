@@ -52,7 +52,7 @@ def persist_with_old_version(ver: str, path: str):
         persist_directory=path,
     )
     if version.Version(ver) <= version.Version("0.4.14"):
-        settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
+        settings.chroma_telemetry_impl = "chromadb.telemetry.product.ProductTelemetryClient"
     system = old_modules.config.System(settings)
     api = system.instance(api_import_for_version(old_modules, ver))
     system.start()
