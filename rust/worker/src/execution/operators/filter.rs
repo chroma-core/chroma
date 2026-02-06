@@ -352,7 +352,7 @@ impl MetadataProvider<'_> {
                     ),
                     MetadataValue::SparseVector(_) => {
                         return Err(FilterError::UnsupportedComparisonType(
-                            MetadataComparison::Primitive(op.clone(), val.clone().into()),
+                            MetadataComparison::Primitive(op.clone(), val.clone()),
                         ))
                     }
                     MetadataValue::BoolArray(_)
@@ -360,7 +360,7 @@ impl MetadataProvider<'_> {
                     | MetadataValue::FloatArray(_)
                     | MetadataValue::StringArray(_) => {
                         return Err(FilterError::UnsupportedComparisonType(
-                            MetadataComparison::Primitive(op.clone(), val.clone().into()),
+                            MetadataComparison::Primitive(op.clone(), val.clone()),
                         ));
                     }
                 };
