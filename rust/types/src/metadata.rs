@@ -1852,6 +1852,36 @@ pub enum MetadataComparison {
     Set(SetOperator, MetadataSetValue),
 }
 
+impl std::fmt::Display for MetadataComparison {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetadataComparison::Primitive(op, val) => {
+                let type_name = match val {
+                    MetadataValue::Bool(_) => "Bool",
+                    MetadataValue::Int(_) => "Int",
+                    MetadataValue::Float(_) => "Float",
+                    MetadataValue::Str(_) => "Str",
+                    MetadataValue::SparseVector(_) => "SparseVector",
+                    MetadataValue::BoolArray(_) => "BoolArray",
+                    MetadataValue::IntArray(_) => "IntArray",
+                    MetadataValue::FloatArray(_) => "FloatArray",
+                    MetadataValue::StringArray(_) => "StringArray",
+                };
+                write!(f, "Primitive({}, {})", op, type_name)
+            }
+            MetadataComparison::Set(op, val) => {
+                let type_name = match val {
+                    MetadataSetValue::Bool(_) => "Bool",
+                    MetadataSetValue::Int(_) => "Int",
+                    MetadataSetValue::Float(_) => "Float",
+                    MetadataSetValue::Str(_) => "Str",
+                };
+                write!(f, "Set({}, {})", op, type_name)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
 pub enum PrimitiveOperator {
