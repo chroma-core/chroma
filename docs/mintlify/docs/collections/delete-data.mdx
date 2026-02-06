@@ -29,6 +29,9 @@ collection.delete(
     Some(vec!["id1".to_string(), "id2".to_string(), "id3".to_string()]),
     None,
 ).await?;
+
+```go Go
+err := collection.Delete(ctx, chroma.WithIDs("id1", "id2", "id3"))
 ```
 </CodeGroup>
 
@@ -64,5 +67,11 @@ collection.delete(
     Some(vec!["id1".to_string(), "id2".to_string(), "id3".to_string()]),
     Some(where_clause),
 ).await?;
+
+```go Go
+err := collection.Delete(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithWhere(chroma.EqString("chapter", "20")),
+)
 ```
 </CodeGroup>

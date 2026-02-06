@@ -32,6 +32,12 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(chroma.EqInt("page", 10)),
+)
 ```
 </CodeGroup>
 
@@ -62,6 +68,13 @@ let where_clause = Where::Metadata(MetadataExpression {
         MetadataValue::Str("value".to_string()),
     ),
 });
+
+```go Go
+// Go uses type-safe filter functions
+chroma.EqString("field", "value")   // $eq for strings
+chroma.EqInt("field", 10)           // $eq for integers
+chroma.GtInt("field", 10)           // $gt
+chroma.LtFloat("field", 5.5)        // $lt
 ```
 </CodeGroup>
 
@@ -104,6 +117,10 @@ let direct = Where::Metadata(MetadataExpression {
         MetadataValue::Str("search_string".to_string()),
     ),
 });
+
+```go Go
+// In Go, use explicit equality functions
+chroma.EqString("metadata_field", "search_string")
 ```
 </CodeGroup>
 
@@ -136,6 +153,12 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(chroma.GtInt("page", 10)),
+)
 ```
 </CodeGroup>
 
@@ -178,6 +201,12 @@ An `$and` operator will return results that match all the filters in the list.
 
 ```rust Rust
 let filter = Key::field("metadata_field").gte(5) & Key::field("metadata_field").lte(10);
+
+```go Go
+chroma.And(
+    chroma.GteInt("field", 5),
+    chroma.LteInt("field", 10),
+)
 ```
 </CodeGroup>
 
@@ -218,6 +247,17 @@ let search = SearchPayload::default()
     .limit(Some(10), 0);
 
 let results = collection.search(vec![search]).await?;
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("first query", "second query"),
+    chroma.WithWhere(
+        chroma.And(
+            chroma.GteInt("page", 5),
+            chroma.LteInt("page", 10),
+        ),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -257,6 +297,12 @@ An `$or` operator will return results that match any of the filters in the list.
 ```rust Rust
 let filter = Key::field("metadata_field").eq("value1")
     | Key::field("metadata_field").eq("value2");
+
+```go Go
+chroma.Or(
+    chroma.EqString("color", "red"),
+    chroma.EqString("color", "blue"),
+)
 ```
 </CodeGroup>
 
@@ -287,6 +333,16 @@ let search = SearchPayload::default()
     .r#where(Key::field("color").eq("red") | Key::field("color").eq("blue"));
 
 let results = collection.search(vec![search]).await?;
+
+```go Go
+results, err := collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.Or(
+            chroma.EqString("color", "red"),
+            chroma.EqString("color", "blue"),
+        ),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -318,6 +374,9 @@ An `$in` operator will return results where the metadata attribute is part of a 
 
 ```rust Rust
 let filter = Key::field("metadata_field").is_in(["value1", "value2", "value3"]);
+
+```go Go
+chroma.InString("metadata_field", "value1", "value2", "value3")
 ```
 </CodeGroup>
 
@@ -342,6 +401,9 @@ An `$nin` operator will return results where the metadata attribute is not part 
 
 ```rust Rust
 let filter = Key::field("metadata_field").not_in(["value1", "value2", "value3"]);
+
+```go Go
+chroma.NinString("metadata_field", "value1", "value2", "value3")
 ```
 </CodeGroup>
 
@@ -369,6 +431,13 @@ let search = SearchPayload::default()
     .r#where(Key::field("author").is_in(["Rowling", "Fitzgerald", "Herbert"]));
 
 let results = collection.search(vec![search]).await?;
+
+```go Go
+results, err := collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.InString("author", "Rowling", "Fitzgerald", "Herbert"),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -411,5 +480,13 @@ let search = SearchPayload::default()
     .limit(Some(10), 0);
 
 let results = collection.search(vec![search]).await?;
+
+```go Go
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("doc10", "thus spake zarathustra"),
+    chroma.WithNResults(10),
+    chroma.WithWhere(chroma.EqString("metadata_field", "is_equal_to_this")),
+    chroma.WithWhereDocument(chroma.Contains("search_string")),
+)
 ```
 </CodeGroup>
