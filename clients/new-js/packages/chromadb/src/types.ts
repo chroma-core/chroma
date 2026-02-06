@@ -32,20 +32,34 @@ export type { SparseVector };
 
 /**
  * Metadata that can be associated with a collection.
- * Values must be boolean, number, or string types.
+ * Values can be boolean, number, string, SparseVector, typed arrays, or null.
  */
 export type CollectionMetadata = Record<
   string,
-  boolean | number | string | SparseVector | null
+  | boolean
+  | number
+  | string
+  | SparseVector
+  | boolean[]
+  | number[]
+  | string[]
+  | null
 >;
 
 /**
  * Metadata that can be associated with individual records.
- * Values must be boolean, number, or string types.
+ * Values can be boolean, number, string, SparseVector, typed arrays, or null.
  */
 export type Metadata = Record<
   string,
-  boolean | number | string | SparseVector | null
+  | boolean
+  | number
+  | string
+  | SparseVector
+  | boolean[]
+  | number[]
+  | string[]
+  | null
 >;
 
 /**
