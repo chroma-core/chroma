@@ -2139,6 +2139,7 @@ impl Schema {
                 let value_type = match &expression.comparison {
                     MetadataComparison::Primitive(_, value) => value.value_type(),
                     MetadataComparison::Set(_, set_value) => set_value.value_type(),
+                    MetadataComparison::ArrayContains(_, value) => value.value_type(),
                 };
                 let is_enabled = self
                     .is_metadata_type_index_enabled(expression.key.as_str(), value_type)

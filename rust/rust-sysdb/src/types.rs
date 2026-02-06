@@ -67,6 +67,18 @@ fn convert_update_metadata_to_metadata(
                         "sparse vectors are not supported in collection metadata".to_string(),
                     ));
                 }
+                chroma_proto::update_metadata_value::Value::BoolListValue(v) => {
+                    MetadataValue::BoolArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::IntListValue(v) => {
+                    MetadataValue::IntArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::DoubleListValue(v) => {
+                    MetadataValue::FloatArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::StringListValue(v) => {
+                    MetadataValue::StringArray(v.values)
+                }
             };
             metadata.insert(key, meta_value);
         }
