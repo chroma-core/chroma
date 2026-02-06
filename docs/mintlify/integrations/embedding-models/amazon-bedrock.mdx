@@ -4,7 +4,14 @@ title: "Amazon Bedrock"
 
 import { Callout } from '/snippets/callout.mdx';
 
-This embedding function relies on the boto3 python package, which you can install with pip install boto3.
+Amazon Bedrock provides access to Amazon Titan embedding models via the AWS SDK or Bedrock API keys (bearer tokens).
+
+## Using Amazon Bedrock models with Chroma
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+This embedding function relies on the boto3 python package, which you can install with `pip install boto3`.
 
 ```python Python
 import boto3
@@ -20,7 +27,73 @@ texts = ["Hello, world!", "How are you?"]
 embeddings = bedrock_ef(texts)
 ```
 
-You can pass in an optional model\_name argument, which lets you choose which Amazon Bedrock embedding model to use. By default, Chroma uses amazon.titan-embed-text-v1.
+You can pass in an optional model\_name argument, which lets you choose which Amazon Bedrock embedding model to use. By default, Chroma uses `amazon.titan-embed-text-v1`.
+
+</Tab>
+
+<Tab title="Go" icon="golang">
+
+The Go client supports two authentication methods: AWS SDK credentials (SigV4) and Bedrock API keys (bearer tokens).
+
+### Bearer Token Authentication
+
+```go
+import (
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/bedrock"
+)
+
+// Using AWS_BEARER_TOKEN_BEDROCK environment variable
+ef, err := bedrock.NewBedrockEmbeddingFunction(bedrock.WithEnvBearerToken())
+```
+
+### AWS SDK Authentication
+
+```go
+import (
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/bedrock"
+)
+
+// Uses the AWS default credential chain (env vars, shared config, IAM roles)
+ef, err := bedrock.NewBedrockEmbeddingFunction(
+    bedrock.WithRegion("us-east-1"),
+    bedrock.WithModel("amazon.titan-embed-text-v2:0"),
+    bedrock.WithDimensions(512),
+    bedrock.WithNormalize(true),
+)
+```
+
+### Embedding Documents
+
+```go
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "Hello, world!",
+    "How are you?",
+})
+
+embedding, err := ef.EmbedQuery(ctx, "search query")
+```
+
+### Configuration Options
+
+```go
+ef, err := bedrock.NewBedrockEmbeddingFunction(
+    bedrock.WithModel("amazon.titan-embed-text-v2:0"), // Model ID (default: amazon.titan-embed-text-v1)
+    bedrock.WithRegion("us-west-2"),                   // AWS region (default: us-east-1)
+    bedrock.WithProfile("myprofile"),                  // AWS profile for shared credentials
+    bedrock.WithDimensions(256),                       // Output dimensions (Titan v2 only)
+    bedrock.WithNormalize(true),                       // Output normalization (Titan v2 only)
+)
+```
+
+### Supported Models
+
+| Model ID | Dimensions | Description |
+|----------|-----------|-------------|
+| `amazon.titan-embed-text-v1` | 1536 | Default. General-purpose text embeddings |
+| `amazon.titan-embed-text-v2:0` | 256/512/1024 | Configurable dimensions, supports normalization |
+
+</Tab>
+</Tabs>
 
 <Callout>
 Visit Amazon Bedrock [documentation](https://docs.aws.amazon.com/bedrock/) for more information on available models and configuration.
