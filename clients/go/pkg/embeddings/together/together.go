@@ -15,6 +15,14 @@ import (
 
 // Docs:  https://docs.together.ai/docs/embeddings-rest.  Models - https://docs.together.ai/docs/embeddings-models.
 
+type contextKey struct{ name string }
+
+var modelContextKey = contextKey{"model"}
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
 const (
 	defaultBaseAPI = "https://api.together.xyz/v1/embeddings"
 	// https://docs.together.ai/reference/embeddings
@@ -172,7 +180,7 @@ func NewTogetherEmbeddingFunction(opts ...Option) (*TogetherEmbeddingFunction, e
 
 func (e *TogetherEmbeddingFunction) getModelFromContext(ctx context.Context) embeddings.EmbeddingModel {
 	model := e.apiClient.DefaultModel
-	if m, ok := ctx.Value("model").(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = embeddings.EmbeddingModel(m)
 	}
 	return model

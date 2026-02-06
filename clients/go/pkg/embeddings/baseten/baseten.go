@@ -15,9 +15,16 @@ import (
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
 
+type contextKey struct{ name string }
+
+var modelContextKey = contextKey{"model"}
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
 const (
-	APIKeyEnvVar    = "BASETEN_API_KEY"
-	ModelContextVar = "model"
+	APIKeyEnvVar = "BASETEN_API_KEY"
 )
 
 // Input represents the input for an embedding request.
@@ -190,7 +197,7 @@ func convertToMatrix(response *CreateEmbeddingResponse) [][]float32 {
 
 func (e *BasetenEmbeddingFunction) getModel(ctx context.Context) string {
 	model := e.apiClient.Model
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = m
 	}
 	return model

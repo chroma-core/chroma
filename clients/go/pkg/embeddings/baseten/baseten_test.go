@@ -352,7 +352,7 @@ func TestBasetenEmbeddingFunction_ContextModel(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	ctx := context.WithValue(context.Background(), ModelContextVar, "context-override-model")
+	ctx := ContextWithModel(context.Background(), "context-override-model")
 	_, err = ef.EmbedQuery(ctx, "test")
 	require.NoError(t, err)
 	require.Equal(t, "context-override-model", capturedModel)
