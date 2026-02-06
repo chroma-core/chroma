@@ -1946,7 +1946,7 @@ def test_sparse_vector_in_metadata_validation():
     with pytest.raises(
         ValueError, match="indices and values must have the same length"
     ):
-        invalid_metadata = { # type: ignore
+        invalid_metadata = {  # type: ignore
             "text": "invalid",
             "sparse_embedding": SparseVector(indices=[0, 1], values=[0.1]),
         }
@@ -1958,13 +1958,13 @@ def test_sparse_vector_in_metadata_validation():
     }
     with pytest.raises(
         ValueError,
-        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, list, or None",
     ):
         validate_metadata(invalid_metadata_2)
 
     # Test 5: Invalid sparse vector - negative index (construction fails)
     with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
-        invalid_metadata_3 = { # type: ignore
+        invalid_metadata_3 = {  # type: ignore
             "text": "negative index",
             "sparse_embedding": SparseVector(
                 indices=[0, -1, 2], values=[0.1, 0.2, 0.3]
@@ -1973,7 +1973,7 @@ def test_sparse_vector_in_metadata_validation():
 
     # Test 6: Invalid sparse vector - non-numeric value (construction fails)
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
-        invalid_metadata_4 = { # type: ignore
+        invalid_metadata_4 = {  # type: ignore
             "text": "non-numeric value",
             "sparse_embedding": SparseVector(
                 indices=[0, 1], values=[0.1, "not_a_number"]
@@ -1996,7 +1996,7 @@ def test_sparse_vector_in_metadata_validation():
     }
     with pytest.raises(
         ValueError,
-        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, list, or None",
     ):
         validate_metadata(metadata_nested)
 

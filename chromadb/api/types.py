@@ -1085,7 +1085,7 @@ def validate_metadata(metadata: Metadata) -> Metadata:
             value, (str, int, float, type(None))
         ):
             raise ValueError(
-                f"Expected metadata value to be a str, int, float, bool, SparseVector, or list, got {value} which is a {type(value).__name__}"
+                f"Expected metadata value to be a str, int, float, bool, SparseVector, list, or None, got {value} which is a {type(value).__name__}"
             )
     return metadata
 
@@ -1183,6 +1183,14 @@ def validate_where(where: Where) -> None:
     for key, value in where.items():
         if not isinstance(key, str):
             raise ValueError(f"Expected where key to be a str, got {key}")
+        # $contains and $not_contains are only valid as operators within a
+        # field expression (e.g. {"field": {"$contains": val}}), not as
+        # top-level where keys.
+        if key in ("$contains", "$not_contains"):
+            raise ValueError(
+                f"Expected where key to be a metadata field name or a logical "
+                f"operator ($and, $or), got {key}"
+            )
         if (
             key != "$and"
             and key != "$or"

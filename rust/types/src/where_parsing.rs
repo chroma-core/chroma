@@ -206,6 +206,12 @@ pub fn parse_where(json_payload: &Value) -> Result<Where, WhereValidationError> 
             children: predicate_list,
         }));
     }
+    // Any other $-prefixed key is an operator, not a metadata field name.
+    // Operators like $contains, $not_contains, $gt, etc. are only valid
+    // inside a field expression (e.g. {"field": {"$contains": val}}).
+    if key.starts_with('$') {
+        return Err(WhereValidationError::WhereClause);
+    }
     // At this point we know we're at a direct comparison. It can either
     // be of the form {"key": "value"} or {"key": {"$operator": "value"}}.
     if value.is_string() {
