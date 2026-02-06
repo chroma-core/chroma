@@ -2095,7 +2095,10 @@ impl Key {
     pub fn not_contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
         Where::Metadata(MetadataExpression {
             key: self.to_string(),
-            comparison: MetadataComparison::ArrayContains(ContainsOperator::NotContains, value.into()),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::NotContains,
+                value.into(),
+            ),
         })
     }
 

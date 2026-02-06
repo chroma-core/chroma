@@ -322,7 +322,8 @@ type SerializedMetadataValue =
   | SparseVector
   | Array<boolean>
   | Array<number>
-  | Array<string>;
+  | Array<string>
+  | null;
 
 export type SerializedMetadata = Record<string, SerializedMetadataValue>;
 

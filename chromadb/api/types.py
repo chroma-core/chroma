@@ -1234,6 +1234,10 @@ def validate_where(where: Where) -> None:
                         )
                 # $contains/$not_contains: scalar operand (checks if array field contains value)
                 if operator in ["$contains", "$not_contains"]:
+                    if key == "#document" and not isinstance(operand, str):
+                        raise ValueError(
+                            f"Expected operand value to be a str for operator {operator} on #document, got {operand}"
+                        )
                     if not isinstance(operand, (str, int, float, bool)):
                         raise ValueError(
                             f"Expected operand value to be a str, int, float, or bool for operator {operator}, got {operand}"
