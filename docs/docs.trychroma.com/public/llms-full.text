@@ -1499,7 +1499,7 @@ We welcome pull requests to add new Embedding Functions to the community.
 
 ## Default: all-MiniLM-L6-v2
 
-Chroma's default embedding function uses the [Sentence Transformers](https://www.sbert.net/) `all-MiniLM-L6-v2` model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you download the model files (this will happen automatically).
+Chroma's default embedding function uses the [Sentence Transformers](https://www.sbert.net/) `all-MiniLM-L6-v2` model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you to download the model files (this will happen automatically).
 
 If you don't specify an embedding function when creating a collection, Chroma will set it to be the `DefaultEmbeddingFunction`:
 
