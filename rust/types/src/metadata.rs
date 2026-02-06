@@ -377,19 +377,20 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
                     "Empty lists are not allowed as metadata values",
                 ));
             }
-            // Try to extract as array - infer type from first element
-            let first = list.get_item(0)?;
-            if first.extract::<bool>().is_ok() {
-                Ok(UpdateMetadataValue::BoolArray(list.extract()?))
-            } else if first.extract::<i64>().is_ok() {
-                Ok(UpdateMetadataValue::IntArray(list.extract()?))
-            } else if first.extract::<f64>().is_ok() {
-                Ok(UpdateMetadataValue::FloatArray(list.extract()?))
-            } else if first.extract::<String>().is_ok() {
-                Ok(UpdateMetadataValue::StringArray(list.extract()?))
+            // Try to extract entire list as each type.
+            // We check all elements (not just the first) to handle mixed-numeric
+            // lists like [1, 2.5, 3] which should be inferred as FloatArray.
+            if let Ok(arr) = list.extract::<Vec<bool>>() {
+                Ok(UpdateMetadataValue::BoolArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<i64>>() {
+                Ok(UpdateMetadataValue::IntArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<f64>>() {
+                Ok(UpdateMetadataValue::FloatArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<String>>() {
+                Ok(UpdateMetadataValue::StringArray(arr))
             } else {
                 Err(pyo3::exceptions::PyTypeError::new_err(
-                    "Cannot convert Python list to UpdateMetadataValue: unsupported element type",
+                    "Cannot convert Python list to UpdateMetadataValue: mixed or unsupported element types",
                 ))
             }
         } else {
@@ -638,19 +639,20 @@ impl<'py> pyo3::FromPyObject<'py> for MetadataValue {
                     "Empty lists are not allowed as metadata values",
                 ));
             }
-            // Try to extract as array - infer type from first element
-            let first = list.get_item(0)?;
-            if first.extract::<bool>().is_ok() {
-                Ok(MetadataValue::BoolArray(list.extract()?))
-            } else if first.extract::<i64>().is_ok() {
-                Ok(MetadataValue::IntArray(list.extract()?))
-            } else if first.extract::<f64>().is_ok() {
-                Ok(MetadataValue::FloatArray(list.extract()?))
-            } else if first.extract::<String>().is_ok() {
-                Ok(MetadataValue::StringArray(list.extract()?))
+            // Try to extract entire list as each type.
+            // We check all elements (not just the first) to handle mixed-numeric
+            // lists like [1, 2.5, 3] which should be inferred as FloatArray.
+            if let Ok(arr) = list.extract::<Vec<bool>>() {
+                Ok(MetadataValue::BoolArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<i64>>() {
+                Ok(MetadataValue::IntArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<f64>>() {
+                Ok(MetadataValue::FloatArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<String>>() {
+                Ok(MetadataValue::StringArray(arr))
             } else {
                 Err(pyo3::exceptions::PyTypeError::new_err(
-                    "Cannot convert Python list to MetadataValue: unsupported element type",
+                    "Cannot convert Python list to MetadataValue: mixed or unsupported element types",
                 ))
             }
         } else {
