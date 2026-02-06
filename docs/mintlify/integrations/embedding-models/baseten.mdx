@@ -8,6 +8,9 @@ Get started easily with an embedding model from Baseten's model library, like [M
 
 ## Using Baseten models with Chroma
 
+<Tabs>
+<Tab title="Python" icon="python">
+
 This embedding function relies on the openai python package, which you can install with pip install openai.
 
 You must set the api\_key and api\_base, replacing the api\_base with the URL from the model deployed in your Baseten account.
@@ -23,3 +26,55 @@ baseten_ef = embedding_functions.BasetenEmbeddingFunction(
 
 baseten_ef(input=["This is my first text to embed", "This is my second document"])
 ```
+
+</Tab>
+
+<Tab title="Go" icon="golang">
+
+The Go client supports Baseten BEI (Baseten Embeddings Inference) for deploying your own embedding models with GPU acceleration.
+
+```go
+import (
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/baseten"
+)
+
+// Create with API key directly
+ef, err := baseten.NewBasetenEmbeddingFunction(
+    baseten.WithAPIKey("YOUR_API_KEY"),
+    baseten.WithBaseURL("https://model-xxxxxxxx.api.baseten.co/environments/production/sync"),
+)
+
+// Or use environment variable (BASETEN_API_KEY)
+ef, err := baseten.NewBasetenEmbeddingFunction(
+    baseten.WithEnvAPIKey(),
+    baseten.WithBaseURL("https://model-xxxxxxxx.api.baseten.co/environments/production/sync"),
+)
+```
+
+### Embedding Documents
+
+```go
+// Embed text documents
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Embed a single query
+embedding, err := ef.EmbedQuery(ctx, "search query")
+```
+
+### Configuration Options
+
+```go
+ef, err := baseten.NewBasetenEmbeddingFunction(
+    baseten.WithEnvAPIKey(),
+    baseten.WithBaseURL("https://model-xxxxxxxx.api.baseten.co/environments/production/sync"),
+    baseten.WithModelID("my-model"),         // Optional model identifier
+    baseten.WithHTTPClient(customHTTPClient), // Optional custom HTTP client
+    baseten.WithInsecure(),                  // Allow HTTP for local development
+)
+```
+
+</Tab>
+</Tabs>

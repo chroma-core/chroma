@@ -38,6 +38,15 @@ let options = ChromaHttpClientOptions::cloud(
     "Database name",
 )?;
 let client = ChromaHttpClient::new(options);
+
+```go Go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewCloudClient(
+    chroma.WithCloudAPIKey("Chroma Cloud API key"),
+    chroma.WithDatabaseAndTenant("Database name", "Tenant ID"),
+)
+defer client.Close()
 ```
 </CodeGroup>
 
@@ -58,6 +67,10 @@ const client = new CloudClient();
 use chroma::ChromaHttpClient;
 
 let client = ChromaHttpClient::cloud()?;
+
+```go Go
+client, err := chroma.NewCloudClient()
+defer client.Close()
 ```
 </CodeGroup>
 
@@ -176,6 +189,52 @@ options.endpoint = "http://localhost:8000".parse()?;
 
 let client = ChromaHttpClient::new(options);
 client.heartbeat().await?;
+
+<Tab title="Go" icon="golang">
+
+To connect with the Go client, you must connect to a Chroma server.
+
+You can run a Chroma server locally using the CLI or Docker:
+
+```terminal
+npx chroma run --path ./getting-started
+```
+
+Or with Docker:
+
+```terminal
+docker pull chromadb/chroma
+docker run -p 8000:8000 chromadb/chroma
+```
+
+With a Chroma server running, connect using `NewHTTPClient`:
+
+```go Go
+import chroma "github.com/chroma-core/chroma/clients/go"
+
+client, err := chroma.NewHTTPClient()
+defer client.Close()
+```
+
+By default, the client connects to `http://localhost:8000`. For custom settings:
+
+```go Go
+client, err := chroma.NewHTTPClient(
+    chroma.WithBaseURL("http://localhost:9000"),
+    chroma.WithDatabaseAndTenant("my-db", "default_tenant"),
+)
+defer client.Close()
+```
+
+The client object has a few useful convenience methods.
+
+- `Heartbeat()` - checks if the server is reachable. Useful for making sure the client remains connected.
+- `Reset()` - empties and completely resets the database. WARNING: This is destructive and not reversible.
+
+```go Go
+ctx := context.Background()
+client.Heartbeat(ctx)
+client.Reset(ctx)
 ```
 
 </Tab>

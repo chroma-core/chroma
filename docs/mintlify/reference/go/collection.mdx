@@ -1,0 +1,413 @@
+---
+title: "Go Collection Reference"
+---
+
+## Properties
+
+| Property | Type | Description |
+| :--- | :--- | :---------- |
+| `Name()` | `string` | The name of the collection. |
+| `ID()` | `string` | The unique identifier of the collection. |
+| `Metadata()` | `CollectionMetadata` | The metadata associated with the collection. |
+| `Dimension()` | `int` | The dimension of embeddings in the collection. |
+| `Tenant()` | `Tenant` | The tenant the collection belongs to. |
+| `Database()` | `Database` | The database the collection belongs to. |
+
+---
+
+## Methods
+
+### Add
+
+Add items to the collection.
+
+```go
+err := collection.Add(ctx, options...)
+```
+
+<ParamField path="WithIDs(ids...)" type="...DocumentID" required>
+  Unique identifiers for the records (required unless using IDGenerator).
+</ParamField>
+
+<ParamField path="WithTexts(texts...)" type="...string">
+  Document text (will be embedded if embeddings not provided).
+</ParamField>
+
+<ParamField path="WithEmbeddings(embeddings...)" type="...Embedding">
+  Pre-computed embeddings.
+</ParamField>
+
+<ParamField path="WithMetadatas(metadatas...)" type="...DocumentMetadata">
+  Metadata for each record.
+</ParamField>
+
+<ParamField path="WithIDGenerator(gen)" type="IDGenerator">
+  Auto-generate IDs for records.
+</ParamField>
+
+```go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithTexts("document 1", "document 2"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewStringAttribute("source", "web")),
+        chroma.NewDocumentMetadata(chroma.NewStringAttribute("source", "file")),
+    ),
+)
+```
+
+### Upsert
+
+Upsert items to the collection (inserts new records or updates existing ones). Accepts the same options as `Add`.
+
+```go
+err := collection.Upsert(ctx, options...)
+```
+
+```go
+err := collection.Upsert(ctx,
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithTexts("updated document 1", "updated document 2"),
+)
+```
+
+### Update
+
+Update items in the collection.
+
+```go
+err := collection.Update(ctx, options...)
+```
+
+<ParamField path="WithIDs(ids...)" type="...DocumentID" required>
+  IDs of records to update.
+</ParamField>
+
+<ParamField path="WithTexts(texts...)" type="...string">
+  New document text.
+</ParamField>
+
+<ParamField path="WithEmbeddings(embeddings...)" type="...Embedding">
+  New embedding vectors.
+</ParamField>
+
+<ParamField path="WithMetadatas(metadatas...)" type="...DocumentMetadata">
+  New metadata.
+</ParamField>
+
+```go
+err := collection.Update(ctx,
+    chroma.WithIDs("id1"),
+    chroma.WithTexts("new document content"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewStringAttribute("updated", "true")),
+    ),
+)
+```
+
+### Delete
+
+Delete items from the collection.
+
+```go
+err := collection.Delete(ctx, options...)
+```
+
+<ParamField path="WithIDs(ids...)" type="...DocumentID">
+  Specific record IDs to delete.
+</ParamField>
+
+<ParamField path="WithWhere(where)" type="WhereFilter">
+  Metadata-based filtering for deletion.
+</ParamField>
+
+<ParamField path="WithWhereDocument(where)" type="WhereDocumentFilter">
+  Document content-based filtering for deletion.
+</ParamField>
+
+```go
+// Delete by IDs
+err := collection.Delete(ctx,
+    chroma.WithIDs("id1", "id2"),
+)
+
+// Delete by filter
+err := collection.Delete(ctx,
+    chroma.WithWhere(chroma.EqString(chroma.K("source"), "deprecated")),
+)
+```
+
+### Get
+
+Get items from the collection.
+
+```go
+result, err := collection.Get(ctx, options...)
+```
+
+<ParamField path="WithIDs(ids...)" type="...DocumentID">
+  Specific record IDs to retrieve.
+</ParamField>
+
+<ParamField path="WithWhere(where)" type="WhereFilter">
+  Metadata-based filtering.
+</ParamField>
+
+<ParamField path="WithWhereDocument(where)" type="WhereDocumentFilter">
+  Document content-based filtering.
+</ParamField>
+
+<ParamField path="WithInclude(include...)" type="...Include">
+  Fields to include: `IncludeDocuments`, `IncludeMetadatas`, `IncludeEmbeddings`.
+</ParamField>
+
+<ParamField path="WithLimit(limit)" type="int">
+  Maximum records to return.
+</ParamField>
+
+<ParamField path="WithOffset(offset)" type="int">
+  Records to skip.
+</ParamField>
+
+<ParamField path="NewPage(opts...)" type="PageOption">
+  Fluent pagination with `Limit(n)` and `Offset(n)`.
+</ParamField>
+
+**Returns:** `GetResult` - Results containing IDs, documents, metadatas, and embeddings.
+
+```go
+result, err := collection.Get(ctx,
+    chroma.WithIDs("id1", "id2"),
+    chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeMetadatas),
+)
+
+for i, id := range result.IDs {
+    fmt.Printf("ID: %s, Document: %s\n", id, result.Documents[i])
+}
+```
+
+### Query
+
+Query the collection for similar items.
+
+```go
+result, err := collection.Query(ctx, options...)
+```
+
+<ParamField path="WithQueryTexts(texts...)" type="...string">
+  Query text to embed and search.
+</ParamField>
+
+<ParamField path="WithQueryEmbeddings(embeddings...)" type="...Embedding">
+  Pre-computed query embeddings.
+</ParamField>
+
+<ParamField path="WithNResults(n)" type="int">
+  Maximum results per query. Default: 10.
+</ParamField>
+
+<ParamField path="WithWhere(where)" type="WhereFilter">
+  Metadata-based filtering.
+</ParamField>
+
+<ParamField path="WithWhereDocument(where)" type="WhereDocumentFilter">
+  Document content-based filtering.
+</ParamField>
+
+<ParamField path="WithInclude(include...)" type="...Include">
+  Fields to include. Default: `["metadatas", "documents", "distances"]`.
+</ParamField>
+
+<ParamField path="WithIDs(ids...)" type="...DocumentID">
+  Filter to specific record IDs.
+</ParamField>
+
+**Returns:** `QueryResult` - Results containing IDs, documents, metadatas, embeddings, and distances (nested by query).
+
+```go
+result, err := collection.Query(ctx,
+    chroma.WithQueryTexts("search query"),
+    chroma.WithNResults(5),
+    chroma.WithWhere(chroma.EqString(chroma.K("category"), "science")),
+    chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeDistances),
+)
+
+for i, ids := range result.IDs {
+    for j, id := range ids {
+        fmt.Printf("Query %d, Result %d: ID=%s, Distance=%f\n",
+            i, j, id, result.Distances[i][j])
+    }
+}
+```
+
+### Search
+
+Performs hybrid search on the collection using expression builders.
+
+```go
+result, err := collection.Search(ctx, options...)
+```
+
+<ParamField path="WithKnnRank(query, opts...)" type="KnnQueryOption, ...KnnOption">
+  KNN ranking with text or vector query.
+</ParamField>
+
+<ParamField path="WithFilter(where)" type="WhereClause">
+  Metadata-based filtering.
+</ParamField>
+
+<ParamField path="WithIDs(ids...)" type="...DocumentID">
+  Filter to specific record IDs.
+</ParamField>
+
+<ParamField path="NewPage(opts...)" type="PageOption">
+  Pagination with `Limit(n)` and `Offset(n)`.
+</ParamField>
+
+<ParamField path="WithSelect(keys...)" type="...Key">
+  Fields to include: `KDocument`, `KScore`, `KMetadata`, `KEmbedding`.
+</ParamField>
+
+<ParamField path="WithGroupBy(groupBy)" type="*GroupBy">
+  Group results by metadata keys.
+</ParamField>
+
+<ParamField path="WithReadLevel(level)" type="ReadLevel">
+  Read from index only or index+WAL.
+</ParamField>
+
+**Returns:** `SearchResult` - Search results. Use `.Rows()` to convert to row-major format.
+
+```go
+result, err := collection.Search(ctx,
+    chroma.NewSearchRequest(
+        chroma.WithKnnRank(chroma.KnnQueryText("machine learning"), chroma.WithKnnLimit(50)),
+        chroma.WithFilter(chroma.EqString(chroma.K("category"), "science")),
+        chroma.NewPage(chroma.Limit(5)),
+        chroma.WithSelect(chroma.KDocument, chroma.KScore, chroma.K("title")),
+    ),
+)
+
+sr := result.(*chroma.SearchResultImpl)
+for _, row := range sr.Rows() {
+    fmt.Printf("ID: %s, Score: %f\n", row.ID, row.Score)
+}
+```
+
+### Count
+
+Count the number of items in the collection.
+
+```go
+count, err := collection.Count(ctx)
+```
+
+**Returns:** `int` - The number of items.
+
+### ModifyName
+
+Modify the collection name.
+
+```go
+err := collection.ModifyName(ctx, "new_collection_name")
+```
+
+### ModifyMetadata
+
+Modify the collection metadata.
+
+```go
+err := collection.ModifyMetadata(ctx,
+    chroma.NewMetadata(chroma.NewStringAttribute("version", "2.0")),
+)
+```
+
+### Fork
+
+Creates a fork of the collection with a new name.
+
+```go
+forkedCollection, err := collection.Fork(ctx, "collection_backup")
+```
+
+**Returns:** `Collection` - The forked collection.
+
+### IndexingStatus
+
+Returns the indexing status of the collection.
+
+```go
+status, err := collection.IndexingStatus(ctx)
+fmt.Printf("Indexing progress: %.2f%%\n", status.OpIndexingProgress * 100)
+```
+
+**Returns:** `*IndexingStatus` containing:
+- `NumIndexedOps` - Number of indexed operations
+- `NumUnindexedOps` - Number of unindexed operations
+- `TotalOps` - Total operations
+- `OpIndexingProgress` - Indexing progress (0.0 to 1.0)
+
+### Close
+
+Closes the collection and releases resources.
+
+```go
+err := collection.Close()
+```
+
+---
+
+## Filter Helpers
+
+### Comparison Operators
+
+```go
+// Equals
+chroma.EqString(chroma.K("field"), "value")
+chroma.EqInt(chroma.K("count"), 10)
+chroma.EqFloat(chroma.K("score"), 0.95)
+chroma.EqBool(chroma.K("active"), true)
+
+// Not equals
+chroma.NeString(chroma.K("field"), "value")
+
+// Greater than / Less than
+chroma.GtInt(chroma.K("count"), 5)
+chroma.GteInt(chroma.K("count"), 5)
+chroma.LtInt(chroma.K("count"), 10)
+chroma.LteInt(chroma.K("count"), 10)
+
+// In / Not In
+chroma.InString(chroma.K("category"), "a", "b", "c")
+chroma.NinString(chroma.K("category"), "x", "y")
+```
+
+### Logical Operators
+
+```go
+// AND
+chroma.And(
+    chroma.EqString(chroma.K("type"), "article"),
+    chroma.GtInt(chroma.K("views"), 100),
+)
+
+// OR
+chroma.Or(
+    chroma.EqString(chroma.K("status"), "published"),
+    chroma.EqString(chroma.K("status"), "featured"),
+)
+```
+
+### Document Filters
+
+```go
+// Contains
+chroma.Contains("search term")
+
+// Not contains
+chroma.NotContains("excluded term")
+
+// Logical combinations
+chroma.AndDoc(chroma.Contains("python"), chroma.Contains("tutorial"))
+chroma.OrDoc(chroma.Contains("beginner"), chroma.Contains("introduction"))
+```

@@ -46,6 +46,29 @@ const sparseEmbeddings = await embedder.generate(["document1", "document2"]);
 ```
 
 </Tab>
+<Tab title="Go" icon="golang">
+
+```go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/chromacloudsplade"
+)
+
+// Create Chroma Cloud Splade embedding function
+ef, err := chromacloudsplade.NewChromaCloudSpladeEmbeddingFunction(
+    os.Getenv("CHROMA_API_KEY"),
+)
+
+// Use directly
+sparseEmbeddings, err := ef.EmbedDocuments(ctx, []string{"Hello, world!", "How are you?"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+</Tab>
 </Tabs>
 
 <Callout>

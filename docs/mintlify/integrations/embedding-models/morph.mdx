@@ -52,6 +52,41 @@ const collectionGet = await client.getCollection({
 
 </Tab>
 
+<Tab title="Go" icon="golang">
+
+```bash
+go get github.com/chroma-core/chroma/clients/go/pkg/embeddings/morph
+```
+
+```go Go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/morph"
+)
+
+// Create Morph embedding function
+ef, err := morph.NewMorphEmbeddingFunction(
+    os.Getenv("MORPH_API_KEY"),
+    morph.WithModel("morph-embedding-v2"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "func calculate(a, b int) int { return a + b }",
+    "type User struct { Name string }",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+</Tab>
+
 </Tabs>
 
 For further details on Morph's models check the [documentation](https://docs.morphllm.com/api-reference/endpoint/embedding?utm_source=docs.trychroma.com).

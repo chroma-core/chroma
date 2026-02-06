@@ -254,6 +254,13 @@
                   "reference/typescript/where-filter"
                 ]
               },
+              {
+                "group": "Go",
+                "pages": [
+                  "reference/go/client",
+                  "reference/go/collection"
+                ]
+              },
               "reference/rust"
             ]
           },
@@ -382,6 +389,7 @@
         "terminal",
         "python",
         "typescript",
+        "go",
         "rust"
       ]
     }
