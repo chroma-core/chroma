@@ -3109,15 +3109,21 @@ class TestWhereFromDict:
 
         # Non-string types must be rejected
         for bad_value in [42, 3.14, True, False]:
-            with pytest.raises(TypeError, match="\\$contains on #document requires a string"):
+            with pytest.raises(
+                TypeError, match="\\$contains on #document requires a string"
+            ):
                 Key.DOCUMENT.contains(bad_value)
 
-            with pytest.raises(TypeError, match="\\$not_contains on #document requires a string"):
+            with pytest.raises(
+                TypeError, match="\\$not_contains on #document requires a string"
+            ):
                 Key.DOCUMENT.not_contains(bad_value)
 
         # Metadata keys still accept non-string scalars
         assert Key("scores").contains(42).to_dict() == {"scores": {"$contains": 42}}
-        assert Key("flags").not_contains(True).to_dict() == {"flags": {"$not_contains": True}}
+        assert Key("flags").not_contains(True).to_dict() == {
+            "flags": {"$not_contains": True}
+        }
 
     def test_logical_operators(self):
         """Test logical operator conversions."""

@@ -58,6 +58,9 @@ export class Key {
    * K("scores").contains(42)                   // metadata array contains
    */
   public contains(value: string | number | boolean): WhereExpression {
+    if (this.name === "#document" && typeof value !== "string") {
+      throw new TypeError("K.DOCUMENT.contains requires a string value");
+    }
     return createComparisonWhere(this.name, "$contains", value);
   }
 
@@ -72,6 +75,9 @@ export class Key {
    * K("tags").notContains("draft")          // metadata array not-contains
    */
   public notContains(value: string | number | boolean): WhereExpression {
+    if (this.name === "#document" && typeof value !== "string") {
+      throw new TypeError("K.DOCUMENT.notContains requires a string value");
+    }
     return createComparisonWhere(this.name, "$not_contains", value);
   }
 

@@ -260,7 +260,32 @@ export const validateMetadata = (metadata?: Metadata) => {
     throw new ChromaValueError("Expected metadata to be non-empty");
   }
 
-  const isValidMetadataValue = (v: unknown): boolean => {
+  const validateMetadataListValue = (key: string, v: unknown[]): void => {
+    if (v.length === 0) {
+      throw new ChromaValueError(
+        `Expected metadata list value for key '${key}' to be non-empty`,
+      );
+    }
+    const firstType = typeof v[0];
+    for (const item of v) {
+      if (
+        typeof item !== "string" &&
+        typeof item !== "number" &&
+        typeof item !== "boolean"
+      ) {
+        throw new ChromaValueError(
+          `Expected metadata list value for key '${key}' to contain only strings, numbers, or booleans, got ${typeof item}`,
+        );
+      }
+      if (typeof item !== firstType) {
+        throw new ChromaValueError(
+          `Expected metadata list value for key '${key}' to contain only the same type, got mixed types`,
+        );
+      }
+    }
+  };
+
+  for (const [key, v] of Object.entries(metadata)) {
     if (
       v === null ||
       v === undefined ||
@@ -268,25 +293,17 @@ export const validateMetadata = (metadata?: Metadata) => {
       typeof v === "number" ||
       typeof v === "boolean"
     ) {
-      return true;
+      continue;
     }
     if (validateSparseVector(v)) {
-      return true;
+      continue;
     }
     if (Array.isArray(v)) {
-      return v.every(
-        (item) =>
-          typeof item === "string" ||
-          typeof item === "number" ||
-          typeof item === "boolean",
-      );
+      validateMetadataListValue(key, v);
+      continue;
     }
-    return false;
-  };
-
-  if (!Object.values(metadata).every(isValidMetadataValue)) {
     throw new ChromaValueError(
-      "Expected metadata values to be a string, number, boolean, SparseVector, typed array (string[], number[], boolean[]), or null",
+      `Expected metadata value for key '${key}' to be a string, number, boolean, SparseVector, typed array (string[], number[], boolean[]), or null`,
     );
   }
 };
