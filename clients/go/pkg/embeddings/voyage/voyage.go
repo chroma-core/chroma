@@ -18,25 +18,46 @@ import (
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
 
-// Docs:  https://docs.together.ai/docs/embeddings-rest.  Models - https://docs.together.ai/docs/embeddings-models.
+// Docs: https://docs.voyageai.com/docs/embeddings
 
 type InputType string
 type EncodingFormat string
 
+type contextKey struct{ name string }
+
+var (
+	inputTypeContextKey      = contextKey{"inputType"}
+	modelContextKey          = contextKey{"model"}
+	truncationContextKey     = contextKey{"truncation"}
+	encodingFormatContextKey = contextKey{"encodingFormat"}
+)
+
+func ContextWithInputType(ctx context.Context, inputType InputType) context.Context {
+	return context.WithValue(ctx, inputTypeContextKey, &inputType)
+}
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
+func ContextWithTruncation(ctx context.Context, truncation bool) context.Context {
+	return context.WithValue(ctx, truncationContextKey, &truncation)
+}
+
+func ContextWithEncodingFormat(ctx context.Context, format EncodingFormat) context.Context {
+	return context.WithValue(ctx, encodingFormatContextKey, &format)
+}
+
 const (
 	defaultBaseAPI = "https://api.voyageai.com/v1/embeddings"
 	// https://docs.voyageai.com/docs/embeddings
-	defaultMaxSize                          = 128
-	DefaultTruncation                       = true
-	InputTypeQuery           InputType      = "query"
-	InputTypeDocument        InputType      = "document"
-	defaultModel                            = "voyage-2"
-	EncodingFormatBase64     EncodingFormat = "base64"
-	InputTypeContextVar                     = "inputType"
-	ModelContextVar                         = "model"
-	TruncationContextVar                    = "truncation"
-	EncodingFormatContextVar                = "encodingFormat"
-	APIKeyEnvVar                            = "VOYAGE_API_KEY"
+	defaultMaxSize                      = 128
+	DefaultTruncation                   = true
+	InputTypeQuery       InputType      = "query"
+	InputTypeDocument    InputType      = "document"
+	defaultModel                        = "voyage-2"
+	EncodingFormatBase64 EncodingFormat = "base64"
+	APIKeyEnvVar                        = "VOYAGE_API_KEY"
 )
 
 type VoyageAIClient struct {
@@ -255,7 +276,7 @@ func NewVoyageAIEmbeddingFunction(opts ...Option) (*VoyageAIEmbeddingFunction, e
 // getModel returns the model from the context if it exists, otherwise it returns the default model
 func (e *VoyageAIEmbeddingFunction) getModel(ctx context.Context) embeddings.EmbeddingModel {
 	model := e.apiClient.DefaultModel
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = embeddings.EmbeddingModel(m)
 	}
 	return model
@@ -264,7 +285,7 @@ func (e *VoyageAIEmbeddingFunction) getModel(ctx context.Context) embeddings.Emb
 // getTruncation returns the truncation from the context if it exists, otherwise it returns the default truncation
 func (e *VoyageAIEmbeddingFunction) getTruncation(ctx context.Context) *bool {
 	model := e.apiClient.DefaultTruncation
-	if m, ok := ctx.Value(TruncationContextVar).(*bool); ok {
+	if m, ok := ctx.Value(truncationContextKey).(*bool); ok {
 		model = m
 	}
 	return model
@@ -273,7 +294,7 @@ func (e *VoyageAIEmbeddingFunction) getTruncation(ctx context.Context) *bool {
 // getInputType returns the input type from the context if it exists, otherwise it returns the default input type
 func (e *VoyageAIEmbeddingFunction) getInputType(ctx context.Context, inputType InputType) *InputType {
 	model := &inputType
-	if m, ok := ctx.Value(InputTypeContextVar).(*InputType); ok {
+	if m, ok := ctx.Value(inputTypeContextKey).(*InputType); ok {
 		model = m
 	}
 	return model
@@ -281,7 +302,7 @@ func (e *VoyageAIEmbeddingFunction) getInputType(ctx context.Context, inputType 
 
 func (e *VoyageAIEmbeddingFunction) getEncodingFormat(ctx context.Context) *EncodingFormat {
 	model := e.apiClient.DefaultEncodingFormat
-	if m, ok := ctx.Value(EncodingFormatContextVar).(*EncodingFormat); ok {
+	if m, ok := ctx.Value(encodingFormatContextKey).(*EncodingFormat); ok {
 		model = m
 	}
 	return model

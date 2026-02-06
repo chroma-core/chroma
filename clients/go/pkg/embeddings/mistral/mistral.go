@@ -13,9 +13,16 @@ import (
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
 
+type contextKey struct{ name string }
+
+var modelContextKey = contextKey{"model"}
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
 const (
 	DefaultEmbeddingModel = "mistral-embed"
-	ModelContextVar       = "model"
 	APIKeyEnvVar          = "MISTRAL_API_KEY"
 	DefaultBaseURL        = "https://api.mistral.ai"
 	EmbeddingsEndpoint    = "/v1/embeddings"
@@ -174,7 +181,7 @@ func (e *MistralEmbeddingFunction) EmbedDocuments(ctx context.Context, documents
 		return embeddings.NewEmptyEmbeddings(), nil
 	}
 	model := e.apiClient.DefaultModel
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = m
 	}
 	req := CreateEmbeddingRequest{
@@ -190,7 +197,7 @@ func (e *MistralEmbeddingFunction) EmbedDocuments(ctx context.Context, documents
 
 func (e *MistralEmbeddingFunction) EmbedQuery(ctx context.Context, document string) (embeddings.Embedding, error) {
 	model := e.apiClient.DefaultModel
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = m
 	}
 	req := CreateEmbeddingRequest{

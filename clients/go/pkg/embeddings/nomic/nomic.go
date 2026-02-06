@@ -19,21 +19,38 @@ import (
 
 type TaskType string
 
+type contextKey struct{ name string }
+
+var (
+	modelContextKey          = contextKey{"model"}
+	dimensionalityContextKey = contextKey{"dimensionality"}
+	taskTypeContextKey       = contextKey{"task_type"}
+)
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
+func ContextWithDimensionality(ctx context.Context, dimensionality *int) context.Context {
+	return context.WithValue(ctx, dimensionalityContextKey, dimensionality)
+}
+
+func ContextWithTaskType(ctx context.Context, taskType TaskType) context.Context {
+	return context.WithValue(ctx, taskTypeContextKey, taskType)
+}
+
 const (
-	DefaultEmbeddingModel             = NomicEmbedTextV1
-	ModelContextVar                   = "model"
-	DimensionalityContextVar          = "dimensionality"
-	TaskTypeContextVar                = "task_type"
-	APIKeyEnvVar                      = "NOMIC_API_KEY"
-	DefaultBaseURL                    = "https://api-atlas.nomic.ai/v1/embedding"
-	TextEmbeddingsEndpoint            = "/text"
-	DefaultMaxBatchSize               = 100
-	TaskTypeSearchQuery      TaskType = "search_query" //
-	TaskTypeSearchDocument   TaskType = "search_document"
-	TaskTypeClustering       TaskType = "clustering"
-	TaskTypeClassification   TaskType = "classification"
-	NomicEmbedTextV1                  = "nomic-embed-text-v1"
-	NomicEmbedTextV15                 = "nomic-embed-text-v1.5"
+	DefaultEmbeddingModel           = NomicEmbedTextV1
+	APIKeyEnvVar                    = "NOMIC_API_KEY"
+	DefaultBaseURL                  = "https://api-atlas.nomic.ai/v1/embedding"
+	TextEmbeddingsEndpoint          = "/text"
+	DefaultMaxBatchSize             = 100
+	TaskTypeSearchQuery    TaskType = "search_query"
+	TaskTypeSearchDocument TaskType = "search_document"
+	TaskTypeClustering     TaskType = "clustering"
+	TaskTypeClassification TaskType = "classification"
+	NomicEmbedTextV1                = "nomic-embed-text-v1"
+	NomicEmbedTextV15               = "nomic-embed-text-v1.5"
 )
 
 type Client struct {
@@ -200,15 +217,15 @@ func (e *NomicEmbeddingFunction) EmbedDocuments(ctx context.Context, documents [
 		return embeddings.NewEmptyEmbeddings(), nil
 	}
 	model := e.apiClient.DefaultModel
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = embeddings.EmbeddingModel(m)
 	}
 	dimensionality := e.apiClient.DefaultDimensionality
-	if d, ok := ctx.Value(DimensionalityContextVar).(*int); ok {
+	if d, ok := ctx.Value(dimensionalityContextKey).(*int); ok {
 		dimensionality = d
 	}
 	taskType := TaskTypeSearchDocument
-	if t, ok := ctx.Value(TaskTypeContextVar).(TaskType); ok {
+	if t, ok := ctx.Value(taskTypeContextKey).(TaskType); ok {
 		taskType = t
 	}
 	req := CreateEmbeddingRequest{
@@ -226,15 +243,15 @@ func (e *NomicEmbeddingFunction) EmbedDocuments(ctx context.Context, documents [
 
 func (e *NomicEmbeddingFunction) EmbedQuery(ctx context.Context, document string) (embeddings.Embedding, error) {
 	model := e.apiClient.DefaultModel
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = embeddings.EmbeddingModel(m)
 	}
 	dimensionality := e.apiClient.DefaultDimensionality
-	if d, ok := ctx.Value(DimensionalityContextVar).(*int); ok {
+	if d, ok := ctx.Value(dimensionalityContextKey).(*int); ok {
 		dimensionality = d
 	}
 	taskType := TaskTypeSearchQuery
-	if t, ok := ctx.Value(TaskTypeContextVar).(TaskType); ok {
+	if t, ok := ctx.Value(taskTypeContextKey).(TaskType); ok {
 		taskType = t
 	}
 	req := CreateEmbeddingRequest{
