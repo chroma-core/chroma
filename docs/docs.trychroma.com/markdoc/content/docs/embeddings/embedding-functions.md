@@ -16,11 +16,11 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          |
 | [Hugging Face](../../integrations/embedding-models/hugging-face)                         | ✓      | -          |
 | [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
-| [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          |
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
 | [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          |
 | [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          |
 | [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
+| [Sentence Transformers](../../integrations/embedding-models/sentence-transformer)        | ✓      | ✓          |
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
 
 
@@ -39,6 +39,7 @@ For TypeScript users, Chroma provides packages for a number of embedding model p
 | Ollama                      | [@chroma-core/ollama](https://www.npmjs.com/package/@chroma-core/ollama)     
 | OpenAI                      | [@chroma-core/openai](https://www.npmjs.com/package/@chroma-core/openai)     
 | Qwen (via Chroma Cloud)     | [@chroma-core/chroma-cloud-qwen](https://www.npmjs.com/package/@chroma-core/chroma-cloud-qwen)
+| Sentence Transformers       | [@chroma-core/sentence-transformer](https://www.npmjs.com/package/@chroma-core/sentence-transformer)
 | Together AI                 | [@chroma-core/together-ai](https://www.npmjs.com/package/@chroma-core/together-ai)     
 | Voyage AI                   | [@chroma-core/voyageai](https://www.npmjs.com/package/@chroma-core/voyageai)     
 
@@ -48,7 +49,7 @@ We welcome pull requests to add new Embedding Functions to the community.
 
 ## Default: all-MiniLM-L6-v2
 
-Chroma's default embedding function uses the [Sentence Transformers](https://www.sbert.net/) `all-MiniLM-L6-v2` model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you download the model files (this will happen automatically).
+Chroma's default embedding function uses the [Sentence Transformers](https://www.sbert.net/) [`all-MiniLM-L6-v2`](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) model to create embeddings. This embedding model can create sentence and document embeddings that can be used for a wide variety of tasks. This embedding function runs locally on your machine, and may require you download the model files (this will happen automatically).
 
 If you don't specify an embedding function when creating a collection, Chroma will set it to be the `DefaultEmbeddingFunction`:
 
