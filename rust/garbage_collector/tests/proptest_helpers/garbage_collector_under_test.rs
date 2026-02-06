@@ -209,12 +209,15 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             Transition::DeleteCollection(collection_id) => {
                 ref_state
                     .runtime
-                    .block_on(state.sysdb.delete_collection(
-                        ref_state.tenant.clone(),
-                        ref_state.db_name.clone(),
-                        collection_id,
-                        vec![],
-                    ))
+                    .block_on(
+                        state.sysdb.delete_collection(
+                            ref_state.tenant.clone(),
+                            DatabaseName::new(ref_state.db_name.clone())
+                                .expect("db_name should be valid"),
+                            collection_id,
+                            vec![],
+                        ),
+                    )
                     .unwrap();
             }
 

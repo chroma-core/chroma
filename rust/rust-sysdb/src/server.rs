@@ -1,6 +1,6 @@
 use crate::types::FlushCompactionRequest;
 use crate::types::SysDbError;
-use crate::types::{self as internal};
+use crate::types::{self as internal, validate_uuid};
 use crate::{
     backend::{Assignable, BackendFactory, Runnable},
     config::RootConfig,
@@ -48,6 +48,7 @@ use chroma_types::chroma_proto::{
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
 use chroma_types::Collection;
+use chroma_types::{CollectionUuid, DatabaseName};
 use thiserror::Error;
 use tokio::{
     select,
@@ -320,9 +321,64 @@ impl SysDb for SysdbService {
 
     async fn delete_collection(
         &self,
-        _request: Request<DeleteCollectionRequest>,
+        request: Request<DeleteCollectionRequest>,
     ) -> Result<Response<DeleteCollectionResponse>, Status> {
-        Err(Status::unimplemented("delete_collection is not supported"))
+        let proto_req = request.into_inner();
+
+        // Convert DeleteCollectionRequest to UpdateCollectionRequest for soft delete
+        let collection_id = validate_uuid(&proto_req.id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid collection ID: {}", e)))?;
+
+        let database_name = DatabaseName::new(&proto_req.database)
+            .ok_or_else(|| Status::invalid_argument("database name is required"))?;
+
+        // First, get the current collection to retrieve its name
+        let backend_for_get = internal::GetCollectionWithSegmentsRequest {
+            database_name: database_name.clone(),
+            id: CollectionUuid(collection_id),
+        }
+        .assign(&self.backends);
+
+        let current_collection = internal::GetCollectionWithSegmentsRequest {
+            database_name: database_name.clone(),
+            id: CollectionUuid(collection_id),
+        }
+        .run(backend_for_get)
+        .await
+        .map_err(|e: SysDbError| Status::from(e))?;
+
+        // Generate new name with "_deleted_" prefix and collection ID
+        let deleted_new_name = format!(
+            "_deleted_{}_{}",
+            current_collection.collection.name, collection_id
+        );
+
+        // NOTE: This is not a TOCTOU because the transaction below checks to make sure
+        // the concerned collection is not soft deleted before proceeding.
+
+        // Create an UpdateCollectionRequest that marks the collection as deleted with the new name
+        let internal_req = internal::UpdateCollectionRequest {
+            database_name,
+            id: CollectionUuid(collection_id),
+            name: Some(deleted_new_name),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            is_deleted: Some(true), // Mark as soft deleted
+        };
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req
+            .run(backend)
+            .await
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let proto_resp: DeleteCollectionResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn finish_collection_deletion(
@@ -2320,5 +2376,75 @@ mod tests {
             "Should have at least 2 MCMR databases, got: {}",
             mcmr_count
         );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_delete_collection_soft_delete() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+
+        // Create collection using the internal type like other tests
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+
+        let backend_for_create = create_collection_req.assign(&service.backends);
+        let _create_response = create_collection_req.run(backend_for_create).await.unwrap();
+
+        // Test: Delete the collection (soft delete)
+        let delete_req = chroma_types::chroma_proto::DeleteCollectionRequest {
+            tenant: tenant_id.clone(),
+            database: database_name.as_ref().to_string(),
+            id: collection_id.0.to_string(),
+            segment_ids: vec![],
+        };
+        let delete_response = service
+            .delete_collection(Request::new(delete_req))
+            .await
+            .unwrap();
+
+        // Verify the response
+        assert_eq!(
+            delete_response.into_inner(),
+            chroma_types::chroma_proto::DeleteCollectionResponse {}
+        );
+
+        // Verify the collection is soft deleted by trying to get it
+        let get_req = chroma_types::chroma_proto::GetCollectionWithSegmentsRequest {
+            database: Some(database_name.as_ref().to_string()),
+            id: collection_id.0.to_string(),
+        };
+        let get_result = service
+            .get_collection_with_segments(Request::new(get_req))
+            .await;
+
+        // Should fail because collection is soft deleted
+        assert!(get_result.is_err());
+        let status = get_result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        // because the proto structure is different. The main test is that
+        // soft delete works and the collection is not found when trying to get it.
     }
 }
