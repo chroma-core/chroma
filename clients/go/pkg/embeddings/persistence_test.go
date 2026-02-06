@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
+	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/bedrock"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/chromacloud"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/cloudflare"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/cohere"
@@ -379,6 +380,34 @@ func TestEmbeddingFunctionPersistence_Nomic(t *testing.T) {
 	assert.Equal(t, name, rebuilt.Name())
 }
 
+func TestEmbeddingFunctionPersistence_Bedrock(t *testing.T) {
+	ef, err := bedrock.NewBedrockEmbeddingFunction(
+		bedrock.WithRegion("us-east-1"),
+		bedrock.WithModel("amazon.titan-embed-text-v2:0"),
+	)
+	require.NoError(t, err)
+
+	name := ef.Name()
+	config := ef.GetConfig()
+
+	assert.Equal(t, "amazon_bedrock", name)
+	assert.Equal(t, "amazon.titan-embed-text-v2:0", config["model_name"])
+	assert.Equal(t, "us-east-1", config["region"])
+
+	// Verify registry has this EF
+	assert.True(t, embeddings.HasDense(name), "amazon_bedrock should be registered")
+
+	// Rebuild from config
+	rebuilt, err := embeddings.BuildDense(name, config)
+	require.NoError(t, err)
+	require.NotNil(t, rebuilt)
+
+	// Verify rebuilt EF matches
+	assert.Equal(t, name, rebuilt.Name())
+	assert.Equal(t, config["model_name"], rebuilt.GetConfig()["model_name"])
+	assert.Equal(t, config["region"], rebuilt.GetConfig()["region"])
+}
+
 func TestEmbeddingFunctionPersistence_ChromaCloud(t *testing.T) {
 	t.Setenv("CHROMA_API_KEY", "test-key-123")
 
@@ -421,6 +450,7 @@ func TestAllRegisteredEFsHaveFactories(t *testing.T) {
 		"together_ai",
 		"nomic",
 		"chroma_cloud",
+		"amazon_bedrock",
 		"default",            // Primary name (matches Python client)
 		"onnx_mini_lm_l6_v2", // Alias for backward compatibility
 	}
@@ -751,6 +781,7 @@ func TestHasDense_KnownProviders(t *testing.T) {
 		"together_ai",
 		"nomic",
 		"chroma_cloud",
+		"amazon_bedrock",
 		"ollama",
 		"consistent_hash",
 	}
