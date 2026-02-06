@@ -1,6 +1,8 @@
 from typing import Dict, List
 from hypothesis import given
 from chromadb.test.conftest import (
+    MULTI_REGION_ENABLED,
+    MULTI_REGION_TOPOLOGY,
     ClientFactories,
 )
 import hypothesis.strategies as st
@@ -54,6 +56,9 @@ def tenants_and_databases_st(
     for database_i, tenant_i in enumerate(database_i_to_tenant_i):
         tenant = tenants[tenant_i]
         database = databases[database_i]
+
+        if MULTI_REGION_ENABLED and database_i >= num_databases // 2:
+            database = f"{MULTI_REGION_TOPOLOGY}+{database}"
 
         if tenant not in result:
             result[tenant] = []

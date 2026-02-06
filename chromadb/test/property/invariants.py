@@ -348,24 +348,25 @@ def ann_accuracy(
                 limit=Limit(limit=n_results),
             ).select_all()
             search_requests.append(search)
-        
-        # Call _search API
-        api = collection._client  # type: ignore
-        search_results = api._search(
-            collection_id=collection.id,
+
+        # Call search API
+        search_results = collection.search(
             searches=search_requests,
-            tenant='default_tenant',
-            database='default_database',
         )
-        
+
         # Convert search results to query-like format
-        query_results = cast(types.QueryResult, {
-            "ids": search_results["ids"],
-            "distances": search_results["scores"],  # scores is distances in search API
-            "embeddings": search_results["embeddings"],
-            "documents": search_results["documents"],
-            "metadatas": search_results["metadatas"],
-        })
+        query_results = cast(
+            types.QueryResult,
+            {
+                "ids": search_results["ids"],
+                "distances": search_results[
+                    "scores"
+                ],  # scores is distances in search API
+                "embeddings": search_results["embeddings"],
+                "documents": search_results["documents"],
+                "metadatas": search_results["metadatas"],
+            },
+        )
     else:
         query_results = collection.query(
             query_embeddings=query_embeddings if have_embeddings else None,
