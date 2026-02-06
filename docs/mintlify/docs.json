@@ -374,17 +374,12 @@
       {
         "icon": "discord",
         "label": "11k",
-        "href": "https://discord.gg/MMeYNTmh3x"
+        "href": "https://discord.gg/dSHcBEMSk7"
       },
       {
         "label": "25k",
         "icon": "x-twitter",
         "href": "https://x.com/trychroma"
-      },
-      {
-        "label": "",
-        "href": "https://discord.gg/dSHcBEMSk7",
-        "type": "discord"
       }
     ],
     "primary": {
