@@ -142,22 +142,34 @@ impl<'me> MetadataLogReader<'me> {
                     match val {
                         MetadataValue::BoolArray(arr) => {
                             for v in arr {
-                                values.entry(MetadataValue::Bool(v)).or_default().insert(offset_id);
+                                values
+                                    .entry(MetadataValue::Bool(v))
+                                    .or_default()
+                                    .insert(offset_id);
                             }
                         }
                         MetadataValue::IntArray(arr) => {
                             for v in arr {
-                                values.entry(MetadataValue::Int(v)).or_default().insert(offset_id);
+                                values
+                                    .entry(MetadataValue::Int(v))
+                                    .or_default()
+                                    .insert(offset_id);
                             }
                         }
                         MetadataValue::FloatArray(arr) => {
                             for v in arr {
-                                values.entry(MetadataValue::Float(v)).or_default().insert(offset_id);
+                                values
+                                    .entry(MetadataValue::Float(v))
+                                    .or_default()
+                                    .insert(offset_id);
                             }
                         }
                         MetadataValue::StringArray(arr) => {
                             for v in arr {
-                                values.entry(MetadataValue::Str(v)).or_default().insert(offset_id);
+                                values
+                                    .entry(MetadataValue::Str(v))
+                                    .or_default()
+                                    .insert(offset_id);
                             }
                         }
                         scalar => {
@@ -1677,9 +1689,7 @@ mod tests {
             },
         ];
 
-        Box::pin(test_segment
-            .compact_log(Chunk::new(compact_records.into()), 1))
-            .await;
+        Box::pin(test_segment.compact_log(Chunk::new(compact_records.into()), 1)).await;
         // After compaction, offset_ids 1-4 live in the blockfile index.
 
         // --- Phase 2: create 3 *uncompacted* log records with array metadata ---

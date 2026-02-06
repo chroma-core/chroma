@@ -730,7 +730,6 @@ impl MetadataValue {
             MetadataValue::StringArray(_) => MetadataValueType::StringArray,
         }
     }
-
 }
 
 impl From<&MetadataValue> for MetadataValueType {
