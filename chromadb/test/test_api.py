@@ -2207,6 +2207,160 @@ def test_where_contains_validation():
     )
 
 
+def _is_python_local_segment(client):
+    """Return True when the client is backed by the Python local segment API
+    (which does not yet support array metadata)."""
+    settings = client.get_settings()
+    return (
+        settings.chroma_api_impl == "chromadb.api.segment.SegmentAPI"
+        and settings.chroma_segment_manager_impl
+        == "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
+
+
+def test_array_metadata_e2e(client):
+    """End-to-end test: write array metadata, read it back, and query with $contains."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_array_metadata_e2e")
+    collection.add(
+        ids=["id1", "id2", "id3"],
+        embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        metadatas=[
+            {"tags": ["action", "comedy"], "year": 2020},
+            {"tags": ["drama"], "year": 2021},
+            {"tags": ["action", "thriller"], "year": 2022},
+        ],
+    )
+
+    # Read back: arrays should round-trip
+    items = collection.get(ids=["id1"])
+    assert len(items["metadatas"]) == 1
+    assert sorted(items["metadatas"][0]["tags"]) == ["action", "comedy"]
+    assert items["metadatas"][0]["year"] == 2020
+
+    # $contains "action" -> id1 and id3
+    items = collection.get(where={"tags": {"$contains": "action"}})
+    ids = sorted([m["year"] for m in items["metadatas"]])
+    assert ids == [2020, 2022]
+
+    # $contains "drama" -> id2 only
+    items = collection.get(where={"tags": {"$contains": "drama"}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["year"] == 2021
+
+    # $not_contains "action" -> id2 only
+    items = collection.get(where={"tags": {"$not_contains": "action"}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["year"] == 2021
+
+    # $contains with no match
+    items = collection.get(where={"tags": {"$contains": "romance"}})
+    assert len(items["metadatas"]) == 0
+
+
+def test_array_metadata_int_contains_e2e(client):
+    """End-to-end: $contains on integer arrays."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_int_array_e2e")
+    collection.add(
+        ids=["id1", "id2"],
+        embeddings=[[1, 0, 0], [0, 1, 0]],
+        metadatas=[
+            {"scores": [10, 20, 30]},
+            {"scores": [40, 50]},
+        ],
+    )
+
+    items = collection.get(where={"scores": {"$contains": 20}})
+    assert len(items["ids"]) == 1
+    assert items["ids"][0] == "id1"
+
+    items = collection.get(where={"scores": {"$contains": 50}})
+    assert len(items["ids"]) == 1
+    assert items["ids"][0] == "id2"
+
+    items = collection.get(where={"scores": {"$not_contains": 10}})
+    assert len(items["ids"]) == 1
+    assert items["ids"][0] == "id2"
+
+
+def test_array_metadata_update_e2e(client):
+    """End-to-end: updating array metadata replaces old values."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_array_update_e2e")
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": ["old_a", "old_b"]}],
+    )
+
+    # Verify initial state
+    items = collection.get(where={"tags": {"$contains": "old_a"}})
+    assert len(items["ids"]) == 1
+
+    # Update to new tags
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": ["new_x"]}],
+    )
+
+    # Old values should be gone
+    items = collection.get(where={"tags": {"$contains": "old_a"}})
+    assert len(items["ids"]) == 0
+
+    # New value should be present
+    items = collection.get(where={"tags": {"$contains": "new_x"}})
+    assert len(items["ids"]) == 1
+
+    # Read back to confirm the array was replaced
+    items = collection.get(ids=["id1"])
+    assert items["metadatas"][0]["tags"] == ["new_x"]
+
+
+def test_array_metadata_mixed_with_scalar_e2e(client):
+    """End-to-end: records with both scalar and array metadata."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_mixed_e2e")
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"name": "Alice", "score": 42, "tags": ["admin", "user"]}],
+    )
+
+    items = collection.get(ids=["id1"])
+    md = items["metadatas"][0]
+    assert md["name"] == "Alice"
+    assert md["score"] == 42
+    assert sorted(md["tags"]) == ["admin", "user"]
+
+    # Filter by scalar
+    items = collection.get(where={"score": {"$eq": 42}})
+    assert len(items["ids"]) == 1
+
+    # Filter by array contains
+    items = collection.get(where={"tags": {"$contains": "admin"}})
+    assert len(items["ids"]) == 1
+
+    # Combined $and filter: scalar + array contains
+    items = collection.get(
+        where={
+            "$and": [
+                {"score": {"$gte": 40}},
+                {"tags": {"$contains": "admin"}},
+            ]
+        }
+    )
+    assert len(items["ids"]) == 1
+
+
 def test_sparse_vector_dict_format_in_record_set():
     """Test that dict-format sparse vectors work in normalize_insert_record_set."""
     from chromadb.api.types import (
