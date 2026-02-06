@@ -71,6 +71,8 @@ pub enum FilterError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error parsing regular expression: {0}")]
     Regex(#[from] ChromaRegexError),
+    #[error("Unsupported comparison type: {0}")]
+    UnsupportedComparisonType(MetadataComparison),
 }
 
 impl ChromaError for FilterError {
@@ -82,6 +84,7 @@ impl ChromaError for FilterError {
             FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
             FilterError::Regex(_) => ErrorCodes::InvalidArgument,
+            FilterError::UnsupportedComparisonType(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -348,7 +351,17 @@ impl MetadataProvider<'_> {
                         &s.as_str().into(),
                     ),
                     MetadataValue::SparseVector(_) => {
-                        unimplemented!("Comparison with sparse vector is not supported")
+                        return Err(FilterError::UnsupportedComparisonType(
+                            MetadataComparison::Primitive(op.clone(), val.clone()),
+                        ))
+                    }
+                    MetadataValue::BoolArray(_)
+                    | MetadataValue::IntArray(_)
+                    | MetadataValue::FloatArray(_)
+                    | MetadataValue::StringArray(_) => {
+                        return Err(FilterError::UnsupportedComparisonType(
+                            MetadataComparison::Primitive(op.clone(), val.clone()),
+                        ));
                     }
                 };
                 if let Some(reader) = metadata_index_reader {

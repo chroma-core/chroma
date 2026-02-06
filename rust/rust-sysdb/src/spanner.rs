@@ -684,6 +684,10 @@ impl SpannerBackend {
                                 chroma_types::MetadataValue::Float(f) => (None, None, Some(*f), None),
                                 chroma_types::MetadataValue::Bool(b) => (None, None, None, Some(*b)),
                                 chroma_types::MetadataValue::SparseVector(_) => continue, // Not supported
+                                chroma_types::MetadataValue::BoolArray(_)
+                                | chroma_types::MetadataValue::IntArray(_)
+                                | chroma_types::MetadataValue::FloatArray(_)
+                                | chroma_types::MetadataValue::StringArray(_) => continue, // Array types not supported in Spanner yet
                             };
 
                             mutations.push(insert(
@@ -1296,6 +1300,10 @@ impl SpannerBackend {
                                         (None, None, None, Some(*b))
                                     }
                                     chroma_types::MetadataValue::SparseVector(_) => continue,
+                                    chroma_types::MetadataValue::BoolArray(_)
+                                    | chroma_types::MetadataValue::IntArray(_)
+                                    | chroma_types::MetadataValue::FloatArray(_)
+                                    | chroma_types::MetadataValue::StringArray(_) => continue, // Array types not supported in Spanner yet
                                 };
 
                                 mutations.push(insert(

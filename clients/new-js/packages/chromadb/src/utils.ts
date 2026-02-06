@@ -260,19 +260,33 @@ export const validateMetadata = (metadata?: Metadata) => {
     throw new ChromaValueError("Expected metadata to be non-empty");
   }
 
-  if (
-    !Object.values(metadata).every(
-      (v: any) =>
-        v === null ||
-        v === undefined ||
-        typeof v === "string" ||
-        typeof v === "number" ||
-        typeof v === "boolean" ||
-        validateSparseVector(v),
-    )
-  ) {
+  const isValidMetadataValue = (v: unknown): boolean => {
+    if (
+      v === null ||
+      v === undefined ||
+      typeof v === "string" ||
+      typeof v === "number" ||
+      typeof v === "boolean"
+    ) {
+      return true;
+    }
+    if (validateSparseVector(v)) {
+      return true;
+    }
+    if (Array.isArray(v)) {
+      return v.every(
+        (item) =>
+          typeof item === "string" ||
+          typeof item === "number" ||
+          typeof item === "boolean",
+      );
+    }
+    return false;
+  };
+
+  if (!Object.values(metadata).every(isValidMetadataValue)) {
     throw new ChromaValueError(
-      "Expected metadata to be a string, number, boolean, SparseVector, or nullable",
+      "Expected metadata values to be a string, number, boolean, SparseVector, typed array (string[], number[], boolean[]), or null",
     );
   }
 };
@@ -289,7 +303,9 @@ type SerializedMetadataValue =
   | string
   | SerializedSparseVector
   | SparseVector
-  | null;
+  | Array<boolean>
+  | Array<number>
+  | Array<string>;
 
 export type SerializedMetadata = Record<string, SerializedMetadataValue>;
 
@@ -315,10 +331,13 @@ export const serializeMetadata = (
   const result: SerializedMetadata = {};
 
   Object.entries(metadata).forEach(([key, value]) => {
+    if (value === null || value === undefined) {
+      return;
+    }
     if (validateSparseVector(value)) {
       result[key] = toSerializedSparseVector(value);
     } else {
-      result[key] = value ?? null;
+      result[key] = value;
     }
   });
 

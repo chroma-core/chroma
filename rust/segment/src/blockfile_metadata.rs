@@ -552,6 +552,64 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
                 }
             },
+            // Array types: explode the array and index each element separately
+            // This enables efficient CONTAINS queries via the inverted index
+            MetadataValue::StringArray(values) => {
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, v.as_str(), offset_id).await {
+                                tracing::error!("Error inserting into str metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::IntArray(values) => {
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, *v as u32, offset_id).await {
+                                tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::FloatArray(values) => {
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, *v as f32, offset_id).await {
+                                tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::BoolArray(values) => {
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, *v, offset_id).await {
+                                tracing::error!("Error inserting into bool metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
         }
     }
 
@@ -625,6 +683,63 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                     None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
             },
+            // Array types: delete each element from the inverted index
+            MetadataValue::StringArray(values) => {
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, v.as_str(), offset_id).await {
+                                tracing::error!("Error deleting from str metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::IntArray(values) => {
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, *v as u32, offset_id).await {
+                                tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::FloatArray(values) => {
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, *v as f32, offset_id).await {
+                                tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::BoolArray(values) => {
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, *v, offset_id).await {
+                                tracing::error!("Error deleting from bool metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
         }
     }
 

@@ -340,12 +340,24 @@ pub enum UpdateMetadataValue {
     Str(String),
     #[cfg_attr(feature = "testing", proptest(skip))]
     SparseVector(SparseVector),
+    // Array types for multi-valued metadata fields
+    // TODO: Add support for these in proptests
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    BoolArray(Vec<bool>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    IntArray(Vec<i64>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    FloatArray(Vec<f64>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    StringArray(Vec<String>),
     None,
 }
 
 #[cfg(feature = "pyo3")]
 impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
     fn extract_bound(ob: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::types::PyList;
+
         if ob.is_none() {
             Ok(UpdateMetadataValue::None)
         } else if let Ok(value) = ob.extract::<bool>() {
@@ -358,6 +370,29 @@ impl<'py> pyo3::FromPyObject<'py> for UpdateMetadataValue {
             Ok(UpdateMetadataValue::Str(value))
         } else if let Ok(value) = ob.extract::<SparseVector>() {
             Ok(UpdateMetadataValue::SparseVector(value))
+        } else if let Ok(list) = ob.downcast::<PyList>() {
+            // Empty lists are not allowed
+            if list.is_empty()? {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Empty lists are not allowed as metadata values",
+                ));
+            }
+            // Try to extract entire list as each type.
+            // We check all elements (not just the first) to handle mixed-numeric
+            // lists like [1, 2.5, 3] which should be inferred as FloatArray.
+            if let Ok(arr) = list.extract::<Vec<bool>>() {
+                Ok(UpdateMetadataValue::BoolArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<i64>>() {
+                Ok(UpdateMetadataValue::IntArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<f64>>() {
+                Ok(UpdateMetadataValue::FloatArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<String>>() {
+                Ok(UpdateMetadataValue::StringArray(arr))
+            } else {
+                Err(pyo3::exceptions::PyTypeError::new_err(
+                    "Cannot convert Python list to UpdateMetadataValue: mixed or unsupported element types",
+                ))
+            }
         } else {
             Err(pyo3::exceptions::PyTypeError::new_err(
                 "Cannot convert Python object to UpdateMetadataValue",
@@ -411,6 +446,30 @@ impl From<&str> for UpdateMetadataValue {
 impl From<SparseVector> for UpdateMetadataValue {
     fn from(v: SparseVector) -> Self {
         Self::SparseVector(v)
+    }
+}
+
+impl From<Vec<bool>> for UpdateMetadataValue {
+    fn from(v: Vec<bool>) -> Self {
+        Self::BoolArray(v)
+    }
+}
+
+impl From<Vec<i64>> for UpdateMetadataValue {
+    fn from(v: Vec<i64>) -> Self {
+        Self::IntArray(v)
+    }
+}
+
+impl From<Vec<f64>> for UpdateMetadataValue {
+    fn from(v: Vec<f64>) -> Self {
+        Self::FloatArray(v)
+    }
+}
+
+impl From<Vec<String>> for UpdateMetadataValue {
+    fn from(v: Vec<String>) -> Self {
+        Self::StringArray(v)
     }
 }
 
@@ -484,6 +543,16 @@ impl From<UpdateMetadataValue> for chroma_proto::UpdateMetadataValue {
                     ),
                 ),
             },
+            // Array types are not yet supported in protobuf
+            // TODO: support protobuf for these
+            UpdateMetadataValue::BoolArray(_)
+            | UpdateMetadataValue::IntArray(_)
+            | UpdateMetadataValue::FloatArray(_)
+            | UpdateMetadataValue::StringArray(_) => {
+                unimplemented!(
+                    "Array types in UpdateMetadataValue are not yet supported in protobuf"
+                )
+            }
             UpdateMetadataValue::None => chroma_proto::UpdateMetadataValue { value: None },
         }
     }
@@ -501,6 +570,12 @@ impl TryFrom<&UpdateMetadataValue> for MetadataValue {
             UpdateMetadataValue::SparseVector(value) => {
                 Ok(MetadataValue::SparseVector(value.clone()))
             }
+            UpdateMetadataValue::BoolArray(value) => Ok(MetadataValue::BoolArray(value.clone())),
+            UpdateMetadataValue::IntArray(value) => Ok(MetadataValue::IntArray(value.clone())),
+            UpdateMetadataValue::FloatArray(value) => Ok(MetadataValue::FloatArray(value.clone())),
+            UpdateMetadataValue::StringArray(value) => {
+                Ok(MetadataValue::StringArray(value.clone()))
+            }
             UpdateMetadataValue::None => Err(MetadataValueConversionError::InvalidValue),
         }
     }
@@ -515,7 +590,7 @@ MetadataValue
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "testing", derive(proptest_derive::Arbitrary))]
-#[cfg_attr(feature = "pyo3", derive(pyo3::FromPyObject, pyo3::IntoPyObject))]
+#[cfg_attr(feature = "pyo3", derive(pyo3::IntoPyObject))]
 #[serde(untagged)]
 pub enum MetadataValue {
     Bool(bool),
@@ -530,6 +605,62 @@ pub enum MetadataValue {
     Str(String),
     #[cfg_attr(feature = "testing", proptest(skip))]
     SparseVector(SparseVector),
+    // Array types for multi-valued metadata fields
+    // TODO: Add support for these in proptests
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    BoolArray(Vec<bool>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    IntArray(Vec<i64>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    FloatArray(Vec<f64>),
+    #[cfg_attr(feature = "testing", proptest(skip))]
+    StringArray(Vec<String>),
+}
+
+#[cfg(feature = "pyo3")]
+impl<'py> pyo3::FromPyObject<'py> for MetadataValue {
+    fn extract_bound(ob: &pyo3::Bound<'py, pyo3::PyAny>) -> pyo3::PyResult<Self> {
+        use pyo3::types::PyList;
+
+        if let Ok(value) = ob.extract::<bool>() {
+            Ok(MetadataValue::Bool(value))
+        } else if let Ok(value) = ob.extract::<i64>() {
+            Ok(MetadataValue::Int(value))
+        } else if let Ok(value) = ob.extract::<f64>() {
+            Ok(MetadataValue::Float(value))
+        } else if let Ok(value) = ob.extract::<String>() {
+            Ok(MetadataValue::Str(value))
+        } else if let Ok(value) = ob.extract::<SparseVector>() {
+            Ok(MetadataValue::SparseVector(value))
+        } else if let Ok(list) = ob.downcast::<PyList>() {
+            // Empty lists are not allowed
+            if list.is_empty()? {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "Empty lists are not allowed as metadata values",
+                ));
+            }
+            // Try to extract entire list as each type.
+            // We check all elements (not just the first) to handle mixed-numeric
+            // lists like [1, 2.5, 3] which should be inferred as FloatArray.
+            if let Ok(arr) = list.extract::<Vec<bool>>() {
+                Ok(MetadataValue::BoolArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<i64>>() {
+                Ok(MetadataValue::IntArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<f64>>() {
+                Ok(MetadataValue::FloatArray(arr))
+            } else if let Ok(arr) = list.extract::<Vec<String>>() {
+                Ok(MetadataValue::StringArray(arr))
+            } else {
+                Err(pyo3::exceptions::PyTypeError::new_err(
+                    "Cannot convert Python list to MetadataValue: mixed or unsupported element types",
+                ))
+            }
+        } else {
+            Err(pyo3::exceptions::PyTypeError::new_err(
+                "Cannot convert Python object to MetadataValue",
+            ))
+        }
+    }
 }
 
 impl std::fmt::Display for MetadataValue {
@@ -540,6 +671,10 @@ impl std::fmt::Display for MetadataValue {
             MetadataValue::Float(v) => write!(f, "{}", v),
             MetadataValue::Str(v) => write!(f, "\"{}\"", v),
             MetadataValue::SparseVector(v) => write!(f, "SparseVector(len={})", v.values.len()),
+            MetadataValue::BoolArray(v) => write!(f, "BoolArray(len={})", v.len()),
+            MetadataValue::IntArray(v) => write!(f, "IntArray(len={})", v.len()),
+            MetadataValue::FloatArray(v) => write!(f, "FloatArray(len={})", v.len()),
+            MetadataValue::StringArray(v) => write!(f, "StringArray(len={})", v.len()),
         }
     }
 }
@@ -553,6 +688,10 @@ pub enum MetadataValueType {
     Float,
     Str,
     SparseVector,
+    BoolArray,
+    IntArray,
+    FloatArray,
+    StringArray,
 }
 
 impl MetadataValue {
@@ -563,6 +702,10 @@ impl MetadataValue {
             MetadataValue::Float(_) => MetadataValueType::Float,
             MetadataValue::Str(_) => MetadataValueType::Str,
             MetadataValue::SparseVector(_) => MetadataValueType::SparseVector,
+            MetadataValue::BoolArray(_) => MetadataValueType::BoolArray,
+            MetadataValue::IntArray(_) => MetadataValueType::IntArray,
+            MetadataValue::FloatArray(_) => MetadataValueType::FloatArray,
+            MetadataValue::StringArray(_) => MetadataValueType::StringArray,
         }
     }
 }
@@ -621,10 +764,52 @@ impl From<SparseVector> for MetadataValue {
     }
 }
 
+impl From<Vec<bool>> for MetadataValue {
+    fn from(v: Vec<bool>) -> Self {
+        MetadataValue::BoolArray(v)
+    }
+}
+
+impl From<Vec<i64>> for MetadataValue {
+    fn from(v: Vec<i64>) -> Self {
+        MetadataValue::IntArray(v)
+    }
+}
+
+impl From<Vec<i32>> for MetadataValue {
+    fn from(v: Vec<i32>) -> Self {
+        MetadataValue::IntArray(v.into_iter().map(|x| x as i64).collect())
+    }
+}
+
+impl From<Vec<f64>> for MetadataValue {
+    fn from(v: Vec<f64>) -> Self {
+        MetadataValue::FloatArray(v)
+    }
+}
+
+impl From<Vec<f32>> for MetadataValue {
+    fn from(v: Vec<f32>) -> Self {
+        MetadataValue::FloatArray(v.into_iter().map(|x| x as f64).collect())
+    }
+}
+
+impl From<Vec<String>> for MetadataValue {
+    fn from(v: Vec<String>) -> Self {
+        MetadataValue::StringArray(v)
+    }
+}
+
+impl From<Vec<&str>> for MetadataValue {
+    fn from(v: Vec<&str>) -> Self {
+        MetadataValue::StringArray(v.into_iter().map(|s| s.to_string()).collect())
+    }
+}
+
 /// We need `Eq` and `Ord` since we want to use this as a key in `BTreeMap`
 ///
 /// For cross-type comparisons, we define a consistent ordering based on variant position:
-/// Bool < Int < Float < Str < SparseVector
+/// Bool < Int < Float < Str < SparseVector < BoolArray < IntArray < FloatArray < StringArray
 #[allow(clippy::derive_ord_xor_partial_ord)]
 impl Ord for MetadataValue {
     fn cmp(&self, other: &Self) -> Ordering {
@@ -636,6 +821,10 @@ impl Ord for MetadataValue {
                 MetadataValue::Float(_) => 2,
                 MetadataValue::Str(_) => 3,
                 MetadataValue::SparseVector(_) => 4,
+                MetadataValue::BoolArray(_) => 5,
+                MetadataValue::IntArray(_) => 6,
+                MetadataValue::FloatArray(_) => 7,
+                MetadataValue::StringArray(_) => 8,
             }
         }
 
@@ -647,6 +836,23 @@ impl Ord for MetadataValue {
                 (MetadataValue::Float(left), MetadataValue::Float(right)) => left.total_cmp(right),
                 (MetadataValue::Str(left), MetadataValue::Str(right)) => left.cmp(right),
                 (MetadataValue::SparseVector(left), MetadataValue::SparseVector(right)) => {
+                    left.cmp(right)
+                }
+                (MetadataValue::BoolArray(left), MetadataValue::BoolArray(right)) => {
+                    left.cmp(right)
+                }
+                (MetadataValue::IntArray(left), MetadataValue::IntArray(right)) => left.cmp(right),
+                (MetadataValue::FloatArray(left), MetadataValue::FloatArray(right)) => {
+                    // Compare element by element using total_cmp for f64
+                    for (l, r) in left.iter().zip(right.iter()) {
+                        match l.total_cmp(r) {
+                            Ordering::Equal => continue,
+                            other => return other,
+                        }
+                    }
+                    left.len().cmp(&right.len())
+                }
+                (MetadataValue::StringArray(left), MetadataValue::StringArray(right)) => {
                     left.cmp(right)
                 }
                 _ => Ordering::Equal, // Different types, but type_order already handled this
@@ -713,6 +919,10 @@ impl From<MetadataValue> for UpdateMetadataValue {
             MetadataValue::Float(v) => UpdateMetadataValue::Float(v),
             MetadataValue::Str(v) => UpdateMetadataValue::Str(v),
             MetadataValue::SparseVector(v) => UpdateMetadataValue::SparseVector(v),
+            MetadataValue::BoolArray(v) => UpdateMetadataValue::BoolArray(v),
+            MetadataValue::IntArray(v) => UpdateMetadataValue::IntArray(v),
+            MetadataValue::FloatArray(v) => UpdateMetadataValue::FloatArray(v),
+            MetadataValue::StringArray(v) => UpdateMetadataValue::StringArray(v),
         }
     }
 }
@@ -754,6 +964,32 @@ impl From<MetadataValue> for Value {
                     ),
                 );
                 Self::Object(map)
+            }
+            MetadataValue::BoolArray(vals) => {
+                Self::Array(vals.into_iter().map(Value::Bool).collect())
+            }
+            MetadataValue::IntArray(vals) => Self::Array(
+                vals.into_iter()
+                    .map(|v| {
+                        Value::Number(
+                            Number::from_i128(v as i128)
+                                .expect("i64 should be representable in JSON"),
+                        )
+                    })
+                    .collect(),
+            ),
+            MetadataValue::FloatArray(vals) => Self::Array(
+                vals.into_iter()
+                    .map(|v| {
+                        Value::Number(
+                            Number::from_f64(v)
+                                .expect("Inf and NaN should not be present in MetadataValue"),
+                        )
+                    })
+                    .collect(),
+            ),
+            MetadataValue::StringArray(vals) => {
+                Self::Array(vals.into_iter().map(Value::String).collect())
             }
         }
     }
@@ -839,6 +1075,14 @@ impl From<MetadataValue> for chroma_proto::UpdateMetadataValue {
                     ),
                 ),
             },
+            // Array types don't have proto equivalents yet.
+            // TODO: Add proto support for array metadata values.
+            MetadataValue::BoolArray(_)
+            | MetadataValue::IntArray(_)
+            | MetadataValue::FloatArray(_)
+            | MetadataValue::StringArray(_) => {
+                panic!("Array metadata values cannot be converted to proto yet")
+            }
         }
     }
 }
@@ -954,6 +1198,10 @@ pub fn logical_size_of_metadata(metadata: &Metadata) -> usize {
                     MetadataValue::SparseVector(v) => {
                         size_of_val(&v.indices[..]) + size_of_val(&v.values[..])
                     }
+                    MetadataValue::BoolArray(arr) => size_of_val(&arr[..]),
+                    MetadataValue::IntArray(arr) => size_of_val(&arr[..]),
+                    MetadataValue::FloatArray(arr) => size_of_val(&arr[..]),
+                    MetadataValue::StringArray(arr) => arr.iter().map(|s| s.len()).sum::<usize>(),
                 }
         })
         .sum()
@@ -1579,6 +1827,9 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
                             }),
                 MetadataValue::Str(value) => chroma_proto::direct_comparison::Comparison::SingleStringOperand(chroma_proto::SingleStringComparison { value, comparator: chroma_proto::GenericComparator::try_from(primitive_operator)? as i32 }),
                 MetadataValue::SparseVector(_) => return Err(WhereConversionError::Cause("Comparison with sparse vector is not supported".to_string())),
+                MetadataValue::BoolArray(_) | MetadataValue::IntArray(_) | MetadataValue::FloatArray(_) | MetadataValue::StringArray(_) => {
+                    return Err(WhereConversionError::Cause("Primitive comparison with array metadata values is not supported".to_string()))
+                }
             },
             MetadataComparison::Set(set_operator, metadata_set_value) => match metadata_set_value {
                 MetadataSetValue::Bool(vec) => chroma_proto::direct_comparison::Comparison::BoolListOperand(chroma_proto::BoolListComparison { values: vec, list_operator: chroma_proto::ListOperator::from(set_operator) as i32 }),
@@ -1599,6 +1850,36 @@ impl TryFrom<MetadataExpression> for chroma_proto::DirectComparison {
 pub enum MetadataComparison {
     Primitive(PrimitiveOperator, MetadataValue),
     Set(SetOperator, MetadataSetValue),
+}
+
+impl std::fmt::Display for MetadataComparison {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MetadataComparison::Primitive(op, val) => {
+                let type_name = match val {
+                    MetadataValue::Bool(_) => "Bool",
+                    MetadataValue::Int(_) => "Int",
+                    MetadataValue::Float(_) => "Float",
+                    MetadataValue::Str(_) => "Str",
+                    MetadataValue::SparseVector(_) => "SparseVector",
+                    MetadataValue::BoolArray(_) => "BoolArray",
+                    MetadataValue::IntArray(_) => "IntArray",
+                    MetadataValue::FloatArray(_) => "FloatArray",
+                    MetadataValue::StringArray(_) => "StringArray",
+                };
+                write!(f, "Primitive({}, {})", op, type_name)
+            }
+            MetadataComparison::Set(op, val) => {
+                let type_name = match val {
+                    MetadataSetValue::Bool(_) => "Bool",
+                    MetadataSetValue::Int(_) => "Int",
+                    MetadataSetValue::Float(_) => "Float",
+                    MetadataSetValue::Str(_) => "Str",
+                };
+                write!(f, "Set({}, {})", op, type_name)
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
