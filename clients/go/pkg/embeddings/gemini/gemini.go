@@ -9,9 +9,16 @@ import (
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
 
+type contextKey struct{ name string }
+
+var modelContextKey = contextKey{"model"}
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
 const (
 	DefaultEmbeddingModel = "gemini-embedding-001"
-	ModelContextVar       = "model"
 	APIKeyEnvVar          = "GEMINI_API_KEY"
 )
 
@@ -71,7 +78,7 @@ func NewGeminiClient(opts ...Option) (*Client, error) {
 
 func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embeddings.Embedding, error) {
 	model := string(c.DefaultModel)
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = m
 	}
 	contents := make([]*genai.Content, len(req))

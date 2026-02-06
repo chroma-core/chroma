@@ -19,13 +19,26 @@ import (
 
 type EmbeddingModel string
 
+type contextKey struct{ name string }
+
+var (
+	modelContextKey      = contextKey{"model"}
+	dimensionsContextKey = contextKey{"dimensions"}
+)
+
+func ContextWithModel(ctx context.Context, model string) context.Context {
+	return context.WithValue(ctx, modelContextKey, model)
+}
+
+func ContextWithDimensions(ctx context.Context, dimensions *int) context.Context {
+	return context.WithValue(ctx, dimensionsContextKey, dimensions)
+}
+
 const (
-	ModelContextVar                     = "model"
-	DimensionsContextVar                = "dimensions"
-	TextEmbeddingAda002  EmbeddingModel = "text-embedding-ada-002"
-	TextEmbedding3Small  EmbeddingModel = "text-embedding-3-small"
-	TextEmbedding3Large  EmbeddingModel = "text-embedding-3-large"
-	APIKeyEnvVar                        = "OPENAI_API_KEY"
+	TextEmbeddingAda002 EmbeddingModel = "text-embedding-ada-002"
+	TextEmbedding3Small EmbeddingModel = "text-embedding-3-small"
+	TextEmbedding3Large EmbeddingModel = "text-embedding-3-large"
+	APIKeyEnvVar                       = "OPENAI_API_KEY"
 )
 
 type Input struct {
@@ -224,7 +237,7 @@ func ConvertToMatrix(response *CreateEmbeddingResponse) [][]float32 {
 // getModel returns the model from the context if it exists, otherwise it returns the default model
 func (e *OpenAIEmbeddingFunction) getModel(ctx context.Context) string {
 	model := e.apiClient.Model
-	if m, ok := ctx.Value(ModelContextVar).(string); ok {
+	if m, ok := ctx.Value(modelContextKey).(string); ok {
 		model = m
 	}
 	return model
@@ -233,7 +246,7 @@ func (e *OpenAIEmbeddingFunction) getModel(ctx context.Context) string {
 // getDimensions returns the dimensions from the context if it exists, otherwise it returns the default dimensions
 func (e *OpenAIEmbeddingFunction) getDimensions(ctx context.Context) *int {
 	dimensions := e.apiClient.Dimensions
-	if dims, ok := ctx.Value(DimensionsContextVar).(*int); ok {
+	if dims, ok := ctx.Value(dimensionsContextKey).(*int); ok {
 		dimensions = dims
 	}
 	return dimensions
