@@ -3,8 +3,8 @@ package gemini
 import (
 	"os"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/pkg/errors"
+	"google.golang.org/genai"
 
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
