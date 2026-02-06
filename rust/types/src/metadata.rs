@@ -1820,11 +1820,12 @@ impl TryFrom<chroma_proto::DirectComparison> for MetadataExpression {
             chroma_proto::direct_comparison::Comparison::SingleIntOperand(
                 single_int_comparison,
             ) => {
-                let comparator = single_int_comparison
-                    .comparator
-                    .ok_or(WhereConversionError::cause(
-                        "Invalid scalar integer operator",
-                    ))?;
+                let comparator =
+                    single_int_comparison
+                        .comparator
+                        .ok_or(WhereConversionError::cause(
+                            "Invalid scalar integer operator",
+                        ))?;
                 let value = MetadataValue::Int(single_int_comparison.value);
                 match comparator {
                     chroma_proto::single_int_comparison::Comparator::GenericComparator(op) => {
