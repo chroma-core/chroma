@@ -3,7 +3,6 @@ package cohere
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 
@@ -169,7 +168,7 @@ func (c *CohereEmbeddingFunction) CreateEmbedding(ctx context.Context, req *Crea
 	}
 	defer resp.Body.Close()
 
-	respData, err := io.ReadAll(resp.Body)
+	respData, err := chttp.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read response body")
 	}

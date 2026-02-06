@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -152,7 +151,7 @@ func (c *BasetenClient) CreateEmbedding(ctx context.Context, req *CreateEmbeddin
 	}
 	defer resp.Body.Close()
 
-	respData, err := io.ReadAll(resp.Body)
+	respData, err := chttp.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read response body")
 	}

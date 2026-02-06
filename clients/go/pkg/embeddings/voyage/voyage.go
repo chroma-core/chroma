@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
-	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -244,7 +243,7 @@ func (c *VoyageAIClient) CreateEmbedding(ctx context.Context, req *CreateEmbeddi
 	}
 	defer resp.Body.Close()
 
-	respData, err := io.ReadAll(resp.Body)
+	respData, err := chttp.ReadLimitedBody(resp.Body)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to read response body")
 	}
