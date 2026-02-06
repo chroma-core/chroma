@@ -1982,6 +1982,20 @@ impl std::fmt::Display for MetadataComparison {
                 };
                 write!(f, "Set({}, {})", op, type_name)
             }
+            MetadataComparison::Contains(op, val) => {
+                let type_name = match val {
+                    MetadataValue::Bool(_) => "Bool",
+                    MetadataValue::Int(_) => "Int",
+                    MetadataValue::Float(_) => "Float",
+                    MetadataValue::Str(_) => "Str",
+                    MetadataValue::SparseVector(_) => "SparseVector",
+                    MetadataValue::BoolArray(_) => "BoolArray",
+                    MetadataValue::IntArray(_) => "IntArray",
+                    MetadataValue::FloatArray(_) => "FloatArray",
+                    MetadataValue::StringArray(_) => "StringArray",
+                };
+                write!(f, "Contains({}, {})", op, type_name)
+            }
         }
     }
 }
