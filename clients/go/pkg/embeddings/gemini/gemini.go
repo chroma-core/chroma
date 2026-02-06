@@ -3,15 +3,14 @@ package gemini
 import (
 	"context"
 
-	"github.com/google/generative-ai-go/genai"
 	"github.com/pkg/errors"
-	"google.golang.org/api/option"
+	"google.golang.org/genai"
 
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
 )
 
 const (
-	DefaultEmbeddingModel = "text-embedding-004"
+	DefaultEmbeddingModel = "gemini-embedding-001"
 	ModelContextVar       = "model"
 	APIKeyEnvVar          = "GEMINI_API_KEY"
 )
@@ -36,7 +35,10 @@ func applyDefaults(c *Client) (err error) {
 	}
 
 	if c.Client == nil {
-		c.Client, err = genai.NewClient(*c.DefaultContext, option.WithAPIKey(c.APIKey.Value()))
+		c.Client, err = genai.NewClient(*c.DefaultContext, &genai.ClientConfig{
+			APIKey:  c.APIKey.Value(),
+			Backend: genai.BackendGeminiAPI,
+		})
 		if err != nil {
 			return errors.WithStack(err)
 		}
@@ -72,16 +74,18 @@ func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embedding
 	if m, ok := ctx.Value(ModelContextVar).(string); ok {
 		model = m
 	}
-	em := c.Client.EmbeddingModel(model)
-	b := em.NewBatch()
-	for _, t := range req {
-		b.AddContent(genai.Text(t))
+	contents := make([]*genai.Content, len(req))
+	for i, t := range req {
+		contents[i] = genai.NewContentFromText(t, genai.RoleUser)
 	}
-	res, err := em.BatchEmbedContents(ctx, b)
+	res, err := c.Client.Models.EmbedContent(ctx, model, contents, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to embed contents")
 	}
-	var embs = make([][]float32, 0)
+	if res == nil || len(res.Embeddings) == 0 {
+		return nil, errors.New("no embeddings returned from Gemini API")
+	}
+	embs := make([][]float32, 0, len(res.Embeddings))
 	for _, e := range res.Embeddings {
 		embs = append(embs, e.Values)
 	}
@@ -89,9 +93,9 @@ func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embedding
 	return embeddings.NewEmbeddingsFromFloat32(embs)
 }
 
-// Close closes the underlying client.
+// Close is a no-op for the new genai SDK client which doesn't require cleanup.
 func (c *Client) Close() error {
-	return c.Client.Close()
+	return nil
 }
 
 var _ embeddings.EmbeddingFunction = (*GeminiEmbeddingFunction)(nil)
