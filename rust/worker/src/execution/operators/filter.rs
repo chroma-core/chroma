@@ -136,13 +136,33 @@ impl<'me> MetadataLogReader<'me> {
                     // Explode array values into individual scalar entries so
                     // that equality-based contains queries work against the
                     // in-memory index, mirroring the blockfile exploded index.
-                    // Scalars pass through as a single-element iterator.
+                    // Scalars pass through directly.
                     let values = compact_metadata.entry(key).or_default();
-                    for scalar in val.into_scalars() {
-                        values
-                            .entry(scalar)
-                            .or_default()
-                            .insert(log.get_offset_id());
+                    let offset_id = log.get_offset_id();
+                    match val {
+                        MetadataValue::BoolArray(arr) => {
+                            for v in arr {
+                                values.entry(MetadataValue::Bool(v)).or_default().insert(offset_id);
+                            }
+                        }
+                        MetadataValue::IntArray(arr) => {
+                            for v in arr {
+                                values.entry(MetadataValue::Int(v)).or_default().insert(offset_id);
+                            }
+                        }
+                        MetadataValue::FloatArray(arr) => {
+                            for v in arr {
+                                values.entry(MetadataValue::Float(v)).or_default().insert(offset_id);
+                            }
+                        }
+                        MetadataValue::StringArray(arr) => {
+                            for v in arr {
+                                values.entry(MetadataValue::Str(v)).or_default().insert(offset_id);
+                            }
+                        }
+                        scalar => {
+                            values.entry(scalar).or_default().insert(offset_id);
+                        }
                     }
                 }
                 if let Some(doc) = log.merged_document_ref() {
@@ -1657,8 +1677,8 @@ mod tests {
             },
         ];
 
-        test_segment
-            .compact_log(Chunk::new(compact_records.into()), 1)
+        Box::pin(test_segment
+            .compact_log(Chunk::new(compact_records.into()), 1))
             .await;
         // After compaction, offset_ids 1-4 live in the blockfile index.
 
