@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 )
 
@@ -36,7 +35,7 @@ func ChromaErrorFromHTTPResponse(resp *http.Response, err error) *ChromaError {
 	chromaAPIError.ErrorCode = resp.StatusCode
 
 	// Read body into buffer first to allow fallback if JSON decode fails
-	bodyBytes, readErr := io.ReadAll(resp.Body)
+	bodyBytes, readErr := ReadLimitedBody(resp.Body)
 	if readErr != nil {
 		return chromaAPIError
 	}
