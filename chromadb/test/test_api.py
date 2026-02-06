@@ -3095,6 +3095,30 @@ class TestWhereFromDict:
         restored = Where.from_dict(d)
         assert restored.to_dict() == d
 
+    def test_document_contains_requires_string(self):
+        """Key.DOCUMENT.contains/not_contains must receive a string."""
+        import pytest
+        from chromadb.execution.expression.operator import Key
+
+        # String is fine
+        expr = Key.DOCUMENT.contains("hello")
+        assert expr.to_dict() == {"#document": {"$contains": "hello"}}
+
+        expr = Key.DOCUMENT.not_contains("hello")
+        assert expr.to_dict() == {"#document": {"$not_contains": "hello"}}
+
+        # Non-string types must be rejected
+        for bad_value in [42, 3.14, True, False]:
+            with pytest.raises(TypeError, match="\\$contains on #document requires a string"):
+                Key.DOCUMENT.contains(bad_value)
+
+            with pytest.raises(TypeError, match="\\$not_contains on #document requires a string"):
+                Key.DOCUMENT.not_contains(bad_value)
+
+        # Metadata keys still accept non-string scalars
+        assert Key("scores").contains(42).to_dict() == {"scores": {"$contains": 42}}
+        assert Key("flags").not_contains(True).to_dict() == {"flags": {"$not_contains": True}}
+
     def test_logical_operators(self):
         """Test logical operator conversions."""
         from chromadb.execution.expression.operator import Where, And, Or

@@ -499,6 +499,8 @@ class Key:
             Key("tags").contains("action")              # metadata array contains
             Key("scores").contains(42)                  # metadata array contains
         """
+        if self.name == "#document" and not isinstance(value, str):
+            raise TypeError("$contains on #document requires a string pattern")
         return Contains(self.name, value)
 
     def not_contains(self, value: LiteralValue) -> NotContains:
@@ -511,6 +513,8 @@ class Key:
             Key.DOCUMENT.not_contains("deprecated")  # document substring exclusion
             Key("tags").not_contains("draft")         # metadata array not-contains
         """
+        if self.name == "#document" and not isinstance(value, str):
+            raise TypeError("$not_contains on #document requires a string pattern")
         return NotContains(self.name, value)
 
 
