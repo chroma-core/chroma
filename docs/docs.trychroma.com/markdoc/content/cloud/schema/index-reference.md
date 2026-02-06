@@ -11,15 +11,15 @@ Comprehensive reference for all index types and their configuration parameters.
 
 Schema recognizes six value types, each with associated index types. Without providing a Schema, collections use these built-in defaults:
 
-| Config Class | Value Type | Default Behavior | Use Case |
-|-------------|-----------|------------------|----------|
-| `StringInvertedIndexConfig` | `string` | Enabled for all metadata | Filter on string values |
-| `FtsIndexConfig` | `string` | Enabled for `K.DOCUMENT` only | Full-text search on documents |
-| `VectorIndexConfig` | `float_list` | Enabled for `K.EMBEDDING` only | Similarity search on embeddings |
-| `SparseVectorIndexConfig` | `sparse_vector` | Disabled (requires config) | Keyword-based search |
-| `IntInvertedIndexConfig` | `int_value` | Enabled for all metadata | Filter on integer values |
-| `FloatInvertedIndexConfig` | `float_value` | Enabled for all metadata | Filter on float values |
-| `BoolInvertedIndexConfig` | `boolean` | Enabled for all metadata | Filter on boolean values |
+| Config Class (Python/TS) | Go Schema Option | Value Type | Default Behavior | Use Case |
+|--------------------------|------------------|-----------|------------------|----------|
+| `StringInvertedIndexConfig` | `WithStringIndex()`, `DisableDefaultStringIndex()` | `string` | Enabled for all metadata | Filter on string values |
+| `FtsIndexConfig` | `WithFtsIndex()` | `string` | Enabled for `K.DOCUMENT` only | Full-text search on documents |
+| `VectorIndexConfig` | `WithDefaultVectorIndex()`, `WithVectorIndex()` | `float_list` | Enabled for `K.EMBEDDING` only | Similarity search on embeddings |
+| `SparseVectorIndexConfig` | `WithSparseVectorIndex()` | `sparse_vector` | Disabled (requires config) | Keyword-based search |
+| `IntInvertedIndexConfig` | `WithIntIndex()`, `DisableDefaultIntIndex()` | `int_value` | Enabled for all metadata | Filter on integer values |
+| `FloatInvertedIndexConfig` | `WithFloatIndex()`, `DisableDefaultFloatIndex()` | `float_value` | Enabled for all metadata | Filter on float values |
+| `BoolInvertedIndexConfig` | `WithBoolIndex()`, `DisableDefaultBoolIndex()` | `boolean` | Enabled for all metadata | Filter on boolean values |
 
 ## Simple Index Configs
 
