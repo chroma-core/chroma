@@ -1655,10 +1655,14 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
     ) -> Result<(), Error> {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            self.config.rollup_concurrent_manifests,
+        ));
         let load_witness = |_this: &LogServer,
                             storage: Arc<Storage>,
                             topology: Option<TopologyName>,
                             collection_id: CollectionUuid| {
+            let semaphore = Arc::clone(&semaphore);
             async move {
                 let cursor = &INTRINSIC_CURSOR;
                 let cursor_store = CursorStore::new(
@@ -1676,8 +1680,7 @@ impl LogServer {
                         let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
                         return Ok((Some(witness), None));
                     }
-                    let load_span = tracing::info_span!("cursor load");
-                    let res = cursor_store.load(cursor).instrument(load_span).await?;
+                    let res = cursor_store.load(cursor).await?;
                     if let Some(witness) = res.as_ref() {
                         let json_witness = serde_json::to_string(&witness)?;
                         let value = CachedBytes::new(Vec::from(json_witness));
@@ -1691,6 +1694,7 @@ impl LogServer {
                 // NOTE(rescrv):  This may turn out to be a bad idea, but do not load the manifest from
                 // cache in order to prevent a stale cache from perpetually returning a stale result.
                 let manifest = if witness.is_none() {
+                    let _permit = semaphore.acquire().await;
                     let reader = self
                         .make_log_reader(topology.as_ref(), collection_id)
                         .await?;
@@ -2960,6 +2964,8 @@ pub struct LogServerConfig {
     pub grpc_max_concurrent_streams: u32,
     #[serde(default = "LogServerConfig::default_rollup_concurrency")]
     pub rollup_concurrency: usize,
+    #[serde(default = "LogServerConfig::default_rollup_concurrent_manifests")]
+    pub rollup_concurrent_manifests: usize,
     #[serde(default)]
     pub regions_and_topologies:
         Option<MultiCloudMultiRegionConfiguration<RegionalStorageConfig, TopologicalStorageConfig>>,
@@ -3033,8 +3039,21 @@ impl LogServerConfig {
         1000
     }
 
-    /// Maximum number of concurrent operations during dirty log rollup.
+    /// Maximum number of concurrent tokio tasks used to enrich dirty log rollup.
+    ///
+    /// Math used for this default:
+    /// 50k dirty collections on one log
+    /// 0.02s per cursor
+    /// To process all 50k in less than 2s requires 500.
     fn default_rollup_concurrency() -> usize {
+        500
+    }
+
+    /// Maximum number of concurrent replicated manifest operations during dirty log rollup.
+    ///
+    /// This affects the number of spanner transactions that are outstanding concurrently.  A
+    /// single node can have 400 by default, so we give 1/8 of the throughput to this.
+    fn default_rollup_concurrent_manifests() -> usize {
         50
     }
 }
