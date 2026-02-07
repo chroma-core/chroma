@@ -583,7 +583,6 @@ class RustBindingsAPI(ServerAPI):
         self.product_telemetry_client.capture(
             CollectionDeleteEvent(
                 # NOTE: the delete amount is not observable from python
-                # TODO: Fix this when posthog is pushed into Rust frontend
                 collection_uuid=str(collection_id),
                 delete_amount=0,
             )
