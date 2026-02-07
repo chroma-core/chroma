@@ -4,9 +4,11 @@ use super::{
     root::RootWriter,
     types::{ArrowWriteableKey, ArrowWriteableValue},
 };
-use chroma_error::ChromaError;
+use backon::{ExponentialBuilder, Retryable};
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::Cmek;
 use futures::{StreamExt, TryStreamExt};
+use std::time::Duration;
 use uuid::Uuid;
 
 pub struct ArrowBlockfileFlusher {
@@ -52,13 +54,40 @@ impl ArrowBlockfileFlusher {
         // NOTE(hammadb) we do not use try_join_all here because we want to flush all blocks
         // in parallel and try_join_all / join_all switches to using futures_ordered if the
         // number of futures is high.
+        let retry_backoff = ExponentialBuilder::default()
+            .with_factor(2.0)
+            .with_min_delay(Duration::from_millis(100))
+            .with_max_delay(Duration::from_secs(10))
+            .with_max_times(5)
+            .with_jitter();
         let mut futures = Vec::new();
         for block in &self.blocks {
-            futures.push(self.block_manager.flush(
-                block,
-                &self.root.prefix_path,
-                self.cmek.clone(),
-            ));
+            let block_manager = self.block_manager.clone();
+            let prefix_path = self.root.prefix_path.clone();
+            let cmek = self.cmek.clone();
+            let block_id = block.id;
+            let block = block.clone();
+            futures.push(async move {
+                let flush_fn = || {
+                    let block_manager = block_manager.clone();
+                    let prefix_path = prefix_path.clone();
+                    let cmek = cmek.clone();
+                    let block = block.clone();
+                    async move { block_manager.flush(&block, &prefix_path, cmek).await }
+                };
+                flush_fn
+                    .retry(retry_backoff)
+                    .when(|e| {
+                        matches!(
+                            e.code(),
+                            ErrorCodes::ResourceExhausted | ErrorCodes::Internal
+                        )
+                    })
+                    .notify(|e, _| {
+                        tracing::warn!("Retrying flush for block {}: {}", block_id, e);
+                    })
+                    .await
+            });
         }
         let num_futures = futures.len();
         // buffer_unordered hangs with 0 futures.
