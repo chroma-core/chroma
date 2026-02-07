@@ -1007,6 +1007,13 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
         starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
+    /// Parse parquet previously returned by read_bytes, skipping setsum computation.
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
+
     /// Scrub the log to verify its integrity.
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>>;
 }
@@ -1073,6 +1080,14 @@ impl<
         starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         LogReader::parse_parquet(self, parquet, starting_log_position).await
+    }
+
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        LogReader::parse_parquet_fast(self, parquet, starting_log_position).await
     }
 
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>> {
