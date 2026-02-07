@@ -511,6 +511,16 @@ impl FragmentConsumer for FragmentReader {
         crate::interfaces::s3::parse_parquet(parquet, Some(starting_log_position)).await
     }
 
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        // NOTE(rescrv):  ReplciatedFragmentManager deals with relatives; we therefore pass an
+        // offset.
+        crate::interfaces::s3::parse_parquet_fast(parquet, Some(starting_log_position)).await
+    }
+
     async fn read_fragment(
         &self,
         path: &str,
