@@ -243,6 +243,7 @@ class Client(SharedSystemClient, ClientAPI):
             Collection: The requested collection.
 
         Raises:
+            NotFoundError: If the collection does not exist.
             ValueError: If the embedding function conflicts with configuration.
         """
         model = self._server.get_collection(
