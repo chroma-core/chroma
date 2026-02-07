@@ -589,6 +589,19 @@ impl ChromaHttpClient {
         })
     }
 
+    /// Given a value previously returned by `dehydrate_collection`, return the collection without
+    /// any network activity.
+    pub async fn rehydrate_collection(
+        &self,
+        dehydrated: serde_json::Value,
+    ) -> Result<ChromaCollection, serde_json::Error> {
+        let collection: Collection = serde_json::from_value(dehydrated)?;
+        Ok(ChromaCollection {
+            client: self.clone(),
+            collection: collection.into(),
+        })
+    }
+
     /// Removes a collection and all its records from the database.
     ///
     /// Permanently deletes the collection and all contained embeddings, metadata, and documents.
@@ -1172,6 +1185,45 @@ mod tests {
                 }
                 _ => panic!("Expected ApiError"),
             };
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_live_cloud_dehydrate_rehydrate() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_dehydrate").await;
+
+            collection
+                .add(
+                    vec!["id1".to_string(), "id2".to_string()],
+                    vec![vec![1.0, 2.0, 3.0], vec![4.0, 5.0, 6.0]],
+                    Some(vec![
+                        Some("first document".to_string()),
+                        Some("second document".to_string()),
+                    ]),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            let count_before = collection.count().await.unwrap();
+            println!("Count before dehydrate: {}", count_before);
+            assert_eq!(count_before, 2);
+
+            let dehydrated = collection.dehydrate().await.unwrap();
+            println!("Dehydrated collection: {}", dehydrated);
+
+            let rehydrated = client.rehydrate_collection(dehydrated).await.unwrap();
+
+            let count_after = rehydrated.count().await.unwrap();
+            println!("Count after rehydrate: {}", count_after);
+            assert_eq!(count_after, 2);
+
+            assert_eq!(collection.name(), rehydrated.name());
+            assert_eq!(collection.id(), rehydrated.id());
         })
         .await;
     }
