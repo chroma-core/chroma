@@ -298,11 +298,27 @@ pub async fn parse_parquet(
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
     let num_bytes = parquet.len() as u64;
     let (setsum, records, uses_relative_offsets, now_micros) =
-        super::checksum_parquet(parquet, starting_log_position)?;
+        super::checksum_parquet(parquet, true, starting_log_position)?;
     match (starting_log_position, uses_relative_offsets) {
         (Some(_), true) => Ok((setsum, records, num_bytes, now_micros)),
         (Some(_), false) => Err(Error::internal(file!(), line!())),
         (None, false) => Ok((setsum, records, num_bytes, now_micros)),
+        (None, true) => Err(Error::internal(file!(), line!())),
+    }
+}
+
+/// Reads a parquet fragment from storage and parses its records.
+pub async fn parse_parquet_fast(
+    parquet: &[u8],
+    starting_log_position: Option<LogPosition>,
+) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+    let num_bytes = parquet.len() as u64;
+    let (_, records, uses_relative_offsets, now_micros) =
+        super::checksum_parquet(parquet, false, starting_log_position)?;
+    match (starting_log_position, uses_relative_offsets) {
+        (Some(_), true) => Ok((records, num_bytes, now_micros)),
+        (Some(_), false) => Err(Error::internal(file!(), line!())),
+        (None, false) => Ok((records, num_bytes, now_micros)),
         (None, true) => Err(Error::internal(file!(), line!())),
     }
 }

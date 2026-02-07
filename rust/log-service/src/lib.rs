@@ -2069,16 +2069,17 @@ impl LogServer {
                         let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
                         if let Ok(Some(answer)) = cache.get(&cache_key).await {
                             if answer.version == Some(1) {
-                                let (_, records, _, _) = log_reader
-                                    .parse_parquet(&answer.bytes, fragment.start)
+                                let (records, _, _) = log_reader
+                                    .parse_parquet_fast(&answer.bytes, fragment.start)
                                     .await?;
                                 return Ok(records);
                             }
                         }
                         let bytes = log_reader.read_bytes(&fragment).await?;
                         let cache_value = CachedBytes::new((*bytes).clone());
-                        let (_, answer, _, _) =
-                            log_reader.parse_parquet(&bytes, fragment.start).await?;
+                        let (answer, _, _) = log_reader
+                            .parse_parquet_fast(&bytes, fragment.start)
+                            .await?;
                         cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
