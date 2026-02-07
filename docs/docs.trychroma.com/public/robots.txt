@@ -1,5 +1,0 @@
-User-agent: *
-Allow: /
-
-# LLM-friendly content
-Sitemap: https://docs.trychroma.com/llms.txt

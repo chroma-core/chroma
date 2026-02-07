@@ -1,5 +1,5 @@
-![Chroma](./docs/docs.trychroma.com/public/chroma-wordmark-color.png#gh-light-mode-only)
-![Chroma](./docs/docs.trychroma.com/public/chroma-wordmark-white.png#gh-dark-mode-only)
+![Chroma](./docs/assets/chroma-wordmark-color.png#gh-light-mode-only)
+![Chroma](./docs/assets/chroma-wordmark-white.png#gh-dark-mode-only)
 
 <p align="center">
     <b>Chroma - the open-source search engine for AI</b>. <br />
