@@ -215,6 +215,28 @@ jobs:
     uses: ./.github/workflows/_deploy.yml
     secrets: inherit
 
+  release-docs:
+    name: Deploy docs to Vercel
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs:
+      - check-tag
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+      - name: Install vercel
+        run: npm install -g vercel
+      - name: Deploy
+        run: vercel deploy --token ${{ secrets.VERCEL_TOKEN }} ${{ needs.check-tag.outputs.tag_matches == 'true' && '--prod' || '' }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
+
   notify-slack-on-failure:
     name: Notify Slack on ChromaDB Release Failure
     if: failure()
@@ -224,6 +246,7 @@ jobs:
       - release-thin-pypi
       - release-github
       - deploy-staging
+      - release-docs
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Notify Slack

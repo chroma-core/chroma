@@ -1,0 +1,22 @@
+loaders:
+  - type: python
+    search_path: [
+      '../../chromadb',
+      '../../chromadb/api',
+      '../../chromadb/api/models',
+      ]
+    modules: ['api', 'Collection', '__init__']
+    ignore_when_discovered: []
+processors:
+  - type: filter
+    skip_empty_modules: true
+  - type: smart
+  - type: crossref
+renderer:
+  type: docusaurus
+  docs_base_path: pages-old
+  relative_output_path: reference
+  relative_sidebar_path: sidebar.json
+  sidebar_top_level_label: 'Reference Docs'
+  markdown:
+    escape_html_in_docstring: false

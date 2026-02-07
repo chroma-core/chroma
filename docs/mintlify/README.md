@@ -2,7 +2,7 @@
 
 This is the official documentation for [Chroma](https://www.trychroma.com), the open-source AI application database.
 
-Documentation is built with [Mintlify](https://mintlify.com) and deployed at [docs.trychroma.com](https://docs.trychroma.com).
+Documentation is built with [Mintlify](https://mintlify.com) and deployed at [mint-docs.trychroma.com](https://mint-docs.trychroma.com).
 
 ## Local Development
 

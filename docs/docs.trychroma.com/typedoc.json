@@ -1,0 +1,11 @@
+{
+    "entryPoints": [
+        "../../clients/js/src/ChromaClient.ts",
+        "../../clients/js/src/Collection.ts",
+        "../../clients/js/src/AdminClient.ts"
+    ],
+    "out": "./pages/reference/temp-js",
+    "plugin": [
+        "typedoc-plugin-markdown"
+    ]
+}

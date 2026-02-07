@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "github": {
+    "enabled": false
+  },
+  "rewrites": [
+    {
+      "source": "/c5/static/(.*)",
+      "destination": "https://us-assets.i.posthog.com/static/$1"
+    },
+    {
+      "source": "/c5/(.*)",
+      "destination": "https://us.i.posthog.com/$1"
+    }
+  ]
+}
