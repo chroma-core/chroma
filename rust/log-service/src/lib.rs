@@ -1360,6 +1360,9 @@ impl LogServer {
                 tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
             }
         }
+        self.metrics
+            .dirty_log_collections
+            .record(rollups.len() as u64, &[]);
         self.set_backpressure(&backpressure);
         {
             let mut need_to_compact = self.need_to_compact.lock();
@@ -1395,9 +1398,6 @@ impl LogServer {
             tracing::Level::INFO,
             collections = ?collections,
         );
-        self.metrics
-            .dirty_log_collections
-            .record(collections as u64, &[]);
         self.enrich_dirty_log(&mut rollup.rollups).await?;
         self.save_dirty_log(rollup, &**dirty_log).await
     }
