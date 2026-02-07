@@ -2055,16 +2055,17 @@ impl LogServer {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
         };
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .await
+            .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         let futures = fragments
             .iter()
             .map(|fragment| {
+                let log_reader = Arc::clone(&log_reader);
                 let this = self;
-                let topology_name = topology_name.clone();
                 let fragment = fragment.clone();
                 async move {
-                    let log_reader = this
-                        .make_log_reader(topology_name.as_ref(), collection_id)
-                        .await?;
                     if let Some(cache) = this.cache.as_ref() {
                         let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
                         if let Ok(Some(answer)) = cache.get(&cache_key).await {
