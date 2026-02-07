@@ -228,6 +228,12 @@ pub trait FragmentConsumer: Send + Sync + 'static {
         starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
+
     async fn read_fragment(
         &self,
         path: &str,
@@ -383,6 +389,7 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
 #[allow(clippy::type_complexity)]
 pub fn checksum_parquet(
     parquet: &[u8],
+    compute_setsum: bool,
     starting_log_position: Option<LogPosition>,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool, u64), Error> {
     let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(parquet))
@@ -464,7 +471,13 @@ pub fn checksum_parquet(
             let body = body.value(i);
             // Use raw_offset for setsum to match how the writer computed it.
             // The writer uses the offset value that gets stored in the file (relative or absolute).
-            setsum.insert_vectored(&[&raw_offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
+            if compute_setsum {
+                setsum.insert_vectored(&[
+                    &raw_offset.to_be_bytes(),
+                    &epoch_micros.to_be_bytes(),
+                    body,
+                ]);
+            }
             // Use absolute_offset for returned positions so callers get correct log positions.
             records.push((LogPosition::from_offset(absolute_offset), body.to_vec()));
         }
@@ -526,7 +539,7 @@ mod tests {
 
         // Read with None starting_log_position
         let (setsum, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, Some(LogPosition::from_offset(42)))
+            checksum_parquet(&buffer, true, Some(LogPosition::from_offset(42)))
                 .expect("checksum_parquet should succeed");
 
         println!(
@@ -560,7 +573,7 @@ mod tests {
 
         // Read with a starting_log_position - positions should be translated
         let (setsum_from_reader, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, Some(starting_position))
+            checksum_parquet(&buffer, true, Some(starting_position))
                 .expect("checksum_parquet should succeed");
 
         println!(
@@ -614,7 +627,7 @@ mod tests {
 
         // Read with a different starting_log_position - should be ignored for absolute files
         let (setsum_from_reader, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+            checksum_parquet(&buffer, true, None).expect("checksum_parquet should succeed");
 
         println!(
             "checksum_parquet_ignores_starting_position_for_absolute_offset_files: \
