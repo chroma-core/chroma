@@ -1,0 +1,18 @@
+{
+    "compilerOptions": {
+        "lib": [
+            "ES2015",
+            "DOM"
+        ],
+        "target": "es5",
+        "module": "commonjs",
+        "outDir": "./dist",
+        "strict": true,
+        "esModuleInterop": true
+    },
+    "include": [
+        "../../clients/js/src/ChromaClient.ts",
+        "../../clients/js/src/Collection.ts",
+        "../../clients/js/src/AdminClient.ts"
+    ]
+}
