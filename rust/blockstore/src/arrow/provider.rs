@@ -213,6 +213,7 @@ impl ArrowBlockfileProvider {
                         self.root_manager.clone(),
                         new_root,
                         options.cmek,
+                        options.track_value_buffer_offsets,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -244,6 +245,7 @@ impl ArrowBlockfileProvider {
                         self.root_manager.clone(),
                         max_block_size_bytes,
                         options.cmek,
+                        options.track_value_buffer_offsets,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -478,6 +480,29 @@ impl BlockManager {
         format!("{}/block/{}", prefix_path, id)
     }
 
+    /// Fetch a byte range from a block file without loading the entire block.
+    /// This is useful for efficiently reading specific values (e.g., embeddings)
+    /// when their byte offset within the block is known.
+    ///
+    /// # Arguments
+    /// * `prefix_path` - The prefix path for the block
+    /// * `block_id` - The UUID of the block
+    /// * `start` - Start byte offset (inclusive)
+    /// * `end` - End byte offset (exclusive)
+    pub(super) async fn get_range(
+        &self,
+        prefix_path: &str,
+        block_id: &Uuid,
+        start: u64,
+        end: u64,
+    ) -> Result<Arc<Vec<u8>>, GetError> {
+        let key = Self::format_key(prefix_path, block_id);
+        self.storage
+            .get_range(&key, start, end)
+            .await
+            .map_err(GetError::StorageGetError)
+    }
+
     pub(super) async fn get(
         &self,
         prefix_path: &str,
@@ -628,6 +653,57 @@ impl BlockManager {
             }
         }
         Ok(())
+    }
+
+    /// Flush a block to storage and return the value buffer byte offset.
+    /// The buffer_index specifies which buffer's offset to compute.
+    /// For DataRecord blocks, buffer index 7 is the embedding Float32 values buffer.
+    pub(super) async fn flush_with_value_buffer_offset(
+        &self,
+        block: &Block,
+        prefix_path: &str,
+        cmek: Option<Cmek>,
+        buffer_index: usize,
+    ) -> Result<Option<u64>, Box<dyn ChromaError>> {
+        let bytes = match block.to_bytes() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                tracing::error!("Failed to convert block to bytes");
+                return Err(Box::new(e));
+            }
+        };
+
+        // Compute value buffer offset before writing
+        let value_buffer_offset = Block::get_value_buffer_offset(&bytes, buffer_index);
+
+        let key = Self::format_key(prefix_path, &block.id);
+        let _stopwatch = Stopwatch::new(
+            &self.block_metrics.flush_latency,
+            &[],
+            chroma_tracing::util::StopWatchUnit::Millis,
+        );
+        let block_bytes_len = bytes.len();
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+        let res = self.storage.put_bytes(&key, bytes, options).await;
+        match res {
+            Ok(_) => {
+                tracing::debug!(
+                    "Block: {} written to storage ({}B), value_buffer_offset: {:?}",
+                    block.id,
+                    block_bytes_len,
+                    value_buffer_offset
+                );
+                self.block_metrics.num_blocks_flushed.record(1, &[]);
+            }
+            Err(e) => {
+                tracing::info!("Error writing block to storage {}", e);
+                return Err(Box::new(e));
+            }
+        }
+        Ok(value_buffer_offset)
     }
 
     pub(super) fn default_max_block_size_bytes(&self) -> usize {
