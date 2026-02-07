@@ -13,6 +13,7 @@ from chromadb import (
     QueryResult,
     URIs,
 )
+from chromadb.api.types import IndexingStatus
 from chromadb.api import ServerAPI
 
 if TYPE_CHECKING:
