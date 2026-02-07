@@ -59,6 +59,7 @@ pub struct WorkerServer {
     jemalloc_pprof_server_port: Option<u16>,
     // config
     fetch_log_batch_size: u32,
+    fetch_log_concurrency: usize,
     shutdown_grace_period: Duration,
 }
 
@@ -109,6 +110,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             port: config.my_port,
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
+            fetch_log_concurrency: config.fetch_log_concurrency,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
