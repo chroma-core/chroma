@@ -152,6 +152,10 @@ pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
 
+    /// The maximum number of concurrent log fetch requests.
+    #[serde(default = "QueryServiceConfig::default_fetch_log_concurrency")]
+    pub fetch_log_concurrency: usize,
+
     /// The configuration for managing SPANN indices within the query service.
     /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
     #[serde(default)]
@@ -192,6 +196,10 @@ impl QueryServiceConfig {
 
     fn default_fetch_log_batch_size() -> u32 {
         100
+    }
+
+    fn default_fetch_log_concurrency() -> usize {
+        10
     }
 
     fn default_grpc_shutdown_grace_period() -> Duration {
