@@ -1573,6 +1573,7 @@ version = "0.1.0"
 dependencies = [
  "arrow",
  "async-trait",
+ "backon",
  "bincode",
  "bytes",
  "chroma-cache",

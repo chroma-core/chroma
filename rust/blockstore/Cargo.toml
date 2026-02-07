@@ -16,6 +16,7 @@ uuid = { workspace = true }
 async-trait = { workspace = true }
 roaring = { workspace = true }
 futures = { workspace = true }
+backon = { workspace = true }
 parking_lot = { workspace = true }
 tracing = { workspace = true }
 shuttle = { workspace = true }
