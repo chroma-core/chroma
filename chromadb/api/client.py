@@ -191,6 +191,7 @@ class Client(SharedSystemClient, ClientAPI):
             Collection: The created collection.
 
         Raises:
+            UniqueConstraintError: If the collection already exists and get_or_create is False.
             ValueError: If the embedding function conflicts with configuration.
         """
         if configuration is None:
