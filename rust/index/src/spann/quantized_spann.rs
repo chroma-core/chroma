@@ -344,12 +344,46 @@ pub mod stats {
         out
     }
 
+    fn format_task_avg_time_table(snapshots: &[StatsSnapshot]) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out, "\n=== Task Avg Time ===").unwrap();
+        // Header
+        write!(out, "| CP |").unwrap();
+        for method in ALL_METHODS {
+            write!(out, " {:>8} |", method).unwrap();
+        }
+        writeln!(out).unwrap();
+        // Separator
+        write!(out, "|----|").unwrap();
+        for _ in ALL_METHODS {
+            write!(out, "----------|").unwrap();
+        }
+        writeln!(out).unwrap();
+        // Data rows
+        for (i, snap) in snapshots.iter().enumerate() {
+            write!(out, "| {:>2} |", i + 1).unwrap();
+            for method in ALL_METHODS {
+                let m = snap.get(method);
+                let avg = if m.calls > 0 {
+                    format_duration(m.total_nanos / m.calls)
+                } else {
+                    "-".to_string()
+                };
+                write!(out, " {:>8} |", avg).unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+        out
+    }
+
     /// Format all batch stats as summary tables.
     pub fn format_batch_tables(snapshots: &[StatsSnapshot]) -> String {
         let mut out = String::new();
         out.push_str(&format_cluster_stats_table(snapshots));
         out.push_str(&format_task_counts_table(snapshots));
         out.push_str(&format_task_timing_table(snapshots));
+        out.push_str(&format_task_avg_time_table(snapshots));
         out
     }
 
