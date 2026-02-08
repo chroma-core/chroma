@@ -247,3 +247,25 @@ def test_ephemeral_client_context_manager() -> None:
     assert client._system._running is False
 
     client.clear_system_cache()
+
+
+def test_client_close_idempotent() -> None:
+    """Test that calling close() multiple times is a safe no-op."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        client = chromadb.PersistentClient(path=tmpdir)
+        collection = client.create_collection("test_collection")
+        collection.add(ids=["id1"], documents=["doc1"])
+
+        # First close should work normally
+        client.close()
+
+        # Second close should be a no-op, not raise KeyError
+        client.close()
+
+        # Third close should also be safe
+        client.close()
+
+        client.clear_system_cache()

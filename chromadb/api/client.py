@@ -560,10 +560,13 @@ class Client(SharedSystemClient, ClientAPI):
         # Decrement reference count and only stop system if this is the last client
         refcount = SharedSystemClient._decrement_refcount(self._identifier)
         if refcount <= 0:
-            self._system.stop()
-            # Clean up the system from the cache when stopped
-            if self._identifier in SharedSystemClient._identifier_to_system:
-                del SharedSystemClient._identifier_to_system[self._identifier]
+            # Use pop() to make close() idempotent - a second call is a safe no-op
+            system = SharedSystemClient._identifier_to_system.pop(
+                self._identifier, None
+            )
+            if system is None:
+                return
+            system.stop()
 
     def __enter__(self) -> "Client":
         """Context manager entry."""
