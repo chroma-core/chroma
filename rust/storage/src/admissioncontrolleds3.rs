@@ -684,10 +684,13 @@ impl AdmissionControlledS3Storage {
             futures.push(fut);
         }
         // Await all futures and return the result.
-        let _ = stream::iter(futures)
+        let results = stream::iter(futures)
             .buffer_unordered(num_parts)
             .collect::<Vec<_>>()
             .await;
+        for result in results.into_iter() {
+            result?;
+        }
         Ok((Arc::new(output_buffer), e_tag))
     }
 
