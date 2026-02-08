@@ -56,6 +56,7 @@ class Client(SharedSystemClient, ClientAPI):
     _server: ServerAPI
     # An internal admin client for verifying that databases and tenants exist
     _admin_client: AdminAPI
+    _closed: bool = False
 
     # region Initialization
     def __init__(
@@ -65,43 +66,55 @@ class Client(SharedSystemClient, ClientAPI):
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
-        if tenant is not None:
-            self.tenant = tenant
-        if database is not None:
-            self.database = database
+        try:
+            if tenant is not None:
+                self.tenant = tenant
+            if database is not None:
+                self.database = database
 
-        # Get the root system component we want to interact with
-        self._server = self._system.instance(ServerAPI)
+            # Get the root system component we want to interact with
+            self._server = self._system.instance(ServerAPI)
 
-        user_identity = self.get_user_identity()
+            user_identity = self.get_user_identity()
 
-        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
-            user_identity,
-            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            user_provided_tenant=tenant,
-            user_provided_database=database,
-        )
-
-        # this should not happen unless types are invalidated
-        if maybe_tenant is None and tenant is None:
-            raise ChromaAuthError(
-                "Could not determine a tenant from the current authentication method. Please provide a tenant."
-            )
-        if maybe_database is None and database is None:
-            raise ChromaAuthError(
-                "Could not determine a database name from the current authentication method. Please provide a database name."
+            maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+                user_identity,
+                overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+                user_provided_tenant=tenant,
+                user_provided_database=database,
             )
 
-        if maybe_tenant:
-            self.tenant = maybe_tenant
-        if maybe_database:
-            self.database = maybe_database
+            # this should not happen unless types are invalidated
+            if maybe_tenant is None and tenant is None:
+                raise ChromaAuthError(
+                    "Could not determine a tenant from the current authentication method. Please provide a tenant."
+                )
+            if maybe_database is None and database is None:
+                raise ChromaAuthError(
+                    "Could not determine a database name from the current authentication method. Please provide a database name."
+                )
 
-        # Create an admin client for verifying that databases and tenants exist
-        self._admin_client = AdminClient.from_system(self._system)
-        self._validate_tenant_database(tenant=self.tenant, database=self.database)
+            if maybe_tenant:
+                self.tenant = maybe_tenant
+            if maybe_database:
+                self.database = maybe_database
 
-        self._submit_client_start_event()
+            # Create an admin client for verifying that databases and tenants exist
+            self._admin_client = AdminClient.from_system(self._system)
+            self._validate_tenant_database(tenant=self.tenant, database=self.database)
+
+            self._submit_client_start_event()
+        except Exception:
+            # If init fails after refcount was incremented, decrement it to
+            # avoid a resource leak (the caller never receives the object to
+            # call close() on it).
+            SharedSystemClient._decrement_refcount(self._identifier)
+            # Also decrement the admin_client's refcount if it was created
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._decrement_refcount(
+                    self._admin_client._identifier
+                )
+            raise
 
     @classmethod
     @override
@@ -557,10 +570,19 @@ class Client(SharedSystemClient, ClientAPI):
             >>> with chromadb.PersistentClient(path="./chroma_db") as client:
             ...     # ... use client ...
         """
+        # Make close() idempotent - a second call is a safe no-op
+        if self._closed:
+            return
+        self._closed = True
+
+        # Decrement the internal admin client's refcount first, since it also
+        # incremented the refcount for the same shared system on creation.
+        if hasattr(self, "_admin_client"):
+            SharedSystemClient._decrement_refcount(self._admin_client._identifier)
+
         # Decrement reference count and only stop system if this is the last client
         refcount = SharedSystemClient._decrement_refcount(self._identifier)
         if refcount <= 0:
-            # Use pop() to make close() idempotent - a second call is a safe no-op
             system = SharedSystemClient._identifier_to_system.pop(
                 self._identifier, None
             )
