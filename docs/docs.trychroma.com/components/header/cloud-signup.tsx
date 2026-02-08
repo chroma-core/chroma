@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Cross2Icon } from "@radix-ui/react-icons";
 import ChromaIcon from "../../public/chroma-icon.svg";
 import Link from "next/link";
 import Image from "next/image";
@@ -42,7 +41,7 @@ const CloudSignUp: React.FC = () => {
   };
 
   return (
-    open && (
+    open ? (
       <div
         className={`hidden md:block fixed bottom-4 z-20 right-4 bg-white border border-black h-48 w-[400px] flex flex-col gap-0 sm:rounded-none p-0 dark:border-white dark:border dark:bg-gray-950 ${imageLoaded ? "opacity-100" : "opacity-0"}`}
       >
@@ -78,7 +77,7 @@ const CloudSignUp: React.FC = () => {
           </div>
         </div>
       </div>
-    )
+    ) : null
   );
 };
 
