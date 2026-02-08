@@ -533,6 +533,32 @@ class Client(SharedSystemClient, ClientAPI):
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
 
+    def close(self) -> None:
+        """Close the client and release all resources.
+
+        This method properly closes database connections and releases file locks,
+        which is particularly important for PersistentClient to avoid SQLite
+        file locking issues.
+
+        Example:
+            >>> client = chromadb.PersistentClient(path="./chroma_db")
+            >>> # ... use client ...
+            >>> client.close()
+
+            Or using context manager:
+            >>> with chromadb.PersistentClient(path="./chroma_db") as client:
+            ...     # ... use client ...
+        """
+        self._system.stop()
+
+    def __enter__(self) -> "Client":
+        """Context manager entry."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.close()
+
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
             self._admin_client.get_tenant(name=tenant)
