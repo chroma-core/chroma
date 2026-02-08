@@ -164,8 +164,16 @@ pub struct AdmissionControlledS3StorageConfig {
     pub rate_limiting_policy: RateLimitingConfig,
     #[serde(default)]
     pub s3_config: S3StorageConfig,
+    #[serde(default = "AdmissionControlledS3StorageConfig::default_spawn_fetches")]
+    pub spawn_fetches: bool,
     #[serde(default)]
     pub use_object_store_client: bool,
+}
+
+impl AdmissionControlledS3StorageConfig {
+    fn default_spawn_fetches() -> bool {
+        false
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize)]
