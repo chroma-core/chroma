@@ -335,6 +335,11 @@ pub struct AdmissionControlledS3Storage {
     outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
     rate_limiter: Arc<RateLimitPolicy>,
     metrics: AdmissionControlledS3StorageMetrics,
+    /// Controls whether fetch futures are spawned as separate tasks or awaited directly.
+    /// When `true`, fetches are spawned allowing them to continue even if the upstream
+    /// request is cancelled. When `false`, fetches are awaited directly which may result
+    /// in cancellation if the caller drops the future.
+    spawn_fetches: bool,
 }
 
 ////// Metrics //////
@@ -599,15 +604,17 @@ impl AdmissionControlledS3Storage {
                 &vec![1.0],
             ))),
             metrics: AdmissionControlledS3StorageMetrics::default(),
+            spawn_fetches: false,
         }
     }
 
-    pub fn new_s3(storage: S3Storage, policy: RateLimitPolicy) -> Self {
+    pub fn new_s3(storage: S3Storage, policy: RateLimitPolicy, spawn_fetches: bool) -> Self {
         Self {
             storage: ACStorageProvider::S3(storage.into()),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
             metrics: AdmissionControlledS3StorageMetrics::default(),
+            spawn_fetches,
         }
     }
 
@@ -620,15 +627,21 @@ impl AdmissionControlledS3Storage {
                 &vec![1.0],
             ))),
             metrics: AdmissionControlledS3StorageMetrics::default(),
+            spawn_fetches: false,
         }
     }
 
-    pub fn new_object(storage: ObjectStorage, policy: RateLimitPolicy) -> Self {
+    pub fn new_object(
+        storage: ObjectStorage,
+        policy: RateLimitPolicy,
+        spawn_fetches: bool,
+    ) -> Self {
         Self {
             storage: ACStorageProvider::Object(Box::new(storage)),
             outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
             metrics: AdmissionControlledS3StorageMetrics::default(),
+            spawn_fetches,
         }
     }
 
@@ -932,7 +945,7 @@ impl AdmissionControlledS3Storage {
                     // we do not cancel tasks right now, this block of logic is moved out
                     // of tokio::spawn. If we introduce the cancellation logic in the future
                     // we need to address the issue in the comment above.
-                    {
+                    let fetching_future = async move {
                         // Fetch all keys in parallel
                         let fetch_futures: Vec<_> = keys_clone
                             .iter()
@@ -1003,6 +1016,11 @@ impl AdmissionControlledS3Storage {
                                 }
                             }
                         }
+                    };
+                    if self.spawn_fetches {
+                        tokio::task::spawn(fetching_future);
+                    } else {
+                        fetching_future.await;
                     }
                     output_rx.await.map_err(|e| {
                         tracing::error!("Unexpected channel closure: {}", e);
@@ -1144,14 +1162,18 @@ impl Configurable<StorageConfig> for AdmissionControlledS3Storage {
                         .await?;
                 if nacconfig.use_object_store_client {
                     let object_storage = ObjectStorage::new(&nacconfig.object_store_config).await?;
-                    return Ok(Self::new_object(object_storage, policy));
+                    return Ok(Self::new_object(
+                        object_storage,
+                        policy,
+                        nacconfig.spawn_fetches,
+                    ));
                 }
                 let s3_storage = S3Storage::try_from_config(
                     &StorageConfig::S3(nacconfig.s3_config.clone()),
                     registry,
                 )
                 .await?;
-                return Ok(Self::new_s3(s3_storage, policy));
+                return Ok(Self::new_s3(s3_storage, policy, nacconfig.spawn_fetches));
             }
             _ => {
                 return Err(Box::new(StorageConfigError::InvalidStorageConfig));
