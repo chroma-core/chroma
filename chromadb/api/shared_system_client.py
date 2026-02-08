@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class SharedSystemClient:
     _identifier_to_system: ClassVar[Dict[str, System]] = {}
+    _identifier_to_refcount: ClassVar[Dict[str, int]] = {}
     _identifier: str
 
     def __init__(
@@ -20,6 +21,7 @@ class SharedSystemClient:
     ) -> None:
         self._identifier = SharedSystemClient._get_identifier_from_settings(settings)
         SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
+        SharedSystemClient._increment_refcount(self._identifier)
 
     @classmethod
     def _create_system_if_not_exists(
@@ -86,9 +88,28 @@ class SharedSystemClient:
         instance = cls(system.settings)
         return instance
 
+    @classmethod
+    def _increment_refcount(cls, identifier: str) -> None:
+        """Increment the reference count for a system identifier."""
+        if identifier not in cls._identifier_to_refcount:
+            cls._identifier_to_refcount[identifier] = 0
+        cls._identifier_to_refcount[identifier] += 1
+
+    @classmethod
+    def _decrement_refcount(cls, identifier: str) -> int:
+        """Decrement the reference count for a system identifier and return the new count."""
+        if identifier in cls._identifier_to_refcount:
+            cls._identifier_to_refcount[identifier] -= 1
+            count = cls._identifier_to_refcount[identifier]
+            if count <= 0:
+                del cls._identifier_to_refcount[identifier]
+            return count
+        return 0
+
     @staticmethod
     def clear_system_cache() -> None:
         SharedSystemClient._identifier_to_system = {}
+        SharedSystemClient._identifier_to_refcount = {}
 
     @property
     def _system(self) -> System:

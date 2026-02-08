@@ -1,4 +1,5 @@
 from typing import Optional, Sequence
+from types import TracebackType
 from uuid import UUID
 
 from overrides import override
@@ -536,9 +537,16 @@ class Client(SharedSystemClient, ClientAPI):
     def close(self) -> None:
         """Close the client and release all resources.
 
-        This method properly closes database connections and releases file locks,
-        which is particularly important for PersistentClient to avoid SQLite
+        This method decrements the reference count for the underlying System.
+        When the last client using a shared System calls close(), the System
+        is stopped and all resources (database connections, etc.) are released.
+
+        This is particularly important for PersistentClient to avoid SQLite
         file locking issues.
+
+        Note: If multiple clients share the same System (e.g., multiple PersistentClient
+        instances with the same path), the System will only be stopped when the last
+        client is closed. This allows safe use of context managers with multiple clients.
 
         Example:
             >>> client = chromadb.PersistentClient(path="./chroma_db")
@@ -549,13 +557,24 @@ class Client(SharedSystemClient, ClientAPI):
             >>> with chromadb.PersistentClient(path="./chroma_db") as client:
             ...     # ... use client ...
         """
-        self._system.stop()
+        # Decrement reference count and only stop system if this is the last client
+        refcount = SharedSystemClient._decrement_refcount(self._identifier)
+        if refcount <= 0:
+            self._system.stop()
+            # Clean up the system from the cache when stopped
+            if self._identifier in SharedSystemClient._identifier_to_system:
+                del SharedSystemClient._identifier_to_system[self._identifier]
 
     def __enter__(self) -> "Client":
         """Context manager entry."""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
         """Context manager exit."""
         self.close()
 
