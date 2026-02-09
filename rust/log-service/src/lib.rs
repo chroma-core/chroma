@@ -2014,12 +2014,20 @@ impl LogServer {
             max_bytes: None,
             max_records: Some(pull_logs.batch_size as u64),
         };
-        Ok(log_reader
-            .scan(
-                LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                limits,
-            )
-            .await?)
+        let from = LogPosition::from_offset(pull_logs.start_from_offset as u64);
+        if let Ok(Some(manifest_and_witness)) = log_reader.manifest_and_witness().await {
+            let fragments = scan_from_manifest(&manifest_and_witness.manifest, from, limits);
+            if let Some(cache) = self.cache.as_ref() {
+                let cache_key = cache_key_for_manifest_and_etag(collection_id);
+                if let Ok(bytes) = serde_json::to_vec(&manifest_and_witness) {
+                    cache.insert(cache_key, CachedBytes::new(bytes)).await;
+                }
+            }
+            if let Some(fragments) = fragments {
+                return Ok(fragments);
+            }
+        }
+        Ok(log_reader.scan(from, limits).await?)
     }
 
     async fn pull_logs(
