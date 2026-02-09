@@ -614,7 +614,7 @@ pub async fn rng_query(
 /// Split a set of embeddings into two groups using 2-means clustering.
 ///
 /// Returns (left_center, left_group, right_center, right_group) where centers
-/// are the nearest actual vectors to the computed cluster centroids.
+/// are the averages of the corresponding groups.
 pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
     let n = embeddings.len();
 
@@ -728,29 +728,6 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         prev_total_dist = total_dist;
     }
 
-    // Find nearest actual vectors as centers
-    let mut nearest_0_idx = 0;
-    let mut nearest_0_dist = f32::MAX;
-    let mut nearest_1_idx = 0;
-    let mut nearest_1_dist = f32::MAX;
-
-    for (i, (_, _, e)) in embeddings.iter().enumerate() {
-        let dist_0 = distance_function.distance(e, &c_0);
-        let dist_1 = distance_function.distance(e, &c_1);
-
-        if !labels[i] && dist_0 < nearest_0_dist {
-            nearest_0_dist = dist_0;
-            nearest_0_idx = i;
-        }
-        if labels[i] && dist_1 < nearest_1_dist {
-            nearest_1_dist = dist_1;
-            nearest_1_idx = i;
-        }
-    }
-
-    let left_center = embeddings[nearest_0_idx].2.clone();
-    let right_center = embeddings[nearest_1_idx].2.clone();
-
     // Build output groups
     let count_0 = labels.iter().filter(|&&l| !l).count();
     let count_1 = n - count_0;
@@ -766,7 +743,7 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         }
     }
 
-    (left_center, group_0, right_center, group_1)
+    (c_0.into(), group_0, c_1.into(), group_1)
 }
 
 /// Query a quantized cluster, returning all points with estimated distance.
