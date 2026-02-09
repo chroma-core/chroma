@@ -38,6 +38,381 @@ use crate::{
     OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
+// =============================================================================
+// Statistics
+// =============================================================================
+
+pub mod stats {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::Instant;
+
+    /// Statistics for a single method.
+    #[derive(Default)]
+    pub struct MethodStats {
+        pub calls: AtomicU64,
+        pub total_nanos: AtomicU64,
+    }
+
+    impl MethodStats {
+        #[inline]
+        pub fn record(&self, nanos: u64) {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            self.total_nanos.fetch_add(nanos, Ordering::Relaxed);
+        }
+
+        pub fn get(&self) -> (u64, u64) {
+            (
+                self.calls.load(Ordering::Relaxed),
+                self.total_nanos.load(Ordering::Relaxed),
+            )
+        }
+    }
+
+    /// Snapshot of stats for a single method (non-atomic, owned).
+    #[derive(Clone, Copy, Default)]
+    pub struct MethodSnapshot {
+        pub calls: u64,
+        pub total_nanos: u64,
+    }
+
+    impl MethodSnapshot {
+        pub fn avg_nanos(&self) -> Option<u64> {
+            if self.calls > 0 {
+                Some(self.total_nanos / self.calls)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Statistics for cluster size distribution.
+    #[derive(Clone, Default)]
+    pub struct ClusterSizeStats {
+        pub num_centroids: u64,
+        pub min: u64,
+        pub max: u64,
+        pub median: u64,
+        pub p90: u64,
+        pub p99: u64,
+        pub avg: f64,
+        pub std: f64,
+    }
+
+    impl ClusterSizeStats {
+        /// Compute cluster size statistics from a slice of sizes.
+        pub fn from_sizes(sizes: &[usize]) -> Self {
+            if sizes.is_empty() {
+                return Self::default();
+            }
+
+            let mut sorted: Vec<usize> = sizes.to_vec();
+            sorted.sort_unstable();
+
+            let n = sorted.len();
+            let sum: usize = sorted.iter().sum();
+            let avg = sum as f64 / n as f64;
+
+            let variance = sorted
+                .iter()
+                .map(|&x| (x as f64 - avg).powi(2))
+                .sum::<f64>()
+                / n as f64;
+            let std = variance.sqrt();
+
+            let percentile = |p: f64| -> u64 {
+                let idx = ((n as f64 - 1.0) * p).round() as usize;
+                sorted[idx.min(n - 1)] as u64
+            };
+
+            Self {
+                num_centroids: n as u64,
+                min: sorted[0] as u64,
+                max: sorted[n - 1] as u64,
+                median: percentile(0.5),
+                p90: percentile(0.9),
+                p99: percentile(0.99),
+                avg,
+                std,
+            }
+        }
+    }
+
+    /// Snapshot of all method stats (non-atomic, owned).
+    #[derive(Clone, Default)]
+    pub struct StatsSnapshot {
+        pub add: MethodSnapshot,
+        pub navigate: MethodSnapshot,
+        pub register: MethodSnapshot,
+        pub spawn: MethodSnapshot,
+        pub scrub: MethodSnapshot,
+        pub split: MethodSnapshot,
+        pub merge: MethodSnapshot,
+        pub reassign: MethodSnapshot,
+        pub drop: MethodSnapshot,
+        pub load: MethodSnapshot,
+        pub load_raw: MethodSnapshot,
+        pub load_raw_points: u64,
+        pub cluster_stats: ClusterSizeStats,
+    }
+
+    impl StatsSnapshot {
+        pub fn get(&self, name: &str) -> MethodSnapshot {
+            match name {
+                "add" => self.add,
+                "navigate" => self.navigate,
+                "register" => self.register,
+                "spawn" => self.spawn,
+                "scrub" => self.scrub,
+                "split" => self.split,
+                "merge" => self.merge,
+                "reassign" => self.reassign,
+                "drop" => self.drop,
+                "load" => self.load,
+                "load_raw" => self.load_raw,
+                _ => MethodSnapshot::default(),
+            }
+        }
+    }
+
+    /// Aggregated statistics for all instrumented methods.
+    #[derive(Default)]
+    pub struct QuantizedSpannStats {
+        pub add: MethodStats,
+        pub navigate: MethodStats,
+        pub register: MethodStats,
+        pub spawn: MethodStats,
+        pub scrub: MethodStats,
+        pub split: MethodStats,
+        pub merge: MethodStats,
+        pub reassign: MethodStats,
+        pub drop: MethodStats,
+        pub load: MethodStats,
+        pub load_raw: MethodStats,
+        pub load_raw_points: AtomicU64,
+    }
+
+    impl QuantizedSpannStats {
+        pub fn snapshot(&self, cluster_sizes: &[usize]) -> StatsSnapshot {
+            let snap = |m: &MethodStats| {
+                let (calls, total_nanos) = m.get();
+                MethodSnapshot { calls, total_nanos }
+            };
+            StatsSnapshot {
+                add: snap(&self.add),
+                navigate: snap(&self.navigate),
+                register: snap(&self.register),
+                spawn: snap(&self.spawn),
+                scrub: snap(&self.scrub),
+                split: snap(&self.split),
+                merge: snap(&self.merge),
+                reassign: snap(&self.reassign),
+                drop: snap(&self.drop),
+                load: snap(&self.load),
+                load_raw: snap(&self.load_raw),
+                load_raw_points: self.load_raw_points.load(Ordering::Relaxed),
+                cluster_stats: ClusterSizeStats::from_sizes(cluster_sizes),
+            }
+        }
+    }
+
+    // All methods ordered by path: Write Path, Balance Path, I/O
+    const ALL_METHODS: &[&str] = &[
+        "add", "navigate", "register", "spawn", // Write Path
+        "scrub", "split", "merge", "reassign", "drop", // Balance Path
+        "load", "load_raw", // I/O
+    ];
+
+    fn format_duration(nanos: u64) -> String {
+        if nanos < 1_000 {
+            format!("{}ns", nanos)
+        } else if nanos < 1_000_000 {
+            format!("{:.1}µs", nanos as f64 / 1_000.0)
+        } else if nanos < 1_000_000_000 {
+            format!("{:.2}ms", nanos as f64 / 1_000_000.0)
+        } else {
+            format!("{:.2}s", nanos as f64 / 1_000_000_000.0)
+        }
+    }
+
+    fn format_count(n: u64) -> String {
+        if n < 1_000 {
+            n.to_string()
+        } else if n < 1_000_000 {
+            format!("{:.1}K", n as f64 / 1_000.0)
+        } else {
+            format!("{:.2}M", n as f64 / 1_000_000.0)
+        }
+    }
+
+    fn format_cluster_stats_table(snapshots: &[StatsSnapshot]) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out, "\n=== Cluster Statistics ===").unwrap();
+        writeln!(
+            out,
+            "| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "|----|-----------|-------|-------|--------|-------|-------|--------|--------|"
+        )
+        .unwrap();
+        for (i, snap) in snapshots.iter().enumerate() {
+            let cs = &snap.cluster_stats;
+            writeln!(
+                out,
+                "| {:>2} | {:>9} | {:>5} | {:>5} | {:>6} | {:>5} | {:>5} | {:>6.1} | {:>6.1} |",
+                i + 1,
+                format_count(cs.num_centroids),
+                cs.min,
+                cs.max,
+                cs.median,
+                cs.p90,
+                cs.p99,
+                cs.avg,
+                cs.std
+            )
+            .unwrap();
+        }
+        out
+    }
+
+    fn format_task_counts_table(snapshots: &[StatsSnapshot]) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out, "\n=== Task Counts ===").unwrap();
+        // Header
+        write!(out, "| CP |").unwrap();
+        for method in ALL_METHODS {
+            write!(out, " {:>8} |", method).unwrap();
+        }
+        writeln!(out).unwrap();
+        // Separator
+        write!(out, "|----|").unwrap();
+        for _ in ALL_METHODS {
+            write!(out, "----------|").unwrap();
+        }
+        writeln!(out).unwrap();
+        // Data rows
+        for (i, snap) in snapshots.iter().enumerate() {
+            write!(out, "| {:>2} |", i + 1).unwrap();
+            for method in ALL_METHODS {
+                let m = snap.get(method);
+                write!(out, " {:>8} |", format_count(m.calls)).unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+        out
+    }
+
+    fn format_task_timing_table(snapshots: &[StatsSnapshot]) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out, "\n=== Task Total Time ===").unwrap();
+        // Header
+        write!(out, "| CP |").unwrap();
+        for method in ALL_METHODS {
+            write!(out, " {:>8} |", method).unwrap();
+        }
+        write!(out, " raw_pts |  raw/pt |").unwrap();
+        writeln!(out).unwrap();
+        // Separator
+        write!(out, "|----|").unwrap();
+        for _ in ALL_METHODS {
+            write!(out, "----------|").unwrap();
+        }
+        write!(out, "---------|---------|").unwrap();
+        writeln!(out).unwrap();
+        // Data rows
+        for (i, snap) in snapshots.iter().enumerate() {
+            write!(out, "| {:>2} |", i + 1).unwrap();
+            for method in ALL_METHODS {
+                let m = snap.get(method);
+                write!(out, " {:>8} |", format_duration(m.total_nanos)).unwrap();
+            }
+            // load_raw points and avg per point
+            let points = snap.load_raw_points;
+            let avg_per_point = if points > 0 {
+                format_duration(snap.load_raw.total_nanos / points)
+            } else {
+                "-".to_string()
+            };
+            write!(out, " {:>7} | {:>7} |", format_count(points), avg_per_point).unwrap();
+            writeln!(out).unwrap();
+        }
+        out
+    }
+
+    fn format_task_avg_time_table(snapshots: &[StatsSnapshot]) -> String {
+        use std::fmt::Write;
+        let mut out = String::new();
+        writeln!(out, "\n=== Task Avg Time ===").unwrap();
+        // Header
+        write!(out, "| CP |").unwrap();
+        for method in ALL_METHODS {
+            write!(out, " {:>8} |", method).unwrap();
+        }
+        writeln!(out).unwrap();
+        // Separator
+        write!(out, "|----|").unwrap();
+        for _ in ALL_METHODS {
+            write!(out, "----------|").unwrap();
+        }
+        writeln!(out).unwrap();
+        // Data rows
+        for (i, snap) in snapshots.iter().enumerate() {
+            write!(out, "| {:>2} |", i + 1).unwrap();
+            for method in ALL_METHODS {
+                let m = snap.get(method);
+                let avg = if m.calls > 0 {
+                    format_duration(m.total_nanos / m.calls)
+                } else {
+                    "-".to_string()
+                };
+                write!(out, " {:>8} |", avg).unwrap();
+            }
+            writeln!(out).unwrap();
+        }
+        out
+    }
+
+    /// Format all batch stats as summary tables.
+    pub fn format_batch_tables(snapshots: &[StatsSnapshot]) -> String {
+        let mut out = String::new();
+        out.push_str(&format_cluster_stats_table(snapshots));
+        out.push_str(&format_task_counts_table(snapshots));
+        out.push_str(&format_task_timing_table(snapshots));
+        out.push_str(&format_task_avg_time_table(snapshots));
+        out
+    }
+
+    /// RAII guard for timing a method.
+    pub struct TimedGuard<'a> {
+        stats: &'a MethodStats,
+        start: Instant,
+    }
+
+    impl<'a> TimedGuard<'a> {
+        #[inline]
+        pub fn new(stats: &'a MethodStats) -> Self {
+            Self {
+                stats,
+                start: Instant::now(),
+            }
+        }
+    }
+
+    impl Drop for TimedGuard<'_> {
+        #[inline]
+        fn drop(&mut self) {
+            self.stats.record(self.start.elapsed().as_nanos() as u64);
+        }
+    }
+}
+
+pub use stats::{format_batch_tables, ClusterSizeStats, QuantizedSpannStats, StatsSnapshot};
+
 // Blockfile prefixes
 const PREFIX_CENTER: &str = "center";
 const PREFIX_LENGTH: &str = "length";
@@ -116,10 +491,14 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // This contains the set of cluster ids in the balance (scrub/split/merge) routine.
     // It is used to prevent concurrent balancing attempts on the same clusters.
     balancing: Arc<DashSet<u32>>,
+
+    // === Statistics ===
+    stats: Arc<QuantizedSpannStats>,
 }
 
 impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.add);
         if embedding.len() != self.dimension {
             return Err(QuantizedSpannError::DimensionMismatch {
                 expected: self.dimension,
@@ -133,6 +512,80 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     pub fn remove(&self, id: u32) {
         self.upgrade_version(id);
+    }
+
+    /// Get the statistics for this index.
+    pub fn stats(&self) -> &QuantizedSpannStats {
+        &self.stats
+    }
+
+    /// Get current cluster sizes.
+    pub fn cluster_sizes(&self) -> Vec<usize> {
+        self.cluster_deltas
+            .iter()
+            .map(|entry| entry.value().length)
+            .collect()
+    }
+
+    /// Search for the k nearest neighbors of a query vector.
+    pub async fn search(
+        &self,
+        k: usize,
+        query: &[f32],
+        nprobe: usize,
+    ) -> Result<SearchResult, QuantizedSpannError> {
+        use std::collections::HashSet;
+
+        let rotated = self.rotate(query);
+
+        // Navigate: find nearest clusters using quantized centroid
+        let cluster_ids = self
+            .quantized_centroid
+            .search(&rotated, nprobe)
+            .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?
+            .keys;
+
+        // Scan clusters and collect results
+        let mut measured = HashSet::new();
+        let mut results = Vec::new();
+
+        let q_norm = (f32::dot(&rotated, &rotated).unwrap_or(0.0) as f32).sqrt();
+
+        for cluster_id in cluster_ids {
+            self.load(cluster_id).await?;
+
+            let Some(delta) = self.cluster_deltas.get(&cluster_id) else {
+                continue;
+            };
+
+            let center = &delta.center;
+            let c_norm = (f32::dot(center, center).unwrap_or(0.0) as f32).sqrt();
+            let c_dot_q = f32::dot(center, &rotated).unwrap_or(0.0) as f32;
+            let r_q: Vec<f32> = rotated
+                .iter()
+                .zip(center.iter())
+                .map(|(q, c)| q - c)
+                .collect();
+
+            for (i, (id, version)) in delta.ids.iter().zip(delta.versions.iter()).enumerate() {
+                if !self.is_valid(*id, *version) || !measured.insert(*id) {
+                    continue;
+                }
+
+                let code = Code::<&[u8]>::new(&delta.codes[i]);
+                let distance =
+                    code.distance_query(&self.distance_function, &r_q, c_norm, c_dot_q, q_norm);
+                results.push((*id, distance));
+            }
+        }
+
+        // Sort by distance ascending and truncate to k
+        results.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(k);
+
+        // Convert to SearchResult
+        let (keys, distances): (Vec<u32>, Vec<f32>) = results.into_iter().unzip();
+        Ok(SearchResult { keys, distances })
     }
 }
 
@@ -209,6 +662,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Remove a cluster from both centroid indexes and register as tombstone.
     fn drop(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.drop);
         self.raw_centroid
             .remove(cluster_id)
             .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
@@ -241,6 +695,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Load cluster data from reader into deltas.
     async fn load(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.load);
         let Some(reader) = &self.quantized_cluster_reader else {
             return Ok(());
         };
@@ -282,6 +737,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Load raw embeddings for given ids into the embeddings cache.
     async fn load_raw(&self, ids: &[u32]) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.load_raw);
         let Some(reader) = &self.raw_embedding_reader else {
             return Ok(());
         };
@@ -296,6 +752,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .load_data_for_keys(missing_ids.iter().map(|id| (String::new(), *id)))
             .await;
 
+        let num_loaded = missing_ids.len();
         for id in missing_ids {
             if let Some(record) = reader
                 .get("", id)
@@ -306,11 +763,16 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             }
         }
 
+        self.stats
+            .load_raw_points
+            .fetch_add(num_loaded as u64, Ordering::Relaxed);
+
         Ok(())
     }
 
     /// Merge a small cluster into a nearby cluster.
     async fn merge(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.merge);
         let Some(source_center) = self.centroid(cluster_id) else {
             return Ok(());
         };
@@ -363,6 +825,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Query the centroid index for the nearest cluster heads.
     fn navigate(&self, query: &[f32], count: usize) -> Result<SearchResult, QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.navigate);
         self.raw_centroid
             .search(query, count)
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))
@@ -376,6 +839,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         version: u32,
         embedding: Arc<[f32]>,
     ) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.reassign);
         if !self.is_valid(id, version) {
             return Ok(());
         }
@@ -407,6 +871,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         embedding: Arc<[f32]>,
         target_cluster_ids: &[u32],
     ) -> Result<Vec<u32>, QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.register);
         let version = self.upgrade_version(id);
 
         let mut registered = false;
@@ -518,6 +983,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// Does NOT trigger split/merge - use balance() for that.
     /// Returns the new length after scrubbing, or None if cluster not found.
     async fn scrub(&self, cluster_id: u32) -> Result<Option<usize>, QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.scrub);
         self.load(cluster_id).await?;
 
         let new_len = if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
@@ -543,6 +1009,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Spawn a new cluster and register it in the centroid index.
     fn spawn(&self, delta: QuantizedDelta) -> Result<u32, QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.spawn);
         let cluster_id = self.next_cluster_id.fetch_add(1, Ordering::Relaxed);
         let center = delta.center.clone();
         self.cluster_deltas.insert(cluster_id, delta);
@@ -557,6 +1024,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Split a large cluster into two smaller clusters using 2-means clustering.
     async fn split(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+        let _guard = stats::TimedGuard::new(&self.stats.split);
         let Some(old_center) = self.centroid(cluster_id) else {
             return Ok(());
         };
@@ -1101,6 +1569,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             raw_embedding_reader: None,
             // === Dedup Sets ===
             balancing: DashSet::new().into(),
+            // === Statistics ===
+            stats: Arc::new(QuantizedSpannStats::default()),
         })
     }
 
@@ -1294,6 +1764,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             raw_embedding_reader,
             // === Dedup Sets ===
             balancing: DashSet::new().into(),
+            // === Statistics ===
+            stats: Arc::new(QuantizedSpannStats::default()),
         })
     }
 
