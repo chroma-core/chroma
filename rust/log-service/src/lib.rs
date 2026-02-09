@@ -1878,6 +1878,7 @@ impl LogServer {
         request: Request<ScoutLogsRequest>,
     ) -> Result<Response<ScoutLogsResponse>, Status> {
         let scout_logs = request.into_inner();
+        let include_fragment_paths = scout_logs.include_fragment_paths;
         let collection_id = Uuid::parse_str(&scout_logs.collection_id)
             .map(CollectionUuid)
             .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
@@ -1915,15 +1916,11 @@ impl LogServer {
                 cached_manifest_and_e_tag.take();
             }
         }
-        let (start_position, limit_position) = if let Some(manifest_and_e_tag) =
-            cached_manifest_and_e_tag
+        let manifest: Option<Manifest> = if let Some(manifest_and_e_tag) = cached_manifest_and_e_tag
         {
-            (
-                manifest_and_e_tag.manifest.oldest_timestamp(),
-                manifest_and_e_tag.manifest.next_write_timestamp(),
-            )
+            Some(manifest_and_e_tag.manifest)
         } else {
-            let (start_position, limit_position) = match log_reader.manifest_and_witness().await {
+            match log_reader.manifest_and_witness().await {
                 Ok(Some(manifest_and_e_tag)) => {
                     if let Some(cache) = self.cache.as_ref() {
                         let json = serde_json::to_string(&manifest_and_e_tag)
@@ -1931,12 +1928,9 @@ impl LogServer {
                         let cached_bytes = CachedBytes::new(json.into());
                         cache.insert(cache_key, cached_bytes).await;
                     }
-                    (
-                        manifest_and_e_tag.manifest.oldest_timestamp(),
-                        manifest_and_e_tag.manifest.next_write_timestamp(),
-                    )
+                    Some(manifest_and_e_tag.manifest)
                 }
-                Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+                Ok(None) => None,
                 Err(wal3::Error::UninitializedLog) => {
                     return Err(Status::not_found(format!(
                         "collection {collection_id} not found"
@@ -1948,8 +1942,29 @@ impl LogServer {
                         format!("could not scout logs: {err:?}"),
                     ));
                 }
-            };
-            (start_position, limit_position)
+            }
+        };
+        let (start_position, limit_position) = match &manifest {
+            Some(m) => (m.oldest_timestamp(), m.next_write_timestamp()),
+            None => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+        };
+        let fragment_paths = if include_fragment_paths {
+            if let Some(manifest) = &manifest {
+                let prefix = collection_id.storage_prefix_for_log();
+                let mut short_read = false;
+                let fragments = log_reader
+                    .scan_with_cache(manifest, start_position, Limits::UNLIMITED, &mut short_read)
+                    .await
+                    .map_err(|err| Status::unknown(err.to_string()))?;
+                fragments
+                    .iter()
+                    .map(|f| wal3::fragment_path(&prefix, &f.path))
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
         };
         let start_offset = start_position.offset() as i64;
         let limit_offset = limit_position.offset() as i64;
@@ -1957,6 +1972,7 @@ impl LogServer {
             first_uncompacted_record_offset: start_offset,
             first_uninserted_record_offset: limit_offset,
             is_sealed: true,
+            fragment_paths,
         }))
     }
 
@@ -4704,6 +4720,7 @@ mod tests {
         server
             .scout_logs(Request::new(ScoutLogsRequest {
                 collection_id: collection_id.to_string(),
+                include_fragment_paths: false,
                 database_name: db_name.to_string(),
             }))
             .await
