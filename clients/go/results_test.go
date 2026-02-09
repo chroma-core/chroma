@@ -117,6 +117,74 @@ func TestQueryResultDeserialization(t *testing.T) {
 	require.Equal(t, embeddings.Distance(0.1), result.GetDistancesGroups()[0][0])
 }
 
+func TestQueryResultDeserializationMultiGroup(t *testing.T) {
+	var apiResponse = `{
+  "distances": [
+    [0.1, 0.2],
+    [0.3, 0.4]
+  ],
+  "documents": [
+    ["doc1", "doc2"],
+    ["doc3", "doc4"]
+  ],
+  "embeddings": [
+    [[0.1, 0.2], [0.3, 0.4]],
+    [[0.5, 0.6], [0.7, 0.8]]
+  ],
+  "ids": [
+    ["id1", "id2"],
+    ["id3", "id4"]
+  ],
+  "include": ["distances", "documents", "embeddings", "metadatas"],
+  "metadatas": [
+    [{"key": "val1"}, {"key": "val2"}],
+    [{"key": "val3"}, {"key": "val4"}]
+  ]
+}`
+
+	var result QueryResultImpl
+	err := json.Unmarshal([]byte(apiResponse), &result)
+	require.NoError(t, err)
+
+	require.Len(t, result.GetIDGroups(), 2)
+	require.Len(t, result.GetIDGroups()[0], 2)
+	require.Len(t, result.GetIDGroups()[1], 2)
+	require.Equal(t, DocumentID("id1"), result.GetIDGroups()[0][0])
+	require.Equal(t, DocumentID("id2"), result.GetIDGroups()[0][1])
+	require.Equal(t, DocumentID("id3"), result.GetIDGroups()[1][0])
+	require.Equal(t, DocumentID("id4"), result.GetIDGroups()[1][1])
+
+	require.Len(t, result.GetDocumentsGroups(), 2)
+	require.Len(t, result.GetDocumentsGroups()[0], 2)
+	require.Len(t, result.GetDocumentsGroups()[1], 2)
+	require.Equal(t, NewTextDocument("doc1"), result.GetDocumentsGroups()[0][0])
+	require.Equal(t, NewTextDocument("doc2"), result.GetDocumentsGroups()[0][1])
+	require.Equal(t, NewTextDocument("doc3"), result.GetDocumentsGroups()[1][0])
+	require.Equal(t, NewTextDocument("doc4"), result.GetDocumentsGroups()[1][1])
+
+	require.Len(t, result.GetDistancesGroups(), 2)
+	require.Len(t, result.GetDistancesGroups()[0], 2)
+	require.Len(t, result.GetDistancesGroups()[1], 2)
+	require.Equal(t, embeddings.Distance(0.1), result.GetDistancesGroups()[0][0])
+	require.Equal(t, embeddings.Distance(0.4), result.GetDistancesGroups()[1][1])
+
+	require.Len(t, result.GetEmbeddingsGroups(), 2)
+	require.Len(t, result.GetEmbeddingsGroups()[0], 2)
+	require.Len(t, result.GetEmbeddingsGroups()[1], 2)
+	require.Equal(t, []float32{0.1, 0.2}, result.GetEmbeddingsGroups()[0][0].ContentAsFloat32())
+	require.Equal(t, []float32{0.7, 0.8}, result.GetEmbeddingsGroups()[1][1].ContentAsFloat32())
+
+	require.Len(t, result.GetMetadatasGroups(), 2)
+	require.Len(t, result.GetMetadatasGroups()[0], 2)
+	require.Len(t, result.GetMetadatasGroups()[1], 2)
+	val1, ok := result.GetMetadatasGroups()[0][0].GetString("key")
+	require.True(t, ok)
+	require.Equal(t, "val1", val1)
+	val4, ok := result.GetMetadatasGroups()[1][1].GetString("key")
+	require.True(t, ok)
+	require.Equal(t, "val4", val4)
+}
+
 func TestGetResultImpl_Rows(t *testing.T) {
 	result := &GetResultImpl{
 		Ids:       []DocumentID{"id1", "id2", "id3"},

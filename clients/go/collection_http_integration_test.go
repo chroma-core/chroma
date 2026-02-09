@@ -630,6 +630,54 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.Equal(t, 2, len(res.GetDistancesGroups()[1]))
 	})
 
+	t.Run("query with multiple query texts returns all field groups", func(t *testing.T) {
+		err := c.Reset(ctx)
+		require.NoError(t, err)
+		collection, err := createCollection("test_collection", WithEmbeddingFunctionCreate(embeddings.NewConsistentHashEmbeddingFunction()))
+		require.NoError(t, err)
+		err = collection.Add(ctx,
+			WithIDs("id1", "id2", "id3"),
+			WithTexts("apple pie recipe", "banana smoothie recipe", "cherry tart recipe"),
+			WithMetadatas(
+				NewDocumentMetadata(NewStringAttribute("fruit", "apple")),
+				NewDocumentMetadata(NewStringAttribute("fruit", "banana")),
+				NewDocumentMetadata(NewStringAttribute("fruit", "cherry")),
+			),
+		)
+		require.NoError(t, err)
+		res, err := collection.Query(ctx,
+			WithQueryTexts("apple pie recipe", "banana smoothie recipe", "cherry tart recipe"),
+			WithInclude(IncludeDistances, IncludeDocuments, IncludeMetadatas, IncludeEmbeddings),
+			WithNResults(2),
+		)
+		require.NoError(t, err)
+
+		require.Equal(t, 3, len(res.GetIDGroups()), "expected 3 ID groups for 3 query texts")
+		require.Equal(t, 3, len(res.GetDocumentsGroups()), "expected 3 document groups for 3 query texts")
+		require.Equal(t, 3, len(res.GetDistancesGroups()), "expected 3 distance groups for 3 query texts")
+		require.Equal(t, 3, len(res.GetMetadatasGroups()), "expected 3 metadata groups for 3 query texts")
+		require.Equal(t, 3, len(res.GetEmbeddingsGroups()), "expected 3 embedding groups for 3 query texts")
+
+		queryTexts := []string{"apple pie recipe", "banana smoothie recipe", "cherry tart recipe"}
+		expectedIDs := []DocumentID{"id1", "id2", "id3"}
+		expectedFruits := []string{"apple", "banana", "cherry"}
+		for i := 0; i < 3; i++ {
+			require.Equal(t, 2, len(res.GetIDGroups()[i]), "expected 2 IDs in group %d", i)
+			require.Equal(t, 2, len(res.GetDocumentsGroups()[i]), "expected 2 documents in group %d", i)
+			require.Equal(t, 2, len(res.GetDistancesGroups()[i]), "expected 2 distances in group %d", i)
+			require.Equal(t, 2, len(res.GetMetadatasGroups()[i]), "expected 2 metadatas in group %d", i)
+			require.Equal(t, 2, len(res.GetEmbeddingsGroups()[i]), "expected 2 embeddings in group %d", i)
+
+			require.Equal(t, expectedIDs[i], res.GetIDGroups()[i][0], "closest ID for query %q", queryTexts[i])
+			require.Equal(t, NewTextDocument(queryTexts[i]), res.GetDocumentsGroups()[i][0], "closest document for query %q", queryTexts[i])
+			require.InDelta(t, 0, float64(res.GetDistancesGroups()[i][0]), 1e-6, "distance should be ~0 for exact match on query %q", queryTexts[i])
+			fruit, ok := res.GetMetadatasGroups()[i][0].GetString("fruit")
+			require.True(t, ok, "metadata 'fruit' should exist for query %q", queryTexts[i])
+			require.Equal(t, expectedFruits[i], fruit, "metadata fruit for query %q", queryTexts[i])
+			require.NotNil(t, res.GetEmbeddingsGroups()[i][0], "embedding should not be nil for query %q", queryTexts[i])
+		}
+	})
+
 	t.Run("query without distances include returns no distances", func(t *testing.T) {
 		err := c.Reset(ctx)
 		require.NoError(t, err)
