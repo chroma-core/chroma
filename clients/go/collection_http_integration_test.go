@@ -28,7 +28,7 @@ import (
 // when ThreadSanitizer interacts with native library cleanup. This is not a bug in the code.
 func TestCollectionAddIntegration(t *testing.T) {
 	ctx := context.Background()
-	var chromaVersion = "1.3.3"
+	var chromaVersion = "1.5.0"
 	var chromaImage = "ghcr.io/chroma-core/chroma"
 	if os.Getenv("CHROMA_VERSION") != "" {
 		chromaVersion = os.Getenv("CHROMA_VERSION")
