@@ -284,10 +284,10 @@ func (r *QueryResultImpl) UnmarshalJSON(data []byte) error {
 	if _, ok := temp["documents"]; ok {
 		r.DocumentsLists = make([]Documents, 0)
 		if lst, ok := temp["documents"].([]interface{}); ok {
-			innerDocList := make([]Document, 0)
 			for _, docList := range lst {
 				switch val := docList.(type) {
 				case []interface{}:
+					innerDocList := make([]Document, 0)
 					docs, err := NewTextDocumentsFromInterface(val)
 					if err != nil {
 						return errors.Errorf("invalid documents: %v", err)
@@ -296,11 +296,11 @@ func (r *QueryResultImpl) UnmarshalJSON(data []byte) error {
 						document := doc
 						innerDocList = append(innerDocList, &document)
 					}
+					r.DocumentsLists = append(r.DocumentsLists, innerDocList)
 				default:
 					return errors.Errorf("invalid documents: %v", temp["documents"])
 				}
 			}
-			r.DocumentsLists = append(r.DocumentsLists, innerDocList)
 		} else if lst != nil {
 			return errors.Errorf("invalid documents: %v", temp["documents"])
 		}

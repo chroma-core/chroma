@@ -618,6 +618,54 @@ func TestSearchResultUnmarshal(t *testing.T) {
 		require.Empty(t, result.Embeddings)
 		require.Empty(t, result.Scores)
 	})
+
+	t.Run("unmarshal with multiple groups", func(t *testing.T) {
+		jsonData := `{
+			"ids": [["id1", "id2"], ["id3", "id4"]],
+			"documents": [["doc1", "doc2"], ["doc3", "doc4"]],
+			"metadatas": [[{"k": "v1"}, {"k": "v2"}], [{"k": "v3"}, {"k": "v4"}]],
+			"embeddings": [[[0.1, 0.2], [0.3, 0.4]], [[0.5, 0.6], [0.7, 0.8]]],
+			"scores": [[0.9, 0.8], [0.7, 0.6]]
+		}`
+
+		var result SearchResultImpl
+		err := json.Unmarshal([]byte(jsonData), &result)
+		require.NoError(t, err)
+
+		require.Len(t, result.IDs, 2)
+		require.Len(t, result.IDs[0], 2)
+		require.Len(t, result.IDs[1], 2)
+		require.Equal(t, DocumentID("id1"), result.IDs[0][0])
+		require.Equal(t, DocumentID("id4"), result.IDs[1][1])
+
+		require.Len(t, result.Documents, 2)
+		require.Len(t, result.Documents[0], 2)
+		require.Len(t, result.Documents[1], 2)
+		require.Equal(t, "doc1", result.Documents[0][0])
+		require.Equal(t, "doc4", result.Documents[1][1])
+
+		require.Len(t, result.Metadatas, 2)
+		require.Len(t, result.Metadatas[0], 2)
+		require.Len(t, result.Metadatas[1], 2)
+		val, ok := result.Metadatas[0][0].GetString("k")
+		require.True(t, ok)
+		require.Equal(t, "v1", val)
+		val, ok = result.Metadatas[1][1].GetString("k")
+		require.True(t, ok)
+		require.Equal(t, "v4", val)
+
+		require.Len(t, result.Embeddings, 2)
+		require.Len(t, result.Embeddings[0], 2)
+		require.Len(t, result.Embeddings[1], 2)
+		require.Equal(t, float32(0.1), result.Embeddings[0][0][0])
+		require.Equal(t, float32(0.5), result.Embeddings[1][0][0])
+
+		require.Len(t, result.Scores, 2)
+		require.Len(t, result.Scores[0], 2)
+		require.Len(t, result.Scores[1], 2)
+		require.Equal(t, 0.9, result.Scores[0][0])
+		require.Equal(t, 0.6, result.Scores[1][1])
+	})
 }
 
 func TestSearchResultImpl_Rows(t *testing.T) {
