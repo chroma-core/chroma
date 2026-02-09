@@ -229,6 +229,7 @@
         "icon": "code",
         "pages": [
           "reference/overview",
+          "reference/where-filter",
           {
             "group": "SDKs",
             "pages": [
