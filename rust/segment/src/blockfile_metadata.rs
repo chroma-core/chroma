@@ -1029,7 +1029,10 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = full_text_index_writer.write_to_blockfiles().await;
+        let res = full_text_index_writer
+            .write_to_blockfiles()
+            .instrument(tracing::info_span!("fts writer write_to_blockfiles"))
+            .await;
         self.full_text_index_writer = Some(full_text_index_writer);
         match res {
             Ok(_) => {}
@@ -1040,7 +1043,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = string_metadata_index_writer.write_to_blockfile().await;
+        let res = string_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "string metadata writer write_to_blockfile"
+            ))
+            .await;
         self.string_metadata_index_writer = Some(string_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -1051,7 +1059,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = bool_metadata_index_writer.write_to_blockfile().await;
+        let res = bool_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "bool metadata writer write_to_blockfile"
+            ))
+            .await;
         self.bool_metadata_index_writer = Some(bool_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -1062,7 +1075,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = f32_metadata_index_writer.write_to_blockfile().await;
+        let res = f32_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "f32 metadata writer write_to_blockfile"
+            ))
+            .await;
         self.f32_metadata_index_writer = Some(f32_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -1073,7 +1091,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = u32_metadata_index_writer.write_to_blockfile().await;
+        let res = u32_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "u32 metadata writer write_to_blockfile"
+            ))
+            .await;
         self.u32_metadata_index_writer = Some(u32_metadata_index_writer);
         match res {
             Ok(_) => {}
