@@ -61,7 +61,7 @@ func supportsEFConfigPersistence(version string) bool {
 // when ThreadSanitizer (suspected) interacts with native library cleanup. This is not a bug in the code.
 func TestClientHTTPIntegration(t *testing.T) {
 	ctx := context.Background()
-	var chromaVersion = "1.3.3"
+	var chromaVersion = "1.5.0"
 	var chromaImage = "ghcr.io/chroma-core/chroma"
 	if os.Getenv("CHROMA_VERSION") != "" {
 		chromaVersion = os.Getenv("CHROMA_VERSION")
@@ -202,7 +202,7 @@ func TestClientHTTPIntegration(t *testing.T) {
 
 		_, err = c.CreateTenant(ctx, NewTenant("l"))
 		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "Validation error: length") || strings.Contains(err.Error(), "Tenant name must be at least 3 characters long"))
+		require.True(t, strings.Contains(err.Error(), "Validation error: length") || strings.Contains(err.Error(), "Tenant name must be at least 3 characters long") || strings.Contains(err.Error(), "Expected a name containing 3-512 characters"))
 	})
 
 	t.Run("list databases", func(t *testing.T) {
@@ -267,7 +267,7 @@ func TestClientHTTPIntegration(t *testing.T) {
 
 		_, err = c.CreateDatabase(ctx, NewDefaultTenant().Database("l"))
 		require.Error(t, err)
-		require.True(t, strings.Contains(err.Error(), "Validation error: length") || strings.Contains(err.Error(), "Database name must be at least 3 characters long"))
+		require.True(t, strings.Contains(err.Error(), "Validation error: length") || strings.Contains(err.Error(), "Database name must be at least 3 characters long") || strings.Contains(err.Error(), "Expected a name containing 3-512 characters"))
 	})
 
 	t.Run("delete database", func(t *testing.T) {
