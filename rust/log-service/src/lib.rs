@@ -1966,13 +1966,17 @@ impl LogServer {
         collection_id: CollectionUuid,
         pull_logs: &PullLogsRequest,
     ) -> Result<Vec<Fragment>, Error> {
+        let read_span = tracing::info_span!("read from cache");
         if let Some(fragments) = self
             .read_fragments_via_cache(collection_id, pull_logs)
+            .instrument(read_span)
             .await
         {
             Ok(fragments)
         } else {
+            let no_read_span = tracing::info_span!("no read from cache");
             self.read_fragments_via_log_reader(database_name, collection_id, pull_logs)
+                .instrument(no_read_span)
                 .await
         }
     }
@@ -1992,6 +1996,8 @@ impl LogServer {
                 max_bytes: None,
                 max_records: Some(pull_logs.batch_size as u64),
             };
+            let scan_span = tracing::info_span!("scan_from_manifest");
+            let _guard = scan_span.enter();
             scan_from_manifest(
                 &manifest_and_etag.manifest,
                 LogPosition::from_offset(pull_logs.start_from_offset as u64),
@@ -2057,6 +2063,7 @@ impl LogServer {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
         };
+        tracing::info!("creating futures");
         let futures = fragments
             .iter()
             .map(|fragment| {
@@ -2091,6 +2098,7 @@ impl LogServer {
                 }
             })
             .collect::<Vec<_>>();
+        tracing::info!("created {} futures", futures.len());
         let try_join_all_span = tracing::info_span!("join all");
         let record_batches = futures::future::try_join_all(futures)
             .instrument(try_join_all_span)
