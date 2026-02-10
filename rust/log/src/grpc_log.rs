@@ -643,7 +643,7 @@ impl GrpcLog {
 
     pub async fn garbage_collect_phase2(
         &mut self,
-        database_name: DatabaseName,
+        database_name: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<(), GarbageCollectError> {
         let mut client = self
@@ -661,7 +661,7 @@ impl GrpcLog {
                         collection_id.to_string(),
                     ),
                 ),
-                database_name: database_name.into_string(),
+                database_name: database_name.map(|db| db.into_string()).unwrap_or_default(),
             })
             .await?;
         Ok(())

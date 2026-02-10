@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use crate::operators::truncate_dirty_log::{
     TruncateDirtyLogError, TruncateDirtyLogOperator, TruncateDirtyLogOutput,
@@ -14,12 +14,14 @@ use chroma_error::ChromaError;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
-use chroma_sysdb::{CollectionToGcInfo, GetCollectionsToGcError, SysDb, SysDbConfig};
+use chroma_sysdb::{
+    CollectionToGcInfo, GetCollectionsOptions, GetCollectionsToGcError, SysDb, SysDbConfig,
+};
 use chroma_system::{
     wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
     TaskResult,
 };
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName, GetCollectionsError};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use opentelemetry::metrics::{Counter, Histogram};
@@ -48,7 +50,7 @@ pub(crate) struct GarbageCollector {
     job_duration_ms_metric: Histogram<u64>,
     total_files_deleted_metric: Counter<u64>,
     total_versions_deleted_metric: Counter<u64>,
-    manual_collections: Mutex<HashSet<CollectionUuid>>,
+    manual_collections: Mutex<HashMap<CollectionUuid, DatabaseName>>,
 }
 
 impl Debug for GarbageCollector {
@@ -63,6 +65,10 @@ enum GarbageCollectCollectionError {
     Uninitialized,
     #[error("Failed to run garbage collection orchestrator: {0}")]
     OrchestratorV2Error(#[from] crate::garbage_collector_orchestrator_v2::GarbageCollectorError),
+    #[error("Collection not found")]
+    NoSuchCollection,
+    #[error("Failed to get collections: {0}")]
+    GetCollectionsError(#[from] GetCollectionsError),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -104,7 +110,7 @@ impl GarbageCollector {
                 .u64_counter("garbage_collector.total_versions_deleted")
                 .with_description("Total number of versions deleted during garbage collection")
                 .build(),
-            manual_collections: Mutex::new(HashSet::default()),
+            manual_collections: Mutex::new(HashMap::default()),
         }
     }
 
@@ -119,6 +125,7 @@ impl GarbageCollector {
     async fn garbage_collect_hard_delete_log(
         &self,
         collection_id: CollectionUuid,
+        database_name: Option<DatabaseName>,
     ) -> Result<GarbageCollectorResponse, GarbageCollectCollectionError> {
         let dispatcher = self
             .dispatcher
@@ -135,6 +142,7 @@ impl GarbageCollector {
                 self.storage.clone(),
                 self.logs.clone(),
                 collection_id,
+                database_name,
             );
 
         let result = match orchestrator.run(system.clone()).await {
@@ -388,13 +396,27 @@ impl GarbageCollector {
     }
 
     #[allow(clippy::result_large_err)]
-    fn manual_garbage_collection_request(
-        &self,
+    async fn manual_garbage_collection_request(
+        &mut self,
         collection_id: CollectionUuid,
     ) -> Result<(), GarbageCollectCollectionError> {
         tracing::event!(Level::INFO, name = "manual garbage collection", collection_id =? collection_id);
+        let collection_info = self
+            .sysdb_client
+            .get_collections(GetCollectionsOptions {
+                collection_ids: Some(vec![collection_id]),
+                ..Default::default()
+            })
+            .await?;
+        if collection_info.is_empty() {
+            return Err(GarbageCollectCollectionError::NoSuchCollection);
+        }
         let mut manual_collections = self.manual_collections.lock();
-        manual_collections.insert(collection_id);
+        if let Some(database_name) = DatabaseName::new(&collection_info[0].database) {
+            manual_collections.insert(collection_id, database_name);
+        } else {
+            return Err(GarbageCollectCollectionError::NoSuchCollection);
+        }
         Ok(())
     }
 }
@@ -422,7 +444,10 @@ impl Handler<ManualGarbageCollectionRequest> for GarbageCollector {
         req: ManualGarbageCollectionRequest,
         _: &ComponentContext<GarbageCollector>,
     ) {
-        if let Err(err) = self.manual_garbage_collection_request(req.collection_id) {
+        if let Err(err) = self
+            .manual_garbage_collection_request(req.collection_id)
+            .await
+        {
             tracing::event!(Level::ERROR, name = "manual collection failed", error =? err);
         }
     }
@@ -515,17 +540,16 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
             while collections_to_gc.len() + manual.len()
                 < self.config.max_collections_to_gc as usize
             {
-                let popped = manual_collections.iter().next().cloned();
-                if let Some(c) = popped {
-                    manual.push(c);
-                    manual_collections.remove(&c);
+                if let Some(&c) = manual_collections.keys().next() {
+                    let db_name = manual_collections.remove(&c);
+                    manual.push((c, db_name));
                 } else {
                     break;
                 }
             }
         }
         let mut collections_to_hard_delete_log = vec![];
-        for collection_id in manual {
+        for (collection_id, db_name) in manual {
             if collections_to_gc.iter().any(|c| c.id == collection_id) {
                 continue;
             }
@@ -539,7 +563,7 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                     collections_to_gc.push(collection_info);
                 }
                 Err(GetCollectionsToGcError::NoSuchCollection) => {
-                    collections_to_hard_delete_log.push(collection_id);
+                    collections_to_hard_delete_log.push((collection_id, db_name));
                 }
                 Err(err) => {
                     tracing::event!(
@@ -600,11 +624,11 @@ impl Handler<GarbageCollectMessage> for GarbageCollector {
                 )
                 .instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
             });
-        let jobs_iter2 = collections_to_hard_delete_log.into_iter().map(|collection_id| {
+        let jobs_iter2 = collections_to_hard_delete_log.into_iter().map(|(collection_id, db_name)| {
                 tracing::event!(Level::INFO, "hard delete log-only");
                 let instrumented_span = span!(parent: None, tracing::Level::INFO, "Garbage collection job (hard delete log)", collection_id =? collection_id);
                 Span::current().add_link(instrumented_span.context().span().span_context().clone());
-                Box::pin(self.garbage_collect_hard_delete_log(collection_id).instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
+                Box::pin(self.garbage_collect_hard_delete_log(collection_id, db_name).instrument(instrumented_span)) as std::pin::Pin<Box<dyn std::future::Future<Output = Result<GarbageCollectorResponse, GarbageCollectCollectionError>> + Send + '_>>
         });
         let mut jobs_stream1 = futures::stream::iter(jobs_iter1).buffer_unordered(100);
         let mut jobs_stream2 = futures::stream::iter(jobs_iter2).buffer_unordered(100);
