@@ -1,0 +1,248 @@
+---
+title: "Search"
+---
+
+## Search
+
+Payload for hybrid search operations.
+
+Can be constructed directly or using builder pattern:
+
+Direct construction with expressions:
+    Search(
+        where=Key("status") == "active",
+        rank=Knn(query=[0.1, 0.2]),
+        limit=Limit(limit=10),
+        select=Select(keys=\{Key.DOCUMENT\})
+    )
+
+Direct construction with dicts:
+    Search(
+        where=\{"status": "active"\},
+        rank=\{"$knn": \{"query": [0.1, 0.2]\}\},
+        limit=10,  # Creates Limit(limit=10, offset=0)
+        select=["#document", "#score"]
+    )
+
+Builder pattern:
+    (Search()
+        .where(Key("status") == "active")
+        .rank(Knn(query=[0.1, 0.2]))
+        .limit(10)
+        .select(Key.DOCUMENT))
+
+Builder pattern with dicts:
+    (Search()
+        .where(\{"status": "active"\})
+        .rank(\{"$knn": \{"query": [0.1, 0.2]\}\})
+        .limit(10)
+        .select(Key.DOCUMENT))
+
+Filter by IDs:
+    Search().where(Key.ID.is_in(["id1", "id2", "id3"]))
+
+Combined with metadata filtering:
+    Search().where((Key.ID.is_in(["id1", "id2"])) & (Key("status") == "active"))
+
+With group_by:
+    (Search()
+        .rank(Knn(query=[0.1, 0.2]))
+        .group_by(GroupBy(
+            keys=[Key("category")],
+            aggregate=MinK(keys=[Key.SCORE], k=3)
+        )))
+
+Empty Search() is valid and will use defaults:
+    - where: None (no filtering)
+    - rank: None (no ranking - results ordered by default order)
+    - group_by: None (no grouping)
+    - limit: No limit
+    - select: Empty selection
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `group_by()`, `limit()`, `rank()`, `select()`, `select_all()`, `to_dict()`, `where()`
+
+
+---
+
+## Select
+
+Selection configuration for search results.
+
+Fields can be:
+- Key.DOCUMENT - Select document key (equivalent to Key("#document"))
+- Key.EMBEDDING - Select embedding key (equivalent to Key("#embedding"))
+- Key.SCORE - Select score key (equivalent to Key("#score"))
+- Any other string - Select specific metadata property
+
+Note: You can use K as an alias for Key for more concise code.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="keys" type="Set[Union[Key, str]]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+---
+
+## Knn
+
+KNN-based ranking
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="query" type="Optional[Embeddings]" />
+
+<ParamField path="key" type="Union[Key, str]" />
+
+<ParamField path="limit" type="int" />
+
+<ParamField path="default" type="Optional[float]" />
+
+<ParamField path="return_rank" type="bool" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `abs()`, `exp()`, `from_dict()`, `log()`, `max()`, `min()`, `to_dict()`
+
+
+---
+
+## Rrf
+
+Reciprocal Rank Fusion for combining multiple ranking strategies.
+
+RRF formula: score = -sum(weight_i / (k + rank_i)) for each ranking strategy
+The negative is used because RRF produces higher scores for better results,
+but Chroma uses ascending order (lower scores = better results).
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ranks" type="List[Rank]" />
+
+<ParamField path="k" type="int" />
+
+<ParamField path="weights" type="Optional[List[float]]" />
+
+<ParamField path="normalize" type="bool" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `abs()`, `exp()`, `from_dict()`, `log()`, `max()`, `min()`, `to_dict()`
+
+
+---
+
+## Group By
+
+### GroupBy
+
+Group results by metadata keys and aggregate within each group.
+
+Groups search results by one or more metadata fields, then applies an
+aggregation (MinK or MaxK) to select records within each group.
+The final output is flattened and sorted by score.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="keys" type="Union[Key, str, List[Union[Key, str]]]" />
+
+<ParamField path="aggregate" type="Optional[Aggregate]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+### Limit
+
+Limit(offset: int = 0, limit: Optional[int] = None)
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="offset" type="int" />
+
+<ParamField path="limit" type="Optional[int]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+### MinK
+
+Keep k records with minimum aggregate key values per group
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="keys" type="Union[Key, str, List[Union[Key, str]]]" />
+
+<ParamField path="k" type="int" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+### MaxK
+
+Keep k records with maximum aggregate key values per group
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="keys" type="Union[Key, str, List[Union[Key, str]]]" />
+
+<ParamField path="k" type="int" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
+
+
+---
+
+## SearchResult
+
+Column-major response from the search API with conversion methods.
+
+Inherits from dict to maintain backward compatibility with existing code
+that treats SearchResult as a dictionary.
+
+Structure:
+    - ids: List[List[str]] - Always present
+    - documents: List[Optional[List[Optional[str]]]] - Optional per payload
+    - embeddings: List[Optional[List[Optional[List[float]]]]] - Optional per payload
+    - metadatas: List[Optional[List[Optional[Dict[str, Any]]]]] - Optional per payload
+    - scores: List[Optional[List[Optional[float]]]] - Optional per payload
+    - select: List[List[str]] - Selected fields for each payload
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ids" type="List[IDs]" />
+
+<ParamField path="documents" type="List[Optional[List[Optional[str]]]]" />
+
+<ParamField path="embeddings" type="List[Optional[List[Optional[List[float]]]]]" />
+
+<ParamField path="metadatas" type="List[Optional[List[Optional[Dict[str, Any]]]]]" />
+
+<ParamField path="scores" type="List[Optional[List[Optional[float]]]]" />
+
+<ParamField path="select" type="List[IDs]" />
+
+
+<span class="text-sm">Methods</span>
+
+`rows()`

@@ -72,30 +72,51 @@ class SectionConfig:
     render_mode: str = (
         "function"  # "function", "method", "class", "class_full", "type_alias"
     )
+    output_file: str = "index"
+    show_class_methods: bool = True
 
 
 def get_documentation_sections() -> list[SectionConfig]:
-    """Define all documentation sections. Import chromadb here to avoid import at module level."""
+    """Define all documentation sections with output_file for split generation."""
     import chromadb
     from chromadb.api import AdminAPI, ClientAPI
     from chromadb.api.models.Collection import Collection
     from chromadb.api.types import (
+        BoolInvertedIndexConfig,
         Embedding,
         EmbeddingFunction,
+        FloatInvertedIndexConfig,
+        FtsIndexConfig,
         GetResult,
+        HnswIndexConfig,
+        IntInvertedIndexConfig,
         QueryResult,
         Schema,
         SearchResult,
         SparseEmbeddingFunction,
+        SparseVectorIndexConfig,
+        SpannIndexConfig,
+        StringInvertedIndexConfig,
+        VectorIndexConfig,
     )
     from chromadb.base_types import SparseVector
-    from chromadb.execution.expression.operator import Knn, Rrf, Select
+    from chromadb.execution.expression.operator import (
+        GroupBy,
+        Knn,
+        Limit,
+        MaxK,
+        MinK,
+        Rrf,
+        Select,
+    )
     from chromadb.execution.expression.plan import Search
+    from chromadb.utils import embedding_functions as ef_module
 
     return [
         SectionConfig(
             title="Clients",
             render_mode="function",
+            output_file="client",
             items=[
                 ("EphemeralClient", chromadb.EphemeralClient),
                 ("PersistentClient", chromadb.PersistentClient),
@@ -109,6 +130,7 @@ def get_documentation_sections() -> list[SectionConfig]:
             title="Client Methods",
             render_mode="method",
             source_class=ClientAPI,
+            output_file="client",
             items=[
                 "heartbeat",
                 "list_collections",
@@ -127,6 +149,7 @@ def get_documentation_sections() -> list[SectionConfig]:
             title="Admin Client Methods",
             render_mode="method",
             source_class=AdminAPI,
+            output_file="client",
             items=[
                 "create_tenant",
                 "get_tenant",
@@ -140,6 +163,7 @@ def get_documentation_sections() -> list[SectionConfig]:
             title="Collection Methods",
             render_mode="method",
             source_class=Collection,
+            output_file="collection",
             items=[
                 "count",
                 "add",
@@ -153,27 +177,107 @@ def get_documentation_sections() -> list[SectionConfig]:
             ],
         ),
         SectionConfig(
-            title="Embedding Functions",
+            title="Types",
             render_mode="class",
+            output_file="collection",
+            items=[
+                ("GetResult", GetResult),
+                ("QueryResult", QueryResult),
+            ],
+        ),
+        SectionConfig(
+            title="Embedding Function Base Classes",
+            render_mode="class",
+            output_file="embedding-functions",
             items=[
                 ("EmbeddingFunction", EmbeddingFunction),
                 ("SparseEmbeddingFunction", SparseEmbeddingFunction),
             ],
         ),
         SectionConfig(
+            title="Registration",
+            render_mode="function",
+            output_file="embedding-functions",
+            items=[
+                ("register_embedding_function", ef_module.register_embedding_function),
+                (
+                    "register_sparse_embedding_function",
+                    ef_module.register_sparse_embedding_function,
+                ),
+            ],
+        ),
+        SectionConfig(
             title="Types",
             render_mode="class",
+            output_file="embedding-functions",
             items=[
                 ("Embedding", Embedding),
                 ("SparseVector", SparseVector),
-                ("Schema", Schema),
-                ("Search", Search),
-                ("Select", Select),
-                ("Knn", Knn),
-                ("Rrf", Rrf),
-                ("GetResult", GetResult),
-                ("QueryResult", QueryResult),
-                ("SearchResult", SearchResult),
+            ],
+        ),
+        SectionConfig(
+            title="Search",
+            render_mode="class",
+            output_file="search",
+            items=[("Search", Search)],
+        ),
+        SectionConfig(
+            title="Select",
+            render_mode="class",
+            output_file="search",
+            items=[("Select", Select)],
+        ),
+        SectionConfig(
+            title="Knn",
+            render_mode="class",
+            output_file="search",
+            items=[("Knn", Knn)],
+        ),
+        SectionConfig(
+            title="Rrf",
+            render_mode="class",
+            output_file="search",
+            items=[("Rrf", Rrf)],
+        ),
+        SectionConfig(
+            title="Group By",
+            render_mode="class",
+            output_file="search",
+            items=[
+                ("GroupBy", GroupBy),
+                ("Limit", Limit),
+                ("MinK", MinK),
+                ("MaxK", MaxK),
+            ],
+        ),
+        SectionConfig(
+            title="SearchResult",
+            render_mode="class",
+            output_file="search",
+            items=[("SearchResult", SearchResult)],
+        ),
+        SectionConfig(
+            title="Schema",
+            render_mode="class",
+            output_file="schema",
+            show_class_methods=False,
+            items=[("Schema", Schema)],
+        ),
+        SectionConfig(
+            title="Index configs",
+            render_mode="class",
+            output_file="schema",
+            show_class_methods=False,
+            items=[
+                ("FtsIndexConfig", FtsIndexConfig),
+                ("HnswIndexConfig", HnswIndexConfig),
+                ("SpannIndexConfig", SpannIndexConfig),
+                ("VectorIndexConfig", VectorIndexConfig),
+                ("SparseVectorIndexConfig", SparseVectorIndexConfig),
+                ("StringInvertedIndexConfig", StringInvertedIndexConfig),
+                ("IntInvertedIndexConfig", IntInvertedIndexConfig),
+                ("FloatInvertedIndexConfig", FloatInvertedIndexConfig),
+                ("BoolInvertedIndexConfig", BoolInvertedIndexConfig),
             ],
         ),
     ]
@@ -306,6 +410,18 @@ def format_type(typ: Any) -> str:
 # =============================================================================
 
 
+def _full_description(parsed: Any) -> Optional[str]:
+    """Build full description from parsed docstring (short + long, paragraphs preserved)."""
+    parts = []
+    if getattr(parsed, "short_description", None):
+        parts.append(parsed.short_description)
+    if getattr(parsed, "long_description", None):
+        parts.append(parsed.long_description)
+    if not parts:
+        return None
+    return "\n\n".join(parts).strip() or None
+
+
 def extract_function(fn: Callable[..., Any], name: Optional[str] = None) -> FunctionDoc:
     """Extract documentation from a function."""
     fn_name = name or fn.__name__
@@ -323,13 +439,7 @@ def extract_function(fn: Callable[..., Any], name: Optional[str] = None) -> Func
     doc = inspect.getdoc(fn) or ""
     parsed = parse_docstring(doc)
 
-    description = parsed.short_description
-    if parsed.long_description:
-        description = (
-            f"{description} {parsed.long_description}"
-            if description
-            else parsed.long_description
-        )
+    description = _full_description(parsed)
 
     param_descs = {p.arg_name: p.description for p in parsed.params}
 
@@ -415,7 +525,7 @@ def extract_class(cls: type) -> ClassDoc:
 
     return ClassDoc(
         name=cls.__name__,
-        description=parsed.short_description,
+        description=_full_description(parsed),
         properties=properties,
         methods=methods,
     )
@@ -426,6 +536,11 @@ def extract_class(cls: type) -> ClassDoc:
 # =============================================================================
 
 
+def _mdx_text(text: str) -> str:
+    """Escape { and } so MDX does not parse them as JS; use backslash so markdown still renders (paragraphs, code blocks)."""
+    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+
+
 def render_param(p: Param) -> str:
     """Render a parameter as a Mintlify ParamField component."""
     attrs = f'path="{p.name}" type="{p.type}"'
@@ -433,15 +548,15 @@ def render_param(p: Param) -> str:
         attrs += " required"
 
     if p.description:
-        return f"<ParamField {attrs}>\n  {p.description.strip()}\n</ParamField>\n"
+        return f"<ParamField {attrs}>\n  {_mdx_text(p.description.strip())}\n</ParamField>\n"
     return f"<ParamField {attrs} />\n"
 
 
-def render_function(fn: FunctionDoc) -> str:
+def render_function(fn: FunctionDoc, heading_level: int = 3) -> str:
     """Render a function as MDX."""
-    lines = [f"### {fn.name}\n"]
+    lines = [f"{'#' * heading_level} {fn.name}\n"]
     if fn.description:
-        lines.append(f"{fn.description}\n")
+        lines.append(f"{_mdx_text(fn.description)}\n")
     lines.extend(render_param(p) for p in fn.params)
     return "\n".join(lines)
 
@@ -452,33 +567,38 @@ def render_method(method: MethodDoc, heading_level: int = 3) -> str:
     lines = [f"{heading} {method.name}\n"]
 
     if method.description:
-        lines.append(f"{method.description}\n")
+        lines.append(f"{_mdx_text(method.description)}\n")
 
     lines.extend(render_param(p) for p in method.params)
 
     if method.returns:
-        lines.append(f"**Returns:** {method.returns}\n")
+        lines.append(f"**Returns:** {_mdx_text(method.returns)}\n")
 
     if method.raises:
         lines.append("**Raises:**\n")
-        lines.extend(f"- {exc}" for exc in method.raises)
+        lines.extend(f"- {_mdx_text(exc)}" for exc in method.raises)
         lines.append("")
 
     return "\n".join(lines)
 
 
-def render_class(cls: ClassDoc, full_methods: bool = False) -> str:
+def render_class(
+    cls: ClassDoc,
+    full_methods: bool = False,
+    heading_level: int = 3,
+    show_methods: bool = True,
+) -> str:
     """Render a class as MDX."""
-    lines = [f"### {cls.name}\n"]
+    lines = [f"{'#' * heading_level} {cls.name}\n"]
 
     if cls.description:
-        lines.append(f"{cls.description}\n")
+        lines.append(f"{_mdx_text(cls.description)}\n")
 
     if cls.properties:
         lines.append('<span class="text-sm">Properties</span>\n')
         lines.extend(render_param(p) for p in cls.properties)
 
-    if cls.methods:
+    if show_methods and cls.methods:
         if full_methods:
             lines.append('<span class="text-sm">Methods</span>\n')
             lines.extend(render_method(m, heading_level=4) for m in cls.methods)
@@ -498,13 +618,30 @@ def render_section(config: SectionConfig) -> str:
     """Render a complete documentation section based on its configuration."""
     from chromadb.api import BaseAPI
 
-    lines = [f"## {config.title}\n"]
+    single_item_name: Optional[str] = None
+    if len(config.items) == 1:
+        item = config.items[0]
+        if config.render_mode == "function" and isinstance(item, tuple):
+            single_item_name = item[0]
+        elif config.render_mode == "method" and isinstance(item, str):
+            single_item_name = item
+        elif config.render_mode in ("class", "class_full") and isinstance(item, tuple):
+            single_item_name = item[0]
+
+    skip_section_heading = (
+        single_item_name is not None and single_item_name == config.title
+    )
+    heading = 2 if skip_section_heading else 3
+
+    lines = [] if skip_section_heading else [f"## {config.title}\n"]
 
     for item in config.items:
         if config.render_mode == "function":
             assert isinstance(item, tuple)
             name, fn = item
-            lines.append(render_function(extract_function(fn, name)))
+            lines.append(
+                render_function(extract_function(fn, name), heading_level=heading)
+            )
             lines.append("")
 
         elif config.render_mode == "method":
@@ -514,7 +651,11 @@ def render_section(config: SectionConfig) -> str:
                 BaseAPI, method_name, None
             )
             if method:
-                lines.append(render_method(extract_method(method, method_name)))
+                lines.append(
+                    render_method(
+                        extract_method(method, method_name), heading_level=heading
+                    )
+                )
                 lines.append("")
 
         elif config.render_mode in ("class", "class_full"):
@@ -522,7 +663,7 @@ def render_section(config: SectionConfig) -> str:
             name, cls = item
 
             if not inspect.isclass(cls):
-                lines.append(f"### {name}\n")
+                lines.append(f"{'#' * heading} {name}\n")
                 lines.append(f"`{format_type(cls)}`\n")
                 lines.append("")
                 continue
@@ -536,7 +677,10 @@ def render_section(config: SectionConfig) -> str:
 
             lines.append(
                 render_class(
-                    class_doc, full_methods=(config.render_mode == "class_full")
+                    class_doc,
+                    full_methods=(config.render_mode == "class_full"),
+                    heading_level=heading,
+                    show_methods=getattr(config, "show_class_methods", True),
                 )
             )
             lines.append("")
@@ -560,24 +704,44 @@ uv pip install chromadb
 """
 
 
-def generate_documentation() -> str:
-    """Generate the complete SDK reference documentation."""
-    sections = get_documentation_sections()
+FILE_TITLES: dict[str, str] = {
+    "client": "Client",
+    "collection": "Collection",
+    "embedding-functions": "Embedding Functions",
+    "search": "Search",
+    "schema": "Schema",
+}
 
-    lines = [
-        "---",
-        'title: "Python Reference"',
-        "---\n",
-        INSTALLATION_SECTION,
-        "---\n",
-    ]
 
-    for i, section in enumerate(sections):
-        if i > 0:
-            lines.append("---\n")
-        lines.append(render_section(section))
+def get_sections_by_file() -> dict[str, list[SectionConfig]]:
+    """Group section configs by output file."""
+    by_file: dict[str, list[SectionConfig]] = {}
+    for config in get_documentation_sections():
+        by_file.setdefault(config.output_file, []).append(config)
+    return by_file
 
-    return "\n".join(lines)
+
+def generate_documentation_per_file() -> dict[str, str]:
+    """Generate documentation as a dict of filename -> content. No index.mdx; /reference/python redirects to client."""
+    by_file = get_sections_by_file()
+    out: dict[str, str] = {}
+
+    for file_stem, configs in by_file.items():
+        if file_stem == "index":
+            continue
+        title = FILE_TITLES.get(file_stem, file_stem.replace("-", " ").title())
+        lines = [
+            "---",
+            f'title: "{title}"',
+            "---\n",
+        ]
+        for i, config in enumerate(configs):
+            if i > 0:
+                lines.append("---\n")
+            lines.append(render_section(config))
+        out[f"{file_stem}.mdx"] = "\n".join(lines)
+
+    return out
 
 
 # =============================================================================
@@ -590,32 +754,31 @@ def main() -> None:
         description="Generate Python SDK reference documentation for Chroma",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  %(prog)s --output reference/python/index.mdx
-  %(prog)s  # prints to stdout
+Example:
+  %(prog)s --output reference/python/
         """,
     )
     parser.add_argument(
         "--output",
         "-o",
         type=str,
-        default=None,
-        help="Output file path relative to docs/mintlify/ (default: stdout)",
+        required=True,
+        help="Output directory (e.g. reference/python/)",
     )
     args = parser.parse_args()
 
-    content = generate_documentation()
-
-    if args.output:
-        output_path = Path(args.output)
-        if not output_path.is_absolute():
-            mintlify_dir = Path(__file__).parent.parent / "mintlify"
-            output_path = mintlify_dir / output_path
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        output_path.write_text(content)
-        print(f"Generated: {output_path}")
-    else:
-        print(content)
+    output_path = Path(args.output)
+    if not output_path.is_absolute():
+        mintlify_dir = Path(__file__).parent.parent / "mintlify"
+        output_path = mintlify_dir / output_path
+    out_dir = output_path.resolve()
+    if out_dir.suffix:
+        out_dir = out_dir.parent
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for filename, content in generate_documentation_per_file().items():
+        fpath = out_dir / filename
+        fpath.write_text(content)
+        print(f"Generated: {fpath}")
 
 
 if __name__ == "__main__":
