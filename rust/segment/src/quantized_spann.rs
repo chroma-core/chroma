@@ -45,6 +45,7 @@ impl ChromaError for QuantizedSpannSegmentError {
     }
 }
 
+#[derive(Clone)]
 pub struct QuantizedSpannSegmentWriter {
     blockfile_provider: BlockfileProvider,
     pub id: SegmentUuid,
@@ -239,6 +240,13 @@ impl QuantizedSpannSegmentWriter {
             }
         }
         Ok(())
+    }
+
+    pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        self.index
+            .finish(&self.usearch_provider)
+            .await
+            .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)
     }
 
     pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusher, Box<dyn ChromaError>> {

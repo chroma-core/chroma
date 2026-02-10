@@ -12,6 +12,8 @@ use tracing::{Instrument, Span};
 use uuid::Uuid;
 
 use crate::distributed_spann::{SpannSegmentFlusher, SpannSegmentWriter};
+#[cfg(feature = "usearch")]
+use crate::quantized_spann::{QuantizedSpannSegmentFlusher, QuantizedSpannSegmentWriter};
 
 use super::blockfile_metadata::{MetadataSegmentFlusher, MetadataSegmentWriter};
 use super::blockfile_record::{
@@ -937,6 +939,8 @@ pub async fn materialize_logs(
 #[allow(clippy::large_enum_variant)]
 pub enum VectorSegmentWriter {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
+    #[cfg(feature = "usearch")]
+    QuantizedSpann(QuantizedSpannSegmentWriter),
     Spann(SpannSegmentWriter),
 }
 
@@ -944,6 +948,8 @@ impl VectorSegmentWriter {
     pub fn get_id(&self) -> SegmentUuid {
         match self {
             VectorSegmentWriter::Hnsw(writer) => writer.id,
+            #[cfg(feature = "usearch")]
+            VectorSegmentWriter::QuantizedSpann(writer) => writer.id,
             VectorSegmentWriter::Spann(writer) => writer.id,
         }
     }
@@ -951,6 +957,8 @@ impl VectorSegmentWriter {
     pub fn get_name(&self) -> &'static str {
         match self {
             VectorSegmentWriter::Hnsw(_) => "DistributedHNSWSegmentWriter",
+            #[cfg(feature = "usearch")]
+            VectorSegmentWriter::QuantizedSpann(_) => "QuantizedSpannSegmentWriter",
             VectorSegmentWriter::Spann(_) => "SpannSegmentWriter",
         }
     }
@@ -966,6 +974,10 @@ impl VectorSegmentWriter {
                     .apply_materialized_log_chunk(record_segment_reader, materialized)
                     .await
             }
+            #[cfg(feature = "usearch")]
+            VectorSegmentWriter::QuantizedSpann(writer) => {
+                writer.apply_materialized_log_chunk(materialized).await
+            }
             VectorSegmentWriter::Spann(writer) => {
                 writer
                     .apply_materialized_log_chunk(record_segment_reader, materialized)
@@ -977,6 +989,8 @@ impl VectorSegmentWriter {
     pub async fn finish(&mut self) -> Result<(), Box<dyn ChromaError>> {
         match self {
             VectorSegmentWriter::Hnsw(_) => Ok(()),
+            #[cfg(feature = "usearch")]
+            VectorSegmentWriter::QuantizedSpann(writer) => writer.finish().await,
             VectorSegmentWriter::Spann(writer) => writer.garbage_collect().await,
         }
     }
@@ -986,6 +1000,12 @@ impl VectorSegmentWriter {
             VectorSegmentWriter::Hnsw(writer) => writer.commit().await.map(|w| {
                 ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Hnsw(Box::new(w)))
             }),
+            #[cfg(feature = "usearch")]
+            VectorSegmentWriter::QuantizedSpann(writer) => {
+                Box::pin(writer.commit()).await.map(|f| {
+                    ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::QuantizedSpann(f))
+                })
+            }
             VectorSegmentWriter::Spann(writer) => Box::pin(writer.commit())
                 .await
                 .map(|w| ChromaSegmentFlusher::VectorSegment(VectorSegmentFlusher::Spann(w))),
@@ -1066,6 +1086,8 @@ impl ChromaSegmentWriter<'_> {
 #[allow(clippy::large_enum_variant)]
 pub enum VectorSegmentFlusher {
     Hnsw(Box<DistributedHNSWSegmentWriter>),
+    #[cfg(feature = "usearch")]
+    QuantizedSpann(QuantizedSpannSegmentFlusher),
     Spann(SpannSegmentFlusher),
 }
 
@@ -1091,6 +1113,8 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::MetadataSegment(flusher) => flusher.id,
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
                 VectorSegmentFlusher::Hnsw(writer) => writer.id,
+                #[cfg(feature = "usearch")]
+                VectorSegmentFlusher::QuantizedSpann(flusher) => flusher.id,
                 VectorSegmentFlusher::Spann(writer) => writer.id,
             },
         }
@@ -1102,6 +1126,8 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::MetadataSegment(_) => "MetadataSegmentFlusher",
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
                 VectorSegmentFlusher::Hnsw(_) => "DistributedHNSWSegmentFlusher",
+                #[cfg(feature = "usearch")]
+                VectorSegmentFlusher::QuantizedSpann(_) => "QuantizedSpannSegmentFlusher",
                 VectorSegmentFlusher::Spann(_) => "SpannSegmentFlusher",
             },
         }
@@ -1113,6 +1139,8 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::MetadataSegment(flusher) => Box::pin(flusher.flush()).await,
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
                 VectorSegmentFlusher::Hnsw(flusher) => flusher.flush().await,
+                #[cfg(feature = "usearch")]
+                VectorSegmentFlusher::QuantizedSpann(flusher) => flusher.flush().await,
                 VectorSegmentFlusher::Spann(flusher) => Box::pin(flusher.flush()).await,
             },
         }

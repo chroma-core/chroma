@@ -87,6 +87,7 @@ impl ChromaError for QuantizedSpannError {
 }
 
 /// Mutable quantized SPANN index, generic over centroid index.
+#[derive(Clone)]
 pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // === Config ===
     cmek: Option<Cmek>,
@@ -806,37 +807,14 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
     /// Commit all in-memory state to blockfile writers and return a flusher.
     ///
     /// This method consumes the index and prepares all data for persistence.
-    /// Call `flush()` on the returned flusher to actually write to storage.
+    /// Call `finish()` before this method, then `flush()` on the returned
+    /// flusher to actually write to storage.
     pub async fn commit(
-        mut self,
+        self,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
-        // === Step 0: Pre-scrub cleanup ===
-        let mut mutated_cluster_ids = self
-            .cluster_deltas
-            .iter()
-            .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
-            .collect::<Vec<_>>();
-
-        for cluster_id in &mutated_cluster_ids {
-            self.scrub(*cluster_id).await?;
-        }
-
-        let zero_length_cluster_ids = self
-            .cluster_deltas
-            .iter()
-            .filter_map(|entry| (entry.value().length == 0).then_some(*entry.key()))
-            .collect::<Vec<_>>();
-
-        for cluster_id in zero_length_cluster_ids {
-            self.drop(cluster_id).await?;
-        }
-
-        // === Step 1: Check center drift and rebuild centroid indexes if needed ===
-        self.rebuild_on_drift(usearch_provider).await?;
-
-        // === Step 2: Create blockfile writers ===
+        // === Create blockfile writers ===
         let mut qc_options =
             BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
         let mut sm_options =
@@ -870,9 +848,14 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .await
             .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
 
-        // === Step 3: Write quantized_cluster data ===
+        // === Write quantized_cluster data ===
         let quantized_cluster_flusher = {
-            // Add tombstoned cluster ids (need to delete from blockfile)
+            // Collect clusters that received mutations plus tombstones.
+            let mut mutated_cluster_ids = self
+                .cluster_deltas
+                .iter()
+                .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
+                .collect::<Vec<_>>();
             for cluster_id in self.tombstones.iter() {
                 mutated_cluster_ids.push(*cluster_id);
             }
@@ -913,7 +896,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 4: Write scalar_metadata ===
+        // === Write scalar_metadata ===
         let scalar_metadata_flusher = {
             // 1. PREFIX_LENGTH - sorted by cluster_id
             let mut lengths = self
@@ -956,7 +939,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 .map_err(QuantizedSpannError::Blockfile)?
         };
 
-        // === Step 5: Write embedding_metadata ===
+        // === Write embedding_metadata ===
         let embedding_metadata_flusher = {
             // 1. PREFIX_CENTER - quantization center (always write, may be updated)
             embedding_metadata_writer
@@ -1075,6 +1058,41 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             // === Dedup Sets ===
             balancing: DashSet::new().into(),
         })
+    }
+
+    /// Prepare the index for commit: scrub mutated clusters, drop empty
+    /// clusters, and rebuild centroid indexes if the quantization center
+    /// has drifted. Must be called before `commit()`.
+    pub async fn finish(
+        &mut self,
+        usearch_provider: &USearchIndexProvider,
+    ) -> Result<(), QuantizedSpannError> {
+        // Scrub all clusters that received mutations.
+        let mutated_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in &mutated_cluster_ids {
+            self.scrub(*cluster_id).await?;
+        }
+
+        // Drop clusters that ended up empty after scrubbing.
+        let zero_length_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (entry.value().length == 0).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in zero_length_cluster_ids {
+            self.drop(cluster_id).await?;
+        }
+
+        // Check center drift and rebuild centroid indexes if needed.
+        self.rebuild_on_drift(usearch_provider).await?;
+
+        Ok(())
     }
 
     /// Open an existing quantized SPANN index from file IDs.
@@ -1752,7 +1770,7 @@ mod tests {
         // =======================================================================
         // Phase 1: Create index, add points, commit, flush
         // =======================================================================
-        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -1795,7 +1813,11 @@ mod tests {
         let expected_rotated_101 = writer.rotate(&[0.0, 1.0, 0.0, 0.0]);
         let expected_rotated_102 = writer.rotate(&[0.0, 0.0, 1.0, 0.0]);
 
-        // Commit and flush
+        // Finish, commit, and flush
+        writer
+            .finish(&usearch_provider)
+            .await
+            .expect("Failed to finish");
         let flusher = writer
             .commit(&blockfile_provider, &usearch_provider)
             .await
@@ -2283,7 +2305,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_open_commit() {
+    async fn test_open_finish_commit() {
         // =======================================================================
         // Setup
         // =======================================================================
@@ -2293,7 +2315,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
         let collection_id = CollectionUuid::new();
 
-        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2382,6 +2404,10 @@ mod tests {
 
         let next_cluster_id_after_spawn = writer.next_cluster_id.load(Ordering::Relaxed);
 
+        writer
+            .finish(&usearch_provider)
+            .await
+            .expect("Failed to finish");
         let flusher = writer
             .commit(&blockfile_provider, &usearch_provider)
             .await
@@ -2394,7 +2420,7 @@ mod tests {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2435,6 +2461,10 @@ mod tests {
         // --- Cluster D: drop ---
         writer.drop(cluster_d).await.expect("drop D failed");
 
+        writer
+            .finish(&usearch_provider)
+            .await
+            .expect("Failed to finish");
         let flusher = writer
             .commit(&blockfile_provider, &usearch_provider)
             .await
@@ -2708,10 +2738,14 @@ mod tests {
             let test_vec = [rng.gen(), rng.gen(), rng.gen(), rng.gen()];
             let expected_rotated = writer.rotate(&test_vec);
 
-            // --- Commit + Flush ---
+            // --- Finish + Commit + Flush ---
             let blockfile_provider = test_blockfile_provider(storage.clone());
             let usearch_provider = test_usearch_provider(storage.clone());
 
+            writer
+                .finish(&usearch_provider)
+                .await
+                .expect("finish failed");
             let flusher = writer
                 .commit(&blockfile_provider, &usearch_provider)
                 .await
