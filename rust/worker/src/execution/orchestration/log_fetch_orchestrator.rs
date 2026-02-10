@@ -578,21 +578,13 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .ok_or_terminate(
                     self.context
                         .spann_provider
-                        .write_quantized_usearch(
-                            &collection,
-                            &vector_segment,
-                            &record_segment,
-                        )
+                        .write_quantized_usearch(&collection, &vector_segment, &record_segment)
                         .await,
                     ctx,
                 )
                 .await
             {
-                Some(writer) => (
-                    None,
-                    VectorSegmentWriter::QuantizedSpann(writer),
-                    true,
-                ),
+                Some(writer) => (None, VectorSegmentWriter::QuantizedSpann(writer), true),
                 None => return,
             },
             SegmentType::Spann => match self
