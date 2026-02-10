@@ -1,0 +1,87 @@
+---
+title: "Schema"
+---
+
+## Schema
+
+Collection schema for configuring indexes and encryption.
+
+The schema controls how data is indexed and can optionally specify
+customer-managed encryption keys (CMEK) for data at rest.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="defaults" type="ValueTypes" />
+
+<ParamField path="keys" type="Record<string, ValueTypes>" />
+
+<ParamField path="cmek" type="Cmek | null" />
+
+
+---
+
+## Index configs
+
+### FtsIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="FtsIndexConfig" />
+
+
+### StringInvertedIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="StringInvertedIndexConfig" />
+
+
+### IntInvertedIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="IntInvertedIndexConfig" />
+
+
+### FloatInvertedIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="FloatInvertedIndexConfig" />
+
+
+### BoolInvertedIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="BoolInvertedIndexConfig" />
+
+
+### VectorIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="VectorIndexConfig" />
+
+<ParamField path="space" type="Space | null" />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction | null | undefined" />
+
+<ParamField path="sourceKey" type="string | null" />
+
+<ParamField path="hnsw" type="HnswIndexConfig | null" />
+
+<ParamField path="spann" type="SpannIndexConfig | null" />
+
+
+### SparseVectorIndexConfig
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="type" type="SparseVectorIndexConfig" />
+
+<ParamField path="embeddingFunction" type="SparseEmbeddingFunction | null | undefined" />
+
+<ParamField path="sourceKey" type="string | null" />
+
+<ParamField path="bm25" type="boolean | null" />
