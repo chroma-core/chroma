@@ -15,6 +15,10 @@ HEADER_FILE="${OUT_DIR}/${NAME}FFI.h"
 INCLUDE_TMP="${OUT_DIR}/include"      # Temp header folder for the XCFramework
 XCFRAMEWORK_NAME="${NAME}_framework.xcframework"
 
+# Deployment targets – must match chroma-swift Package.swift
+MACOS_DEPLOYMENT_TARGET="14.0"
+IOS_DEPLOYMENT_TARGET="17.0"
+
 ############################################
 # ─────────── Rust target list ────────────
 ############################################
@@ -40,11 +44,23 @@ done
 echo "🦀 Building static libraries…"
 for TARGET in "${RUST_TARGETS[@]}"; do
   echo "  • $TARGET"
+  unset BINDGEN_EXTRA_CLANG_ARGS 2>/dev/null || true
+
+  case "$TARGET" in
+    *-apple-darwin)
+      export MACOSX_DEPLOYMENT_TARGET="$MACOS_DEPLOYMENT_TARGET"
+      unset IPHONEOS_DEPLOYMENT_TARGET 2>/dev/null || true
+      ;;
+    *-apple-ios*)
+      export IPHONEOS_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET"
+      unset MACOSX_DEPLOYMENT_TARGET 2>/dev/null || true
+      ;;
+  esac
+
   if [[ "$TARGET" == "aarch64-apple-ios-sim" ]]; then
     export BINDGEN_EXTRA_CLANG_ARGS="-target arm64-apple-ios-simulator -isysroot $(xcrun --sdk iphonesimulator --show-sdk-path)"
-  else
-    unset BINDGEN_EXTRA_CLANG_ARGS
   fi
+
   cargo build --manifest-path "$BASE_DIR/Cargo.toml" --release --target "$TARGET"
 done
 
@@ -112,8 +128,8 @@ import PackageDescription
 let package = Package(
     name: "$PACKAGE_NAME",
     platforms: [
-        .macOS(.v10_15),
-        .iOS(.v13)
+        .macOS(.v14),
+        .iOS(.v17)
     ],
     products: [
         .library(name: "$PACKAGE_NAME", targets: ["$PACKAGE_NAME"])
