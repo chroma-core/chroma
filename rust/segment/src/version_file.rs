@@ -16,8 +16,10 @@ use uuid;
 pub enum VersionFileType {
     /// Compaction operation - file name ends with _flush
     Compaction,
-    /// Garbage collection operation - file name ends with _gc_mark
-    GarbageCollection,
+    /// Garbage collection mark operation - file name ends with _gc_mark
+    GarbageCollectionMark,
+    /// Garbage collection delete operation - file name ends with _gc_delete
+    GarbageCollectionDelete,
 }
 
 impl VersionFileType {
@@ -25,7 +27,8 @@ impl VersionFileType {
     pub fn suffix(&self) -> &'static str {
         match self {
             VersionFileType::Compaction => "flush",
-            VersionFileType::GarbageCollection => "gc_mark",
+            VersionFileType::GarbageCollectionMark => "gc_mark",
+            VersionFileType::GarbageCollectionDelete => "gc_delete",
         }
     }
 }
@@ -123,11 +126,11 @@ impl VersionFileManager {
     /// The path where the version file was stored
     pub async fn upload(
         &self,
+        version_file_path: &str,
         version_file: &CollectionVersionFile,
         collection: &chroma_types::Collection,
-        file_type: VersionFileType,
         new_version_id: i64,
-    ) -> Result<String, VersionFileError> {
+    ) -> Result<(), VersionFileError> {
         // Validate the version file before uploading
         let collection_id_str = &collection.collection_id.to_string();
         // For upload, we don't know the expected version yet, so we'll validate structure
@@ -141,15 +144,6 @@ impl VersionFileManager {
         } else {
             return Err(VersionFileError::MissingCollectionInfo);
         }
-
-        // Generate the version file path from collection metadata
-        let version_file_path = self.generate_file_path(
-            &collection.tenant,
-            &collection.database,
-            &collection.collection_id,
-            new_version_id,
-            file_type,
-        );
 
         // Validate the version file before uploading
         let collection_id_str = &collection.collection_id.to_string();
@@ -180,7 +174,7 @@ impl VersionFileManager {
             "Successfully uploaded version file"
         );
 
-        Ok(version_file_path)
+        Ok(())
     }
 
     /// Generate a standard version file path based on collection metadata.
@@ -196,11 +190,9 @@ impl VersionFileManager {
     /// A formatted path matching Go implementation with appropriate suffix:
     /// - For COMPACTION: "tenant/{tenant_id}/database/{database_id}/collection/{collection_id}/versionfiles/{version_id}_flush"
     /// - For GARBAGE_COLLECTION: "tenant/{tenant_id}/database/{database_id}/collection/{collection_id}/versionfiles/{version_id}_gc_mark"
-    fn generate_file_path(
+    pub fn generate_file_path(
         &self,
-        tenant_id: &str,
-        database_id: &str,
-        collection_id: &CollectionUuid,
+        collection: &Collection,
         version_id: i64,
         file_type: VersionFileType,
     ) -> String {
@@ -212,7 +204,7 @@ impl VersionFileManager {
 
         format!(
             "tenant/{}/database/{}/collection/{}/versionfiles/{}",
-            tenant_id, database_id, collection_id, version_file_name
+            collection.tenant, collection.database_id, collection.collection_id, version_file_name
         )
     }
 
@@ -257,10 +249,11 @@ impl VersionFileManager {
         };
 
         if version_history.versions.is_empty() {
-            tracing::error!("version history is empty");
-            return Err(VersionFileError::ValidationFailed(
-                "version history is empty".to_string(),
-            ));
+            tracing::warn!("version history is empty");
+            // return Err(VersionFileError::ValidationFailed(
+            //     "version history is empty".to_string(),
+            // ));
+            return Ok(());
         }
 
         let versions = &version_history.versions;
@@ -481,9 +474,14 @@ mod tests {
             }],
         });
 
+        // Generate the version file path from collection metadata
+        let upload_path =
+            manager.generate_file_path(&collection, new_version, VersionFileType::Compaction);
+
         // Upload the version file
-        let uploaded_path = manager
+        manager
             .upload(
+                &upload_path,
                 &version_file,
                 &collection,
                 VersionFileType::Compaction,
@@ -708,17 +706,21 @@ mod tests {
             }],
         });
 
+        // Generate the version file path from collection metadata
+        let initial_path =
+            manager.generate_file_path(&collection, new_version, VersionFileType::Compaction);
+
         // Upload initial version
         let upload_result = manager
             .upload(
+                &initial_path,
                 &version_file,
                 &collection,
                 VersionFileType::Compaction,
-                new_version as i64,
+                new_version,
             )
             .await;
         assert!(upload_result.is_ok());
-        let initial_path = upload_result.unwrap();
 
         // Download and validate
         let mut collection_with_initial_path = collection.clone();
@@ -786,15 +788,22 @@ mod tests {
         let mut modified_collection = collection.clone();
         modified_collection.version = 999;
 
+        // Generate the version file path for the modified version
+        let modified_path = manager.generate_file_path(
+            &modified_collection,
+            modified_version_id,
+            VersionFileType::Compaction,
+        );
+
         let reupload_result = manager
             .upload(
+                &modified_path,
                 &version_file,
                 &modified_collection,
                 VersionFileType::Compaction,
                 modified_version_id,
             )
             .await;
-        let modified_path = reupload_result.unwrap();
 
         // Validate that the path follows the new Go-style format: {version_id:06d}_{uuid}_flush
         // We'll check that the path contains the expected components

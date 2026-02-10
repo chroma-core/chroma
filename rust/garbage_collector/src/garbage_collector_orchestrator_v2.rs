@@ -29,7 +29,7 @@ use chroma_blockstore::RootManager;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_storage::Storage;
-use chroma_sysdb::{GetCollectionsOptions, SysDb};
+use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler,
     OneshotMessageReceiver, Orchestrator, OrchestratorContext, PanicError, System, TaskError,
@@ -266,7 +266,7 @@ impl GarbageCollectorOrchestrator {
             .get_collections(GetCollectionsOptions {
                 collection_ids: Some(soft_deleted_collections_to_gc),
                 include_soft_deleted: true,
-                database_name: self.database_name.map(DatabaseOrTopology::Database),
+                database_or_topology: self.database_name.map(DatabaseOrTopology::Database),
                 ..Default::default()
             })
             .await
@@ -385,12 +385,13 @@ impl GarbageCollectorOrchestrator {
                         .collect::<Vec<_>>(),
                     tenant_id: collection_info.tenant_id.clone(),
                     database_id: collection_info.database_id.clone(),
+                    database_name: self.database_name.as_ref().map(|d| d.as_ref().to_string()),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
         self.sysdb_client
-            .mark_version_for_deletion(0, versions_to_mark)
+            .mark_version_for_deletion(0, versions_to_mark, self.database_name.clone())
             .await
             .map_err(|err| GarbageCollectorError::SysDbMethodFailed(err.to_string()))?;
 
@@ -894,6 +895,7 @@ impl GarbageCollectorOrchestrator {
                         database_id: collection_info.database_id.clone(),
                         collection_id: collection_id.to_string(),
                         versions,
+                        database_name: self.database_name.as_ref().map(|d| d.as_ref().to_string()),
                     },
                 },
                 ctx.receiver(),

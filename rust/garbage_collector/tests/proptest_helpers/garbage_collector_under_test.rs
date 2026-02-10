@@ -322,6 +322,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
 
                             let orchestrator = GarbageCollectorOrchestrator::new(
                                 collection_id,
+                                None,
                                 collection_to_gc.version_file_path.clone(),
                                 collection_to_gc.lineage_file_path.clone(),
                                 // This proptest does not test the cutoff time as the timestamps created by the SysDb (e.g. collection.created_at and timestamps in version files) cannot currently be faked/overridden.
