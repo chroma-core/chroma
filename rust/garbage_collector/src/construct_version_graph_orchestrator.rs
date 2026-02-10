@@ -24,7 +24,7 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid};
+use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, DatabaseName};
 use chrono::DateTime;
 use petgraph::{dot::Dot, graph::DiGraph};
 use std::{
@@ -54,6 +54,7 @@ pub struct ConstructVersionGraphOrchestrator {
     collection_id: CollectionUuid,
     version_file_path: String,
     lineage_file_path: Option<String>,
+    database_name: Option<DatabaseName>,
 
     version_dependencies: Vec<VersionDependency>,
     version_files: HashMap<CollectionUuid, Arc<CollectionVersionFile>>,
@@ -69,6 +70,7 @@ impl ConstructVersionGraphOrchestrator {
         collection_id: CollectionUuid,
         version_file_path: String,
         lineage_file_path: Option<String>,
+        database_name: Option<DatabaseName>,
     ) -> Self {
         Self {
             context: OrchestratorContext::new(dispatcher),
@@ -78,6 +80,7 @@ impl ConstructVersionGraphOrchestrator {
             collection_id,
             version_file_path,
             lineage_file_path,
+            database_name,
 
             version_dependencies: Vec::new(),
             version_files: HashMap::new(),
@@ -459,6 +462,7 @@ impl Handler<TaskResult<FetchLineageFileOutput, FetchLineageFileError>>
                 GetVersionFilePathsInput::new(
                     collection_ids_to_fetch_version_files.into_iter().collect(),
                     self.sysdb.clone(),
+                    self.database_name.clone(),
                 ),
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -600,6 +604,7 @@ mod tests {
             sysdb,
             CollectionUuid::new(),
             version_file_path.to_string(),
+            None,
             None,
         );
 
@@ -786,6 +791,7 @@ mod tests {
                 collection_id,
                 version_file_path,
                 Some(lineage_file_a_path.clone()),
+                None,
             );
 
             let result = orchestrator.run(system.clone()).await.unwrap();
