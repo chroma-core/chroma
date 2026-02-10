@@ -1634,6 +1634,65 @@ impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsR
 }
 
 // ============================================================================
+// FinishCollectionDeletion Types
+// ============================================================================
+
+/// Internal request for finishing collection deletion (hard delete).
+#[derive(Debug, Clone)]
+pub struct FinishCollectionDeletionRequest {
+    pub collection_id: CollectionUuid,
+    pub database_name: DatabaseName,
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::FinishCollectionDeletionRequest> for FinishCollectionDeletionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::FinishCollectionDeletionRequest) -> Result<Self, Self::Error> {
+        let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.database
+            ))
+        })?;
+        Ok(Self {
+            collection_id: CollectionUuid(validate_uuid(&req.id)?),
+            database_name,
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal response for finishing collection deletion.
+#[derive(Debug, Clone)]
+pub struct FinishCollectionDeletionResponse {}
+
+impl From<FinishCollectionDeletionResponse> for chroma_proto::FinishCollectionDeletionResponse {
+    fn from(_: FinishCollectionDeletionResponse) -> Self {
+        chroma_proto::FinishCollectionDeletionResponse {}
+    }
+}
+
+impl Assignable for FinishCollectionDeletionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for FinishCollectionDeletionRequest {
+    type Response = FinishCollectionDeletionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.finish_collection_deletion(self).await
+    }
+}
+
+// ============================================================================
 // ListCollectionsToGc Types
 // ============================================================================
 
