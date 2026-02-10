@@ -26,6 +26,7 @@ pub struct DeleteVersionsAtSysDbInput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
+    pub database_name: chroma_types::DatabaseName,
 }
 
 #[derive(Debug)]
@@ -149,7 +150,10 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
             );
 
             match sysdb
-                .delete_collection_version(vec![input.versions_to_delete.clone()])
+                .delete_collection_version(
+                    vec![input.versions_to_delete.clone()],
+                    input.database_name.clone(),
+                )
                 .await
             {
                 Ok(results) => {
@@ -191,7 +195,7 @@ mod tests {
     use super::*;
     use chroma_storage::local::LocalStorage;
     use chroma_sysdb::TestSysDb;
-    use chroma_types::chroma_proto;
+    use chroma_types::{chroma_proto, DatabaseName};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -218,6 +222,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: DatabaseName::new("test_db").expect("valid db name"),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -249,6 +254,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: DatabaseName::new("test_db").expect("valid db name"),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -390,6 +396,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: DatabaseName::new("test_db").expect("valid db name"),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -460,6 +467,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: DatabaseName::new("test_db").expect("valid db name"),
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
