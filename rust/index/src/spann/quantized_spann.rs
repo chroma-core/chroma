@@ -981,6 +981,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
     }
 
     /// Create a new quantized SPANN index.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         cluster_block_size: usize,
         collection_id: CollectionUuid,
