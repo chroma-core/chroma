@@ -28,6 +28,12 @@ pub const VERSION_MAP_PATH: &str = "version_map_path";
 pub const POSTING_LIST_PATH: &str = "posting_list_path";
 pub const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
+pub const QUANTIZED_SPANN_CLUSTER: &str = "quantized_spann_cluster";
+pub const QUANTIZED_SPANN_SCALAR_METADATA: &str = "quantized_spann_scalar_metadata";
+pub const QUANTIZED_SPANN_EMBEDDING_METADATA: &str = "quantized_spann_embedding_metadata";
+pub const QUANTIZED_SPANN_RAW_CENTROID: &str = "quantized_spann_raw_centroid";
+pub const QUANTIZED_SPANN_QUANTIZED_CENTROID: &str = "quantized_spann_quantized_centroid";
+
 /// SegmentUuid is a wrapper around Uuid to provide a type for the segment id.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SegmentUuid(pub Uuid);
@@ -117,8 +123,6 @@ pub struct Segment {
 }
 
 impl Segment {
-    // TODO(Sanket): Add QuantizedSpann to the prefetch supported list when
-    // we have intelligent prefetching.
     pub fn prefetch_supported(&self) -> bool {
         matches!(
             self.r#type,
@@ -126,7 +130,6 @@ impl Segment {
         )
     }
 
-    // TODO(Sanket): Add file paths for QuantizedSpann when we have intelligent prefetching.
     pub fn filepaths_to_prefetch(&self) -> Vec<String> {
         let mut res = Vec::new();
         match self.r#type {

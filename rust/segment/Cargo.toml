@@ -3,6 +3,10 @@ name = "chroma-segment"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+usearch = ["chroma-index/usearch"]
+
 [dependencies]
 async-trait = { workspace = true }
 bytes = { workspace = true }
