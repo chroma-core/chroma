@@ -5660,6 +5660,144 @@ mod tests {
     }
 
     #[test]
+    fn test_fts_create_global_without_key_rejected() {
+        // FTS create_index without key (global) should fail with FtsIndexOnlyOnDocument
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::FtsIndexOnlyOnDocument
+        ));
+    }
+
+    #[test]
+    fn test_fts_delete_global_without_key_rejected() {
+        // FTS delete_index without key (global) should fail with FtsIndexDeletionOnlyOnDocument
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::FtsIndexDeletionOnlyOnDocument
+        ));
+    }
+
+    #[test]
+    fn test_fts_delete_on_custom_key_rejected() {
+        // FTS delete_index on a custom key (not #document) should fail
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::FtsIndexDeletionOnlyOnDocument
+        ));
+    }
+
+    #[test]
+    fn test_reserved_key_prefix_create_index() {
+        // create_index with a key starting with # (not #document or #embedding) should fail
+        let result = Schema::new_default(KnnIndex::Hnsw).create_index(
+            Some("#custom_field"),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::ReservedKeyPrefix { key } if key == "#custom_field"
+        ));
+    }
+
+    #[test]
+    fn test_reserved_key_prefix_delete_index() {
+        // delete_index with a key starting with # (not #document or #embedding) should fail
+        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
+            Some("#custom_field"),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::ReservedKeyPrefix { key } if key == "#custom_field"
+        ));
+    }
+
+    #[test]
+    fn test_is_fts_enabled_backward_compatibility() {
+        // Default schema has FTS enabled (backward compatibility)
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.is_fts_enabled());
+
+        // Schema with no FTS config at all should default to enabled (is_none_or)
+        let empty_schema = Schema {
+            defaults: ValueTypes::default(),
+            keys: HashMap::new(),
+            cmek: None,
+            source_attached_function_id: None,
+        };
+        assert!(empty_schema.is_fts_enabled());
+    }
+
+    #[test]
+    fn test_is_fts_enabled_after_disable() {
+        // After disabling FTS on #document, is_fts_enabled should return false
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+        assert!(!schema.is_fts_enabled());
+    }
+
+    #[test]
+    fn test_is_fts_enabled_after_reenable() {
+        // After disabling then re-enabling FTS on #document, is_fts_enabled should return true
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed")
+            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS creation should succeed");
+        assert!(schema.is_fts_enabled());
+    }
+
+    #[test]
+    fn test_fts_disabled_blocks_where_document_validation() {
+        use crate::{DocumentExpression, DocumentOperator};
+
+        // Create schema with FTS disabled
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+
+        // Where::Document query should be rejected
+        let where_clause = Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "test query".to_string(),
+        });
+        let result = schema.is_metadata_where_indexing_enabled(&where_clause);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FilterValidationError::FtsDisabled
+        ));
+    }
+
+    #[test]
+    fn test_fts_enabled_allows_where_document_validation() {
+        use crate::{DocumentExpression, DocumentOperator};
+
+        // Default schema has FTS enabled
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+
+        // Where::Document query should be allowed
+        let where_clause = Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "test query".to_string(),
+        });
+        let result = schema.is_metadata_where_indexing_enabled(&where_clause);
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn test_builder_pattern_chaining() {
         // Test complex chaining scenario
         let schema = Schema::new_default(KnnIndex::Hnsw)

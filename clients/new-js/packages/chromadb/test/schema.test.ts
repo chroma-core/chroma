@@ -903,6 +903,31 @@ describe("Schema", () => {
     expect(() =>
       schema.createIndex(new FtsIndexConfig(), "custom_field"),
     ).toThrow(/FTS index can only be enabled on #document key/);
+
+    // Test 11: Cannot create index on key starting with # (reserved prefix)
+    expect(() =>
+      schema.createIndex(new StringInvertedIndexConfig(), "#custom_field"),
+    ).toThrow(/key cannot begin with '#'/);
+
+    // Test 12: Cannot delete index on key starting with # (reserved prefix)
+    expect(() =>
+      schema.deleteIndex(new StringInvertedIndexConfig(), "#custom_field"),
+    ).toThrow(/key cannot begin with '#'/);
+
+    // Test 13: Cannot delete FTS on custom key
+    expect(() =>
+      schema.deleteIndex(new FtsIndexConfig(), "my_text_field"),
+    ).toThrow(/Deleting FTS index is only supported on #document key/);
+
+    // Test 14: Cannot delete non-FTS on #document
+    expect(() =>
+      schema.deleteIndex(new StringInvertedIndexConfig(), DOCUMENT_KEY),
+    ).toThrow(/Cannot delete index on special key '#document'/);
+
+    // Test 15: Cannot delete on #embedding
+    expect(() =>
+      schema.deleteIndex(new StringInvertedIndexConfig(), EMBEDDING_KEY),
+    ).toThrow(/Cannot modify #embedding/);
   });
 
   it("empty schema serialization", async () => {
