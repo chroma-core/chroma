@@ -650,6 +650,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         // Skip FTS indexing if disabled in schema (default to enabled for backwards compatibility)
         let fts_enabled = schema.as_ref().is_none_or(|s| s.is_fts_enabled());
         if !fts_enabled {
+            tracing::info!("FTS is disabled in schema, skipping indexing");
             return Ok(());
         }
 
