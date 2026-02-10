@@ -896,6 +896,7 @@ impl GarbageCollectorOrchestrator {
                         collection_id: collection_id.to_string(),
                         versions,
                     },
+                    database_name: self.database_name.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
