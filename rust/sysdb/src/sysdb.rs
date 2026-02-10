@@ -396,7 +396,7 @@ impl SysDb {
     pub async fn delete_collection(
         &mut self,
         tenant: String,
-        database: String,
+        database: DatabaseName,
         collection_id: CollectionUuid,
         segment_ids: Vec<SegmentUuid>,
     ) -> Result<(), DeleteCollectionError> {
@@ -407,7 +407,12 @@ impl SysDb {
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .delete_collection(tenant, database, collection_id, segment_ids)
+                    .delete_collection(
+                        tenant,
+                        database.as_ref().to_string(),
+                        collection_id,
+                        segment_ids,
+                    )
                     .await
             }
             SysDb::Test(_) => {
@@ -1459,14 +1464,19 @@ impl GrpcSysDb {
     async fn delete_collection(
         &mut self,
         tenant: String,
-        database: String,
+        database: DatabaseName,
         collection_id: CollectionUuid,
         segment_ids: Vec<SegmentUuid>,
     ) -> Result<(), DeleteCollectionError> {
-        self.client
+        self.client(&database)
+            .map_err(|e| {
+                DeleteCollectionError::Internal(
+                    TonicError(tonic::Status::internal(e.to_string())).boxed(),
+                )
+            })?
             .delete_collection(chroma_proto::DeleteCollectionRequest {
                 tenant,
-                database,
+                database: database.into_string(),
                 id: collection_id.0.to_string(),
                 segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
             })
