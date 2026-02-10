@@ -26,6 +26,7 @@ pub struct DeleteVersionsAtSysDbInput {
     pub epoch_id: i64,
     pub sysdb_client: SysDb,
     pub versions_to_delete: VersionListForCollection,
+    pub database_name: Option<chroma_types::DatabaseName>,
 }
 
 #[derive(Debug)]
@@ -149,7 +150,10 @@ impl Operator<DeleteVersionsAtSysDbInput, DeleteVersionsAtSysDbOutput>
             );
 
             match sysdb
-                .delete_collection_version(vec![input.versions_to_delete.clone()])
+                .delete_collection_version(
+                    vec![input.versions_to_delete.clone()],
+                    input.database_name.clone(),
+                )
                 .await
             {
                 Ok(results) => {
@@ -211,7 +215,6 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![2, 3, 4],
-            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -219,6 +222,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: None,
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -243,7 +247,6 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![],
-            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -251,6 +254,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: None,
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -385,7 +389,6 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![1, 2],
-            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -393,6 +396,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: None,
         };
 
         let operator = DeleteVersionsAtSysDbOperator {
@@ -456,7 +460,6 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![1, 2],
-            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -464,6 +467,7 @@ mod tests {
             versions_to_delete: versions_to_delete.clone(),
             sysdb_client: sysdb,
             epoch_id: 123,
+            database_name: None,
         };
 
         let operator = DeleteVersionsAtSysDbOperator {

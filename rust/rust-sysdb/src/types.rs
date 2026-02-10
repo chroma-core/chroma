@@ -1622,30 +1622,6 @@ impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsR
     }
 }
 
-// TryFrom implementation for GetCollectionsRequest from VersionListForCollection
-impl TryFrom<&chroma_proto::VersionListForCollection> for GetCollectionsRequest {
-    type Error = SysDbError;
-
-    fn try_from(
-        version_list: &chroma_proto::VersionListForCollection,
-    ) -> Result<Self, Self::Error> {
-        let collection_id = CollectionUuid(validate_uuid(&version_list.collection_id)?);
-        let database_name = version_list
-            .database_name
-            .as_ref()
-            .and_then(|s| DatabaseName::new(s))
-            .ok_or_else(|| {
-                SysDbError::InvalidArgument(
-                    "database_name is required for GetCollectionsRequest".to_string(),
-                )
-            })?;
-        let filter = CollectionFilter::default()
-            .ids(vec![collection_id])
-            .database_name(database_name);
-        Ok(GetCollectionsRequest { filter })
-    }
-}
-
 // ============================================================================
 // ListCollectionsToGc Types
 // ============================================================================

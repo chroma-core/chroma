@@ -383,7 +383,6 @@ mod tests {
                 collection_id: "test_collection".to_string(),
                 database_id: "test_database".to_string(),
                 tenant_id: "test_tenant".to_string(),
-                database_name: None,
             },
             version_to_content: HashMap::new(), // Empty content map
             oldest_version_to_keep: 1,

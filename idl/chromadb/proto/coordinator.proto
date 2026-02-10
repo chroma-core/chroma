@@ -431,7 +431,6 @@ message VersionListForCollection {
   string database_id = 2;
   string collection_id = 3;
   repeated int64 versions = 4;
-  optional string database_name = 5;
 }
 
 // Request to list versions of a collection.
@@ -538,6 +537,7 @@ message MarkVersionForDeletionResponse {
 message DeleteCollectionVersionRequest {
   int64 epoch_id = 1;
   repeated VersionListForCollection versions = 2;
+  optional string database_name = 3;
 }
 
 message DeleteCollectionVersionResponse {
