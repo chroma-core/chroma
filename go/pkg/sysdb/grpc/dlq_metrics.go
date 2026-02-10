@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	dlqMetricsInterval = 30 * time.Second
+	dlqMetricsInterval = 1 * time.Minute
 )
 
 // StartDLQMetrics starts a background goroutine that periodically emits
