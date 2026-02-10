@@ -4,8 +4,8 @@ use std::sync::{
 };
 
 use chroma_blockstore::{
-    arrow::provider::BlockfileReaderOptions, BlockfileFlusher, BlockfileReader,
-    BlockfileWriterOptions,
+    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileFlusher,
+    BlockfileReader, BlockfileWriterOptions,
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -26,16 +26,14 @@ use faer::{
     Mat,
 };
 use simsimd::SpatialSimilarity;
-
 use thiserror::Error;
-
-use chroma_blockstore::provider::BlockfileProvider;
+use uuid::Uuid;
 
 use crate::{
     quantization::Code,
-    spann::{types::QuantizedSpannIds, utils},
+    spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
-    OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 // Blockfile prefixes
@@ -56,6 +54,16 @@ struct QuantizedDelta {
     ids: Vec<u32>,
     length: usize,
     versions: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QuantizedSpannIds {
+    pub embedding_metadata_id: Uuid,
+    pub prefix_path: String,
+    pub quantized_centroid_id: IndexUuid,
+    pub quantized_cluster_id: Uuid,
+    pub raw_centroid_id: IndexUuid,
+    pub scalar_metadata_id: Uuid,
 }
 
 #[derive(Error, Debug)]
@@ -978,6 +986,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
         Ok(QuantizedSpannFlusher {
             embedding_metadata_flusher,
+            prefix_path: self.prefix_path.clone(),
             quantized_centroid: self.quantized_centroid,
             quantized_cluster_flusher,
             raw_centroid: self.raw_centroid,
@@ -1353,6 +1362,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 /// Flusher for persisting a quantized SPANN index to storage.
 pub struct QuantizedSpannFlusher {
     embedding_metadata_flusher: BlockfileFlusher,
+    prefix_path: String,
     quantized_centroid: USearchIndex,
     quantized_cluster_flusher: BlockfileFlusher,
     raw_centroid: USearchIndex,
@@ -1397,6 +1407,7 @@ impl QuantizedSpannFlusher {
         // Return file IDs
         Ok(QuantizedSpannIds {
             embedding_metadata_id,
+            prefix_path: self.prefix_path.clone(),
             quantized_centroid_id,
             quantized_cluster_id,
             raw_centroid_id,

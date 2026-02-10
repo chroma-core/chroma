@@ -923,6 +923,30 @@ impl Schema {
         }
     }
 
+    pub fn get_spann_config(&self) -> Option<(SpannIndexConfig, Space)> {
+        let extract = |vector_index: &VectorIndexType| {
+            let space = vector_index.config.space.clone().unwrap_or_default();
+            vector_index
+                .config
+                .spann
+                .clone()
+                .map(|config| (config, space))
+        };
+
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .and_then(extract)
+            .or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .and_then(extract)
+            })
+    }
+
     pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
         let to_internal = |vector_index: &VectorIndexType| {
             let space = vector_index.config.space.clone();
