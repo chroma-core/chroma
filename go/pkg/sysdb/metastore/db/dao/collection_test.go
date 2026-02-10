@@ -727,6 +727,66 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_CompactionFailureCount() {
 	suite.NoError(err)
 }
 
+func (suite *CollectionDbTestSuite) TestCollectionDb_GetCompactionDLQSize() {
+	dim := int32(128)
+
+	// Create collections with different compaction_failure_count values
+	// Collection 1: failure count = 0 (should NOT be in DLQ)
+	collection1 := daotest.NewTestCollection(
+		suite.tenantName,
+		suite.databaseId,
+		"test_dlq_size_1",
+		daotest.WithDimension(dim),
+		daotest.WithCompactionFailureCount(0),
+	)
+	collectionID1, err := CreateTestCollection(suite.db, collection1)
+	suite.NoError(err)
+
+	// Collection 2: failure count = 1 (should be in DLQ)
+	collection2 := daotest.NewTestCollection(
+		suite.tenantName,
+		suite.databaseId,
+		"test_dlq_size_2",
+		daotest.WithDimension(dim),
+		daotest.WithCompactionFailureCount(1),
+	)
+	collectionID2, err := CreateTestCollection(suite.db, collection2)
+	suite.NoError(err)
+
+	// Collection 3: failure count = 5 (should be in DLQ)
+	collection3 := daotest.NewTestCollection(
+		suite.tenantName,
+		suite.databaseId,
+		"test_dlq_size_3",
+		daotest.WithDimension(dim),
+		daotest.WithCompactionFailureCount(5),
+	)
+	collectionID3, err := CreateTestCollection(suite.db, collection3)
+	suite.NoError(err)
+
+	// Get DLQ size - should be 2 (collections with failure count > 0)
+	dlqSize, err := suite.collectionDb.GetCompactionDLQSize()
+	suite.NoError(err)
+	suite.Equal(int64(2), dlqSize)
+
+	// Increment failure count on collection 1, now it should be in DLQ
+	err = suite.collectionDb.IncrementCompactionFailureCount(collectionID1)
+	suite.NoError(err)
+
+	// DLQ size should now be 3
+	dlqSize, err = suite.collectionDb.GetCompactionDLQSize()
+	suite.NoError(err)
+	suite.Equal(int64(3), dlqSize)
+
+	// Clean up
+	err = CleanUpTestCollection(suite.db, collectionID1)
+	suite.NoError(err)
+	err = CleanUpTestCollection(suite.db, collectionID2)
+	suite.NoError(err)
+	err = CleanUpTestCollection(suite.db, collectionID3)
+	suite.NoError(err)
+}
+
 func TestCollectionDbTestSuiteSuite(t *testing.T) {
 	testSuite := new(CollectionDbTestSuite)
 	suite.Run(t, testSuite)
