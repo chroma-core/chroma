@@ -1140,7 +1140,7 @@ impl ChromaSegmentFlusher {
             ChromaSegmentFlusher::VectorSegment(flusher) => match flusher {
                 VectorSegmentFlusher::Hnsw(flusher) => flusher.flush().await,
                 #[cfg(feature = "usearch")]
-                VectorSegmentFlusher::QuantizedSpann(flusher) => flusher.flush().await,
+                VectorSegmentFlusher::QuantizedSpann(flusher) => Box::pin(flusher.flush()).await,
                 VectorSegmentFlusher::Spann(flusher) => Box::pin(flusher.flush()).await,
             },
         }
