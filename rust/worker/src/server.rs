@@ -5,6 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::usearch::USearchIndexProvider;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
@@ -82,11 +83,16 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
+        let usearch_cache =
+            chroma_cache::from_config(&config.hnsw_provider.hnsw_cache_config).await?;
+        let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
+
         let spann_provider = SpannProvider::try_from_config(
             &(
                 hnsw_index_provider.clone(),
                 blockfile_provider.clone(),
                 config.spann_provider.clone(),
+                usearch_provider,
             ),
             registry,
         )
