@@ -372,6 +372,30 @@ impl Backend {
         }
     }
 
+    /// CAS update of version_file_name in collection_compaction_cursors.
+    /// Returns true if the update succeeded (rows affected > 0), false if CAS failed.
+    pub async fn update_version_related_fields(
+        &self,
+        collection_id: &str,
+        old_version_file_name: &str,
+        new_version_file_name: &str,
+        oldest_version_ts: Option<i64>,
+        num_active_versions: i32,
+    ) -> Result<bool, SysDbError> {
+        match self {
+            Backend::Spanner(s) => {
+                s.update_version_related_fields(
+                    collection_id,
+                    old_version_file_name,
+                    new_version_file_name,
+                    oldest_version_ts,
+                    num_active_versions,
+                )
+                .await
+            }
+        }
+    }
+
     /// Reset the database state by deleting all data and recreating default entities.
     pub async fn reset(&self) -> Result<(), SysDbError> {
         match self {

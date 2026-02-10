@@ -392,7 +392,7 @@ impl GarbageCollectorOrchestrator {
             .collect::<Result<Vec<_>, _>>()?;
 
         self.sysdb_client
-            .mark_version_for_deletion(0, versions_to_mark)
+            .mark_version_for_deletion(0, versions_to_mark, self.database_name.clone())
             .await
             .map_err(|err| GarbageCollectorError::SysDbMethodFailed(err.to_string()))?;
 

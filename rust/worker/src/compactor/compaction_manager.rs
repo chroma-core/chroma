@@ -927,15 +927,26 @@ impl Handler<GetCollectionAssignmentMessage> for CompactionManager {
         message: GetCollectionAssignmentMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
+        // Get the current memberlist from scheduler
+        let memberlist = self.scheduler.get_memberlist();
+        let mut member_ids: Vec<String> = memberlist
+            .iter()
+            .map(|member| member.member_id.clone())
+            .collect();
+
+        // Sort memberlist for consistent output
+        member_ids.sort();
+
+        // Get the assignment policy from scheduler
         let assignment_policy = self.scheduler.get_assignment_policy();
 
+        // Set the members in the assignment policy
+        assignment_policy.set_members(member_ids.clone());
+
+        // Determine which node this collection would be assigned to
         let assigned_node = assignment_policy
             .assign_one(&message.collection_id.0.to_string())
             .unwrap_or_else(|_| "no_assignment".to_string());
-
-        let mut member_ids = assignment_policy.get_members();
-
-        member_ids.sort();
 
         let response = GetCollectionAssignmentResponse {
             assigned_node,

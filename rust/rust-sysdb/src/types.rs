@@ -489,6 +489,21 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
     }
 }
 
+impl GetCollectionsRequest {
+    pub fn for_collection(
+        collection_id: CollectionUuid,
+        database_name: DatabaseName,
+        include_soft_deleted: bool,
+    ) -> Self {
+        Self {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .database_name(database_name)
+                .include_soft_deleted(include_soft_deleted),
+        }
+    }
+}
+
 /// Internal request for getting a collection with its segments.
 #[derive(Debug, Clone)]
 pub struct GetCollectionWithSegmentsRequest {

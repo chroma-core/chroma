@@ -4,7 +4,7 @@ use std::time::{Duration, SystemTime};
 
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
 use chroma_log::{CollectionInfo, CollectionRecord, Log};
-use chroma_memberlist::memberlist_provider::Memberlist;
+use chroma_memberlist::memberlist_provider::{Member, Memberlist};
 use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_types::{CollectionUuid, DatabaseName, JobId, TopologyName};
 use figment::providers::Env;
@@ -522,6 +522,10 @@ impl Scheduler {
 
     pub(crate) fn has_memberlist(&self) -> bool {
         self.memberlist.is_some()
+    }
+
+    pub(crate) fn get_memberlist(&self) -> Vec<Member> {
+        self.memberlist.as_ref().cloned().unwrap_or_default()
     }
 
     pub(crate) fn get_assignment_policy(&mut self) -> &mut Box<dyn AssignmentPolicy> {
