@@ -175,7 +175,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		})
 
 		// Start DLQ metrics goroutine (runs on all pods, uses read replica)
-		go StartDLQMetrics(context.Background())
+		go coordinator.StartDLQMetrics(context.Background())
 
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
