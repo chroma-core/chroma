@@ -1073,11 +1073,12 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         usearch_provider: &USearchIndexProvider,
     ) -> Result<(), QuantizedSpannError> {
         // Scrub all clusters that received mutations.
-        let mutated_cluster_ids = self
+        let mut mutated_cluster_ids = self
             .cluster_deltas
             .iter()
             .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
             .collect::<Vec<_>>();
+        mutated_cluster_ids.sort_unstable();
 
         for cluster_id in &mutated_cluster_ids {
             self.scrub(*cluster_id).await?;

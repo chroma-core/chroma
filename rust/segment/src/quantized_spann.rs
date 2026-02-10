@@ -543,8 +543,7 @@ mod test {
                 .await
                 .unwrap_or_else(|e| panic!("cycle {cycle}: finish failed: {e}"));
 
-            let flusher = writer
-                .commit()
+            let flusher = Box::pin(writer.commit())
                 .await
                 .unwrap_or_else(|e| panic!("cycle {cycle}: commit failed: {e}"));
 

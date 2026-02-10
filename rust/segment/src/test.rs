@@ -57,35 +57,17 @@ impl TestDistributedSegment {
             .await
             .expect("Expected to construct gc context for spann");
 
-        #[allow(unused_mut)]
-        let mut temp_dirs = vec![blockfile_dir, hnsw_dir];
-
-        #[cfg(feature = "usearch")]
-        let (usearch_dir, usearch_provider) = {
-            let (dir, storage) = chroma_storage::test_storage();
-            let provider = chroma_index::usearch::USearchIndexProvider::new(
-                storage,
-                chroma_cache::new_non_persistent_cache_for_test(),
-            );
-            (dir, provider)
-        };
-
-        #[cfg(feature = "usearch")]
-        temp_dirs.push(usearch_dir);
-
         Self {
-            temp_dirs,
+            temp_dirs: vec![blockfile_dir, hnsw_dir],
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
             spann_provider: SpannProvider {
-                adaptive_search_nprobe: true,
+                hnsw_provider,
                 blockfile_provider,
                 garbage_collection_context,
-                hnsw_provider,
                 metrics: SpannMetrics::default(),
                 pl_block_size: 5 * 1024 * 1024,
-                #[cfg(feature = "usearch")]
-                usearch_provider,
+                adaptive_search_nprobe: true,
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
