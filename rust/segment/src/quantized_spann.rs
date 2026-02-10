@@ -63,6 +63,7 @@ impl Debug for QuantizedSpannSegmentWriter {
 
 impl QuantizedSpannSegmentWriter {
     pub async fn from_segment(
+        cluster_block_size: usize,
         collection: &Collection,
         vector_segment: &Segment,
         record_segment: &Segment,
@@ -171,6 +172,7 @@ impl QuantizedSpannSegmentWriter {
                 scalar_metadata_id: parsed[4].1,
             };
             QuantizedSpannIndexWriter::open(
+                cluster_block_size,
                 vector_segment.collection,
                 spann_config,
                 dimensionality,
@@ -185,6 +187,7 @@ impl QuantizedSpannSegmentWriter {
             .await?
         } else {
             QuantizedSpannIndexWriter::create(
+                cluster_block_size,
                 vector_segment.collection,
                 spann_config,
                 dimensionality,
@@ -277,10 +280,9 @@ impl Debug for QuantizedSpannSegmentFlusher {
 
 impl QuantizedSpannSegmentFlusher {
     pub async fn flush(self) -> Result<HashMap<String, Vec<String>>, Box<dyn ChromaError>> {
-        let ids =
-            Box::pin(self.flusher.flush()).await.map_err(|e| {
-                Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>
-            })?;
+        let ids = Box::pin(self.flusher.flush())
+            .await
+            .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
 
         let mut file_paths = HashMap::new();
         file_paths.insert(
@@ -352,6 +354,7 @@ mod test {
     use super::QuantizedSpannSegmentWriter;
     use crate::types::materialize_logs;
 
+    const CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
     const DIMENSION: usize = 4;
     const NUM_CYCLES: usize = 3;
     const BATCH_SIZE: usize = 10;
@@ -381,8 +384,7 @@ mod test {
             vector_index: VectorIndexConfiguration::Spann(params),
             embedding_function: None,
         };
-        let schema =
-            Schema::try_from(&config).expect("failed to create schema from test config");
+        let schema = Schema::try_from(&config).expect("failed to create schema from test config");
         Collection {
             collection_id,
             name: "test".to_string(),
@@ -514,6 +516,7 @@ mod test {
             let usearch_provider = test_usearch_provider(storage.clone());
 
             let mut writer = QuantizedSpannSegmentWriter::from_segment(
+                CLUSTER_BLOCK_SIZE,
                 &collection,
                 &vector_segment,
                 &record_segment,
@@ -526,10 +529,9 @@ mod test {
             let start_id = cycle * BATCH_SIZE;
             let logs = make_log_records(start_id, BATCH_SIZE);
             let chunked = Chunk::new(logs.into());
-            let materialized =
-                materialize_logs(&None, chunked, Some(next_offset_id.clone()))
-                    .await
-                    .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));
+            let materialized = materialize_logs(&None, chunked, Some(next_offset_id.clone()))
+                .await
+                .unwrap_or_else(|e| panic!("cycle {cycle}: materialize failed: {e}"));
 
             writer
                 .apply_materialized_log_chunk(&materialized)
@@ -563,7 +565,11 @@ mod test {
                     .file_path
                     .get(*key)
                     .unwrap_or_else(|| panic!("cycle {cycle}: missing key {key}"));
-                assert_eq!(paths.len(), 1, "cycle {cycle}: key {key} should have 1 path");
+                assert_eq!(
+                    paths.len(),
+                    1,
+                    "cycle {cycle}: key {key} should have 1 path"
+                );
                 assert!(
                     paths[0].starts_with(&expected_prefix),
                     "cycle {cycle}: path '{}' should start with '{expected_prefix}'",
@@ -577,6 +583,7 @@ mod test {
         let usearch_provider = test_usearch_provider(storage.clone());
 
         QuantizedSpannSegmentWriter::from_segment(
+            CLUSTER_BLOCK_SIZE,
             &collection,
             &vector_segment,
             &record_segment,

@@ -90,6 +90,7 @@ impl ChromaError for QuantizedSpannError {
 #[derive(Clone)]
 pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // === Config ===
+    cluster_block_size: usize,
     cmek: Option<Cmek>,
     collection_id: CollectionUuid,
     config: SpannIndexConfig,
@@ -815,8 +816,9 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         usearch_provider: &USearchIndexProvider,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
         // === Create blockfile writers ===
-        let mut qc_options =
-            BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
+        let mut qc_options = BlockfileWriterOptions::new(self.prefix_path.clone())
+            .ordered_mutations()
+            .max_block_size_bytes(self.cluster_block_size);
         let mut sm_options =
             BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
         let mut em_options =
@@ -980,6 +982,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
     /// Create a new quantized SPANN index.
     pub async fn create(
+        cluster_block_size: usize,
         collection_id: CollectionUuid,
         config: SpannIndexConfig,
         dimension: usize,
@@ -1033,6 +1036,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
         Ok(Self {
             // === Config ===
+            cluster_block_size,
             cmek,
             collection_id,
             config,
@@ -1098,6 +1102,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
     /// Open an existing quantized SPANN index from file IDs.
     #[allow(clippy::too_many_arguments)]
     pub async fn open(
+        cluster_block_size: usize,
         collection_id: CollectionUuid,
         config: SpannIndexConfig,
         dimension: usize,
@@ -1261,6 +1266,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 
         Ok(Self {
             // === Config ===
+            cluster_block_size,
             cmek,
             collection_id,
             config,
@@ -1460,6 +1466,7 @@ mod tests {
 
     use super::{QuantizedDelta, QuantizedSpannIndexWriter};
 
+    const TEST_CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
     const TEST_DIMENSION: usize = 4;
     const TEST_EPSILON: f32 = 1e-5;
 
@@ -1520,6 +1527,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage);
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             CollectionUuid::new(),
             test_config(),
             TEST_DIMENSION,
@@ -1771,6 +1779,7 @@ mod tests {
         // Phase 1: Create index, add points, commit, flush
         // =======================================================================
         let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -1840,6 +1849,7 @@ mod tests {
             .expect("Failed to open raw embedding reader");
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2049,6 +2059,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage);
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             CollectionUuid::new(),
             test_config(),
             TEST_DIMENSION,
@@ -2316,6 +2327,7 @@ mod tests {
         let collection_id = CollectionUuid::new();
 
         let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2421,6 +2433,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
 
         let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2478,6 +2491,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2657,6 +2671,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
 
         let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2765,6 +2780,7 @@ mod tests {
                 .expect("Failed to open raw embedding reader");
 
             writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                TEST_CLUSTER_BLOCK_SIZE,
                 collection_id,
                 test_config(),
                 TEST_DIMENSION,
