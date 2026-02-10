@@ -184,9 +184,22 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .map(|delta| delta.center.clone())
     }
 
-    /// Remove a cluster from deltas and load raw embeddings for its valid points.
-    /// Returns the delta if the cluster existed.
-    async fn detach(&self, cluster_id: u32) -> Result<Option<QuantizedDelta>, QuantizedSpannError> {
+    /// Compute distance between two vectors using the configured distance function.
+    fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
+        self.distance_function.distance(a, b)
+    }
+
+    /// Remove a cluster from both centroid indexes and register as tombstone.
+    /// Load raw embeddings and returns the delta if the cluster existed.
+    async fn drop(&self, cluster_id: u32) -> Result<Option<QuantizedDelta>, QuantizedSpannError> {
+        self.raw_centroid
+            .remove(cluster_id)
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        self.quantized_centroid
+            .remove(cluster_id)
+            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
+        self.tombstones.insert(cluster_id);
+
         let Some((_, delta)) = self.cluster_deltas.remove(&cluster_id) else {
             return Ok(None);
         };
@@ -200,23 +213,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         self.load_raw(&ids).await?;
 
         Ok(Some(delta))
-    }
-
-    /// Compute distance between two vectors using the configured distance function.
-    fn distance(&self, a: &[f32], b: &[f32]) -> f32 {
-        self.distance_function.distance(a, b)
-    }
-
-    /// Remove a cluster from both centroid indexes and register as tombstone.
-    fn drop(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
-        self.raw_centroid
-            .remove(cluster_id)
-            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-        self.quantized_centroid
-            .remove(cluster_id)
-            .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
-        self.tombstones.insert(cluster_id);
-        Ok(())
     }
 
     /// Insert a rotated vector into the index.
@@ -330,12 +326,11 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let Some(source_delta) = self.detach(cluster_id).await? else {
+        let Some(delta) = self.drop(cluster_id).await? else {
             return Ok(());
         };
 
-        self.drop(cluster_id)?;
-        for (id, version) in source_delta.ids.iter().zip(source_delta.versions.iter()) {
+        for (id, version) in delta.ids.iter().zip(delta.versions.iter()) {
             let Some(embedding) = self.embeddings.get(id).map(|emb| emb.clone()) else {
                 continue;
             };
@@ -557,12 +552,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
     /// Split a large cluster into two smaller clusters using 2-means clustering.
     async fn split(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
-        let Some(old_center) = self.centroid(cluster_id) else {
+        let Some(delta) = self.drop(cluster_id).await? else {
             return Ok(());
         };
-        let Some(delta) = self.detach(cluster_id).await? else {
-            return Ok(());
-        };
+        let old_center = delta.center.clone();
 
         let embeddings = delta
             .ids
@@ -584,20 +577,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .split_threshold
             .unwrap_or(default_split_threshold()) as usize;
         if embeddings.len() <= split_threshold {
-            self.cluster_deltas.insert(cluster_id, delta);
+            self.spawn(delta)?;
             return Ok(());
         }
 
         let (left_center, left_group, right_center, right_group) =
             utils::split(embeddings, &self.distance_function);
-
-        let left_distance = self.distance(&left_center, &old_center);
-        let right_distance = self.distance(&right_center, &old_center);
-
-        if left_distance.abs() < f32::EPSILON && right_distance.abs() < f32::EPSILON {
-            self.cluster_deltas.insert(cluster_id, delta);
-            return Ok(());
-        }
 
         let left_delta = QuantizedDelta {
             center: left_center.clone(),
@@ -609,13 +594,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             length: left_group.len(),
             versions: left_group.iter().map(|(_, version, _)| *version).collect(),
         };
-
-        let left_cluster_id = if left_distance.abs() < f32::EPSILON {
-            self.cluster_deltas.insert(cluster_id, left_delta);
-            cluster_id
-        } else {
-            self.spawn(left_delta)?
-        };
+        let left_cluster_id = self.spawn(left_delta)?;
 
         let right_delta = QuantizedDelta {
             center: right_center.clone(),
@@ -631,52 +610,36 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             length: right_group.len(),
             versions: right_group.iter().map(|(_, version, _)| *version).collect(),
         };
-
-        let right_cluster_id = if right_distance.abs() < f32::EPSILON {
-            self.cluster_deltas.insert(cluster_id, right_delta);
-            cluster_id
-        } else {
-            self.spawn(right_delta)?
-        };
-
-        if left_cluster_id != cluster_id && right_cluster_id != cluster_id {
-            self.drop(cluster_id)?;
-        }
+        let right_cluster_id = self.spawn(right_delta)?;
 
         // NPA check for split points
         let evaluated = DashSet::new();
-
-        if left_cluster_id != cluster_id {
-            for (id, version, embedding) in &left_group {
-                if !self.is_valid(*id, *version) {
-                    continue;
-                }
-                if !evaluated.insert(*id) {
-                    continue;
-                }
-                let old_dist = self.distance(embedding, &old_center);
-                let new_dist = self.distance(embedding, &left_center);
-                if new_dist > old_dist {
-                    self.reassign(left_cluster_id, *id, *version, embedding.clone())
-                        .await?;
-                }
+        for (id, version, embedding) in &left_group {
+            if !self.is_valid(*id, *version) {
+                continue;
+            }
+            if !evaluated.insert(*id) {
+                continue;
+            }
+            let old_dist = self.distance(embedding, &old_center);
+            let new_dist = self.distance(embedding, &left_center);
+            if new_dist > old_dist {
+                self.reassign(left_cluster_id, *id, *version, embedding.clone())
+                    .await?;
             }
         }
-
-        if right_cluster_id != cluster_id {
-            for (id, version, embedding) in &right_group {
-                if !self.is_valid(*id, *version) {
-                    continue;
-                }
-                if !evaluated.insert(*id) {
-                    continue;
-                }
-                let old_dist = self.distance(embedding, &old_center);
-                let new_dist = self.distance(embedding, &right_center);
-                if new_dist > old_dist {
-                    self.reassign(right_cluster_id, *id, *version, embedding.clone())
-                        .await?;
-                }
+        for (id, version, embedding) in &right_group {
+            if !self.is_valid(*id, *version) {
+                continue;
+            }
+            if !evaluated.insert(*id) {
+                continue;
+            }
+            let old_dist = self.distance(embedding, &old_center);
+            let new_dist = self.distance(embedding, &right_center);
+            if new_dist > old_dist {
+                self.reassign(right_cluster_id, *id, *version, embedding.clone())
+                    .await?;
             }
         }
 
@@ -764,13 +727,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
 
                 let code = Code::<&[u8]>::new(code.as_ref());
 
-                let neighbor_dist = code.distance_query(
-                    &self.distance_function,
-                    &neighbor_r_q,
-                    c_norm,
-                    neighbor_c_dot_q,
-                    neighbor_q_norm,
-                );
                 let left_dist = code.distance_query(
                     &self.distance_function,
                     &left_r_q,
@@ -785,6 +741,18 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     right_c_dot_q,
                     right_q_norm,
                 );
+                let neighbor_dist = code.distance_query(
+                    &self.distance_function,
+                    &neighbor_r_q,
+                    c_norm,
+                    neighbor_c_dot_q,
+                    neighbor_q_norm,
+                );
+
+                if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
+                    continue;
+                }
+
                 let old_dist = code.distance_query(
                     &self.distance_function,
                     &old_r_q,
@@ -793,9 +761,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     old_q_norm,
                 );
 
-                if neighbor_dist <= left_dist && neighbor_dist <= right_dist {
-                    continue;
-                }
                 if old_dist <= left_dist && old_dist <= right_dist {
                     continue;
                 }
@@ -857,8 +822,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .collect::<Vec<_>>();
 
         for cluster_id in zero_length_cluster_ids {
-            self.detach(cluster_id).await?;
-            self.drop(cluster_id)?;
+            self.drop(cluster_id).await?;
         }
 
         // === Step 1: Check center drift and rebuild centroid indexes if needed ===
@@ -1698,7 +1662,7 @@ mod tests {
         assert_eq!(selected.keys[0], cluster_id_1);
 
         // --- drop ---
-        writer.drop(cluster_id_2).expect("drop failed");
+        writer.drop(cluster_id_2).await.expect("drop failed");
 
         // Verify tombstone
         assert!(writer.tombstones.contains(&cluster_id_2));
@@ -1709,8 +1673,8 @@ mod tests {
             .expect("navigate failed");
         assert!(!result.keys.contains(&cluster_id_2));
 
-        // But centroid still returns Some (delta still exists until detach)
-        assert!(writer.centroid(cluster_id_2).is_some());
+        // Centroid returns None (drop removes from deltas too)
+        assert!(writer.centroid(cluster_id_2).is_none());
 
         // Verify remaining clusters are still navigable
         let result = writer
@@ -1955,22 +1919,25 @@ mod tests {
         // Invalidate 201 by upgrading its version
         writer.upgrade_version(201); // Now version is 2, but cluster has version 1
 
-        // Verify embedding 200 not in cache before detach
+        // Verify embedding 200 not in cache before drop
         assert!(writer.embeddings.get(&200).is_none());
 
-        // Detach cluster - should load raw embeddings for valid point (200) only
-        let detached = writer
-            .detach(cluster_id_2)
+        // Drop cluster - should load raw embeddings for valid point (200) only
+        let dropped = writer
+            .drop(cluster_id_2)
             .await
-            .expect("detach failed")
+            .expect("drop failed")
             .expect("expected delta");
-        assert_eq!(detached.ids, vec![200, 201]);
+        assert_eq!(dropped.ids, vec![200, 201]);
 
         // Cluster should be removed from deltas
         assert!(writer.cluster_deltas.get(&cluster_id_2).is_none());
 
         // Embedding for valid point 200 should be loaded
         assert!(writer.embeddings.get(&200).is_some());
+
+        // Cluster should be in tombstones
+        assert!(writer.tombstones.contains(&cluster_id_2));
 
         // --- scrub ---
         // Spawn a cluster with points 300, 301, 302
@@ -2454,9 +2421,8 @@ mod tests {
         writer.upgrade_version(30);
         writer.upgrade_version(31);
 
-        // --- Cluster D: detach and drop ---
-        writer.detach(cluster_d).await.expect("detach D failed");
-        writer.drop(cluster_d).expect("drop D failed");
+        // --- Cluster D: drop ---
+        writer.drop(cluster_d).await.expect("drop D failed");
 
         let flusher = writer
             .commit(&blockfile_provider, &usearch_provider)
