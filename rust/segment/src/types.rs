@@ -245,6 +245,21 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
         self.materialized_log_record.final_operation
     }
 
+    pub fn embeddings_ref_from_log(&self) -> Option<&'log_data [f32]> {
+        match self.materialized_log_record.final_embedding_at_log_index {
+            // SAFETY: index is guaranteed valid as it was set during log materialization
+            Some(index) => Some(
+                self.logs
+                    .get(index)
+                    .expect("log index from materialization must be valid")
+                    .record
+                    .embedding
+                    .as_ref()?,
+            ),
+            None => None,
+        }
+    }
+
     /// Reads any record segment data that this log record may reference and returns a hydrated version of this record.
     /// The record segment reader passed here **must be over the same set of blockfiles** as the reader that was originally passed to `materialize_logs()`. If the two readers are different, the behavior is undefined.
     pub async fn hydrate<'segment_data>(
