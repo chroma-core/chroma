@@ -113,7 +113,7 @@ func (s *collectionDb) ListCollectionsToGc(cutoffTimeSecs *uint64, limit *uint64
 	}
 
 	query := s.read_db.Table("collections").
-		Select("collections.id, collections.name, collections.version_file_name, sub.min_oldest_version_ts AS oldest_version_ts, databases.tenant_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name").
+		Select("collections.id, collections.name, collections.version_file_name, sub.min_oldest_version_ts AS oldest_version_ts, databases.tenant_id, NULLIF(collections.lineage_file_name, '') AS lineage_file_name, databases.name AS database_name").
 		Joins("INNER JOIN databases ON collections.database_id = databases.id").
 		Joins("INNER JOIN (?) AS sub ON collections.id = sub.id", sub)
 

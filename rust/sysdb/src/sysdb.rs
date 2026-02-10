@@ -848,6 +848,7 @@ impl Configurable<(GrpcSysDbConfig, Option<GrpcSysDbConfig>)> for GrpcSysDb {
 pub struct CollectionToGcInfo {
     pub id: CollectionUuid,
     pub tenant: String,
+    pub database: DatabaseName,
     pub name: String,
     pub version_file_path: String,
     pub lineage_file_path: Option<String>,
@@ -885,9 +886,18 @@ impl TryFrom<chroma_proto::CollectionToGcInfo> for CollectionToGcInfo {
             Err(e) => return Err(GetCollectionsToGcError::ParsingError(e)),
         };
         let collection_id = CollectionUuid(collection_uuid);
+        let database = value
+            .database_name
+            .and_then(|name| DatabaseName::new(&name))
+            .ok_or_else(|| {
+                GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicMissingFieldError(
+                    "database_name",
+                )))
+            })?;
         Ok(CollectionToGcInfo {
             id: collection_id,
             tenant: value.tenant_id,
+            database,
             name: value.name,
             version_file_path: value.version_file_path,
             lineage_file_path: value.lineage_file_path,
@@ -1615,25 +1625,54 @@ impl GrpcSysDb {
         tenant: Option<String>,
         min_versions_if_alive: Option<u64>,
     ) -> Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError> {
+        let req = chroma_proto::ListCollectionsToGcRequest {
+            cutoff_time: cutoff_time.map(|t| t.into()),
+            limit,
+            tenant_id: tenant,
+            min_versions_if_alive,
+        };
+
         let res = self
             .client
-            .list_collections_to_gc(chroma_proto::ListCollectionsToGcRequest {
-                cutoff_time: cutoff_time.map(|t| t.into()),
-                limit,
-                tenant_id: tenant,
-                min_versions_if_alive,
-            })
-            .await;
+            .list_collections_to_gc(req.clone())
+            .await
+            .map_err(GetCollectionsToGcError::RequestFailed)?;
 
-        match res {
-            Ok(collections) => collections
-                .into_inner()
-                .collections
-                .into_iter()
-                .map(|collection| collection.try_into())
-                .collect::<Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError>>(),
-            Err(e) => Err(GetCollectionsToGcError::RequestFailed(e)),
+        let mut collections: Vec<CollectionToGcInfo> = res
+            .into_inner()
+            .collections
+            .into_iter()
+            .map(|c| c.try_into())
+            .collect::<Result<Vec<CollectionToGcInfo>, GetCollectionsToGcError>>()?;
+
+        // NOTE(tanujnay112): We actually end up returning <= limit * |topologies| collections.
+        if let Some(mcmr_client) = self._mcmr_client.as_mut() {
+            match mcmr_client.list_collections_to_gc(req).await {
+                Ok(mcmr_res) => {
+                    let mcmr_collections: Vec<CollectionToGcInfo> = mcmr_res
+                        .into_inner()
+                        .collections
+                        .into_iter()
+                        .filter_map(|c| c.try_into().ok())
+                        .collect();
+                    let len = mcmr_collections.len();
+                    collections.extend(mcmr_collections);
+                    tracing::debug!(
+                        "Successfully retrieved {} collections from mcmr_client",
+                        len
+                    );
+                }
+                Err(e) => {
+                    tracing::error!(
+                        error = ?e,
+                        "Failed to get collections from mcmr_client - collections from mcmr sysdb will be missing from GC list"
+                    );
+                    // Intentionally continue
+                }
+            }
         }
+
+        Ok(collections)
     }
 
     pub async fn get_collection_to_gc(
@@ -1667,9 +1706,16 @@ impl GrpcSysDb {
 
         let collection = collections.remove(0);
 
+        let database_name = DatabaseName::new(&collection.database).ok_or_else(|| {
+            GetCollectionsToGcError::Internal(Box::new(chroma_error::TonicMissingFieldError(
+                "database_name",
+            )))
+        })?;
+
         Ok(CollectionToGcInfo {
             id: collection.collection_id,
             tenant: collection.tenant,
+            database: database_name,
             name: collection.name,
             version_file_path: collection.version_file_path.unwrap_or_default(),
             lineage_file_path: collection.lineage_file_path,

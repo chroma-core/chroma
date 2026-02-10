@@ -720,6 +720,7 @@ func (s *Server) ListCollectionsToGc(ctx context.Context, req *coordinatorpb.Lis
 			VersionFilePath: collectionToGc.VersionFilePath,
 			TenantId:        collectionToGc.TenantID,
 			LineageFilePath: collectionToGc.LineageFilePath,
+			DatabaseName:    &collectionToGc.DatabaseName,
 		})
 	}
 	return res, nil
