@@ -101,32 +101,6 @@ jobs:
         env:
           file: k8s/distributed-chroma/Chart.yaml
 
-  deploy-docs-preview:
-    name: Deploy preview of docs
-    needs: change-detection
-    if: needs.change-detection.outputs.docs-only == 'true'
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    environment:
-      name: Preview
-      url: ${{ steps.deploy.outputs.url }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "18.x"
-          registry-url: "https://registry.npmjs.org"
-      - name: Install vercel
-        run: npm install -g vercel
-      - name: Deploy
-        id: deploy
-        run: echo "url=$(vercel deploy --token ${{ secrets.VERCEL_TOKEN }})" >> $GITHUB_OUTPUT
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_DOCS_PROJECT_ID }}
-
   check-helm-version-bump:
     name: Warn if Helm chart was updated without version bump
     needs: change-detection
