@@ -20,7 +20,7 @@ collection.get(
 
 _Note_: Full-text search is case-sensitive.
 
-Here we get all records whose documents matches the regex pattern for an email address:
+Here we get all records whose documents match the regex pattern for an email address:
 
 ```python
 collection.get(
@@ -147,23 +147,120 @@ await collection.query({
 
 <Tab title="Rust" icon="rust">
 
-Use the Search API to filter on document content. You can combine `contains` and regex filters with metadata conditions.
+The `r#where` argument in `get` and `query` is used to filter records based on their document content.
+
+We support full-text search with the `Contains` and `NotContains` operators. We also support regular expression pattern matching with the `Regex` and `NotRegex` operators.
+
+For example, here we get all records whose document contains a search string:
 
 ```rust
-use chroma::types::SearchPayload;
-use chroma::types::{Key, QueryVector, RankExpr};
+use chroma::types::{DocumentExpression, DocumentOperator, Where};
 
-let search = SearchPayload::default()
-    .r#where(Key::Document.contains("search string"))
-    .rank(RankExpr::Knn {
-        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
-        key: Key::Embedding,
-        limit: 10,
-        default: None,
-        return_rank: false,
-    });
+let where_clause = Where::Document(DocumentExpression {
+    operator: DocumentOperator::Contains,
+    pattern: "search string".to_string(),
+});
 
-let results = collection.search(vec![search]).await?;
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+```
+
+Here we get all records whose documents matches the regex pattern for an email address:
+
+```rust
+let where_clause = Where::Document(DocumentExpression {
+    operator: DocumentOperator::Regex,
+    pattern: r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$".to_string(),
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+```
+
+## Using Logical Operators
+
+You can also use the logical operators to combine multiple filters using `CompositeExpression`.
+
+An `And` operator will return results that match all the filters in the list:
+
+```rust
+use chroma::types::{
+    BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator, Where,
+};
+
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::And,
+    children: vec![
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "search_string_1".to_string(),
+        }),
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Regex,
+            pattern: "[a-z]+".to_string(),
+        }),
+    ],
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
+```
+
+An `Or` operator will return results that match any of the filters in the list:
+
+```rust
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::Or,
+    children: vec![
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "search_string_1".to_string(),
+        }),
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::NotContains,
+            pattern: "search_string_2".to_string(),
+        }),
+    ],
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
+```
+
+## Combining with Metadata Filtering
+
+`get` and `query` can handle document search combined with [metadata filtering](./metadata-filtering) using a composite where clause:
+
+```rust
+use chroma::types::{
+    BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator,
+    MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
+};
+
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::And,
+    children: vec![
+        Where::Metadata(MetadataExpression {
+            key: "metadata_field".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("is_equal_to_this".to_string()),
+            ),
+        }),
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "search_string".to_string(),
+        }),
+    ],
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
 ```
 
 </Tab>
