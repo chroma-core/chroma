@@ -1831,6 +1831,64 @@ impl SpannerBackend {
         }
     }
 
+    /// CAS update of version_file_name and related fields in collections table.
+    /// Returns true if the update succeeded (rows affected > 0), false if CAS failed.
+    pub async fn update_version_related_fields(
+        &self,
+        collection_id: &str,
+        old_version_file_name: &str,
+        new_version_file_name: &str,
+        oldest_version_ts: Option<i64>,
+        num_active_versions: i32,
+    ) -> Result<bool, SysDbError> {
+        let region = self.local_region();
+        let collection_id = collection_id.to_string();
+        let old_version_file_name = old_version_file_name.to_string();
+        let new_version_file_name = new_version_file_name.to_string();
+        let region = region.to_string();
+        let (_, rows_affected) = self
+            .client
+            .read_write_transaction::<i64, SysDbError, _>(|tx| {
+                let collection_id = collection_id.clone();
+                let old_version_file_name = old_version_file_name.clone();
+                let new_version_file_name = new_version_file_name.clone();
+                let region = region.clone();
+                Box::pin(async move {
+                    // Build the base UPDATE statement
+                    let mut update_sql = "UPDATE collection_compaction_cursors SET
+                        version_file_name = @new_version_file_name,
+                        updated_at = PENDING_COMMIT_TIMESTAMP()"
+                        .to_string();
+                    // Add optional fields if provided
+                    if oldest_version_ts.is_some() {
+                        update_sql.push_str(
+                            ", oldest_version_ts = TIMESTAMP_SECONDS(@oldest_version_ts)",
+                        );
+                    }
+                    update_sql.push_str(", num_versions = @num_versions");
+                    // Add WHERE clause for CAS
+                    update_sql.push_str(
+                        " WHERE collection_id = @collection_id
+                        AND region = @region
+                        AND version_file_name = @old_version_file_name",
+                    );
+                    let mut update_stmt = Statement::new(&update_sql);
+                    update_stmt.add_param("collection_id", &collection_id);
+                    update_stmt.add_param("region", &region);
+                    update_stmt.add_param("old_version_file_name", &old_version_file_name);
+                    update_stmt.add_param("new_version_file_name", &new_version_file_name);
+                    update_stmt.add_param("num_versions", &(num_active_versions as i64));
+                    if let Some(ts) = oldest_version_ts {
+                        update_stmt.add_param("oldest_version_ts", &ts);
+                    }
+                    let rows_affected = tx.update(update_stmt).await?;
+                    Ok(rows_affected)
+                })
+            })
+            .await?;
+        Ok(rows_affected > 0)
+    }
+
     /// Reset the database state by dropping all tables and re-running migrations.
     /// This provides a completely clean slate for testing.
     #[instrument(skip(self), level = "info")]
