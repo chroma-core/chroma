@@ -234,6 +234,7 @@ async fn main() {
 
             let orchestrator = GarbageCollectorOrchestrator::new(
                 collection_id,
+                None,
                 collection.version_file_path.unwrap(),
                 collection.lineage_file_path,
                 version_absolute_cutoff_time,
