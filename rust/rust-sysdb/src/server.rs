@@ -384,11 +384,17 @@ impl SysDb for SysdbService {
 
     async fn finish_collection_deletion(
         &self,
-        _request: Request<FinishCollectionDeletionRequest>,
+        request: Request<FinishCollectionDeletionRequest>,
     ) -> Result<Response<FinishCollectionDeletionResponse>, Status> {
-        Err(Status::unimplemented(
-            "finish_collection_deletion is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let internal_req: internal::FinishCollectionDeletionRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(internal_resp.into()))
     }
 
     async fn get_collection(
@@ -606,7 +612,7 @@ impl SysDb for SysdbService {
         let database_name = proto_req
             .database_name
             .as_ref()
-            .and_then(|s| DatabaseName::new(s))
+            .and_then(DatabaseName::new)
             .ok_or_else(|| Status::invalid_argument("valid database_name is required"))?;
 
         let mut collection_id_to_success = HashMap::new();
@@ -636,7 +642,7 @@ impl SysDb for SysdbService {
         let database_name = proto_req
             .database_name
             .as_ref()
-            .and_then(|s| DatabaseName::new(s))
+            .and_then(DatabaseName::new)
             .ok_or_else(|| Status::invalid_argument("database_name is required"))?;
 
         let mut collection_id_to_success = std::collections::HashMap::new();

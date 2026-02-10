@@ -54,11 +54,12 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 use crate::types::{
     CollectionFilter, CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
     CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse, SpannerRow,
-    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
+    CreateTenantResponse, FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
+    FlushCompactionRequest, FlushCompactionResponse, GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse, GetCollectionsRequest, GetCollectionsResponse,
+    GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest, GetTenantsResponse,
+    ListCollectionsToGcRequest, ListCollectionsToGcResponse, SpannerRow, SpannerRowRef,
+    SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateSegmentRequest, UpdateTenantRequest,
 };
 
@@ -1495,6 +1496,78 @@ impl SpannerBackend {
             Ok((_, ())) => Ok(UpdateCollectionResponse {}),
             Err(e) => Err(e),
         }
+    }
+
+    /// Finish collection deletion (hard delete).
+    ///
+    /// Steps:
+    /// 1. Delete from collection_segments for the local region
+    /// 2. Delete from collection_compaction_cursors for the local region
+    /// 3. Query collection_compaction_cursors for remaining regions
+    /// 4. If no other regions remain, also delete from collection_metadata and collections
+    pub async fn finish_collection_deletion(
+        &self,
+        req: FinishCollectionDeletionRequest,
+    ) -> Result<FinishCollectionDeletionResponse, SysDbError> {
+        let collection_id = req.collection_id.0.to_string();
+        let region = self.local_region().to_string();
+
+        self.client
+            .read_write_transaction::<(), SysDbError, _>(|tx| {
+                let collection_id = collection_id.clone();
+                let region = region.clone();
+                Box::pin(async move {
+                    // Step 1 & 2: Delete from collection_segments and collection_compaction_cursors for this region
+                    let mut delete_segments_stmt = Statement::new(
+                        "DELETE FROM collection_segments WHERE collection_id = @collection_id AND region = @region",
+                    );
+                    delete_segments_stmt.add_param("collection_id", &collection_id);
+                    delete_segments_stmt.add_param("region", &region);
+
+                    let mut delete_cursors_stmt = Statement::new(
+                        "DELETE FROM collection_compaction_cursors WHERE collection_id = @collection_id AND region = @region",
+                    );
+                    delete_cursors_stmt.add_param("collection_id", &collection_id);
+                    delete_cursors_stmt.add_param("region", &region);
+
+                    tx.batch_update(vec![delete_segments_stmt, delete_cursors_stmt]).await?;
+
+                    // Step 3: Check if any other regions still have cursors for this collection
+                    let mut check_stmt = Statement::new(
+                        "SELECT EXISTS(SELECT 1 FROM collection_compaction_cursors WHERE collection_id = @collection_id AND region != @region) as has_other_regions",
+                    );
+                    check_stmt.add_param("collection_id", &collection_id);
+                    check_stmt.add_param("region", &region);
+                    let mut result_set = tx.query(check_stmt).await?;
+
+                    let has_other_regions: bool = result_set
+                        .next()
+                        .await?
+                        .ok_or_else(|| SysDbError::Internal("Expected at least one row".to_string()))?
+                        .column_by_name("has_other_regions")
+                        .map_err(SysDbError::FailedToReadColumn)?;
+
+                    // Step 4: If no other regions remain, delete collection_metadata and collections
+                    if !has_other_regions {
+                        let mut delete_metadata_stmt = Statement::new(
+                            "DELETE FROM collection_metadata WHERE collection_id = @collection_id",
+                        );
+                        delete_metadata_stmt.add_param("collection_id", &collection_id);
+
+                        let mut delete_collection_stmt = Statement::new(
+                            "DELETE FROM collections WHERE collection_id = @collection_id",
+                        );
+                        delete_collection_stmt.add_param("collection_id", &collection_id);
+
+                        tx.batch_update(vec![delete_metadata_stmt, delete_collection_stmt]).await?;
+                    }
+
+                    Ok(())
+                })
+            })
+            .await?;
+
+        Ok(FinishCollectionDeletionResponse {})
     }
 
     /// List collections that need garbage collection.

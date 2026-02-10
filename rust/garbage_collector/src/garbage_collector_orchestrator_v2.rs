@@ -266,7 +266,7 @@ impl GarbageCollectorOrchestrator {
             .get_collections(GetCollectionsOptions {
                 collection_ids: Some(soft_deleted_collections_to_gc),
                 include_soft_deleted: true,
-                database_or_topology: self.database_name.map(DatabaseOrTopology::Database),
+                database_or_topology: self.database_name.clone().map(DatabaseOrTopology::Database),
                 ..Default::default()
             })
             .await
