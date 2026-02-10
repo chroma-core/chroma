@@ -233,8 +233,18 @@
           {
             "group": "SDKs",
             "pages": [
-              "reference/python",
-              "reference/typescript",
+              {
+                "group": "Python",
+                "pages": [
+                  "reference/python/client",
+                  "reference/python/collection",
+                  "reference/python/embedding-functions",
+                  "reference/python/search",
+                  "reference/python/schema",
+                  "reference/python/where-filter"
+                ]
+              },
+              "reference/typescript/index",
               "reference/rust"
             ]
           },
@@ -446,12 +456,12 @@
       "destination": "/reference/typescript/"
     },
     {
-      "source": "/reference/python/client",
-      "destination": "/reference/python"
+      "source": "/reference/python",
+      "destination": "/reference/python/client"
     },
     {
-      "source": "/reference/python/collection",
-      "destination": "/reference/python"
+      "source": "/reference/python/index",
+      "destination": "/reference/python/client"
     }
   ]
 }
