@@ -38,6 +38,7 @@ type CollectionToGc struct {
 	VersionFileName string    `gorm:"version_file_name"`
 	OldestVersionTs time.Time `gorm:"oldest_version_ts;type:timestamp"`
 	LineageFileName *string   `gorm:"lineage_file_name"`
+	DatabaseName    string    `gorm:"database_name"`
 }
 
 func (v Collection) TableName() string {

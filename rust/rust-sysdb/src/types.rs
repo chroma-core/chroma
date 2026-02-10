@@ -1618,6 +1618,78 @@ impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsR
     }
 }
 
+// ============================================================================
+// ListCollectionsToGc Types
+// ============================================================================
+
+/// Internal request for listing collections to garbage collect.
+#[derive(Debug, Clone)]
+pub struct ListCollectionsToGcRequest {
+    pub cutoff_time: Option<prost_types::Timestamp>,
+    pub limit: Option<u64>,
+    pub tenant_id: Option<String>,
+    pub min_versions_if_alive: Option<u64>,
+}
+
+impl TryFrom<chroma_proto::ListCollectionsToGcRequest> for ListCollectionsToGcRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::ListCollectionsToGcRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            cutoff_time: req.cutoff_time,
+            limit: req.limit,
+            tenant_id: req.tenant_id,
+            min_versions_if_alive: req.min_versions_if_alive,
+        })
+    }
+}
+
+/// Internal response for listing collections to garbage collect.
+#[derive(Debug, Clone)]
+pub struct ListCollectionsToGcResponse {
+    pub collections: Vec<chroma_proto::CollectionToGcInfo>,
+}
+
+impl From<ListCollectionsToGcResponse> for chroma_proto::ListCollectionsToGcResponse {
+    fn from(r: ListCollectionsToGcResponse) -> Self {
+        chroma_proto::ListCollectionsToGcResponse {
+            collections: r.collections,
+        }
+    }
+}
+
+impl Assignable for ListCollectionsToGcRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        factory.get_all_backends()
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ListCollectionsToGcRequest {
+    type Response = ListCollectionsToGcResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut all_collections = Vec::new();
+        for backend in backends {
+            match backend.list_collections_to_gc(self.clone()).await {
+                Ok(resp) => all_collections.extend(resp.collections),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to list collections to gc from backend, continuing with other backends"
+                    );
+                }
+            }
+        }
+        Ok(ListCollectionsToGcResponse {
+            collections: all_collections,
+        })
+    }
+}
+
 impl Assignable for FlushCompactionRequest {
     type Output = Backend;
 

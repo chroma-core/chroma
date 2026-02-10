@@ -231,9 +231,12 @@ async fn main() {
             }
 
             let collection = collections.pop().unwrap();
+            let database_name = chroma_types::DatabaseName::new(&collection.database)
+                .expect("Collection has invalid database name");
 
             let orchestrator = GarbageCollectorOrchestrator::new(
                 collection_id,
+                database_name,
                 collection.version_file_path.unwrap(),
                 collection.lineage_file_path,
                 version_absolute_cutoff_time,
