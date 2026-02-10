@@ -313,6 +313,7 @@ pub fn add_documents(collection_name: String, ids: Vec<String>, embeddings: Vec<
 pub struct QueryResult {
     pub ids: Vec<Vec<String>>, // batched: one Vec<String> per query embedding
     pub documents: Vec<Vec<Option<String>>>, // batched: one Vec<Option<String>> per query embedding
+    pub distances: Option<Vec<Vec<Option<f32>>>>, // batched: distances from query embedding to each result
 }
 
 #[uniffi::export]
@@ -390,7 +391,8 @@ pub fn query_collection(
     
     let ids = result.ids;
     let documents = result.documents.unwrap_or_default();
-    let ffi_result = QueryResult { ids, documents };
+    let distances = result.distances;
+    let ffi_result = QueryResult { ids, documents, distances };
     Ok(ffi_result)
 
 }
