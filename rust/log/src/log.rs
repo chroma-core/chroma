@@ -284,7 +284,7 @@ impl Log {
 
     pub async fn garbage_collect_phase2(
         &mut self,
-        database_name: DatabaseName,
+        database_name: Option<DatabaseName>,
         collection_id: CollectionUuid,
     ) -> Result<(), GarbageCollectError> {
         match self {
