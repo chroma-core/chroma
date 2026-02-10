@@ -728,10 +728,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 )
                 .await
             {
-                Some(writer) => (
-                    Some(writer.index_uuid()),
-                    VectorSegmentWriter::Hnsw(writer),
-                ),
+                Some(writer) => (Some(writer.index_uuid()), VectorSegmentWriter::Hnsw(writer)),
                 None => return,
             },
         };
