@@ -1,0 +1,116 @@
+---
+title: "Search"
+---
+
+## Search
+
+<ParamField path="where" type="WhereInput" />
+
+<ParamField path="rank" type="RankInput" />
+
+<ParamField path="groupBy" type="GroupByInput | undefined" />
+
+<ParamField path="limit" type="LimitInput" />
+
+<ParamField path="select" type="SelectInput" />
+
+
+---
+
+## Select
+
+<ParamField path="keys" type="Iterable<SelectKeyInput>" />
+
+
+---
+
+## Knn
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="query" type="string | SparseVector | IterableInput<number>" />
+
+<ParamField path="key" type="string | Key | undefined" />
+
+<ParamField path="limit" type="number | undefined" />
+
+<ParamField path="default" type="number | null | undefined" />
+
+<ParamField path="returnRank" type="boolean | undefined" />
+
+
+---
+
+## Rrf
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ranks" type="RankInput[]" />
+
+<ParamField path="k" type="number | undefined" />
+
+<ParamField path="weights" type="Embedding | undefined" />
+
+<ParamField path="normalize" type="boolean | undefined" />
+
+
+---
+
+## Group By
+
+### GroupBy
+
+<ParamField path="keys" type="Key[]" required />
+
+<ParamField path="aggregate" type="Aggregate" required />
+
+
+### MinK
+
+<ParamField path="keys" type="Key[]" required />
+
+<ParamField path="k" type="number" required />
+
+
+### MaxK
+
+<ParamField path="keys" type="Key[]" required />
+
+<ParamField path="k" type="number" required />
+
+
+---
+
+## Group By
+
+### Limit
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="offset" type="number" />
+
+<ParamField path="limit" type="number | undefined" />
+
+
+<span class="text-sm">Methods</span>
+
+`from()`, `toJSON()`
+
+
+---
+
+## SearchResult
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ids" type="string[][]" />
+
+<ParamField path="documents" type="((string | null)[] | null)[]" />
+
+<ParamField path="embeddings" type="((Embedding | null)[] | null)[]" />
+
+<ParamField path="metadatas" type="((Metadata | null)[] | null)[]" />
+
+<ParamField path="scores" type="((number | null)[] | null)[]" />
+
+<ParamField path="select" type="Key[][]" />

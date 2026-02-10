@@ -229,7 +229,6 @@
         "icon": "code",
         "pages": [
           "reference/overview",
-          "reference/where-filter",
           {
             "group": "SDKs",
             "pages": [
@@ -244,7 +243,17 @@
                   "reference/python/where-filter"
                 ]
               },
-              "reference/typescript/index",
+              {
+                "group": "TypeScript",
+                "pages": [
+                  "reference/typescript/client",
+                  "reference/typescript/collection",
+                  "reference/typescript/embedding-functions",
+                  "reference/typescript/search",
+                  "reference/typescript/schema",
+                  "reference/typescript/where-filter"
+                ]
+              },
               "reference/rust"
             ]
           },
@@ -355,6 +364,12 @@
                 }
               }
             ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "reference/where-filter"
+            ]
           }
         ]
       }
@@ -462,6 +477,14 @@
     {
       "source": "/reference/python/index",
       "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/typescript",
+      "destination": "/reference/typescript/client"
+    },
+    {
+      "source": "/reference/typescript/index",
+      "destination": "/reference/typescript/client"
     }
   ]
 }
