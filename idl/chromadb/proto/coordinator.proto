@@ -544,6 +544,7 @@ message DeleteCollectionVersionResponse {
 
 message BatchGetCollectionVersionFilePathsRequest {
   repeated string collection_ids = 1;
+  optional string database_name = 2;
 }
 
 message BatchGetCollectionVersionFilePathsResponse {

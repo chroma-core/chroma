@@ -567,10 +567,11 @@ impl SysDb {
     pub async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
+        database_name: Option<DatabaseName>,
     ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.batch_get_collection_version_file_paths(collection_ids)
+                grpc.batch_get_collection_version_file_paths(collection_ids, database_name)
                     .await
             }
             SysDb::Sqlite(_) => todo!(),
@@ -1827,15 +1828,20 @@ impl GrpcSysDb {
     async fn batch_get_collection_version_file_paths(
         &mut self,
         collection_ids: Vec<CollectionUuid>,
+        database_name: Option<DatabaseName>,
     ) -> Result<HashMap<CollectionUuid, String>, BatchGetCollectionVersionFilePathsError> {
-        let res = self
-            .client
+        let mut client = match &database_name {
+            Some(db_name) => self.client(db_name)?,
+            None => self.client.clone(),
+        };
+        let res = client
             .batch_get_collection_version_file_paths(
                 chroma_proto::BatchGetCollectionVersionFilePathsRequest {
                     collection_ids: collection_ids
                         .into_iter()
                         .map(|id| id.0.to_string())
                         .collect(),
+                    database_name: database_name.map(|d| d.into_string()),
                 },
             )
             .await?;
