@@ -1,0 +1,48 @@
+---
+title: "Where Filters"
+description: "Reference for the Python DSL used to build where filters."
+---
+
+Use the `K` (Key) builder to construct where filters in Python. Filters are passed to `get`, `query`, `search`, `delete`, and similar methods via the `where` parameter.
+
+## Field references
+
+| Type | DSL | Example |
+|------|-----|---------|
+| Metadata field | `K("field_name")` | `K("category")`, `K("year")` |
+| Document | `K.DOCUMENT` | `K.DOCUMENT.contains("text")` |
+| ID | `K.ID` | `K.ID.is_in(["id1", "id2"])` |
+
+## Comparison operators
+
+| Predicate | Operator | Example |
+|-----------|----------|---------|
+| Equal | `==` | `K("status") == "active"` |
+| Not equal | `!=` | `K("count") != 0` |
+| Greater than | `>` | `K("price") > 100` |
+| Greater than or equal | `>=` | `K("year") >= 2020` |
+| Less than | `<` | `K("stock") < 10` |
+| Less than or equal | `<=` | `K("discount") <= 0.25` |
+
+## Set operators
+
+| Predicate | DSL | Example |
+|-----------|-----|---------|
+| In list | `K("field").is_in([...])` | `K("category").is_in(["tech", "ai"])` |
+| Not in list | `K("field").not_in([...])` | `K("status").not_in(["draft", "deleted"])` |
+
+## Array operators
+
+| Predicate | DSL | Example |
+|-----------|-----|---------|
+| Contains | `K("field").contains(value)` | `K("tags").contains("action")` |
+| Not contains | `K("field").not_contains(value)` | `K("tags").not_contains("draft")` |
+
+## Document operators
+
+| Predicate | DSL | Example |
+|-----------|-----|---------|
+| Contains | `K.DOCUMENT.contains(value)` | `K.DOCUMENT.contains("machine learning")` |
+| Not contains | `K.DOCUMENT.not_contains(value)` | `K.DOCUMENT.not_contains("draft")` |
+| Regex match | `K.DOCUMENT.regex(pattern)` | `K.DOCUMENT.regex("^quantum\\s+\\w+")` |
+| Regex not match | `K.DOCUMENT.not_regex(pattern)` | `K.DOCUMENT.not_regex("^draft")` |

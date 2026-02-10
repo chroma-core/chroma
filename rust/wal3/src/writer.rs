@@ -1381,7 +1381,7 @@ mod tests {
 
         // Read back with checksum_parquet (no starting position)
         let (setsum_from_reader, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, Some(LogPosition::from_offset(100)))
+            checksum_parquet(&buffer, true, Some(LogPosition::from_offset(100)))
                 .expect("checksum_parquet should succeed");
 
         println!(
@@ -1418,7 +1418,7 @@ mod tests {
 
         // Read back with checksum_parquet
         let (setsum_from_reader, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+            checksum_parquet(&buffer, true, None).expect("checksum_parquet should succeed");
 
         println!(
             "absolute_offset_setsum_consistency: setsum_from_writer = {}, setsum_from_reader = {}",

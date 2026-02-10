@@ -90,6 +90,23 @@ message Tenant {
     optional string resource_name = 2;
 }
 
+// Wrapper messages for repeated values inside oneof fields.
+message BoolListValue {
+    repeated bool values = 1;
+}
+
+message IntListValue {
+    repeated int64 values = 1;
+}
+
+message DoubleListValue {
+    repeated double values = 1;
+}
+
+message StringListValue {
+    repeated string values = 1;
+}
+
 message UpdateMetadataValue {
     // Not set if user wants to delete the key.
     // TODO(Sanket): Should we make this more explicit?
@@ -99,6 +116,10 @@ message UpdateMetadataValue {
         double float_value = 3;
         bool bool_value = 4;
         SparseVector sparse_vector_value = 5;
+        BoolListValue bool_list_value = 6;
+        IntListValue int_list_value = 7;
+        DoubleListValue double_list_value = 8;
+        StringListValue string_list_value = 9;
     }
 }
 
@@ -251,6 +272,12 @@ enum ListOperator {
 enum GenericComparator {
     EQ = 0;
     NE = 1;
+    // Array contains operators: check if an array metadata field contains
+    // (or does not contain) a specific scalar value.
+    // NOTE: This is called ARRAY_CONTAINS only in proto since there are conflicting
+    // names in scope. Elsewhere, it is called CONTAINS and NOT_CONTAINS.
+    ARRAY_CONTAINS = 2;
+    ARRAY_NOT_CONTAINS = 3;
 }
 
 // Used when a leaf-node `Where` clause compares an int or float to a single

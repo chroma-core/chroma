@@ -1,3 +1,4 @@
+use crate::types::validate_uuid;
 use crate::types::FlushCompactionRequest;
 use crate::types::SysDbError;
 use crate::types::{self as internal};
@@ -11,8 +12,6 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::version_file::{VersionFileManager, VersionFileType};
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
-use chroma_types::chroma_proto::DeleteDatabaseResponse;
-use chroma_types::chroma_proto::FinishDatabaseDeletionResponse;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
     AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
@@ -24,11 +23,12 @@ use chroma_types::chroma_proto::{
     CreateDatabaseResponse, CreateSegmentRequest, CreateSegmentResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRequest, DeleteCollectionResponse,
     DeleteCollectionVersionRequest, DeleteCollectionVersionResponse, DeleteDatabaseRequest,
-    DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest, DetachFunctionResponse,
-    FinishAttachedFunctionDeletionRequest, FinishAttachedFunctionDeletionResponse,
-    FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
-    FinishCreateAttachedFunctionRequest, FinishCreateAttachedFunctionResponse,
-    FinishDatabaseDeletionRequest, FlushCollectionCompactionAndAttachedFunctionRequest,
+    DeleteDatabaseResponse, DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest,
+    DetachFunctionResponse, FinishAttachedFunctionDeletionRequest,
+    FinishAttachedFunctionDeletionResponse, FinishCollectionDeletionRequest,
+    FinishCollectionDeletionResponse, FinishCreateAttachedFunctionRequest,
+    FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
+    FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
     FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
     GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
@@ -47,7 +47,7 @@ use chroma_types::chroma_proto::{
     SetTenantResourceNameResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
-use chroma_types::Collection;
+use chroma_types::{Collection, CollectionUuid, DatabaseName};
 use thiserror::Error;
 use tokio::{
     select,
@@ -752,11 +752,34 @@ impl SysDb for SysdbService {
 
     async fn increment_compaction_failure_count(
         &self,
-        _request: Request<IncrementCompactionFailureCountRequest>,
+        request: Request<IncrementCompactionFailureCountRequest>,
     ) -> Result<Response<IncrementCompactionFailureCountResponse>, Status> {
-        Err(Status::unimplemented(
-            "increment_compaction_failure_count is not supported",
-        ))
+        let proto_req = request.into_inner();
+
+        let internal_req = internal::UpdateCollectionRequest {
+            id: CollectionUuid(validate_uuid(&proto_req.collection_id)?),
+            database_name: proto_req
+                .database_name
+                .ok_or_else(|| Status::internal("database_name is required"))
+                .and_then(|db_name| {
+                    DatabaseName::new(db_name)
+                        .ok_or_else(|| Status::internal("a valid database_name is required"))
+                })?,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(internal::UpdateCollectionCursor {
+                compaction_failure_count_increment: Some(1),
+            }),
+        };
+
+        // Execute the update
+        let backend = internal_req.assign(&self.backends);
+        let _internal_resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(IncrementCompactionFailureCountResponse {}))
     }
 }
 
@@ -1962,7 +1985,6 @@ mod tests {
                 .database_name(DatabaseName::new("eu-west+mydb").unwrap())
                 .topology_name("us-east"), // Explicit topology should win
         };
-
         let backend = request_with_explicit_topology.assign(&factory);
         // Should route to us-east (explicit topology), not eu-west (from database)
         let Backend::Spanner(spanner_backend) = backend;

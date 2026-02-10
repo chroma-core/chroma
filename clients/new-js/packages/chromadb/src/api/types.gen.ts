@@ -307,7 +307,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-  [key: string]: boolean | number | string | SparseVector | null;
+  [key: string]: boolean | number | string | SparseVector | Array<boolean> | Array<number> | Array<string> | null;
 };
 
 export type HeartbeatResponse = {

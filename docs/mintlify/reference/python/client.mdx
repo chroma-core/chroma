@@ -1,0 +1,378 @@
+---
+title: "Client"
+---
+
+## Clients
+
+### EphemeralClient
+
+Creates an in-memory instance of Chroma. This is useful for testing and
+
+development, but not recommended for production use.
+
+<ParamField path="settings" type="Optional[Settings]" />
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### PersistentClient
+
+Creates a persistent instance of Chroma that saves to disk. This is useful for
+
+testing and development, but not recommended for production use.
+
+<ParamField path="path" type="Union[str, Path]">
+  The directory to save Chroma's data to. Defaults to "./chroma".
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]" />
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### HttpClient
+
+Creates a client that connects to a remote Chroma server. This supports
+
+many clients connecting to the same server, and is the recommended way to
+use Chroma in production.
+
+<ParamField path="host" type="str">
+  The hostname of the Chroma server. Defaults to "localhost".
+</ParamField>
+
+<ParamField path="port" type="int">
+  The port of the Chroma server. Defaults to 8000.
+</ParamField>
+
+<ParamField path="ssl" type="bool">
+  Whether to use SSL to connect to the Chroma server. Defaults to False.
+</ParamField>
+
+<ParamField path="headers" type="Optional[Dict[str, str]]">
+  A dictionary of headers to send to the Chroma server. Defaults to \{\}.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]">
+  A dictionary of settings to communicate with the chroma server.
+</ParamField>
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### AsyncHttpClient
+
+Creates an async client that connects to a remote Chroma server. This supports
+
+many clients connecting to the same server, and is the recommended way to
+use Chroma in production.
+
+<ParamField path="host" type="str">
+  The hostname of the Chroma server. Defaults to "localhost".
+</ParamField>
+
+<ParamField path="port" type="int">
+  The port of the Chroma server. Defaults to 8000.
+</ParamField>
+
+<ParamField path="ssl" type="bool">
+  Whether to use SSL to connect to the Chroma server. Defaults to False.
+</ParamField>
+
+<ParamField path="headers" type="Optional[Dict[str, str]]">
+  A dictionary of headers to send to the Chroma server. Defaults to \{\}.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]">
+  A dictionary of settings to communicate with the chroma server.
+</ParamField>
+
+<ParamField path="tenant" type="str">
+  The tenant to use for this client. Defaults to the default tenant.
+</ParamField>
+
+<ParamField path="database" type="str">
+  The database to use for this client. Defaults to the default database.
+</ParamField>
+
+
+### CloudClient
+
+Creates a client to connect to a tenant and database on Chroma cloud.
+
+<ParamField path="tenant" type="Optional[str]">
+  The tenant to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single tenant. If provided, it will be validated against the API key's scope.
+</ParamField>
+
+<ParamField path="database" type="Optional[str]">
+  The database to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single database. If provided, it will be validated against the API key's scope.
+</ParamField>
+
+<ParamField path="api_key" type="Optional[str]">
+  The api key to use for this client.
+</ParamField>
+
+<ParamField path="settings" type="Optional[Settings]" />
+
+<ParamField path="cloud_host" type="str" />
+
+<ParamField path="cloud_port" type="int" />
+
+<ParamField path="enable_ssl" type="bool" />
+
+
+### AdminClient
+
+Creates an admin client that can be used to create tenants and databases.
+
+<ParamField path="settings" type="Settings" />
+
+
+---
+
+## Client Methods
+
+### heartbeat
+
+Get the current time in nanoseconds since epoch.
+
+Used to check if the server is alive.
+
+**Returns:** The current time in nanoseconds since epoch
+
+
+### list_collections
+
+List all collections.
+
+<ParamField path="limit" type="Optional[int]">
+  The maximum number of entries to return. Defaults to None.
+</ParamField>
+
+<ParamField path="offset" type="Optional[int]">
+  The number of entries to skip before returning. Defaults to None.
+</ParamField>
+
+**Returns:** A list of collections
+
+
+### count_collections
+
+Count the number of collections.
+
+**Returns:** The number of collections.
+
+
+### create_collection
+
+Create a new collection with the given name and metadata.
+
+<ParamField path="name" type="str" required>
+  The name of the collection to create.
+</ParamField>
+
+<ParamField path="schema" type="Optional[Schema]" />
+
+<ParamField path="configuration" type="Optional[CreateCollectionConfiguration]" />
+
+<ParamField path="metadata" type="Optional[Dict[str, Any]]">
+  Optional metadata to associate with the collection.
+</ParamField>
+
+<ParamField path="embedding_function" type="Optional[EmbeddingFunction[Optional[Embeddings]]]">
+  Optional function to use to embed documents.
+Uses the default embedding function if not provided.
+</ParamField>
+
+<ParamField path="data_loader" type="Optional[DataLoader[Optional[Embeddings]]]">
+  Optional function to use to load records (documents, images, etc.)
+</ParamField>
+
+<ParamField path="get_or_create" type="bool">
+  If True, return the existing collection if it exists.
+</ParamField>
+
+**Returns:** The newly created collection.
+
+**Raises:**
+
+- ValueError: If the collection already exists and get_or_create is False.
+- ValueError: If the collection name is invalid.
+
+
+### get_collection
+
+Get a collection with the given name.
+
+<ParamField path="name" type="str" required>
+  The name of the collection to get
+</ParamField>
+
+<ParamField path="embedding_function" type="Optional[EmbeddingFunction[Optional[Embeddings]]]">
+  Optional function to use to embed documents.
+Uses the default embedding function if not provided.
+</ParamField>
+
+<ParamField path="data_loader" type="Optional[DataLoader[Optional[Embeddings]]]">
+  Optional function to use to load records (documents, images, etc.)
+</ParamField>
+
+**Returns:** The collection
+
+**Raises:**
+
+- ValueError: If the collection does not exist
+
+
+### get_or_create_collection
+
+Get or create a collection with the given name and metadata.
+
+Args:
+    name: The name of the collection to get or create
+    metadata: Optional metadata to associate with the collection. If
+    the collection already exists, the metadata provided is ignored.
+    If the collection does not exist, the new collection will be created
+    with the provided metadata.
+    embedding_function: Optional function to use to embed documents
+    data_loader: Optional function to use to load records (documents, images, etc.)
+
+Returns:
+    The collection
+
+Examples:
+    ```python
+    client.get_or_create_collection("my_collection")
+    # collection(name="my_collection", metadata=\{\})
+    ```
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="schema" type="Optional[Schema]" />
+
+<ParamField path="configuration" type="Optional[CreateCollectionConfiguration]" />
+
+<ParamField path="metadata" type="Optional[Dict[str, Any]]" />
+
+<ParamField path="embedding_function" type="Optional[EmbeddingFunction[Optional[Embeddings]]]" />
+
+<ParamField path="data_loader" type="Optional[DataLoader[Optional[Embeddings]]]" />
+
+
+### delete_collection
+
+Delete a collection with the given name.
+
+<ParamField path="name" type="str" required>
+  The name of the collection to delete.
+</ParamField>
+
+**Raises:**
+
+- ValueError: If the collection does not exist.
+
+
+### reset
+
+Resets the database. This will delete all collections and entries.
+
+**Returns:** True if the database was reset successfully.
+
+
+### get_version
+
+Get the version of Chroma.
+
+**Returns:** The version of Chroma
+
+
+### get_settings
+
+Get the settings used to initialize.
+
+**Returns:** The settings used to initialize.
+
+
+### get_max_batch_size
+
+Return the maximum number of records that can be created or mutated in a single call.
+
+
+---
+
+## Admin Client Methods
+
+### create_tenant
+
+Create a new tenant. Raises an error if the tenant already exists.
+
+<ParamField path="name" type="str" required />
+
+
+### get_tenant
+
+Get a tenant. Raises an error if the tenant does not exist.
+
+<ParamField path="name" type="str" required />
+
+
+### create_database
+
+Create a new database. Raises an error if the database already exists.
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="tenant" type="str" />
+
+
+### get_database
+
+Get a database. Raises an error if the database does not exist.
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="tenant" type="str">
+  The tenant of the database to get.
+</ParamField>
+
+
+### delete_database
+
+Delete a database. Raises an error if the database does not exist.
+
+<ParamField path="name" type="str" required />
+
+<ParamField path="tenant" type="str">
+  The tenant of the database to delete.
+</ParamField>
+
+
+### list_databases
+
+List all databases for a tenant. Raises an error if the tenant does not exist.
+
+<ParamField path="limit" type="Optional[int]" />
+
+<ParamField path="offset" type="Optional[int]" />
+
+<ParamField path="tenant" type="str">
+  The tenant to list databases for.
+</ParamField>

@@ -669,7 +669,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         Ok(Some(delta))
     }
 
-
     /// Insert a rotated vector into the index.
     async fn insert(&self, id: u32, embedding: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
         let write_nprobe = self.config.write_nprobe.unwrap_or(default_write_nprobe()) as usize;

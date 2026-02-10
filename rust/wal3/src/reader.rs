@@ -96,6 +96,7 @@ pub fn scan_from_manifest(
 
 /// Post process the fragments such that only records starting at from and not exceeding limits
 /// will be processed.  Sets *short_read=true when the limits truncate the log.
+#[tracing::instrument(skip(fragments))]
 fn post_process_fragments(
     mut fragments: Vec<Fragment>,
     from: LogPosition,
@@ -228,6 +229,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     ///    interval.
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
+    #[tracing::instrument(skip(self))]
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
@@ -244,6 +246,7 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     ///
     /// This differs from scan in that it takes a loaded manifest.
     /// This differs from scan_from_manifest because it will load snapshots.
+    #[tracing::instrument(skip(self))]
     pub async fn scan_with_cache(
         &self,
         manifest: &Manifest,
@@ -338,6 +341,19 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         self.fragment_consumer
             .parse_parquet(parquet, starting_log_position)
+            .await
+    }
+
+    /// Parse parquet previously returned by read_bytes, skipping setsum computation.
+    #[tracing::instrument(skip(self, parquet))]
+    #[allow(clippy::type_complexity)]
+    pub async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        self.fragment_consumer
+            .parse_parquet_fast(parquet, starting_log_position)
             .await
     }
 

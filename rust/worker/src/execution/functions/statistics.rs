@@ -164,7 +164,7 @@ impl StatisticsValue {
     }
 
     /// Convert MetadataValue to a vector of StatisticsValue.
-    /// Returns a vector because sparse vectors expand to multiple values.
+    /// Returns a vector because sparse vectors and arrays expand to multiple values.
     fn from_metadata_value(value: &MetadataValue) -> Vec<StatisticsValue> {
         match value {
             MetadataValue::Bool(b) => vec![StatisticsValue::Bool(*b)],
@@ -189,6 +189,18 @@ impl StatisticsValue {
                         .collect()
                 }
             }
+            // Array types expand to multiple statistics values
+            MetadataValue::BoolArray(arr) => {
+                arr.iter().map(|b| StatisticsValue::Bool(*b)).collect()
+            }
+            MetadataValue::IntArray(arr) => arr.iter().map(|i| StatisticsValue::Int(*i)).collect(),
+            MetadataValue::FloatArray(arr) => {
+                arr.iter().map(|f| StatisticsValue::Float(*f)).collect()
+            }
+            MetadataValue::StringArray(arr) => arr
+                .iter()
+                .map(|s| StatisticsValue::Str(s.clone()))
+                .collect(),
         }
     }
 }

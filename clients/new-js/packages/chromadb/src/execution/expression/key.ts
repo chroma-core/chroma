@@ -46,16 +46,37 @@ export class Key {
     return createComparisonWhere(this.name, "$nin", array);
   }
 
-  public contains(value: string): WhereExpression {
-    if (typeof value !== "string") {
-      throw new TypeError("$contains requires a string value");
+  /**
+   * Contains filter.
+   *
+   * On `Key.DOCUMENT`: substring search (value must be a string).
+   * On metadata fields: checks if the array field contains the scalar value.
+   *
+   * @example
+   * K.DOCUMENT.contains("machine learning")   // document substring
+   * K("tags").contains("action")               // metadata array contains
+   * K("scores").contains(42)                   // metadata array contains
+   */
+  public contains(value: string | number | boolean): WhereExpression {
+    if (this.name === "#document" && typeof value !== "string") {
+      throw new TypeError("K.DOCUMENT.contains requires a string value");
     }
     return createComparisonWhere(this.name, "$contains", value);
   }
 
-  public notContains(value: string): WhereExpression {
-    if (typeof value !== "string") {
-      throw new TypeError("$not_contains requires a string value");
+  /**
+   * Not-contains filter.
+   *
+   * On `Key.DOCUMENT`: excludes documents containing the substring.
+   * On metadata fields: checks that the array field does not contain the scalar value.
+   *
+   * @example
+   * K.DOCUMENT.notContains("deprecated")   // document substring exclusion
+   * K("tags").notContains("draft")          // metadata array not-contains
+   */
+  public notContains(value: string | number | boolean): WhereExpression {
+    if (this.name === "#document" && typeof value !== "string") {
+      throw new TypeError("K.DOCUMENT.notContains requires a string value");
     }
     return createComparisonWhere(this.name, "$not_contains", value);
   }

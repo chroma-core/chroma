@@ -232,8 +232,28 @@
           {
             "group": "SDKs",
             "pages": [
-              "reference/python",
-              "reference/typescript",
+              {
+                "group": "Python",
+                "pages": [
+                  "reference/python/client",
+                  "reference/python/collection",
+                  "reference/python/embedding-functions",
+                  "reference/python/search",
+                  "reference/python/schema",
+                  "reference/python/where-filter"
+                ]
+              },
+              {
+                "group": "TypeScript",
+                "pages": [
+                  "reference/typescript/client",
+                  "reference/typescript/collection",
+                  "reference/typescript/embedding-functions",
+                  "reference/typescript/search",
+                  "reference/typescript/schema",
+                  "reference/typescript/where-filter"
+                ]
+              },
               "reference/rust"
             ]
           },
@@ -251,7 +271,7 @@
                 "group": "Chroma Core API",
                 "openapi": {
                   "source": "openapi.json",
-                  "directory": "api-reference"
+                  "directory": "/reference/chroma-api"
                 },
                 "pages": [
                   {
@@ -344,6 +364,12 @@
                 }
               }
             ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "reference/where-filter"
+            ]
           }
         ]
       }
@@ -367,9 +393,14 @@
   "navbar": {
     "links": [
       {
-        "label": "26k",
         "icon": "github",
+        "label": "26k",
         "href": "https://github.com/chroma-core/chroma"
+      },
+      {
+        "icon": "discord",
+        "label": "11k",
+        "href": "https://discord.gg/dSHcBEMSk7"
       },
       {
         "label": "25k",
@@ -438,6 +469,22 @@
     {
       "source": "/reference/js/:slug*",
       "destination": "/reference/typescript/"
+    },
+    {
+      "source": "/reference/python",
+      "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/python/index",
+      "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/typescript",
+      "destination": "/reference/typescript/client"
+    },
+    {
+      "source": "/reference/typescript/index",
+      "destination": "/reference/typescript/client"
     }
   ]
 }
