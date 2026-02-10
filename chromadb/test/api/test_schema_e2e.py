@@ -2692,7 +2692,7 @@ def test_fts_disabled_blocks_where_document_queries(
 
     with pytest.raises(InvalidArgumentError) as exc_info:
         collection.query(
-            query_embeddings=cast(Embeddings, [[0.1, 0.2, 0.3, 0.4]]),
+            query_texts=["some query text"],
             n_results=1,
             where_document={"$contains": "delta"},
         )
@@ -2838,6 +2838,6 @@ def test_fts_disabled_search_api_blocks_document_filter(
 
     with pytest.raises(InvalidArgumentError) as exc_info:
         collection.search(
-            Search(where_document={"$contains": "alpha"})
+            Search(where=Key.DOCUMENT.contains("alpha"))
         )
     assert "fts" in str(exc_info.value).lower()
