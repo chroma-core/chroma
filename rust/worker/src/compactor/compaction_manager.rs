@@ -20,6 +20,7 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::usearch::USearchIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_segment::spann_provider::SpannProvider;
@@ -510,11 +511,16 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
+        let usearch_cache =
+            chroma_cache::from_config(&config.hnsw_provider.hnsw_cache_config).await?;
+        let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
+
         let spann_provider = SpannProvider::try_from_config(
             &(
                 hnsw_index_provider.clone(),
                 blockfile_provider.clone(),
                 config.spann_provider.clone(),
+                usearch_provider,
             ),
             registry,
         )
@@ -1033,13 +1039,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
         let system = System::new();
         let mut manager = CompactionManager::new(
