@@ -1690,6 +1690,54 @@ impl Runnable for ListCollectionsToGcRequest {
     }
 }
 
+// ============================================================================
+// BatchGetCollectionVersionFilePaths Types
+// ============================================================================
+
+/// Internal request for batch getting collection version file paths.
+#[derive(Debug, Clone)]
+pub struct BatchGetCollectionVersionFilePathsRequest {
+    pub collection_ids: Vec<CollectionUuid>,
+    pub database_name: Option<DatabaseName>,
+}
+
+impl TryFrom<chroma_proto::BatchGetCollectionVersionFilePathsRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        req: chroma_proto::BatchGetCollectionVersionFilePathsRequest,
+    ) -> Result<Self, Self::Error> {
+        let filter = CollectionFilter::default().ids(
+            req.collection_ids
+                .into_iter()
+                .map(|id| validate_uuid(&id).map(CollectionUuid))
+                .collect::<Result<Vec<_>, _>>()?,
+        );
+
+        let filter = if let Some(db_name) = req.database_name {
+            if let Some(valid_db_name) = DatabaseName::new(&db_name) {
+                filter.database_name(valid_db_name)
+            } else {
+                return Err(SysDbError::InvalidArgument(format!(
+                    "database name must be at least 3 characters, got '{}'",
+                    db_name
+                )));
+            }
+        } else {
+            filter
+        }
+        .include_soft_deleted(true);
+
+        Ok(GetCollectionsRequest { filter })
+    }
+}
+
+/// Internal response for batch getting collection version file paths.
+#[derive(Debug, Clone)]
+pub struct BatchGetCollectionVersionFilePathsResponse {
+    pub collection_id_to_version_file_path: HashMap<String, String>,
+}
+
 impl Assignable for FlushCompactionRequest {
     type Output = Backend;
 
