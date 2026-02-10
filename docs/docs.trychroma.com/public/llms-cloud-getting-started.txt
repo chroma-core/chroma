@@ -25,7 +25,7 @@ Chroma Cloud is SOC 2 Type I certified (Type II in progress), and offers deploym
 
 Our web dashboard lets your team work together to view your data, and ensure data quality in your collections with ease. It also serves as a touchpoint for you to view billing data and usage telemetry.
 
-### Advanced Search API (Beta)
+### Advanced Search API
 
 Chroma Cloud introduces a powerful [Search API](/cloud/search-api/overview) that enables hybrid search with advanced filtering, custom ranking expressions, and batch operations. Combine vector similarity with metadata filtering using an intuitive builder pattern or flexible dictionary syntax.
 
