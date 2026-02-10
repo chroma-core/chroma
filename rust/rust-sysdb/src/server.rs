@@ -583,11 +583,19 @@ impl SysDb for SysdbService {
 
     async fn list_collections_to_gc(
         &self,
-        _request: Request<ListCollectionsToGcRequest>,
+        request: Request<ListCollectionsToGcRequest>,
     ) -> Result<Response<ListCollectionsToGcResponse>, Status> {
-        Err(Status::unimplemented(
-            "list_collections_to_gc is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let internal_req: internal::ListCollectionsToGcRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await?;
+
+        let proto_resp: ListCollectionsToGcResponse = internal_resp.into();
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn mark_version_for_deletion(
