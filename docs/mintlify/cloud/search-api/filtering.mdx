@@ -242,7 +242,7 @@ Use `contains()` to check if a metadata array includes a value, and `not_contain
 from chromadb import Search, K
 
 # Find all records where genres contains "action"
-search = Search().where(K("tags").contains("action"))
+search = Search().where(K("genres").contains("action"))
 
 # Exclude records with a specific tag
 search = Search().where(K("tags").not_contains("draft"))
