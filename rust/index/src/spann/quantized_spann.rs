@@ -37,14 +37,14 @@ use crate::{
 };
 
 // Blockfile prefixes
-const PREFIX_CENTER: &str = "center";
+pub const PREFIX_CENTER: &str = "center";
 const PREFIX_LENGTH: &str = "length";
 const PREFIX_NEXT_CLUSTER: &str = "next";
-const PREFIX_ROTATION: &str = "rotation";
-const PREFIX_VERSION: &str = "version";
+pub const PREFIX_ROTATION: &str = "rotation";
+pub const PREFIX_VERSION: &str = "version";
 
 // Key for singleton values (center, next_cluster_id)
-const SINGLETON_KEY: u32 = 0;
+pub const SINGLETON_KEY: u32 = 0;
 
 /// In-memory staging for a quantized cluster head.
 #[derive(Clone)]

@@ -5,13 +5,15 @@ edition = "2021"
 
 [features]
 default = []
-usearch = ["chroma-index/usearch"]
+usearch = ["chroma-index/usearch", "faer", "simsimd"]
 
 [dependencies]
 async-trait = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
+faer = { workspace = true, optional = true }
 futures = { workspace = true }
+simsimd = { workspace = true, optional = true }
 prost = { workspace = true }
 regex = { workspace = true }
 roaring = { workspace = true }
