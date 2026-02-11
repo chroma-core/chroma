@@ -1335,7 +1335,7 @@ mod tests {
 
         // Double check that the collection is still soft deleted
         let statuses = sysdb
-            .batch_get_collection_soft_delete_status(vec![collection_id])
+            .batch_get_collection_soft_delete_status(None, vec![collection_id])
             .await
             .unwrap();
         assert_eq!(

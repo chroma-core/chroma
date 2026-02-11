@@ -96,6 +96,12 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
                 .skip(input.min_versions_to_keep as usize)
             {
                 if *created_at < input.cutoff_time {
+                    tracing::debug!(
+                        version = *version,
+                        created_at = %created_at,
+                        cutoff_time = %input.cutoff_time,
+                        "Deleting version before cutoff time"
+                    );
                     *mode = CollectionVersionAction::Delete;
                 } else {
                     tracing::debug!(
