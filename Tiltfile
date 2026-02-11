@@ -149,22 +149,6 @@ else:
 
 if config.tilt_subcommand == "ci":
   custom_build(
-    'load-service',
-    'docker image tag load-service:ci $EXPECTED_REF',
-    ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
-    disable_push=True
-  )
-else:
-  docker_build(
-    'load-service',
-    '.',
-    only=["rust/", "idl/", "Cargo.toml", "Cargo.lock"],
-    dockerfile='./rust/Dockerfile',
-    target='load_service'
-  )
-
-if config.tilt_subcommand == "ci":
-  custom_build(
     'rust-sysdb-service',
     'docker image tag rust-sysdb-service:ci $EXPECTED_REF',
     ['./rust/', './idl/', './Cargo.toml', './Cargo.lock'],
