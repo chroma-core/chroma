@@ -658,14 +658,21 @@ impl SysDb for SysdbService {
         let mut collection_id_to_success = std::collections::HashMap::new();
         for version_list in &proto_req.versions {
             let collection_id_str = version_list.collection_id.clone();
-            let success = self
+            let result = self
                 .update_version_file_single_collection(
                     version_list,
                     &database_name,
                     VersionFileOperation::DeleteVersions,
                 )
-                .await
-                .is_ok();
+                .await;
+            let success = result.is_ok();
+            if !success {
+                tracing::error!(
+                    "Failed to delete versions for collection {}: {:?}",
+                    collection_id_str,
+                    result.err()
+                );
+            }
             collection_id_to_success.insert(collection_id_str, success);
         }
 
@@ -713,11 +720,34 @@ impl SysDb for SysdbService {
 
     async fn batch_get_collection_soft_delete_status(
         &self,
-        _request: Request<BatchGetCollectionSoftDeleteStatusRequest>,
+        request: Request<BatchGetCollectionSoftDeleteStatusRequest>,
     ) -> Result<Response<BatchGetCollectionSoftDeleteStatusResponse>, Status> {
-        Err(Status::unimplemented(
-            "batch_get_collection_soft_delete_status is not supported",
-        ))
+        tracing::info!("batch_get_collection_soft_delete_status: called");
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backend).await?;
+
+        let mut collection_id_to_is_soft_deleted = std::collections::HashMap::new();
+        for collection in &internal_resp.collections {
+            let is_deleted = internal_resp
+                .soft_deleted_ids
+                .contains(&collection.collection_id);
+            collection_id_to_is_soft_deleted
+                .insert(collection.collection_id.0.to_string(), is_deleted);
+        }
+
+        tracing::info!(
+            "BatchGetCollectionSoftDeleteStatusResponse: {} entries",
+            collection_id_to_is_soft_deleted.len()
+        );
+
+        Ok(Response::new(BatchGetCollectionSoftDeleteStatusResponse {
+            collection_id_to_is_soft_deleted,
+        }))
     }
 
     async fn cleanup_expired_partial_attached_functions(
@@ -2969,5 +2999,88 @@ mod tests {
         // (even though chroma_types::Collection doesn't expose is_deleted field)
         // because the proto structure is different. The main test is that
         // soft delete works and the collection is not found when trying to get it.
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_batch_get_collection_soft_delete_status() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+
+        // Create two collections
+        let active_collection_id = CollectionUuid(Uuid::new_v4());
+        let deleted_collection_id = CollectionUuid(Uuid::new_v4());
+
+        for (cid, name) in [
+            (active_collection_id, "active_collection"),
+            (deleted_collection_id, "deleted_collection"),
+        ] {
+            let req = CreateCollectionRequest {
+                id: cid,
+                tenant_id: tenant_id.clone(),
+                database_name: database_name.clone(),
+                name: name.to_string(),
+                dimension: Some(128),
+                metadata: Some(HashMap::new()),
+                segments: vec![Segment {
+                    id: SegmentUuid(Uuid::new_v4()),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: cid,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                }],
+                index_schema: Schema::default(),
+                get_or_create: false,
+            };
+            let backend_for_create = req.assign(&service.backends);
+            req.run(backend_for_create).await.unwrap();
+        }
+
+        // Soft-delete one collection
+        let delete_req = chroma_types::chroma_proto::DeleteCollectionRequest {
+            tenant: tenant_id.clone(),
+            database: database_name.as_ref().to_string(),
+            id: deleted_collection_id.0.to_string(),
+            segment_ids: vec![],
+        };
+        service
+            .delete_collection(Request::new(delete_req))
+            .await
+            .expect("Failed to soft-delete collection");
+
+        // Call batch_get_collection_soft_delete_status via the gRPC handler
+        let status_req = BatchGetCollectionSoftDeleteStatusRequest {
+            collection_ids: vec![
+                active_collection_id.0.to_string(),
+                deleted_collection_id.0.to_string(),
+            ],
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+        let response = service
+            .batch_get_collection_soft_delete_status(Request::new(status_req))
+            .await
+            .expect("Failed to get soft delete status");
+
+        let statuses = response.into_inner().collection_id_to_is_soft_deleted;
+
+        // Active collection should be false
+        assert_eq!(
+            statuses.get(&active_collection_id.0.to_string()),
+            Some(&false),
+            "Active collection should not be soft deleted"
+        );
+
+        // Deleted collection should be true
+        assert_eq!(
+            statuses.get(&deleted_collection_id.0.to_string()),
+            Some(&true),
+            "Soft-deleted collection should be marked as deleted"
+        );
+
+        assert_eq!(statuses.len(), 2, "Should have exactly 2 entries");
     }
 }

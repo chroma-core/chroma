@@ -379,7 +379,7 @@ impl StateMachineTest for GarbageCollectorUnderTest {
             let storage = state.storage.clone();
 
             async move {
-                let collection_statuses = sysdb.batch_get_collection_soft_delete_status(ref_state.collection_status.keys().cloned().collect()).await.unwrap();
+                let collection_statuses = sysdb.batch_get_collection_soft_delete_status(None, ref_state.collection_status.keys().cloned().collect()).await.unwrap();
                 for (collection_id, status) in ref_state.collection_status.iter() {
                     match status {
                         CollectionStatus::Deleted => {

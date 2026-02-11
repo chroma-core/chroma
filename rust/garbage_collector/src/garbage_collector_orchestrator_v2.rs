@@ -244,15 +244,26 @@ impl GarbageCollectorOrchestrator {
     ) -> Result<HashSet<CollectionUuid>, GarbageCollectorError> {
         let soft_delete_statuses = self
             .sysdb_client
-            .batch_get_collection_soft_delete_status(all_collection_ids.clone())
+            .batch_get_collection_soft_delete_status(
+                self.database_name.clone(),
+                all_collection_ids.clone(),
+            )
             .await
             .map_err(|e| GarbageCollectorError::SysDbMethodFailed(e.to_string()))?;
 
         let all_collection_ids: HashSet<CollectionUuid> = all_collection_ids.into_iter().collect();
 
+        tracing::debug!("Soft delete statuses: {:?}", soft_delete_statuses);
+
         let soft_deleted_collections_to_gc = soft_delete_statuses
             .iter()
             .filter_map(|(collection_id, status)| {
+                tracing::debug!(
+                    "Collection {} is soft deleted: {}, in all_collection_ids: {}",
+                    collection_id,
+                    status,
+                    all_collection_ids.contains(collection_id)
+                );
                 if *status && all_collection_ids.contains(collection_id) {
                     Some(*collection_id)
                 } else {
@@ -261,10 +272,16 @@ impl GarbageCollectorOrchestrator {
             })
             .collect::<Vec<_>>();
 
+        tracing::debug!(
+            "Soft deleted collections to dgc: {:?}",
+            soft_deleted_collections_to_gc
+        );
+
         let collections = self
             .sysdb_client
             .get_collections(GetCollectionsOptions {
                 collection_ids: Some(soft_deleted_collections_to_gc),
+                database_or_topology: self.database_name.clone().map(DatabaseOrTopology::Database),
                 include_soft_deleted: true,
                 database_or_topology: Some(DatabaseOrTopology::Database(
                     self.database_name.clone(),
@@ -277,6 +294,12 @@ impl GarbageCollectorOrchestrator {
         let mut eligible_ids = HashSet::new();
         let cutoff_time: SystemTime = self.collection_soft_delete_absolute_cutoff_time.into();
         for collection in collections {
+            tracing::debug!(
+                "Collection {} was updated at {:?}, cutoff time is {:?}",
+                collection.collection_id,
+                collection.updated_at,
+                cutoff_time
+            );
             if collection.updated_at < cutoff_time {
                 eligible_ids.insert(collection.collection_id);
             } else {
@@ -494,6 +517,7 @@ impl GarbageCollectorOrchestrator {
                     "Expected version file to be present".to_string(),
                 ),
             )?;
+            tracing::debug!("VERSION FILE IS: {:?}", version_file);
             let version_history = &version_file
                 .as_ref()
                 .version_history
@@ -769,7 +793,6 @@ impl GarbageCollectorOrchestrator {
         )?;
         let tenant_id = collection_info.tenant_id.clone();
         self.tenant = Some(tenant_id.clone());
-        let _database_name_from_version_file = collection_info.database_name.clone();
 
         let task = wrap(
             Box::new(DeleteUnusedFilesOperator::new(
@@ -896,6 +919,11 @@ impl GarbageCollectorOrchestrator {
                 }
             }
 
+            match self.database_name.as_ref() {
+                Some(db_name) => tracing::info!("HAVE DB NAME {}", db_name.clone().into_string()),
+                None => tracing::info!("NO DB NAME???"),
+            };
+
             let delete_versions_task = wrap(
                 Box::new(DeleteVersionsAtSysDbOperator {
                     storage: self.storage.clone(),
@@ -930,7 +958,7 @@ impl GarbageCollectorOrchestrator {
         output: DeleteVersionsAtSysDbOutput,
         ctx: &ComponentContext<Self>,
     ) -> Result<(), GarbageCollectorError> {
-        tracing::trace!("Received DeleteVersionsAtSysDbOutput: {:#?}", output);
+        tracing::debug!("Received DeleteVersionsAtSysDbOutput: {:#?}", output);
         self.num_versions_deleted += output.versions_to_delete.versions.len() as u32;
 
         self.num_pending_tasks -= 1;

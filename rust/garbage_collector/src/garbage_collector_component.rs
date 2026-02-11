@@ -741,6 +741,12 @@ impl Configurable<(GarbageCollectorConfig, System)> for GarbageCollector {
         (config, system): &(GarbageCollectorConfig, System),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        tracing::debug!(
+            "Loaded config - collection_soft_delete_grace_period: {:?}, attached_function_soft_delete_grace_period: {:?}",
+            config.collection_soft_delete_grace_period,
+            config.attached_function_soft_delete_grace_period
+        );
+
         let sysdb_config = (
             SysDbConfig::Grpc(config.sysdb_config.clone()),
             config.mcmr_sysdb_config.clone(),
@@ -1310,7 +1316,7 @@ mod tests {
 
         // Double check that the collection is still soft deleted
         let statuses = sysdb
-            .batch_get_collection_soft_delete_status(vec![collection_id])
+            .batch_get_collection_soft_delete_status(None, vec![collection_id])
             .await
             .unwrap();
         assert_eq!(
