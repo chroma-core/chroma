@@ -217,6 +217,7 @@ impl WorkerServer {
             collection_uuid: collection_and_segments.collection.collection_id,
             tenant: collection_and_segments.collection.tenant.clone(),
             database_name,
+            fetch_log_concurrency: self.fetch_log_concurrency,
         })
     }
 
@@ -782,6 +783,7 @@ mod tests {
             port,
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
+            fetch_log_concurrency: 10,
             shutdown_grace_period: Duration::from_secs(1),
         };
 
