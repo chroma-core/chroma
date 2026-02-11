@@ -6,6 +6,7 @@ use chroma_index::hnsw_provider::HnswIndexProvider;
 use chroma_segment::{
     distributed_hnsw::{DistributedHNSWSegmentFromSegmentError, DistributedHNSWSegmentReader},
     distributed_spann::SpannSegmentReaderError,
+    quantized_spann::QuantizedSpannSegmentError,
 };
 use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
@@ -31,6 +32,8 @@ use crate::execution::operators::{
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
+    quantized_spann_bruteforce::QuantizedSpannBruteforceError,
+    quantized_spann_navigate::QuantizedSpannNavigateError,
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
     spann_fetch_pl::SpannFetchPlError,
@@ -60,6 +63,12 @@ pub enum KnnError {
     NoCollectionDimension,
     #[error("Panic: {0}")]
     Panic(#[from] PanicError),
+    #[error("Error running quantized spann bruteforce operator: {0}")]
+    QuantizedSpannBruteforce(#[from] QuantizedSpannBruteforceError),
+    #[error("Error running quantized spann navigate operator: {0}")]
+    QuantizedSpannNavigate(#[from] QuantizedSpannNavigateError),
+    #[error("Error creating quantized spann segment reader: {0}")]
+    QuantizedSpannReader(#[from] QuantizedSpannSegmentError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
@@ -92,6 +101,9 @@ impl ChromaError for KnnError {
             KnnError::KnnProjection(e) => e.code(),
             KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             KnnError::Panic(_) => ErrorCodes::Aborted,
+            KnnError::QuantizedSpannBruteforce(e) => e.code(),
+            KnnError::QuantizedSpannNavigate(e) => e.code(),
+            KnnError::QuantizedSpannReader(e) => e.code(),
             KnnError::Result(_) => ErrorCodes::Internal,
             KnnError::SpannBfPl(e) => e.code(),
             KnnError::SpannFetchPl(e) => e.code(),
