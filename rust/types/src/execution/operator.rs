@@ -461,7 +461,7 @@ impl Merge {
             if let Some(next_m) = batch_iters[idx].next() {
                 max_heap.push((next_m, idx));
             }
-            if fusion.last().is_some_and(|tail| tail == &m) {
+            if fusion.contains(&m) {
                 continue;
             }
             fusion.push(m);
