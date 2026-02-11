@@ -27,10 +27,10 @@ jobs:
         python: ${{ fromJson(inputs.python_versions) }}
         test-glob:
           - "--ignore-glob 'chromadb/test/property/*' --ignore-glob 'chromadb/test/stress/*' --ignore-glob 'chromadb/test/distributed/*'"
-          - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+          - "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py --ignore-glob chromadb/test/property/test_add_mcmr.py"
           - "chromadb/test/property/test_cross_version_persist.py"
         include:
-          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_cross_version_persist.py"
+          - test-glob: "chromadb/test/property --ignore-glob chromadb/test/property/test_add_mcmr.py --ignore-glob chromadb/test/property/test_cross_version_persist.py"
             parallelized: false  # Disabled to fix INTERNALERROR crashes in CI
 
     runs-on: ${{ inputs.runner }}
@@ -134,6 +134,7 @@ jobs:
           - "chromadb/test/api/test_limit_offset.py"
           - "chromadb/test/property/test_collections.py"
           - "chromadb/test/property/test_add.py"
+          - "chromadb/test/property/test_add_mcmr.py"
           - "chromadb/test/property/test_filtering.py"
           - "chromadb/test/property/test_fork.py"
           - "chromadb/test/property/test_embeddings.py"
@@ -148,6 +149,8 @@ jobs:
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: false
+          - test-glob: "chromadb/test/property/test_add_mcmr.py"
+            multi_region: true
           - test-glob: "chromadb/test/property/test_embeddings.py"
           - test-glob: "chromadb/test/api"
           - test-glob: "chromadb/test/property/test_collections_with_database_tenant.py"
