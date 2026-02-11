@@ -285,6 +285,11 @@ garbage_collector:
     port: 50051
     connect_timeout_ms: 60000
     request_timeout_ms: 60000
+  mcmr_sysdb_config:
+    host: "rust-sysdb-service.chroma"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000
   dispatcher_config:
     num_worker_threads: 4
     dispatcher_queue_size: 100
