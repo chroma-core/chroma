@@ -231,7 +231,6 @@ k8s_yaml([
   'k8s/test/grafana.yaml',
   'k8s/test/jaeger-service.yaml',
   'k8s/test/jaeger.yaml',
-  'k8s/test/load-service.yaml',
   'k8s/test/minio.yaml',
   'k8s/test/spanner.yaml',
   'k8s/test/prometheus.yaml',
@@ -338,7 +337,6 @@ k8s_resource('rust-frontend-service:deployment:chroma', resource_deps=['sysdb:de
 k8s_resource('query-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"], port_forwards='50053:50051')
 k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:deployment:chroma'], labels=["chroma"])
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment'], labels=["chroma"], port_forwards='50055:50055')
-k8s_resource('load-service', resource_deps=['k8s_setup'], labels=["infrastructure"], port_forwards='3001:3001')
 
 # Production Chroma 2
 k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2'], labels=["infrastructure2"], port_forwards='6432:5432')
@@ -380,7 +378,6 @@ groups = {
     'rust-frontend-service:deployment:chroma',
     'query-service:statefulset:chroma',
     'compaction-service:statefulset:chroma',
-    'load-service',
     'garbage-collector:statefulset:chroma',
     'jaeger',
     'grafana',
