@@ -126,13 +126,27 @@ impl Segment {
     pub fn prefetch_supported(&self) -> bool {
         matches!(
             self.r#type,
-            SegmentType::BlockfileMetadata | SegmentType::BlockfileRecord | SegmentType::Spann
+            SegmentType::BlockfileMetadata
+                | SegmentType::BlockfileRecord
+                | SegmentType::QuantizedSpann
+                | SegmentType::Spann
         )
     }
 
     pub fn filepaths_to_prefetch(&self) -> Vec<String> {
         let mut res = Vec::new();
         match self.r#type {
+            SegmentType::QuantizedSpann => {
+                for key in [
+                    QUANTIZED_SPANN_CLUSTER,
+                    QUANTIZED_SPANN_EMBEDDING_METADATA,
+                    QUANTIZED_SPANN_SCALAR_METADATA,
+                ] {
+                    if let Some(paths) = self.file_path.get(key) {
+                        res.extend(paths.iter().cloned());
+                    }
+                }
+            }
             SegmentType::Spann => {
                 if let Some(pl_path) = self.file_path.get(POSTING_LIST_PATH) {
                     res.extend(pl_path.iter().cloned());
