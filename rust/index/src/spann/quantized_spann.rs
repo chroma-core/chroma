@@ -1456,7 +1456,7 @@ mod tests {
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, DataRecord, SpannIndexConfig};
+    use chroma_types::{CollectionUuid, DataRecord, Quantization, SpannIndexConfig};
     use rand::{Rng, SeedableRng};
     use tempfile::TempDir;
 
@@ -1491,7 +1491,7 @@ mod tests {
             initial_lambda: None,
             num_centers_to_merge_to: None,
             max_neighbors: Some(8),
-            quantize: true,
+            quantize: Quantization::USearch4BitRabitQ,
         }
     }
 
