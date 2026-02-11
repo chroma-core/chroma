@@ -37,9 +37,9 @@ use chroma_types::{
     GetTenantRequest, GetTenantResponse, HealthCheckResponse, HeartbeatError, Include,
     IndexStatusError, IndexStatusResponse, KnnIndex, ListCollectionsRequest,
     ListCollectionsResponse, ListDatabasesError, ListDatabasesRequest, ListDatabasesResponse,
-    Operation, OperationRecord, QueryError, QueryRequest, QueryResponse, ResetError, ResetResponse,
-    Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope, SegmentType,
-    SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
+    Operation, OperationRecord, Quantization, QueryError, QueryRequest, QueryResponse, ResetError,
+    ResetResponse, Schema, SchemaError, SearchRequest, SearchResponse, Segment, SegmentScope,
+    SegmentType, SegmentUuid, UpdateCollectionError, UpdateCollectionRecordsError,
     UpdateCollectionRecordsRequest, UpdateCollectionRecordsResponse, UpdateCollectionRequest,
     UpdateCollectionResponse, UpdateTenantError, UpdateTenantRequest, UpdateTenantResponse,
     UpsertCollectionRecordsError, UpsertCollectionRecordsRequest, UpsertCollectionRecordsResponse,
@@ -548,8 +548,8 @@ impl ServiceBasedFrontend {
 
         // Enable quantization for tenants in the config list (or all tenants if "*" is present)
         if let Some(ref mut schema) = reconciled_schema {
-            if let Some(spann_config) = schema.get_spann_config_mut() {
-                spann_config.quantize = self.should_enable_quantization_for_tenant(&tenant_id);
+            if self.should_enable_quantization_for_tenant(&tenant_id) {
+                schema.quantize(Quantization::USearch4BitRabitQ);
             }
         }
 
