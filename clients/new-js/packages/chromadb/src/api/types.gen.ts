@@ -436,6 +436,11 @@ export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
     MetadataField: string;
 };
 
+/**
+ * Quantization implementation for SPANN vector index.
+ */
+export type Quantization = 'none' | 'u_search4_bit_rabit_q';
+
 export type QueryRequestPayload = RawWhereFields & {
     ids?: Array<string> | null;
     include?: IncludeList;
@@ -559,9 +564,9 @@ export type SpannIndexConfig = {
     num_centers_to_merge_to?: number | null;
     num_samples_kmeans?: number | null;
     /**
-     * Enable quantization for vector search (cloud-only feature)
+     * Quantization implementation for vector search (cloud-only feature)
      */
-    quantize?: boolean;
+    quantize?: Quantization;
     reassign_neighbor_count?: number | null;
     search_nprobe?: number | null;
     search_rng_epsilon?: number | null;
