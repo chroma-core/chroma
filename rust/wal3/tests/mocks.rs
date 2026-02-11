@@ -92,4 +92,8 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for MockManifestPublisher {
     async fn destroy(&self) -> Result<(), Error> {
         Ok(())
     }
+
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+        Ok(None)
+    }
 }
