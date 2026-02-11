@@ -254,7 +254,12 @@ async fn test_k8s_mcmr_integration_repl_copy_empty_with_advanced_manifest() {
             + 1u64;
     }
 
-    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::new(storage.clone()),
+        prefix.clone(),
+        "test".to_string(),
+    );
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),

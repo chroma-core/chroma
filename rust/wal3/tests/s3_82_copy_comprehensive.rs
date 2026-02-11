@@ -347,7 +347,12 @@ async fn test_k8s_integration_copy_empty_with_advanced_manifest() {
         let batch = vec![Vec::from(format!("advanced:i={}", i))];
         position = log.append_many(batch).await.unwrap() + 1u64;
     }
-    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "test".to_string(),
+    );
     cursors
         .init(
             &CursorName::new("test_cursor").unwrap(),
