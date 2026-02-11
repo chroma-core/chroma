@@ -13,7 +13,9 @@ use chroma_types::{Cmek, Collection, Segment};
 
 use crate::distributed_spann::{SpannSegmentWriter, SpannSegmentWriterError};
 #[cfg(feature = "usearch")]
-use crate::quantized_spann::{QuantizedSpannSegmentError, QuantizedSpannSegmentWriter};
+use crate::quantized_spann::{
+    QuantizedSpannSegmentError, QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter,
+};
 
 #[derive(Clone)]
 pub struct SpannProvider {
@@ -116,6 +118,21 @@ impl SpannProvider {
             self.pl_block_size,
             self.metrics.clone(),
             cmek,
+        )
+        .await
+    }
+
+    #[cfg(feature = "usearch")]
+    pub async fn read_quantized_usearch(
+        &self,
+        collection: &Collection,
+        vector_segment: &Segment,
+    ) -> Result<QuantizedSpannSegmentReader, QuantizedSpannSegmentError> {
+        QuantizedSpannSegmentReader::from_segment(
+            collection,
+            vector_segment,
+            &self.blockfile_provider,
+            &self.usearch_provider,
         )
         .await
     }
