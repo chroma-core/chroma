@@ -9,6 +9,7 @@ use chroma_system::{
 use chroma_types::{
     default_search_nprobe,
     operator::{Knn, KnnOutput, Merge, RecordMeasure},
+    spann_configuration::default_search_nprobe,
     CollectionAndSegments,
 };
 use tokio::sync::oneshot::Sender;
@@ -154,6 +155,8 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
                 self.context.task_cancellation_token.clone(),
             );
             tasks.push((load_center_task, Some(Span::current())));
+        } else {
+            self.num_bruteforces = Some(0);
         }
 
         tasks

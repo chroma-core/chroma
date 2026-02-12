@@ -24,6 +24,7 @@ use chroma_types::{
 };
 use faer::{col::ColRef, Mat};
 use thiserror::Error;
+use tracing::Instrument;
 
 use crate::blockfile_record::ApplyMaterializedLogError;
 use crate::types::{ChromaSegmentFlusher, MaterializeLogsResult};
@@ -495,6 +496,10 @@ impl QuantizedSpannSegmentReader {
         };
         let quantized_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Open(quantized_centroid_id))
+            .instrument(tracing::trace_span!(
+                "Open quantized centroid index",
+                index_id = %quantized_centroid_id.0
+            ))
             .await
             .map_err(|e| {
                 QuantizedSpannSegmentError::Data(format!(
