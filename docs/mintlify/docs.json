@@ -91,9 +91,7 @@
           "cloud/quotas-limits",
           {
             "group": "Features",
-            "pages": [
-              "cloud/features/collection-forking"
-            ]
+            "pages": ["cloud/features/collection-forking"]
           },
           {
             "group": "Schema",
@@ -219,7 +217,8 @@
               "integrations/frameworks/openlit",
               "integrations/frameworks/openllmetry",
               "integrations/frameworks/streamlit",
-              "integrations/frameworks/voltagent"
+              "integrations/frameworks/voltagent",
+              "integrations/frameworks/n8n"
             ]
           }
         ]
@@ -259,10 +258,7 @@
           },
           {
             "group": "Beta SDKs",
-            "pages": [
-              "reference/kotlin",
-              "reference/swift"
-            ]
+            "pages": ["reference/kotlin", "reference/swift"]
           },
           {
             "group": "APIs",
@@ -327,9 +323,7 @@
                   },
                   {
                     "group": "Authentication",
-                    "pages": [
-                      "GET /api/v2/auth/identity"
-                    ]
+                    "pages": ["GET /api/v2/auth/identity"]
                   }
                 ]
               },
@@ -367,9 +361,7 @@
           },
           {
             "group": "Other",
-            "pages": [
-              "reference/where-filter"
-            ]
+            "pages": ["reference/where-filter"]
           }
         ]
       }
@@ -377,13 +369,7 @@
   },
   "api": {
     "examples": {
-      "languages": [
-        "curl",
-        "terminal",
-        "python",
-        "typescript",
-        "rust"
-      ]
+      "languages": ["curl", "terminal", "python", "typescript", "rust"]
     }
   },
   "logo": {
