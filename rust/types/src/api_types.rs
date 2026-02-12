@@ -127,6 +127,8 @@ pub enum BatchGetCollectionVersionFilePathsError {
     Grpc(#[from] Status),
     #[error("Could not parse UUID from string {1}: {0}")]
     Uuid(uuid::Error, String),
+    #[error("Client resolution error: {0}")]
+    ClientResolution(#[from] ClientResolutionError),
 }
 
 impl ChromaError for BatchGetCollectionVersionFilePathsError {
@@ -134,6 +136,7 @@ impl ChromaError for BatchGetCollectionVersionFilePathsError {
         match self {
             BatchGetCollectionVersionFilePathsError::Grpc(status) => status.code().into(),
             BatchGetCollectionVersionFilePathsError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+            BatchGetCollectionVersionFilePathsError::ClientResolution(e) => e.code(),
         }
     }
 }

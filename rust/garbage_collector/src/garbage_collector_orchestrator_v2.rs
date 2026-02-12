@@ -298,6 +298,7 @@ impl GarbageCollectorOrchestrator {
             self.collection_id,
             self.version_file_path.clone(),
             self.lineage_file_path.clone(),
+            self.database_name.clone(),
         );
         let output = orchestrator.run(self.system.clone()).await?;
 
@@ -326,6 +327,7 @@ impl GarbageCollectorOrchestrator {
             .await
             .map_err(|e| GarbageCollectorError::SysDbMethodFailed(e.to_string()))?;
 
+        // TODO: This doesn't make sense, it'll all be the same databasename
         let mut database_names = HashMap::new();
         for collection in collections {
             match DatabaseName::new(collection.database.clone()) {
