@@ -266,6 +266,7 @@ impl GarbageCollectorOrchestrator {
             .get_collections(GetCollectionsOptions {
                 collection_ids: Some(soft_deleted_collections_to_gc),
                 include_soft_deleted: true,
+                database_name: self.database_name.map(DatabaseOrTopology::Database),
                 ..Default::default()
             })
             .await
@@ -316,34 +317,6 @@ impl GarbageCollectorOrchestrator {
         self.version_files = output.version_files;
         self.graph = Some(output.graph.clone());
 
-        let collection_ids = self.version_files.keys().cloned().collect::<Vec<_>>();
-        let collections = self
-            .sysdb_client
-            .get_collections(GetCollectionsOptions {
-                collection_ids: Some(collection_ids),
-                include_soft_deleted: true,
-                ..Default::default()
-            })
-            .await
-            .map_err(|e| GarbageCollectorError::SysDbMethodFailed(e.to_string()))?;
-
-        // TODO: This doesn't make sense, it'll all be the same databasename
-        let mut database_names = HashMap::new();
-        for collection in collections {
-            match DatabaseName::new(collection.database.clone()) {
-                Some(database_name) => {
-                    database_names.insert(collection.collection_id, database_name);
-                }
-                None => {
-                    tracing::error!(
-                        "Collection {} has invalid database name '{}', skipping GC",
-                        collection.collection_id,
-                        collection.database
-                    );
-                }
-            }
-        }
-
         let task = wrap(
             Box::new(ComputeVersionsToDeleteOperator {}),
             ComputeVersionsToDeleteInput {
@@ -351,7 +324,6 @@ impl GarbageCollectorOrchestrator {
                 soft_deleted_collections: self.soft_deleted_collections_to_gc.clone(),
                 cutoff_time: self.version_absolute_cutoff_time,
                 min_versions_to_keep: self.min_versions_to_keep,
-                database_names,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -387,7 +359,7 @@ impl GarbageCollectorOrchestrator {
         let versions_to_mark = output
             .versions
             .iter()
-            .map(|(collection_id, (_database_name, versions))| {
+            .map(|(collection_id, versions)| {
                 let version_file = self
                     .version_files
                     .get(collection_id)
@@ -431,7 +403,7 @@ impl GarbageCollectorOrchestrator {
         let version_files = self.version_files.clone();
 
         let mut stream = futures::stream::iter(output.versions.into_iter().flat_map(
-            |(collection_id, (_database_name, versions))| {
+            |(collection_id, versions)| {
                 versions
                     .keys()
                     .map(|version| (collection_id, *version))
@@ -504,7 +476,7 @@ impl GarbageCollectorOrchestrator {
             ),
         )?;
 
-        for (collection_id, (database_name, versions)) in &versions_to_delete.versions {
+        for (collection_id, versions) in &versions_to_delete.versions {
             let Some(&min_version_to_keep) = versions
                 .iter()
                 .filter_map(|(version, action)| {
@@ -549,10 +521,7 @@ impl GarbageCollectorOrchestrator {
             collections_to_garbage_collect.insert(
                 *collection_id,
                 // The minimum offset to keep is one after the minimum compaction offset
-                (
-                    database_name.clone(),
-                    LogPosition::from_offset(min_compaction_log_offset) + 1u64,
-                ),
+                LogPosition::from_offset(min_compaction_log_offset) + 1u64,
             );
         }
 
@@ -568,6 +537,7 @@ impl GarbageCollectorOrchestrator {
             DeleteUnusedLogsInput {
                 collections_to_destroy,
                 collections_to_garbage_collect,
+                database_name: self.database_name.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -601,7 +571,6 @@ impl GarbageCollectorOrchestrator {
                 "Expected versions_to_delete_output to contain collection {}",
                 output.collection_id
             )))?
-            .1
             .get(&output.version)
             .ok_or(GarbageCollectorError::InvariantViolation(format!(
                 "Expected versions_to_delete_output to contain version {} for collection {}",
@@ -856,7 +825,7 @@ impl GarbageCollectorOrchestrator {
         let versions_to_delete = versions_to_delete
             .versions
             .iter()
-            .filter_map(|(collection_id, (_database_name, versions))| {
+            .filter_map(|(collection_id, versions)| {
                 let versions = versions
                     .iter()
                     .filter_map(|(version, action)| {
