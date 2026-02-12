@@ -3432,9 +3432,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_ne!(
+        assert_eq!(
             res.status(),
-            200,
+            reqwest::StatusCode::BAD_REQUEST,
             "multi-region database fork should be rejected"
         );
         let response_json = res.json::<serde_json::Value>().await.unwrap();
