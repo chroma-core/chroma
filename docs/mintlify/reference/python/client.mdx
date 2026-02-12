@@ -6,131 +6,138 @@ title: "Client"
 
 ### EphemeralClient
 
-Creates an in-memory instance of Chroma. This is useful for testing and
+Create an in-memory client for local use.
 
-development, but not recommended for production use.
+This client stores all data in memory and does not persist to disk.
+It is intended for testing and development.
 
-<ParamField path="settings" type="Optional[Settings]" />
+<ParamField path="settings" type="Optional[Settings]">
+  Optional settings to override defaults.
+</ParamField>
 
 <ParamField path="tenant" type="str">
-  The tenant to use for this client. Defaults to the default tenant.
+  Tenant name to use for requests. Defaults to the default tenant.
 </ParamField>
 
 <ParamField path="database" type="str">
-  The database to use for this client. Defaults to the default database.
+  Database name to use for requests. Defaults to the default database.
 </ParamField>
 
 
 ### PersistentClient
 
-Creates a persistent instance of Chroma that saves to disk. This is useful for
+Create a persistent client that stores data on disk.
 
-testing and development, but not recommended for production use.
+This client is intended for local development and testing. For production,
+prefer a server-backed Chroma instance.
 
 <ParamField path="path" type="Union[str, Path]">
-  The directory to save Chroma's data to. Defaults to "./chroma".
+  Directory to store persisted data.
 </ParamField>
 
-<ParamField path="settings" type="Optional[Settings]" />
+<ParamField path="settings" type="Optional[Settings]">
+  Optional settings to override defaults.
+</ParamField>
 
 <ParamField path="tenant" type="str">
-  The tenant to use for this client. Defaults to the default tenant.
+  Tenant name to use for requests.
 </ParamField>
 
 <ParamField path="database" type="str">
-  The database to use for this client. Defaults to the default database.
+  Database name to use for requests.
 </ParamField>
 
 
 ### HttpClient
 
-Creates a client that connects to a remote Chroma server. This supports
-
-many clients connecting to the same server, and is the recommended way to
-use Chroma in production.
+Create a client that connects to a Chroma server.
 
 <ParamField path="host" type="str">
-  The hostname of the Chroma server. Defaults to "localhost".
+  Hostname of the Chroma server.
 </ParamField>
 
 <ParamField path="port" type="int">
-  The port of the Chroma server. Defaults to 8000.
+  HTTP port of the Chroma server.
 </ParamField>
 
 <ParamField path="ssl" type="bool">
-  Whether to use SSL to connect to the Chroma server. Defaults to False.
+  Whether to enable SSL for the connection.
 </ParamField>
 
 <ParamField path="headers" type="Optional[Dict[str, str]]">
-  A dictionary of headers to send to the Chroma server. Defaults to \{\}.
+  Optional headers to send with each request.
 </ParamField>
 
 <ParamField path="settings" type="Optional[Settings]">
-  A dictionary of settings to communicate with the chroma server.
+  Optional settings to override defaults.
 </ParamField>
 
 <ParamField path="tenant" type="str">
-  The tenant to use for this client. Defaults to the default tenant.
+  Tenant name to use for requests.
 </ParamField>
 
 <ParamField path="database" type="str">
-  The database to use for this client. Defaults to the default database.
+  Database name to use for requests.
 </ParamField>
 
 
 ### AsyncHttpClient
 
-Creates an async client that connects to a remote Chroma server. This supports
+Create an async client that connects to a Chroma HTTP server.
 
-many clients connecting to the same server, and is the recommended way to
-use Chroma in production.
+This supports multiple clients connecting to the same server and is the
+recommended production configuration.
 
 <ParamField path="host" type="str">
-  The hostname of the Chroma server. Defaults to "localhost".
+  Hostname of the Chroma server.
 </ParamField>
 
 <ParamField path="port" type="int">
-  The port of the Chroma server. Defaults to 8000.
+  HTTP port of the Chroma server.
 </ParamField>
 
 <ParamField path="ssl" type="bool">
-  Whether to use SSL to connect to the Chroma server. Defaults to False.
+  Whether to enable SSL for the connection.
 </ParamField>
 
 <ParamField path="headers" type="Optional[Dict[str, str]]">
-  A dictionary of headers to send to the Chroma server. Defaults to \{\}.
+  Optional headers to send with each request.
 </ParamField>
 
 <ParamField path="settings" type="Optional[Settings]">
-  A dictionary of settings to communicate with the chroma server.
+  Optional settings to override defaults.
 </ParamField>
 
 <ParamField path="tenant" type="str">
-  The tenant to use for this client. Defaults to the default tenant.
+  Tenant name to use for requests.
 </ParamField>
 
 <ParamField path="database" type="str">
-  The database to use for this client. Defaults to the default database.
+  Database name to use for requests.
 </ParamField>
 
 
 ### CloudClient
 
-Creates a client to connect to a tenant and database on Chroma cloud.
+Create a client for Chroma Cloud.
+
+If not provided, `tenant`, `database`, and `api_key` will be inferred from the environment variables `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`.
 
 <ParamField path="tenant" type="Optional[str]">
-  The tenant to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single tenant. If provided, it will be validated against the API key's scope.
+  Tenant name to use, or None to infer from credentials.
 </ParamField>
 
 <ParamField path="database" type="Optional[str]">
-  The database to use for this client. Optional. If not provided, it will be inferred from the API key if the key is scoped to a single database. If provided, it will be validated against the API key's scope.
+  Database name to use, or None to infer from credentials.
 </ParamField>
 
 <ParamField path="api_key" type="Optional[str]">
-  The api key to use for this client.
+  API key for Chroma Cloud.
 </ParamField>
 
-<ParamField path="settings" type="Optional[Settings]" />
+<ParamField path="settings" type="Optional[Settings]">
+  Optional settings to override defaults.
+</ParamField>
 
 <ParamField path="cloud_host" type="str" />
 
@@ -141,7 +148,7 @@ Creates a client to connect to a tenant and database on Chroma cloud.
 
 ### AdminClient
 
-Creates an admin client that can be used to create tenants and databases.
+Create an admin client for tenant and database management.
 
 <ParamField path="settings" type="Settings" />
 
@@ -261,7 +268,7 @@ Returns:
 Examples:
     ```python
     client.get_or_create_collection("my_collection")
-    # collection(name="my_collection", metadata=\{\})
+    # collection(name="my_collection", metadata={})
     ```
 
 <ParamField path="name" type="str" required />
