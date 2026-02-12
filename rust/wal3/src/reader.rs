@@ -96,7 +96,6 @@ pub fn scan_from_manifest(
 
 /// Post process the fragments such that only records starting at from and not exceeding limits
 /// will be processed.  Sets *short_read=true when the limits truncate the log.
-#[tracing::instrument(skip(fragments))]
 fn post_process_fragments(
     mut fragments: Vec<Fragment>,
     from: LogPosition,
@@ -229,7 +228,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     ///    interval.
     /// 2. Up to, and including, the number of files to return.
     /// 3. Up to, and including, the total number of bytes to return.
-    #[tracing::instrument(skip(self))]
     pub async fn scan(&self, from: LogPosition, limits: Limits) -> Result<Vec<Fragment>, Error> {
         let Some((manifest, _)) = self.manifest_consumer.manifest_load().await? else {
             return Err(Error::UninitializedLog);
@@ -246,7 +244,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     ///
     /// This differs from scan in that it takes a loaded manifest.
     /// This differs from scan_from_manifest because it will load snapshots.
-    #[tracing::instrument(skip(self))]
     pub async fn scan_with_cache(
         &self,
         manifest: &Manifest,
