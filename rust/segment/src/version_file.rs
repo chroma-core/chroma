@@ -156,7 +156,7 @@ impl VersionFileManager {
 
         // Upload to storage
         self.storage
-            .put_bytes(&version_file_path, content, PutOptions::default())
+            .put_bytes(version_file_path, content, PutOptions::default())
             .await
             .map_err(|e| {
                 tracing::error!(
