@@ -630,11 +630,32 @@ impl SysDb for SysdbService {
 
     async fn delete_collection_version(
         &self,
-        _request: Request<DeleteCollectionVersionRequest>,
+        request: Request<DeleteCollectionVersionRequest>,
     ) -> Result<Response<DeleteCollectionVersionResponse>, Status> {
-        Err(Status::unimplemented(
-            "delete_collection_version is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let database_name = proto_req
+            .database_name
+            .as_ref()
+            .and_then(|s| DatabaseName::new(s))
+            .ok_or_else(|| Status::invalid_argument("database_name is required"))?;
+
+        let mut collection_id_to_success = std::collections::HashMap::new();
+        for version_list in &proto_req.versions {
+            let collection_id_str = version_list.collection_id.clone();
+            let success = self
+                .update_version_file_single_collection(
+                    version_list,
+                    &database_name,
+                    VersionFileOperation::DeleteVersions,
+                )
+                .await
+                .is_ok();
+            collection_id_to_success.insert(collection_id_str, success);
+        }
+
+        Ok(Response::new(DeleteCollectionVersionResponse {
+            collection_id_to_success,
+        }))
     }
 
     async fn batch_get_collection_version_file_paths(
@@ -896,8 +917,6 @@ impl SysdbService {
         segments: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
         new_version: i64,
         version_file_type: VersionFileType,
-        log_position: i64,
-        current_collection_version: i64,
     ) -> Result<(chroma_types::chroma_proto::CollectionVersionFile, String), SysDbError> {
         let version_file_manager = VersionFileManager::new(storage.clone());
 
@@ -956,11 +975,11 @@ impl SysdbService {
                 segment_compaction_info: segments_to_use,
             }),
             collection_info_mutable: Some(chroma_types::chroma_proto::CollectionInfoMutable {
-                current_log_position: log_position,
-                current_collection_version: current_collection_version,
+                current_log_position: collection.log_position,
+                current_collection_version: collection.version as i64,
                 updated_at_secs: ts_secs,
-                dimension: 0,                 // Default value - not used in Go version
-                last_compaction_time_secs: 0, // Default value - not used in Go version
+                dimension: 0, // Default value - not used in Go version
+                last_compaction_time_secs: ts_secs,
             }),
             created_at_secs: ts_secs,
             version_change_reason: VersionChangeReason::DataCompaction as i32,
@@ -1064,6 +1083,11 @@ impl SysdbService {
                             target_versions.len()
                         )));
                     }
+                }
+                VersionFileOperation::DeleteVersions => {
+                    version_history
+                        .versions
+                        .retain(|v| !target_versions.contains(&v.version));
                 }
             }
 
@@ -1173,18 +1197,21 @@ impl SysdbService {
 #[derive(Debug, Clone, Copy)]
 enum VersionFileOperation {
     MarkForDeletion,
+    DeleteVersions,
 }
 
 impl VersionFileOperation {
     fn name(&self) -> &'static str {
         match self {
             VersionFileOperation::MarkForDeletion => "mark_version_for_deletion",
+            VersionFileOperation::DeleteVersions => "delete_collection_version",
         }
     }
 
     fn version_file_type(&self) -> VersionFileType {
         match self {
             VersionFileOperation::MarkForDeletion => VersionFileType::GarbageCollectionMark,
+            VersionFileOperation::DeleteVersions => VersionFileType::GarbageCollectionDelete,
         }
     }
 }

@@ -713,10 +713,13 @@ impl SysDb {
     pub async fn delete_collection_version(
         &mut self,
         versions: Vec<VersionListForCollection>,
+        database_name: Option<DatabaseName>,
     ) -> Result<HashMap<String, bool>, DeleteCollectionVersionError> {
         match self {
             SysDb::Grpc(client) => {
-                let response = client.delete_collection_version(versions).await?;
+                let response = client
+                    .delete_collection_version(versions, database_name)
+                    .await?;
                 Ok(response)
             }
             SysDb::Test(client) => Ok(client.delete_collection_version(versions).await),
@@ -2101,13 +2104,27 @@ impl GrpcSysDb {
     async fn delete_collection_version(
         &mut self,
         versions: Vec<chroma_proto::VersionListForCollection>,
+        database_name: Option<DatabaseName>,
     ) -> Result<HashMap<String, bool>, DeleteCollectionVersionError> {
         let req = chroma_proto::DeleteCollectionVersionRequest {
             epoch_id: 0, // TODO: Pass this through
             versions,
+            database_name: database_name.as_ref().map(|d| d.as_ref().to_string()),
         };
 
-        let res = self.client.delete_collection_version(req).await?;
+        let res = match database_name {
+            Some(ref db_name) => {
+                self.client(db_name)
+                    .map_err(|e| {
+                        DeleteCollectionVersionError::FailedToDeleteVersion(
+                            tonic::Status::internal(e.to_string()),
+                        )
+                    })?
+                    .delete_collection_version(req)
+                    .await?
+            }
+            None => self.client.delete_collection_version(req).await?,
+        };
         Ok(res.into_inner().collection_id_to_success)
     }
 

@@ -140,7 +140,6 @@ impl Operator<ComputeVersionsToDeleteInput, ComputeVersionsToDeleteOutput>
             database_id: collection_info.database_id.clone(),
             collection_id: collection_info.collection_id.clone(),
             versions: marked_versions,
-            database_name: None,
         };
 
         tracing::info!(

@@ -385,7 +385,6 @@ impl GarbageCollectorOrchestrator {
                         .collect::<Vec<_>>(),
                     tenant_id: collection_info.tenant_id.clone(),
                     database_id: collection_info.database_id.clone(),
-                    database_name: self.database_name.as_ref().map(|d| d.as_ref().to_string()),
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
@@ -882,6 +881,20 @@ impl GarbageCollectorOrchestrator {
                 ),
             )?;
 
+            if let Some(db_name) = self.database_name.clone() {
+                let db_name_str = db_name.into_string();
+                if db_name_str != collection_info.database_name {
+                    tracing::error!(
+                        "Database name mismatch: expected {}, got {}",
+                        db_name_str,
+                        collection_info.database_name
+                    );
+                    return Err(GarbageCollectorError::InvariantViolation(
+                        "Database name mismatch".to_string(),
+                    ));
+                }
+            }
+
             let delete_versions_task = wrap(
                 Box::new(DeleteVersionsAtSysDbOperator {
                     storage: self.storage.clone(),
@@ -895,8 +908,8 @@ impl GarbageCollectorOrchestrator {
                         database_id: collection_info.database_id.clone(),
                         collection_id: collection_id.to_string(),
                         versions,
-                        database_name: self.database_name.as_ref().map(|d| d.as_ref().to_string()),
                     },
+                    database_name: self.database_name.clone(),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
