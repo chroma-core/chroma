@@ -108,12 +108,18 @@ class Client(SharedSystemClient, ClientAPI):
             # If init fails after refcount was incremented, decrement it to
             # avoid a resource leak (the caller never receives the object to
             # call close() on it).
-            SharedSystemClient._decrement_refcount(self._identifier)
             # Also decrement the admin_client's refcount if it was created
             if hasattr(self, "_admin_client"):
                 SharedSystemClient._decrement_refcount(
                     self._admin_client._identifier
                 )
+            refcount = SharedSystemClient._decrement_refcount(self._identifier)
+            if refcount <= 0:
+                system = SharedSystemClient._identifier_to_system.pop(
+                    self._identifier, None
+                )
+                if system is not None:
+                    system.stop()
             raise
 
     @classmethod

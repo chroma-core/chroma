@@ -168,11 +168,14 @@ def test_persistent_client_close() -> None:
             metadatas=[{"key": "value1"}, {"key": "value2"}],
         )
 
+        # Save a reference to the system before close() removes it from the cache
+        system = client._system
+
         # Close the client
         client.close()
 
         # Verify the system is stopped
-        assert client._system._running is False
+        assert system._running is False
 
         # Create a new client with the same path to verify data was persisted
         client2 = chromadb.PersistentClient(path=tmpdir)
@@ -195,6 +198,8 @@ def test_persistent_client_context_manager() -> None:
     with tempfile.TemporaryDirectory() as tmpdir:
         # Use client as context manager
         with chromadb.PersistentClient(path=tmpdir) as client:
+            # Save a reference to the system before close() removes it from the cache
+            system = client._system
             collection = client.create_collection("test_collection")
             collection.add(
                 ids=["id1", "id2"],
@@ -203,7 +208,7 @@ def test_persistent_client_context_manager() -> None:
             )
 
         # Verify the system is stopped after context exit
-        assert client._system._running is False
+        assert system._running is False
 
         # Verify data was persisted
         with chromadb.PersistentClient(path=tmpdir) as client2:
@@ -221,6 +226,8 @@ def test_ephemeral_client_close() -> None:
         pytest.skip("Integration test only")
 
     client = chromadb.EphemeralClient()
+    # Save a reference to the system before close() removes it from the cache
+    system = client._system
     collection = client.create_collection("test_collection")
     collection.add(ids=["id1"], documents=["doc1"])
 
@@ -228,7 +235,7 @@ def test_ephemeral_client_close() -> None:
     client.close()
 
     # Verify the system is stopped
-    assert client._system._running is False
+    assert system._running is False
 
     client.clear_system_cache()
 
@@ -239,12 +246,14 @@ def test_ephemeral_client_context_manager() -> None:
         pytest.skip("Integration test only")
 
     with chromadb.EphemeralClient() as client:
+        # Save a reference to the system before close() removes it from the cache
+        system = client._system
         collection = client.create_collection("test_collection")
         collection.add(ids=["id1"], documents=["doc1"])
-        assert client._system._running is True
+        assert system._running is True
 
     # Verify the system is stopped after context exit
-    assert client._system._running is False
+    assert system._running is False
 
     client.clear_system_cache()
 
