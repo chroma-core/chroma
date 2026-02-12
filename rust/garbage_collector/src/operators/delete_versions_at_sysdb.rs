@@ -211,6 +211,7 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![2, 3, 4],
+            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -242,6 +243,7 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![],
+            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -383,6 +385,7 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![1, 2],
+            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {
@@ -453,6 +456,7 @@ mod tests {
             database_id: "default".to_string(),
             tenant_id: "default".to_string(),
             versions: vec![1, 2],
+            database_name: None,
         };
 
         let input = DeleteVersionsAtSysDbInput {

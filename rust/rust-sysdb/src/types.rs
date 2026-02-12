@@ -478,6 +478,21 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
     }
 }
 
+impl GetCollectionsRequest {
+    pub fn for_collection(
+        collection_id: CollectionUuid,
+        database_name: DatabaseName,
+        include_soft_deleted: bool,
+    ) -> Self {
+        Self {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .database_name(database_name)
+                .include_soft_deleted(include_soft_deleted),
+        }
+    }
+}
+
 /// Internal request for getting a collection with its segments.
 #[derive(Debug, Clone)]
 pub struct GetCollectionWithSegmentsRequest {
@@ -1598,6 +1613,30 @@ impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsR
             .ok_or_else(|| {
                 SysDbError::InvalidArgument(
                     "database name must be at least 3 characters".to_string(),
+                )
+            })?;
+        let filter = CollectionFilter::default()
+            .ids(vec![collection_id])
+            .database_name(database_name);
+        Ok(GetCollectionsRequest { filter })
+    }
+}
+
+// TryFrom implementation for GetCollectionsRequest from VersionListForCollection
+impl TryFrom<&chroma_proto::VersionListForCollection> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        version_list: &chroma_proto::VersionListForCollection,
+    ) -> Result<Self, Self::Error> {
+        let collection_id = CollectionUuid(validate_uuid(&version_list.collection_id)?);
+        let database_name = version_list
+            .database_name
+            .as_ref()
+            .and_then(|s| DatabaseName::new(s))
+            .ok_or_else(|| {
+                SysDbError::InvalidArgument(
+                    "database_name is required for GetCollectionsRequest".to_string(),
                 )
             })?;
         let filter = CollectionFilter::default()
