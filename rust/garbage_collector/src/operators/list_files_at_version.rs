@@ -4,11 +4,15 @@ use chroma_blockstore::{arrow::provider::RootManagerError, RootManager};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
     hnsw_provider::{HnswIndexProvider, FILES},
+    usearch::USearchIndex,
     IndexUuid,
 };
 use chroma_storage::StorageError;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid, Segment, HNSW_PATH};
+use chroma_types::{
+    chroma_proto::CollectionVersionFile, CollectionUuid, Segment, HNSW_PATH,
+    QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
+};
 use futures::stream::StreamExt;
 use std::{collections::HashMap, str::FromStr, sync::Arc};
 use thiserror::Error;
@@ -137,6 +141,19 @@ impl Operator<ListFilesAtVersionInput, ListFilesAtVersionOutput> for ListFilesAt
                                 );
                                 file_paths.insert_path(s3_key);
                             }
+                        }
+                    } else if file_type == QUANTIZED_SPANN_RAW_CENTROID
+                        || file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID
+                    {
+                        let quantized = file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID;
+                        for path in &segment_paths.paths {
+                            let (prefix, id) = Segment::extract_prefix_and_id(path)
+                                .map_err(ListFilesAtVersionError::InvalidUuid)?;
+                            file_paths.insert_path(USearchIndex::format_storage_key(
+                                prefix,
+                                IndexUuid(id),
+                                quantized,
+                            ));
                         }
                     } else {
                         // Must be a sparse index
