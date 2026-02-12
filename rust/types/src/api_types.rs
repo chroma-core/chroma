@@ -147,6 +147,8 @@ pub enum BatchGetCollectionSoftDeleteStatusError {
     Grpc(#[from] Status),
     #[error("Could not parse UUID from string {1}: {0}")]
     Uuid(uuid::Error, String),
+    #[error("Client resolution error: {0}")]
+    ClientResolution(#[from] ClientResolutionError),
 }
 
 impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
@@ -154,6 +156,7 @@ impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
         match self {
             BatchGetCollectionSoftDeleteStatusError::Grpc(status) => status.code().into(),
             BatchGetCollectionSoftDeleteStatusError::Uuid(_, _) => ErrorCodes::InvalidArgument,
+            BatchGetCollectionSoftDeleteStatusError::ClientResolution(e) => e.code(),
         }
     }
 }
