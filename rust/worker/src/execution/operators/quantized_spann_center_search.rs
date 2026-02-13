@@ -8,42 +8,42 @@ use chroma_types::operator::Knn;
 use thiserror::Error;
 
 #[derive(Debug)]
-pub struct QuantizedSpannNavigateInput {
+pub struct QuantizedSpannCenterSearchInput {
     pub count: usize,
     pub reader: QuantizedSpannSegmentReader,
 }
 
 #[derive(Debug)]
-pub struct QuantizedSpannNavigateOutput {
+pub struct QuantizedSpannCenterSearchOutput {
     pub cluster_ids: Vec<u32>,
     pub rotated_query: Arc<[f32]>,
 }
 
 #[derive(Error, Debug)]
-pub enum QuantizedSpannNavigateError {
-    #[error("Error navigating quantized spann segment: {0}")]
-    NavigateError(#[from] QuantizedSpannSegmentError),
+pub enum QuantizedSpannCenterSearchError {
+    #[error("Error searching quantized spann centers: {0}")]
+    CenterSearchError(#[from] QuantizedSpannSegmentError),
 }
 
-impl ChromaError for QuantizedSpannNavigateError {
+impl ChromaError for QuantizedSpannCenterSearchError {
     fn code(&self) -> ErrorCodes {
         match self {
-            Self::NavigateError(e) => e.code(),
+            Self::CenterSearchError(e) => e.code(),
         }
     }
 }
 
 #[async_trait]
-impl Operator<QuantizedSpannNavigateInput, QuantizedSpannNavigateOutput> for Knn {
-    type Error = QuantizedSpannNavigateError;
+impl Operator<QuantizedSpannCenterSearchInput, QuantizedSpannCenterSearchOutput> for Knn {
+    type Error = QuantizedSpannCenterSearchError;
 
     async fn run(
         &self,
-        input: &QuantizedSpannNavigateInput,
-    ) -> Result<QuantizedSpannNavigateOutput, QuantizedSpannNavigateError> {
+        input: &QuantizedSpannCenterSearchInput,
+    ) -> Result<QuantizedSpannCenterSearchOutput, QuantizedSpannCenterSearchError> {
         let rotated_query = input.reader.rotate(&self.embedding)?;
         let cluster_ids = input.reader.navigate(&rotated_query, input.count)?;
-        Ok(QuantizedSpannNavigateOutput {
+        Ok(QuantizedSpannCenterSearchOutput {
             cluster_ids,
             rotated_query: rotated_query.into(),
         })

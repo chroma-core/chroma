@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use chroma_segment::{quantized_spann::QuantizedSpannSegmentReader, spann_provider::SpannProvider};
 use chroma_system::{
@@ -5,6 +7,7 @@ use chroma_system::{
     OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::{
+    default_search_nprobe,
     operator::{Knn, KnnOutput, Merge, RecordMeasure},
     CollectionAndSegments,
 };
@@ -18,8 +21,17 @@ use crate::execution::operators::{
         QuantizedSpannBruteforceError, QuantizedSpannBruteforceInput,
         QuantizedSpannBruteforceOperator, QuantizedSpannBruteforceOutput,
     },
-    quantized_spann_navigate::{
-        QuantizedSpannNavigateError, QuantizedSpannNavigateInput, QuantizedSpannNavigateOutput,
+    quantized_spann_center_search::{
+        QuantizedSpannCenterSearchError, QuantizedSpannCenterSearchInput,
+        QuantizedSpannCenterSearchOutput,
+    },
+    quantized_spann_load_center::{
+        QuantizedSpannLoadCenterError, QuantizedSpannLoadCenterOperator,
+        QuantizedSpannLoadCenterOutput,
+    },
+    quantized_spann_load_cluster::{
+        QuantizedSpannLoadClusterError, QuantizedSpannLoadClusterInput,
+        QuantizedSpannLoadClusterOperator, QuantizedSpannLoadClusterOutput,
     },
 };
 
@@ -33,9 +45,11 @@ pub struct QuantizedSpannKnnOrchestrator {
     knn_filter_output: KnnFilterOutput,
     queue: usize,
     reader: Option<QuantizedSpannSegmentReader>,
+    rotated_query: Option<Arc<[f32]>>,
     spann_provider: SpannProvider,
 
     // State tracking.
+    // num_bruteforces is set when either there is no reader (0) or center search completes.
     num_bruteforces: Option<usize>,
     records: Vec<Vec<RecordMeasure>>,
 
@@ -59,6 +73,7 @@ impl QuantizedSpannKnnOrchestrator {
             knn_filter_output,
             queue,
             reader: None,
+            rotated_query: None,
             spann_provider,
             num_bruteforces: None,
             records: Vec::new(),
@@ -67,13 +82,7 @@ impl QuantizedSpannKnnOrchestrator {
     }
 
     async fn try_merge(&mut self, ctx: &ComponentContext<Self>) {
-        if !self.records.is_empty() && self.reader.is_none() {
-            let records = std::mem::take(&mut self.records);
-            self.terminate_with_result(Ok(records.into_iter().flatten().collect()), ctx)
-                .await;
-            return;
-        }
-
+        // Merge once KnnLog + all bruteforces report in.
         if self
             .num_bruteforces
             .is_some_and(|num_bruteforces| self.records.len() > num_bruteforces)
@@ -125,48 +134,26 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
-        // 2. Create reader and dispatch Navigate if segment is initialized.
-        if !self
+        // 2. LoadCenter — dispatched if segment is initialized.
+        if self
             .collection_and_segments
             .vector_segment
             .file_path
             .is_empty()
         {
-            match self
-                .spann_provider
-                .read_quantized_usearch(
-                    &self.collection_and_segments.collection,
-                    &self.collection_and_segments.vector_segment,
-                )
-                .await
-            {
-                Ok(reader) => {
-                    let search_nprobe = self
-                        .collection_and_segments
-                        .collection
-                        .schema
-                        .as_ref()
-                        .and_then(|s| s.get_spann_config())
-                        .and_then(|(config, _)| config.search_nprobe)
-                        .unwrap_or(64) as usize;
-
-                    let navigate_task = wrap(
-                        Box::new(self.knn.clone()),
-                        QuantizedSpannNavigateInput {
-                            count: search_nprobe,
-                            reader: reader.clone(),
-                        },
-                        ctx.receiver(),
-                        self.context.task_cancellation_token.clone(),
-                    );
-                    tasks.push((navigate_task, Some(Span::current())));
-                    self.reader = Some(reader);
-                }
-                Err(e) => {
-                    self.terminate_with_result(Err(KnnError::QuantizedSpannReader(e)), ctx)
-                        .await;
-                }
-            }
+            self.num_bruteforces = Some(0);
+        } else {
+            let load_center_task = wrap(
+                Box::new(QuantizedSpannLoadCenterOperator {
+                    collection: self.collection_and_segments.collection.clone(),
+                    spann_provider: self.spann_provider.clone(),
+                    vector_segment: self.collection_and_segments.vector_segment.clone(),
+                }),
+                (),
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
+            tasks.push((load_center_task, Some(Span::current())));
         }
 
         tasks
@@ -203,13 +190,53 @@ impl Handler<TaskResult<KnnOutput, KnnLogError>> for QuantizedSpannKnnOrchestrat
 }
 
 #[async_trait]
-impl Handler<TaskResult<QuantizedSpannNavigateOutput, QuantizedSpannNavigateError>>
+impl Handler<TaskResult<QuantizedSpannLoadCenterOutput, QuantizedSpannLoadCenterError>>
     for QuantizedSpannKnnOrchestrator
 {
     type Result = ();
     async fn handle(
         &mut self,
-        message: TaskResult<QuantizedSpannNavigateOutput, QuantizedSpannNavigateError>,
+        message: TaskResult<QuantizedSpannLoadCenterOutput, QuantizedSpannLoadCenterError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        self.reader = Some(output.reader.clone());
+
+        let search_nprobe = self
+            .collection_and_segments
+            .collection
+            .schema
+            .as_ref()
+            .and_then(|s| s.get_spann_config())
+            .and_then(|(config, _)| config.search_nprobe)
+            .unwrap_or(default_search_nprobe()) as usize;
+
+        let center_search_task = wrap(
+            Box::new(self.knn.clone()),
+            QuantizedSpannCenterSearchInput {
+                count: search_nprobe,
+                reader: output.reader,
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(center_search_task, ctx, Some(Span::current()))
+            .await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<QuantizedSpannCenterSearchOutput, QuantizedSpannCenterSearchError>>
+    for QuantizedSpannKnnOrchestrator
+{
+    type Result = ();
+    async fn handle(
+        &mut self,
+        message: TaskResult<QuantizedSpannCenterSearchOutput, QuantizedSpannCenterSearchError>,
         ctx: &ComponentContext<Self>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
@@ -218,6 +245,7 @@ impl Handler<TaskResult<QuantizedSpannNavigateOutput, QuantizedSpannNavigateErro
         };
 
         self.num_bruteforces = Some(output.cluster_ids.len());
+        self.rotated_query = Some(output.rotated_query.clone());
 
         if output.cluster_ids.is_empty() {
             self.try_merge(ctx).await;
@@ -227,7 +255,51 @@ impl Handler<TaskResult<QuantizedSpannNavigateOutput, QuantizedSpannNavigateErro
         let reader = self
             .reader
             .as_ref()
-            .expect("reader must be set when navigate succeeds")
+            .expect("reader must be set when center search succeeds")
+            .clone();
+
+        let load_cluster_operator = QuantizedSpannLoadClusterOperator {
+            reader: reader.clone(),
+        };
+
+        for cluster_id in output.cluster_ids {
+            let load_cluster_task = wrap(
+                Box::new(load_cluster_operator.clone()),
+                QuantizedSpannLoadClusterInput { cluster_id },
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
+            self.send(load_cluster_task, ctx, Some(Span::current()))
+                .await;
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClusterError>>
+    for QuantizedSpannKnnOrchestrator
+{
+    type Result = ();
+    async fn handle(
+        &mut self,
+        message: TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClusterError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        let reader = self
+            .reader
+            .as_ref()
+            .expect("reader must be set when load cluster succeeds")
+            .clone();
+
+        let rotated_query = self
+            .rotated_query
+            .as_ref()
+            .expect("rotated_query must be set when load cluster succeeds")
             .clone();
 
         let bf_operator = QuantizedSpannBruteforceOperator {
@@ -238,17 +310,18 @@ impl Handler<TaskResult<QuantizedSpannNavigateOutput, QuantizedSpannNavigateErro
                 .compact_offset_ids
                 .clone(),
             reader,
-            rotated_query: output.rotated_query,
+            rotated_query,
         };
-        for cluster_id in output.cluster_ids {
-            let bf_task = wrap(
-                Box::new(bf_operator.clone()),
-                QuantizedSpannBruteforceInput { cluster_id },
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            );
-            self.send(bf_task, ctx, Some(Span::current())).await;
-        }
+
+        let bf_task = wrap(
+            Box::new(bf_operator),
+            QuantizedSpannBruteforceInput {
+                cluster_id: output.cluster_id,
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(bf_task, ctx, Some(Span::current())).await;
     }
 }
 
