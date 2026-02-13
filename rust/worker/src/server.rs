@@ -84,7 +84,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
         )
         .await?;
         let usearch_cache =
-            chroma_cache::from_config(&config.hnsw_provider.hnsw_cache_config).await?;
+            chroma_cache::from_config(&config.spann_provider.usearch_provider.cache_config).await?;
         let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
 
         let spann_provider = SpannProvider::try_from_config(
