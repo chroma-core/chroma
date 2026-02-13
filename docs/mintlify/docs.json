@@ -214,11 +214,11 @@
               "integrations/frameworks/langchain",
               "integrations/frameworks/llamaindex",
               "integrations/frameworks/mem0",
+              "integrations/frameworks/n8n",
               "integrations/frameworks/openlit",
               "integrations/frameworks/openllmetry",
               "integrations/frameworks/streamlit",
-              "integrations/frameworks/voltagent",
-              "integrations/frameworks/n8n"
+              "integrations/frameworks/voltagent"
             ]
           }
         ]
