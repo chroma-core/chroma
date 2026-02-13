@@ -1029,7 +1029,7 @@ impl Schema {
                     quantize: variant,
                     ..*spann_config
                 },
-                Quantization::USearch4BitRabitQ => SpannIndexConfig {
+                Quantization::FourBitRabitQWithUSearch => SpannIndexConfig {
                     search_nprobe: Some(64),
                     nreplica_count: Some(2),
                     write_rng_factor: Some(4.0),
@@ -2769,7 +2769,7 @@ impl HnswIndexConfig {
 pub enum Quantization {
     #[default]
     None,
-    USearch4BitRabitQ,
+    FourBitRabitQWithUSearch,
 }
 
 fn is_default_quantization(v: &Quantization) -> bool {
@@ -3722,7 +3722,7 @@ mod tests {
             ef_search: None,
             max_neighbors: None,
             center_drift_threshold: None,
-            quantize: Quantization::USearch4BitRabitQ, // This should be rejected
+            quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
         };
 
         // Should reject user schema with quantize: true
@@ -3755,7 +3755,7 @@ mod tests {
             ef_search: Some(10),
             max_neighbors: Some(16),
             center_drift_threshold: None,
-            quantize: Quantization::USearch4BitRabitQ, // This should be rejected
+            quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann_with_quantize), None);
