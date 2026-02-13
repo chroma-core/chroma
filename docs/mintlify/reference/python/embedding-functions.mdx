@@ -6,16 +6,24 @@ title: "Embedding Functions"
 
 ### EmbeddingFunction
 
-A protocol for embedding functions. To implement a new embedding function,
+Protocol for embedding functions.
 
-you need to implement the following methods at minimum:
-- __call__
+To implement a new embedding function,
+you need to implement the following methods:
+    - __init__
+    - __call__
+    - name
+    - build_from_config
+    - get_config
 
-For future compatibility, it is strongly recommended to also implement:
-- __init__
-- name
-- build_from_config
-- get_config
+Additionally, you should register the embedding function so it will automatically
+be used by the Chroma client.
+
+```python
+@register_embedding_function
+class MyEmbeddingFunction(EmbeddingFunction[Documents]):
+    ...
+```
 
 
 <span class="text-sm">Methods</span>
@@ -25,16 +33,14 @@ For future compatibility, it is strongly recommended to also implement:
 
 ### SparseEmbeddingFunction
 
-A protocol for sparse vector functions. To implement a new sparse vector function,
+Protocol for sparse embedding functions.
 
-you need to implement the following methods at minimum:
-- __call__
-
-For future compatibility, it is strongly recommended to also implement:
-- __init__
-- name
-- build_from_config
-- get_config
+To implement a new sparse embedding function, you need to implement the following methods:
+    - __call__
+    - __init__
+    - name
+    - build_from_config
+    - get_config
 
 
 <span class="text-sm">Methods</span>
@@ -51,13 +57,18 @@ For future compatibility, it is strongly recommended to also implement:
 Register a custom embedding function.
 
 Can be used as a decorator:
-    @register_embedding_function
-    class MyEmbedding(EmbeddingFunction):
-        @classmethod
-        def name(cls): return "my_embedding"
+```
+@register_embedding_function
+class MyEmbedding(EmbeddingFunction):
+    @classmethod
+    def name(cls): return "my_embedding"
+```
 
 Or directly:
-    register_embedding_function(MyEmbedding)
+
+```
+register_embedding_function(MyEmbedding)
+```
 
 <ParamField path="ef_class" type="Any">
   The embedding function class to register.
@@ -69,11 +80,12 @@ Or directly:
 Register a custom sparse embedding function.
 
 Can be used as a decorator:
-    @register_sparse_embedding_function
-    class MySparseEmbeddingFunction(SparseEmbeddingFunction):
-        @classmethod
-        def name(cls): return "my_sparse_embedding"
-
+```
+@register_sparse_embedding_function
+class MySparseEmbeddingFunction(SparseEmbeddingFunction):
+    @classmethod
+    def name(cls): return "my_sparse_embedding"
+```
 <ParamField path="ef_class" type="Any" />
 
 
@@ -88,7 +100,7 @@ Can be used as a decorator:
 
 ### SparseVector
 
-Represents a sparse vector using parallel arrays for indices and values.
+Sparse vector using parallel indices and values arrays.
 
 <span class="text-sm">Properties</span>
 
