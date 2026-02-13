@@ -714,7 +714,7 @@ impl ServiceBasedFrontend {
         })?;
         let collection = self
             .get_collection(
-                GetCollectionRequest::try_new(tenant_id.clone(), db_name.clone(), collection_name)
+                GetCollectionRequest::try_new(tenant_id.clone(), db_name, collection_name)
                     .map_err(DeleteCollectionError::Validation)?,
             )
             .await?;
@@ -728,7 +728,7 @@ impl ServiceBasedFrontend {
         self.sysdb_client
             .delete_collection(
                 tenant_id,
-                db_name,
+                database_name,
                 collection.collection_id,
                 segments.into_iter().map(|s| s.id).collect(),
             )

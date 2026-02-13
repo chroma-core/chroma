@@ -543,8 +543,6 @@ pub struct UpdateCollectionRequest {
     pub new_configuration: Option<UpdateCollectionConfiguration>,
     // Cursor updates (optional - None means don't change)
     pub cursor_updates: Option<UpdateCollectionCursor>,
-    /// If true, mark the collection as soft deleted (for delete_collection operation)
-    pub is_deleted: Option<bool>,
 }
 
 impl std::fmt::Debug for UpdateCollectionRequest {
@@ -617,7 +615,6 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             reset_metadata,
             new_configuration,
             cursor_updates: None,
-            is_deleted: None, // Not supported in proto UpdateCollectionRequest
         })
     }
 }
@@ -632,18 +629,6 @@ impl TryFrom<UpdateCollectionResponse> for chroma_proto::UpdateCollectionRespons
     fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
         // The proto response is empty - it doesn't return the updated collection
         Ok(chroma_proto::UpdateCollectionResponse {})
-    }
-}
-
-// For delete_collection, we reuse UpdateCollectionResponse
-use chroma_types::chroma_proto::DeleteCollectionResponse;
-
-impl TryFrom<UpdateCollectionResponse> for DeleteCollectionResponse {
-    type Error = SysDbError;
-
-    fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
-        // The proto response is empty
-        Ok(DeleteCollectionResponse {})
     }
 }
 

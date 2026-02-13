@@ -1219,8 +1219,6 @@ impl SpannerBackend {
             new_configuration,
             cursor_updates,
             database_name: _, // Ignore database_name as it's only used for routing
-            is_deleted,
-            ..
         } = req;
 
         let collection_id = id.0.to_string();
@@ -1280,22 +1278,8 @@ impl SpannerBackend {
                     let commit_ts = "spanner.commit_timestamp()";
                     let mut mutations = Vec::new();
 
-                    // Handle soft delete operation
-                    if let Some(true) = is_deleted {
-                        // For soft delete, the new name should be provided in the request
-                        let new_name = name.as_ref().ok_or_else(|| {
-                            SysDbError::InvalidArgument("name is required for soft delete operation".to_string())
-                        })?;
-
-                        mutations.push(update(
-                            "collections",
-                            &["collection_id", "name", "is_deleted", "updated_at"],
-                            &[&collection_id, new_name, &true, &commit_ts],
-                        ));
-                    }
-
                     // Determine what needs to be updated
-                    let has_collection_changes = (name.is_some() && is_deleted != Some(true)) || dimension.is_some();
+                    let has_collection_changes = name.is_some() || dimension.is_some();
                     let has_metadata_changes = metadata.is_some() || reset_metadata;
                     let has_config_changes = new_configuration.as_ref().is_some_and(|c| {
                         c.hnsw.is_some() || c.spann.is_some() || c.embedding_function.is_some()
@@ -7236,7 +7220,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7284,7 +7267,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7339,7 +7321,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7410,7 +7391,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7474,7 +7454,6 @@ pub mod tests {
             reset_metadata: true,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7528,7 +7507,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7578,7 +7556,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7632,7 +7609,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7699,7 +7675,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7750,7 +7725,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7811,7 +7785,6 @@ pub mod tests {
                 embedding_function: None,
             }),
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7862,7 +7835,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7921,7 +7893,6 @@ pub mod tests {
                 embedding_function: Some(new_ef.clone()),
             }),
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7997,7 +7968,6 @@ pub mod tests {
                 embedding_function: None,
             }),
             cursor_updates: None,
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -8309,7 +8279,6 @@ pub mod tests {
             cursor_updates: Some(UpdateCollectionCursor {
                 compaction_failure_count_increment: Some(1), // This field indicates intent to increment
             }),
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -8472,7 +8441,6 @@ pub mod tests {
             cursor_updates: Some(UpdateCollectionCursor {
                 compaction_failure_count_increment: Some(1),
             }),
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -8523,7 +8491,6 @@ pub mod tests {
             cursor_updates: Some(UpdateCollectionCursor {
                 compaction_failure_count_increment: Some(1),
             }),
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -8575,7 +8542,6 @@ pub mod tests {
             cursor_updates: Some(UpdateCollectionCursor {
                 compaction_failure_count_increment: Some(1),
             }),
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -8625,7 +8591,6 @@ pub mod tests {
             reset_metadata: false,
             new_configuration: None,
             cursor_updates: None, // No cursor updates
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -8677,7 +8642,6 @@ pub mod tests {
             cursor_updates: Some(UpdateCollectionCursor {
                 compaction_failure_count_increment: None, // Explicitly None - should not trigger increment
             }),
-            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
