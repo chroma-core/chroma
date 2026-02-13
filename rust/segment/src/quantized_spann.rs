@@ -348,7 +348,7 @@ pub struct QuantizedSpannSegmentReader {
     // Quantization parameters (for rotate + scoring)
     dimension: usize,
     distance_function: DistanceFunction,
-    rotation: Mat<f32>,
+    rotation: Arc<Mat<f32>>,
 
     // Blockfile readers
     quantized_cluster_reader: BlockfileReader<'static, u32, QuantizedCluster<'static>>,
@@ -470,7 +470,7 @@ impl QuantizedSpannSegmentReader {
                 )));
             }
         }
-        let rotation = Mat::from_fn(dimension, dimension, |i, j| columns[j].2[i]);
+        let rotation = Mat::from_fn(dimension, dimension, |i, j| columns[j].2[i]).into();
 
         let center = emb_meta_reader
             .get(PREFIX_CENTER, SINGLETON_KEY)
@@ -553,9 +553,9 @@ impl QuantizedSpannSegmentReader {
         let rotated = match self.distance_function {
             DistanceFunction::Cosine => {
                 let normalized = normalize(query);
-                &self.rotation * ColRef::from_slice(&normalized)
+                self.rotation.as_ref() * ColRef::from_slice(&normalized)
             }
-            _ => &self.rotation * ColRef::from_slice(query),
+            _ => self.rotation.as_ref() * ColRef::from_slice(query),
         };
         Ok(rotated.iter().copied().collect())
     }
