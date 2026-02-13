@@ -230,10 +230,6 @@ impl Handler<TaskResult<QuantizedSpannNavigateOutput, QuantizedSpannNavigateErro
             .expect("reader must be set when navigate succeeds")
             .clone();
 
-        reader
-            .load_clusters(output.cluster_ids.iter().copied())
-            .await;
-
         let bf_operator = QuantizedSpannBruteforceOperator {
             count: self.knn.fetch as usize,
             filter: self

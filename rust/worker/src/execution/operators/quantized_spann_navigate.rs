@@ -41,7 +41,7 @@ impl Operator<QuantizedSpannNavigateInput, QuantizedSpannNavigateOutput> for Knn
         &self,
         input: &QuantizedSpannNavigateInput,
     ) -> Result<QuantizedSpannNavigateOutput, QuantizedSpannNavigateError> {
-        let rotated_query = input.reader.rotate(&self.embedding);
+        let rotated_query = input.reader.rotate(&self.embedding)?;
         let cluster_ids = input.reader.navigate(&rotated_query, input.count)?;
         Ok(QuantizedSpannNavigateOutput {
             cluster_ids,
