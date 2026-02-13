@@ -13,7 +13,6 @@ use compactor::compaction_server::CompactionServer;
 use tokio::runtime::Handle;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
-use tracing::info;
 
 // Required for benchmark
 pub mod config;
@@ -42,8 +41,6 @@ pub async fn query_service_entrypoint() {
         &config.otel_filters,
         &config.otel_endpoint,
     );
-
-    info!("Loaded configuration successfully: {:#?}", config);
 
     let system = chroma_system::System::new();
     let dispatcher =
@@ -104,8 +101,6 @@ pub async fn compaction_service_entrypoint() {
         &config.otel_filters,
         &config.otel_endpoint,
     );
-
-    info!("Loaded configuration successfully: {:#?}", config);
 
     let system = chroma_system::System::new();
 
