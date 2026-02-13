@@ -1977,7 +1977,6 @@ dependencies = [
  "serde-pickle",
  "serde_json",
  "shuttle",
- "simsimd",
  "sqlx",
  "tantivy",
  "tempfile",

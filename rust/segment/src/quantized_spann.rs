@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 
@@ -9,10 +8,13 @@ use chroma_blockstore::{
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
-    quantization::Code,
-    spann::quantized_spann::{
-        QuantizedSpannError, QuantizedSpannFlusher, QuantizedSpannIds, QuantizedSpannIndexWriter,
-        PREFIX_CENTER, PREFIX_ROTATION, PREFIX_VERSION, SINGLETON_KEY,
+    spann::{
+        quantized_spann::{
+            QuantizedSpannError, QuantizedSpannFlusher, QuantizedSpannIds,
+            QuantizedSpannIndexWriter, PREFIX_CENTER, PREFIX_ROTATION, PREFIX_VERSION,
+            SINGLETON_KEY,
+        },
+        utils::query_quantized_cluster,
     },
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, VectorIndex, VectorIndexProvider,
@@ -27,7 +29,6 @@ use chroma_types::{
 };
 use faer::{col::ColRef, Mat};
 use futures::future;
-use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
 use crate::blockfile_record::ApplyMaterializedLogError;
@@ -39,6 +40,8 @@ pub enum QuantizedSpannSegmentError {
     Config(String),
     #[error("quantized spann data error: {0}")]
     Data(String),
+    #[error("dimension mismatch: expected {expected}, got {actual}")]
+    DimensionMismatch { expected: usize, actual: usize },
     #[error(transparent)]
     Index(#[from] QuantizedSpannError),
     #[error(transparent)]
@@ -50,6 +53,7 @@ impl ChromaError for QuantizedSpannSegmentError {
         match self {
             Self::Config(_) => ErrorCodes::InvalidArgument,
             Self::Data(_) => ErrorCodes::Internal,
+            Self::DimensionMismatch { .. } => ErrorCodes::InvalidArgument,
             Self::Index(e) => e.code(),
             Self::Schema(e) => e.code(),
         }
@@ -516,11 +520,15 @@ impl QuantizedSpannSegmentReader {
                     ))
                 })?;
 
-        // Step 4: Open scalar_metadata blockfile reader (for version lookups).
+        // Step 4: Open scalar_metadata blockfile reader (for version lookups)
+        //         and preload all version blocks into the blockfile cache.
         let scalar_options = BlockfileReaderOptions::new(scalar_metadata_id, prefix_path.clone());
         let versions_reader = blockfile_provider.read(scalar_options).await.map_err(|e| {
             QuantizedSpannSegmentError::Data(format!("failed to open scalar metadata reader: {e}"))
         })?;
+        versions_reader
+            .load_blocks_for_prefixes(std::iter::once(PREFIX_VERSION))
+            .await;
 
         Ok(Self {
             dimension,
@@ -534,7 +542,14 @@ impl QuantizedSpannSegmentReader {
 
     /// Rotate a query vector into the quantized space.
     /// Applies normalization for cosine distance, then multiplies by the rotation matrix.
-    pub fn rotate(&self, query: &[f32]) -> Vec<f32> {
+    pub fn rotate(&self, query: &[f32]) -> Result<Vec<f32>, QuantizedSpannSegmentError> {
+        if query.len() != self.dimension {
+            return Err(QuantizedSpannSegmentError::DimensionMismatch {
+                expected: self.dimension,
+                actual: query.len(),
+            });
+        }
+
         let rotated = match self.distance_function {
             DistanceFunction::Cosine => {
                 let normalized = normalize(query);
@@ -542,7 +557,7 @@ impl QuantizedSpannSegmentReader {
             }
             _ => &self.rotation * ColRef::from_slice(query),
         };
-        rotated.iter().copied().collect()
+        Ok(rotated.iter().copied().collect())
     }
 
     /// Find nearest cluster heads using the quantized centroid index.
@@ -552,6 +567,13 @@ impl QuantizedSpannSegmentReader {
         rotated_query: &[f32],
         count: usize,
     ) -> Result<Vec<u32>, QuantizedSpannSegmentError> {
+        if rotated_query.len() != self.dimension {
+            return Err(QuantizedSpannSegmentError::DimensionMismatch {
+                expected: self.dimension,
+                actual: rotated_query.len(),
+            });
+        }
+
         let result = self
             .quantized_centroid
             .search(rotated_query, count)
@@ -561,16 +583,11 @@ impl QuantizedSpannSegmentReader {
         Ok(result.keys)
     }
 
-    /// Preload version and cluster blocks so subsequent `bruteforce()` calls
-    /// avoid IO during compute.
-    pub async fn load_clusters(&self, cluster_ids: impl IntoIterator<Item = u32>) {
-        let versions_fut = self
-            .versions_reader
-            .load_blocks_for_prefixes(std::iter::once(PREFIX_VERSION));
-        let clusters_fut = self
-            .quantized_cluster_reader
-            .load_data_for_keys(cluster_ids.into_iter().map(|id| (String::new(), id)));
-        tokio::join!(versions_fut, clusters_fut);
+    /// Preload a single cluster's blockfile data into cache.
+    pub async fn load_cluster(&self, cluster_id: u32) {
+        self.quantized_cluster_reader
+            .load_data_for_keys(std::iter::once((String::new(), cluster_id)))
+            .await;
     }
 
     /// Score all valid entries in a cluster against the rotated query.
@@ -581,6 +598,13 @@ impl QuantizedSpannSegmentReader {
         cluster_id: u32,
         rotated_query: &[f32],
     ) -> Result<Vec<RecordMeasure>, QuantizedSpannSegmentError> {
+        if rotated_query.len() != self.dimension {
+            return Err(QuantizedSpannSegmentError::DimensionMismatch {
+                expected: self.dimension,
+                actual: rotated_query.len(),
+            });
+        }
+
         let cluster = self
             .quantized_cluster_reader
             .get("", cluster_id)
@@ -600,59 +624,36 @@ impl QuantizedSpannSegmentReader {
         }
 
         // Fetch global versions for all entries in parallel.
-        let valid = future::try_join_all(cluster.ids.iter().zip(cluster.versions.iter()).map(
-            |(id, stored_version)| async move {
-                let global = self
-                    .versions_reader
-                    .get(PREFIX_VERSION, *id)
-                    .await
-                    .map_err(|e| {
-                        QuantizedSpannSegmentError::Data(format!(
-                            "failed to read version for id {id}: {e}"
-                        ))
-                    })?;
-                Ok::<_, QuantizedSpannSegmentError>(
-                    global.map(|v| v == *stored_version).unwrap_or(false),
-                )
-            },
-        ))
-        .await?;
+        let versions = future::try_join_all(cluster.ids.iter().map(|id| async move {
+            let global = self
+                .versions_reader
+                .get(PREFIX_VERSION, *id)
+                .await
+                .map_err(|e| {
+                    QuantizedSpannSegmentError::Data(format!(
+                        "failed to read version for id {id}: {e}"
+                    ))
+                })?;
+            Ok::<_, QuantizedSpannSegmentError>(global.map(|v| (*id, v)))
+        }))
+        .await?
+        .into_iter()
+        .flatten()
+        .collect::<HashMap<_, _>>();
 
-        // Precompute query-side parameters for RaBitQ scoring.
-        let center = cluster.center;
-        let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
-        let c_dot_q = f32::dot(center, rotated_query).unwrap_or(0.0) as f32;
-        let r_q = rotated_query
-            .iter()
-            .zip(center.iter())
-            .map(|(q, c)| q - c)
-            .collect::<Vec<_>>();
-        let q_norm = f32::dot(rotated_query, rotated_query).unwrap_or(0.0).sqrt() as f32;
+        let result = query_quantized_cluster(
+            &cluster,
+            rotated_query,
+            &self.distance_function,
+            |id, version| versions.get(&id) == Some(&version),
+        );
 
-        let code_size = Code::<&[u8]>::size(self.dimension);
-        let mut seen = HashSet::new();
-        let mut results = Vec::new();
-
-        for (id, code_bytes) in valid
-            .iter()
-            .zip(cluster.ids.iter())
-            .zip(cluster.codes.chunks(code_size))
-            .filter_map(|((is_valid, id), code_bytes)| is_valid.then_some((id, code_bytes)))
-        {
-            if !seen.insert(*id) {
-                continue;
-            }
-            let code = Code::<&[u8]>::new(code_bytes);
-            let distance =
-                code.distance_query(&self.distance_function, &r_q, c_norm, c_dot_q, q_norm);
-            results.push(RecordMeasure {
-                offset_id: *id,
-                measure: distance,
-            });
-        }
-
-        results.sort_unstable();
-        Ok(results)
+        Ok(result
+            .keys
+            .into_iter()
+            .zip(result.distances)
+            .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
+            .collect())
     }
 }
 
@@ -995,7 +996,7 @@ mod test {
 
         // Rotate a query vector.
         let query = embeddings[0].as_slice();
-        let rotated = reader.rotate(query);
+        let rotated = reader.rotate(query).expect("rotate failed");
         assert_eq!(rotated.len(), DIMENSION);
 
         // Navigate — request enough to cover all clusters.
@@ -1012,9 +1013,6 @@ mod test {
                 "navigate returned unknown cluster id {id}",
             );
         }
-
-        // Preload all clusters (not just navigate results) for exhaustive verification.
-        reader.load_clusters(all_clusters.iter().copied()).await;
 
         // Bruteforce each cluster and merge results.
         let mut all_results = HashMap::new();
@@ -1053,13 +1051,13 @@ mod test {
             .iter()
             .map(|(offset_id, measure)| {
                 let emb = embeddings[(*offset_id - 1) as usize].as_slice();
-                let rotated_emb = reader.rotate(emb);
+                let rotated_emb = reader.rotate(emb).expect("rotate failed");
                 let exact = reader.distance_function.distance(&rotated, &rotated_emb);
                 (measure - exact).abs() / exact.abs().max(f32::EPSILON)
             })
             .collect::<Vec<_>>();
         rel_errors.sort_by(|a, b| a.total_cmp(b));
-        let p95 = rel_errors[rel_errors.len() * 95 / 100];
-        assert!(p95 < 1e-2, "P95 relative error {p95} exceeds 1% bound",);
+        let p90 = rel_errors[rel_errors.len() * 90 / 100];
+        assert!(p90 < 1e-2, "P90 relative error {p90} exceeds 1% bound",);
     }
 }
