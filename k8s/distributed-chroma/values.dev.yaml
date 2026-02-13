@@ -68,3 +68,8 @@ garbageCollector:
 
 rustSysdbService:
   replicaCount: 1
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
