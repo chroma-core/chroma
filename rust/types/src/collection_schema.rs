@@ -1022,6 +1022,10 @@ impl Schema {
     }
 
     /// Set the quantization variant and apply impl-specific SPANN config defaults.
+    /// Note: this intentionally skips `SpannIndexConfig::validate()` because the
+    /// hardcoded quantization defaults (e.g. split_threshold=512) exceed the
+    /// user-facing validation ranges. Those ranges gate user input only;
+    /// programmatic defaults set here are known-good constants.
     pub fn quantize(&mut self, variant: Quantization) {
         if let Some(spann_config) = self.get_spann_config_mut() {
             *spann_config = match variant {
@@ -2794,13 +2798,13 @@ pub struct SpannIndexConfig {
     #[validate(range(max = 8))]
     pub nreplica_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 1.0, max = 10.0))]
+    #[validate(range(min = 1.0, max = 1.0))]
     pub write_rng_factor: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 1.0, max = 10.0))]
+    #[validate(range(min = 5.0, max = 10.0))]
     pub write_rng_epsilon: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 50, max = 1000))]
+    #[validate(range(min = 50, max = 200))]
     pub split_threshold: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 1000))]
@@ -2812,7 +2816,7 @@ pub struct SpannIndexConfig {
     #[validate(range(max = 64))]
     pub reassign_neighbor_count: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 25, max = 500))]
+    #[validate(range(min = 25, max = 100))]
     pub merge_threshold: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 8))]
@@ -2821,7 +2825,7 @@ pub struct SpannIndexConfig {
     #[validate(range(max = 64))]
     pub write_nprobe: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(max = 300))]
+    #[validate(range(max = 200))]
     pub ef_construction: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 200))]
@@ -5401,9 +5405,9 @@ mod tests {
         };
         assert!(invalid_split_threshold.validate().is_err());
 
-        // Invalid: split_threshold too large (max 1000)
+        // Invalid: split_threshold too large (max 200)
         let invalid_split_threshold_high = SpannIndexConfig {
-            split_threshold: Some(1500),
+            split_threshold: Some(250),
             ..Default::default()
         };
         assert!(invalid_split_threshold_high.validate().is_err());
@@ -5422,7 +5426,7 @@ mod tests {
         };
         assert!(invalid_reassign.validate().is_err());
 
-        // Invalid: merge_threshold out of range (min 25, max 500)
+        // Invalid: merge_threshold out of range (min 25, max 100)
         let invalid_merge_threshold_low = SpannIndexConfig {
             merge_threshold: Some(5),
             ..Default::default()
@@ -5430,7 +5434,7 @@ mod tests {
         assert!(invalid_merge_threshold_low.validate().is_err());
 
         let invalid_merge_threshold_high = SpannIndexConfig {
-            merge_threshold: Some(600),
+            merge_threshold: Some(150),
             ..Default::default()
         };
         assert!(invalid_merge_threshold_high.validate().is_err());
@@ -5442,9 +5446,9 @@ mod tests {
         };
         assert!(invalid_num_centers.validate().is_err());
 
-        // Invalid: ef_construction too large (max 300)
+        // Invalid: ef_construction too large (max 200)
         let invalid_ef_construction = SpannIndexConfig {
-            ef_construction: Some(400),
+            ef_construction: Some(300),
             ..Default::default()
         };
         assert!(invalid_ef_construction.validate().is_err());
@@ -5510,7 +5514,7 @@ mod tests {
         };
         assert!(valid_search_rng_epsilon.validate().is_ok());
 
-        // Invalid: write_rng_factor out of range (min 1.0, max 10.0)
+        // Invalid: write_rng_factor not exactly 1.0 (min 1.0, max 1.0)
         let invalid_write_rng_factor_low = SpannIndexConfig {
             write_rng_factor: Some(0.9),
             ..Default::default()
@@ -5518,21 +5522,21 @@ mod tests {
         assert!(invalid_write_rng_factor_low.validate().is_err());
 
         let invalid_write_rng_factor_high = SpannIndexConfig {
-            write_rng_factor: Some(11.0),
+            write_rng_factor: Some(1.1),
             ..Default::default()
         };
         assert!(invalid_write_rng_factor_high.validate().is_err());
 
-        // Valid: write_rng_factor within range
+        // Valid: write_rng_factor exactly 1.0
         let valid_write_rng_factor = SpannIndexConfig {
             write_rng_factor: Some(1.0),
             ..Default::default()
         };
         assert!(valid_write_rng_factor.validate().is_ok());
 
-        // Invalid: write_rng_epsilon out of range (min 1.0, max 10.0)
+        // Invalid: write_rng_epsilon out of range (min 5.0, max 10.0)
         let invalid_write_rng_epsilon_low = SpannIndexConfig {
-            write_rng_epsilon: Some(0.5),
+            write_rng_epsilon: Some(4.0),
             ..Default::default()
         };
         assert!(invalid_write_rng_epsilon_low.validate().is_err());
