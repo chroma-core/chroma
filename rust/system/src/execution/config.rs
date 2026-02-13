@@ -2,96 +2,42 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Deserialize, Debug, Serialize)]
 pub struct DispatcherConfig {
-    /// The number of worker threads to allocate for running tasks.
+    /// The number of worker threads to use
     #[serde(default = "DispatcherConfig::default_num_worker_threads")]
     pub num_worker_threads: usize,
-
-    /// The maximum number of tasks that can be enqueued onto the dispatcher's
-    /// internal task queue.
+    /// The maximum number of tasks that can be enqueued.
     #[serde(default = "DispatcherConfig::default_task_queue_limit")]
     pub task_queue_limit: usize,
-
-    /// The maximum number of messages (TaskMessage and TaskRequestMessage)
-    /// that can be queued onto the dispatcher component's channel.
+    /// The number of tasks enqueued.
     #[serde(default = "DispatcherConfig::default_dispatcher_queue_size")]
     pub dispatcher_queue_size: usize,
-
-    /// The maximum number of messages that can be queued onto the worker
-    /// threads' component channels.
+    /// The size of the worker components queue.
     #[serde(default = "DispatcherConfig::default_worker_queue_size")]
     pub worker_queue_size: usize,
-
-    /// The maximum number of active I/O tasks managed by the dispatcher at any
-    /// given time.
+    /// The number of active I/O tasks.
     #[serde(default = "DispatcherConfig::default_active_io_tasks")]
     pub active_io_tasks: usize,
 }
 
 impl DispatcherConfig {
     fn default_num_worker_threads() -> usize {
-        // Get the number of available logical CPUs. When running in cloud or
-        // container environments, this is equal to the number of vCPUs
-        // available to the process.
-        let num_cpus = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1);
-
-        // Reserve 20% of the available logical CPUs for IO-bound tasks within
-        // the dispatcher and general system overhead (other components and
-        // tokio tasks besides the dispatcher).
-        let reserved_cpus = num_cpus / 5;
-
-        // Always allocate a minimum of 4 worker threads.
-        std::cmp::max(num_cpus - reserved_cpus, 4)
+        5
     }
 
     fn default_task_queue_limit() -> usize {
-        // Default to a large number that is unlikely to be exceeded by the
-        // number of tasks that are expected to be enqueued at once. This is
-        // to prevent the task queue from growing indefinitely, or filling to
-        // the point where requests must be cancelled due to a full task queue.
-        //
-        // Setting this value to a multiple of the number of worker threads
-        // is a somewhat reasonable way to construct the default value because
-        // the total number of created tasks is partially related to the number
-        // of worker threads, as the orchestrator will generate new tasks after
-        // previous tasks are completed. Or, to phrase the intuition in another
-        // way, the total number of tasks that can be completed in any given
-        // amount of time is directly related to the number of worker threads
-        // that are available to execute them.
-        1000 * DispatcherConfig::default_num_worker_threads()
+        1000
     }
 
     fn default_dispatcher_queue_size() -> usize {
-        // The dispatcher component's channel takes the incoming task messages
-        // and either enqueues them onto its internal task queue or sends them
-        // directly to a worker thread's channel. It needs to handle large
-        // bursts of task messages that are enqueued by the orchestrator for
-        // database queries. We would prefer to hit the task_queue_limit before
-        // hitting this limit, because the dispatcher maintains more control
-        // over the load shedding behavior of its internal task queue.
-        //
-        // Therefore, we set this value to a magnitude larger than the
-        // task_queue_limit, to be able to handle bursts of task messages that
-        // are enqueued before the dispatcher's tokio task is able to process
-        // them.
-        10 * DispatcherConfig::default_task_queue_limit()
+        100
     }
 
     fn default_worker_queue_size() -> usize {
-        // Within the dispatcher, each worker component will only receive one
-        // task message at a time and will process each task sequentially.
-        // Therefore, we set this value to a constant, minimal default value.
         100
     }
 
     fn default_active_io_tasks() -> usize {
-        // By default, we allow the dispatcher to run a relatively large number
-        // of concurrent I/O tasks. This value is somewhat "experimental" and
-        // is based on examining previous production workloads. It is subject
-        // to change as we gather more data, and we may want to adjust how we
-        // determine this default value in the future.
-        10000
+        1000
     }
 }
 
