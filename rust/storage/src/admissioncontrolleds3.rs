@@ -465,6 +465,10 @@ impl InflightRequestContext {
         }
         guard
     }
+
+    fn is_finished(&self) -> bool {
+        self.finished.load(Ordering::SeqCst)
+    }
 }
 
 struct InflightRequest {
@@ -495,6 +499,60 @@ impl InflightRequest {
                 finished: Arc::new(AtomicBool::new(false)),
             },
             senders,
+        }
+    }
+}
+
+struct InflightCleanupGuard {
+    outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
+    composite_key: String,
+    defused: bool,
+    context: InflightRequestContext,
+}
+
+impl InflightCleanupGuard {
+    fn new(
+        outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
+        composite_key: String,
+        context: InflightRequestContext,
+    ) -> Self {
+        Self {
+            outstanding_read_requests,
+            composite_key,
+            defused: false,
+            context,
+        }
+    }
+
+    #[allow(clippy::type_complexity)]
+    async fn complete(
+        &mut self,
+        result: Result<(Arc<dyn Any + Send + Sync>, Vec<Option<ETag>>), StorageError>,
+    ) {
+        let mut requests = self.outstanding_read_requests.lock().await;
+        let mut inflight = requests
+            .remove(&self.composite_key)
+            .expect("Key must exist");
+        inflight.context.complete();
+        drop(requests);
+        for tx in inflight.senders.drain(..) {
+            if tx.send(result.clone()).is_err() {
+                tracing::error!(
+                    "Unexpected channel closure, the calling task must have been dropped"
+                );
+            }
+        }
+        self.defused = true;
+    }
+}
+
+impl Drop for InflightCleanupGuard {
+    fn drop(&mut self) {
+        if !self.defused {
+            tracing::warn!("InflightCleanupGuard dropped without completing, cleaning up");
+            self.context.complete();
+            // Note: We don't remove from map here to avoid lock contention in Drop.
+            // The entry will be cleaned up on the next operation that checks finished flag.
         }
     }
 }
@@ -881,7 +939,17 @@ impl AdmissionControlledS3Storage {
                 chroma_tracing::util::StopWatchUnit::Micros,
             );
             let mut requests = self.outstanding_read_requests.lock().await;
-            any_res = match requests.get_mut(&composite_key) {
+            let res = if let Some(inflight_req) = requests.get_mut(&composite_key) {
+                if inflight_req.context.is_finished() {
+                    requests.remove(&composite_key);
+                    None
+                } else {
+                    Some(inflight_req)
+                }
+            } else {
+                None
+            };
+            any_res = match res {
                 Some(inflight_req) => {
                     self.metrics
                         .nac_dedup_count
@@ -918,6 +986,7 @@ impl AdmissionControlledS3Storage {
                         Some(priority_tx),
                         vec![output_tx],
                     );
+                    let context_clone = request.context.clone();
                     _guard = RollbackPriorityOnDrop {
                         request: request.context.clone(),
                         entry_priority: options.priority,
@@ -949,6 +1018,12 @@ impl AdmissionControlledS3Storage {
                     // of tokio::spawn. If we introduce the cancellation logic in the future
                     // we need to address the issue in the comment above.
                     let fetching_future = async move {
+                        let mut guard = InflightCleanupGuard::new(
+                            outstanding_read_requests,
+                            composite_key_clone,
+                            context_clone,
+                        );
+
                         // Fetch all keys in parallel
                         let fetch_futures: Vec<_> = keys_clone
                             .iter()
@@ -1002,23 +1077,7 @@ impl AdmissionControlledS3Storage {
                         .await
                         .map(|(r, e_tags)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tags));
 
-                        // Clean up the requests map entry.
-                        // SAFETY(hammadb): We just created this entry above, and only this task remove it,
-                        // so it must exist.
-                        let mut requests = outstanding_read_requests.lock().await;
-                        let mut inflight = requests
-                            .remove(&composite_key_clone)
-                            .expect("Key must exist");
-                        inflight.context.complete();
-                        drop(requests);
-                        for output_tx in inflight.senders.drain(..) {
-                            match output_tx.send(fetched.clone()) {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    tracing::error!("Unexpected channel closure, the calling task must have been dropped");
-                                }
-                            }
-                        }
+                        guard.complete(fetched).await;
                     };
                     if self.spawn_fetches {
                         tokio::task::spawn(fetching_future);
