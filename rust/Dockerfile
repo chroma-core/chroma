@@ -47,6 +47,7 @@ ENV EXCLUDED_PACKAGES="chromadb_rust_bindings chromadb-js-bindings chroma-benchm
 # Once Rust supports AVX512, the target-features will be updated to use AVX512.
 RUN --mount=type=cache,sharing=locked,target=/chroma/target/ \
   --mount=type=cache,sharing=locked,target=/usr/local/cargo/registry/ \
+  --mount=type=cache,sharing=locked,target=/usr/local/cargo/git/ \
   if [ "$ENABLE_AVX512" = "1" ]; then \
   export CXXFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
   export CFLAGS="-mavx512f -mavx512dq -mavx512bw -mavx512vl" && \
