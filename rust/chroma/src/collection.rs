@@ -823,7 +823,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_accessor_methods() {
+    async fn test_k8s_integration_accessor_methods() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_accessors").await;
             assert!(!collection.database().is_empty());
@@ -836,7 +836,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_count_empty_collection() {
+    async fn test_k8s_integration_count_empty_collection() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_count_empty").await;
 
@@ -849,7 +849,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_indexing_status() {
+    async fn test_k8s_integration_get_indexing_status() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_indexing_status").await;
 
@@ -883,7 +883,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_add_single_record() {
+    async fn test_k8s_integration_add_single_record() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_add_single").await;
 
@@ -907,7 +907,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_add_multiple_records() {
+    async fn test_k8s_integration_add_multiple_records() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_add_multiple").await;
 
@@ -939,7 +939,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_add_with_metadata() {
+    async fn test_k8s_integration_add_with_metadata() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_add_metadata").await;
 
@@ -966,7 +966,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_add_with_uris() {
+    async fn test_k8s_integration_add_with_uris() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_add_uris").await;
 
@@ -989,7 +989,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_all_records() {
+    async fn test_k8s_integration_get_all_records() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_get_all").await;
 
@@ -1015,7 +1015,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_by_ids() {
+    async fn test_k8s_integration_get_by_ids() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_get_by_ids").await;
 
@@ -1054,7 +1054,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_with_limit_and_offset() {
+    async fn test_k8s_integration_get_with_limit_and_offset() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_get_limit_offset").await;
 
@@ -1092,7 +1092,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_with_where_clause() {
+    async fn test_k8s_integration_get_with_where_clause() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_get_where").await;
 
@@ -1133,7 +1133,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_with_include_list() {
+    async fn test_k8s_integration_get_with_include_list() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_get_include").await;
 
@@ -1176,7 +1176,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_query_basic() {
+    async fn test_k8s_integration_query_basic() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_query_basic").await;
 
@@ -1214,7 +1214,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_query_with_n_results() {
+    async fn test_k8s_integration_query_with_n_results() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_query_n_results").await;
 
@@ -1255,7 +1255,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_query_with_where_clause() {
+    async fn test_k8s_integration_query_with_where_clause() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_query_where").await;
 
@@ -1303,7 +1303,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_query_multiple_embeddings() {
+    async fn test_k8s_integration_query_multiple_embeddings() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_query_multiple").await;
 
@@ -1342,7 +1342,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_search_with_read_levels() {
+    async fn test_k8s_integration_search_with_read_levels() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_search_read_level").await;
 
@@ -1401,7 +1401,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_update_embeddings() {
+    async fn test_k8s_integration_update_embeddings() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_update_embeddings").await;
 
@@ -1449,7 +1449,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_update_documents() {
+    async fn test_k8s_integration_update_documents() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_update_documents").await;
 
@@ -1497,7 +1497,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_update_metadata() {
+    async fn test_k8s_integration_update_metadata() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_update_metadata").await;
 
@@ -1559,7 +1559,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_upsert_insert_new() {
+    async fn test_k8s_integration_upsert_insert_new() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_upsert_insert").await;
 
@@ -1583,7 +1583,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_upsert_update_existing() {
+    async fn test_k8s_integration_upsert_update_existing() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_upsert_update").await;
 
@@ -1618,7 +1618,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_upsert_mixed() {
+    async fn test_k8s_integration_upsert_mixed() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_upsert_mixed").await;
 
@@ -1653,7 +1653,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_delete_by_ids() {
+    async fn test_k8s_integration_delete_by_ids() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_delete_by_ids").await;
 
@@ -1686,7 +1686,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_delete_by_where() {
+    async fn test_k8s_integration_delete_by_where() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_delete_by_where").await;
 
@@ -1725,7 +1725,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_fork_basic() {
+    async fn test_k8s_integration_fork_basic() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_fork_source").await;
 
@@ -1760,7 +1760,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_fork_preserves_data() {
+    async fn test_k8s_integration_fork_preserves_data() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_fork_preserves_source").await;
 
@@ -1798,7 +1798,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_fork_independence() {
+    async fn test_k8s_integration_fork_independence() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_fork_independence_source").await;
 
@@ -1842,7 +1842,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_modify() {
+    async fn test_k8s_integration_modify() {
         with_client(|mut client| async move {
             let mut collection = client.new_collection("test_modify").await;
 

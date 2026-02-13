@@ -112,35 +112,18 @@ pub use collection::ChromaCollection;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::{ChromaAuthMethod, ChromaHttpClientOptions};
+    use crate::client::ChromaHttpClientOptions;
     use std::collections::HashSet;
     use std::sync::{Arc, LazyLock, Mutex};
     use uuid::Uuid;
 
-    static CHROMA_CLIENT_OPTIONS: LazyLock<ChromaHttpClientOptions> = LazyLock::new(|| {
-        match dotenvy::dotenv() {
-            Ok(_) => {}
-            Err(err) => {
-                if err.not_found() {
-                    tracing::warn!("No .env file found");
-                } else {
-                    panic!("Error loading .env file: {}", err);
-                }
-            }
-        };
-
-        ChromaHttpClientOptions {
-            endpoint: std::env::var("CHROMA_ENDPOINT")
-                .unwrap_or_else(|_| "https://api.trychroma.com".to_string())
-                .parse()
-                .unwrap(),
-            auth_method: ChromaAuthMethod::cloud_api_key(
-                &std::env::var("CHROMA_CLOUD_API_KEY").unwrap(),
-            )
-            .unwrap(),
+    static CHROMA_CLIENT_OPTIONS: LazyLock<ChromaHttpClientOptions> =
+        LazyLock::new(|| ChromaHttpClientOptions {
+            endpoint: "http://localhost:8000".parse().unwrap(),
+            tenant_id: Some("default_tenant".to_string()),
+            database_name: Some("default_database".to_string()),
             ..Default::default()
-        }
-    });
+        });
 
     pub struct TestClient {
         client: ChromaHttpClient,
