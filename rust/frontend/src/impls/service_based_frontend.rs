@@ -549,7 +549,7 @@ impl ServiceBasedFrontend {
         // Enable quantization for tenants in the config list (or all tenants if "*" is present)
         if let Some(ref mut schema) = reconciled_schema {
             if self.should_enable_quantization_for_tenant(&tenant_id) {
-                schema.quantize(Quantization::USearch4BitRabitQ);
+                schema.quantize(Quantization::FourBitRabitQWithUSearch);
             }
         }
 

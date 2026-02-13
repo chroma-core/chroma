@@ -439,7 +439,7 @@ export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
 /**
  * Quantization implementation for SPANN vector index.
  */
-export type Quantization = 'none' | 'u_search4_bit_rabit_q';
+export type Quantization = 'none' | 'four_bit_rabit_q_with_u_search';
 
 export type QueryRequestPayload = RawWhereFields & {
     ids?: Array<string> | null;

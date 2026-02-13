@@ -1491,7 +1491,7 @@ mod tests {
             initial_lambda: None,
             num_centers_to_merge_to: None,
             max_neighbors: Some(8),
-            quantize: Quantization::USearch4BitRabitQ,
+            quantize: Quantization::FourBitRabitQWithUSearch,
         }
     }
 
