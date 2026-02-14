@@ -337,20 +337,14 @@ impl ManifestManager {
     pub async fn get_dirty_logs(
         spanner: &Client,
         region: &str,
-    ) -> Result<Vec<(Uuid, LogPosition)>, Error> {
+    ) -> Result<Vec<(Uuid, LogPosition, LogPosition)>, Error> {
         let mut stmt = Statement::new(
             "
-            SELECT DISTINCT manifests.log_id, manifests.enumeration_offset
+            SELECT DISTINCT manifests.log_id, manifest_regions.intrinsic_cursor, manifests.enumeration_offset
             FROM manifests
-                INNER JOIN fragments
-                ON manifests.log_id = fragments.log_id
-                INNER JOIN fragment_regions
-                ON fragments.log_id = fragment_regions.log_id
-                    AND fragments.ident = fragment_regions.ident
                 INNER JOIN manifest_regions
                 ON manifests.log_id = manifest_regions.log_id
-                    AND fragment_regions.region = manifest_regions.region
-            WHERE fragment_regions.region = @region
+            WHERE manifest_regions.region = @region
                 AND (manifest_regions.intrinsic_cursor IS NULL
                     OR manifest_regions.intrinsic_cursor < manifests.enumeration_offset)
             ",
@@ -361,18 +355,27 @@ impl ManifestManager {
         let mut results = vec![];
         while let Some(row) = reader.next().await? {
             let log_id_str = row.column_by_name::<String>("log_id")?;
+            let intrinsic_cursor = row.column_by_name::<i64>("intrinsic_cursor")?;
             let enumeration_offset = row.column_by_name::<i64>("enumeration_offset")?;
             let Ok(log_id) = Uuid::parse_str(&log_id_str) else {
                 tracing::warn!("invalid log_id in manifests table: {log_id_str}");
                 continue;
             };
+            if intrinsic_cursor < 0 {
+                tracing::warn!("negative intrinsic_cursor {intrinsic_cursor} for log_id {log_id}");
+                continue;
+            }
             if enumeration_offset < 0 {
                 tracing::warn!(
                     "negative enumeration_offset {enumeration_offset} for log_id {log_id}"
                 );
                 continue;
             }
-            results.push((log_id, LogPosition::from_offset(enumeration_offset as u64)));
+            results.push((
+                log_id,
+                LogPosition::from_offset(intrinsic_cursor as u64),
+                LogPosition::from_offset(enumeration_offset as u64),
+            ));
         }
         Ok(results)
     }

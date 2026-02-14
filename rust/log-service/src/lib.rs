@@ -1421,12 +1421,10 @@ impl LogServer {
             .map(|d| d.as_micros() as u64)
             .unwrap_or(0);
         let mut rollups = HashMap::new();
-        for (log_id, enumeration_offset) in dirty_logs {
+        for (log_id, compaction_offset, enumeration_offset) in dirty_logs {
             let collection_id = CollectionUuid(log_id);
             let rollup = RollupPerCollection {
-                start_log_position: LogPosition::from_offset(
-                    enumeration_offset.offset().saturating_sub(1),
-                ),
+                start_log_position: compaction_offset,
                 limit_log_position: enumeration_offset,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now_us,
@@ -2215,7 +2213,24 @@ impl LogServer {
         }
 
         let cursor = cursor.unwrap_or(LogPosition::from_offset(1));
-        if cursor != max_offset {
+        // Ensure the target log's intrinsic cursor reflects the source compaction point.
+        // This prevents empty/fully-compacted forks from being reported as dirty on repl.
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        log_reader
+            .update_intrinsic_cursor(cursor, epoch_us, &self.config.my_member_id, false)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to update intrinsic cursor on fork target: {}", err),
+                )
+            })?;
+
+        if cursor != max_offset && topology_name.is_none() {
             let mark_dirty = MarkDirty {
                 collection_id: target_collection_id,
                 dirty_log: self.dirty_log.clone(),
