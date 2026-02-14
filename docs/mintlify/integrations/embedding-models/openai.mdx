@@ -58,8 +58,6 @@ import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 const embeddingFunction = new OpenAIEmbeddingFunction({
     apiKeyEnvVar: "OPENAI_API_KEY",
     modelName: "text-embedding-3-small",
-    // Optional: specify API base (e.g. for Azure OpenAI)
-    apiBase: "your-api-base"
 });
 
 // use directly
@@ -76,14 +74,14 @@ collection = await client.getCollection({
 });
 ```
 
-To use the OpenAI embedding models on other platforms such as GitHub AI Models, you can use the `apiBase` parameter:
+To use the OpenAI embedding models on other platforms such as GitHub AI Models or Azure OpenAI, you can supply the endpoint through `apiBase` parameter:
 ```typescript
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-  apiKey: "apiKey",
-  apiBase: "https://models.github.ai/inference",
-  modelName: "text-embedding-3-small",
+    apiKeyEnvVar: "YOUR_API_KEY",
+    apiBase: "https://models.github.ai/inference",
+    modelName: "text-embedding-3-small",
 });
 ```
 
