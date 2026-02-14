@@ -856,6 +856,8 @@ class EmbeddingFunction(Protocol[D]):
         call = getattr(cls, "__call__")
 
         def __call__(self: EmbeddingFunction[D], input: D) -> Embeddings:
+            if not isinstance(input, list):
+                input = [input]
             result = call(self, input)
             assert result is not None
             return validate_embeddings(cast(Embeddings, normalize_embeddings(result)))
