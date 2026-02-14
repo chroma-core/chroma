@@ -16,8 +16,10 @@ use uuid;
 pub enum VersionFileType {
     /// Compaction operation - file name ends with _flush
     Compaction,
-    /// Garbage collection operation - file name ends with _gc_mark
-    GarbageCollection,
+    /// Garbage collection mark operation - file name ends with _gc_mark
+    GarbageCollectionMark,
+    /// Garbage collection delete operation - file name ends with _gc_delete
+    GarbageCollectionDelete,
 }
 
 impl VersionFileType {
@@ -25,7 +27,8 @@ impl VersionFileType {
     pub fn suffix(&self) -> &'static str {
         match self {
             VersionFileType::Compaction => "flush",
-            VersionFileType::GarbageCollection => "gc_mark",
+            VersionFileType::GarbageCollectionMark => "gc_mark",
+            VersionFileType::GarbageCollectionDelete => "gc_delete",
         }
     }
 }
@@ -101,12 +104,10 @@ impl VersionFileManager {
 
         let version_file = CollectionVersionFile::decode(content.as_slice())?;
 
-        // Extract collection ID from the collection for validation
-        let collection_id_str = &collection.collection_id.to_string();
         let version = collection.version;
 
         // Validate the version file
-        self.validate(&version_file, collection_id_str, version.into())?;
+        self.validate(&version_file, collection, version.into())?;
 
         Ok(version_file)
     }
@@ -123,11 +124,11 @@ impl VersionFileManager {
     /// The path where the version file was stored
     pub async fn upload(
         &self,
+        version_file_path: &str,
         version_file: &CollectionVersionFile,
         collection: &chroma_types::Collection,
-        file_type: VersionFileType,
         new_version_id: i64,
-    ) -> Result<String, VersionFileError> {
+    ) -> Result<(), VersionFileError> {
         // Validate the version file before uploading
         let collection_id_str = &collection.collection_id.to_string();
         // For upload, we don't know the expected version yet, so we'll validate structure
@@ -142,19 +143,9 @@ impl VersionFileManager {
             return Err(VersionFileError::MissingCollectionInfo);
         }
 
-        // Generate the version file path from collection metadata
-        let version_file_path = self.generate_file_path(
-            &collection.tenant,
-            &collection.database,
-            &collection.collection_id,
-            new_version_id,
-            file_type,
-        );
-
         // Validate the version file before uploading
-        let collection_id_str = &collection.collection_id.to_string();
         // The given version file's latest version is expected to be new_version_id
-        self.validate(version_file, collection_id_str, new_version_id)?;
+        self.validate(version_file, collection, new_version_id)?;
 
         // Encode the version file
         let content = version_file.encode_to_vec();
@@ -162,7 +153,7 @@ impl VersionFileManager {
 
         // Upload to storage
         self.storage
-            .put_bytes(&version_file_path, content, PutOptions::default())
+            .put_bytes(version_file_path, content, PutOptions::default())
             .await
             .map_err(|e| {
                 tracing::error!(
@@ -180,7 +171,7 @@ impl VersionFileManager {
             "Successfully uploaded version file"
         );
 
-        Ok(version_file_path)
+        Ok(())
     }
 
     /// Generate a standard version file path based on collection metadata.
@@ -196,11 +187,9 @@ impl VersionFileManager {
     /// A formatted path matching Go implementation with appropriate suffix:
     /// - For COMPACTION: "tenant/{tenant_id}/database/{database_id}/collection/{collection_id}/versionfiles/{version_id}_flush"
     /// - For GARBAGE_COLLECTION: "tenant/{tenant_id}/database/{database_id}/collection/{collection_id}/versionfiles/{version_id}_gc_mark"
-    fn generate_file_path(
+    pub fn generate_file_path(
         &self,
-        tenant_id: &str,
-        database_id: &str,
-        collection_id: &CollectionUuid,
+        collection: &Collection,
         version_id: i64,
         file_type: VersionFileType,
     ) -> String {
@@ -212,7 +201,7 @@ impl VersionFileManager {
 
         format!(
             "tenant/{}/database/{}/collection/{}/versionfiles/{}",
-            tenant_id, database_id, collection_id, version_file_name
+            collection.tenant, collection.database_id, collection.collection_id, version_file_name
         )
     }
 
@@ -220,12 +209,12 @@ impl VersionFileManager {
     ///
     /// # Arguments
     /// * `version_file` - The version file to validate
-    /// * `expected_collection_id` - The expected collection ID to match against
+    /// * `collection` - The collection to validate against (collection_id derived from it)
     /// * `expected_version` - The expected version to match against
     pub fn validate(
         &self,
         version_file: &CollectionVersionFile,
-        expected_collection_id: &str,
+        collection: &Collection,
         expected_version: i64,
     ) -> Result<(), VersionFileError> {
         let collection_info = match version_file.collection_info_immutable.as_ref() {
@@ -234,6 +223,7 @@ impl VersionFileManager {
         };
 
         // Validate collection ID matches expected collection ID
+        let expected_collection_id = collection.collection_id.0.to_string();
         if collection_info.collection_id != expected_collection_id {
             tracing::error!(
                 expected_collection_id = %expected_collection_id,
@@ -242,6 +232,17 @@ impl VersionFileManager {
             );
             return Err(VersionFileError::ValidationFailed(
                 "collection id mismatch".to_string(),
+            ));
+        }
+
+        if collection_info.database_name != collection.database {
+            tracing::error!(
+                expected_database_name = %collection.database,
+                version_file_database_name = %collection_info.database_name,
+                "database name mismatch"
+            );
+            return Err(VersionFileError::ValidationFailed(
+                "database name mismatch".to_string(),
             ));
         }
 
@@ -402,20 +403,16 @@ mod tests {
         (storage, temp_dir)
     }
 
-    fn create_test_version_file() -> CollectionVersionFile {
-        let collection_id = Uuid::new_v4();
-        let tenant_id = Uuid::new_v4().to_string();
-        let database_id = Uuid::new_v4().to_string();
-
+    fn create_test_version_file(collection: &chroma_types::Collection) -> CollectionVersionFile {
         CollectionVersionFile {
             collection_info_immutable: Some(CollectionInfoImmutable {
-                tenant_id,
-                database_id,
-                database_name: "test_db".to_string(),
+                tenant_id: collection.tenant.clone(),
+                database_id: collection.database.clone(),
+                database_name: collection.database.clone(),
                 is_deleted: false,
-                dimension: 128,
-                collection_id: collection_id.to_string(),
-                collection_name: "test_collection".to_string(),
+                dimension: collection.dimension.unwrap_or(128),
+                collection_id: collection.collection_id.to_string(),
+                collection_name: collection.name.clone(),
                 collection_creation_secs: 1640995200, // 2022-01-01
             }),
             version_history: Some(CollectionVersionHistory { versions: vec![] }),
@@ -457,13 +454,8 @@ mod tests {
         let manager = VersionFileManager::new(storage);
         let collection = create_test_collection();
 
-        // Create a version file with collection ID matching the test collection
-        let mut version_file = create_test_version_file();
-        version_file
-            .collection_info_immutable
-            .as_mut()
-            .unwrap()
-            .collection_id = collection.collection_id.to_string();
+        // Create a version file with collection info matching the test collection
+        let mut version_file = create_test_version_file(&collection);
 
         // Add a version history entry to satisfy validation
         let new_version = collection.version as i64; // Use collection's current version as i64
@@ -481,31 +473,30 @@ mod tests {
             }],
         });
 
+        // Generate the version file path from collection metadata
+        let upload_path =
+            manager.generate_file_path(&collection, new_version, VersionFileType::Compaction);
+
         // Upload the version file
-        let uploaded_path = manager
-            .upload(
-                &version_file,
-                &collection,
-                VersionFileType::Compaction,
-                new_version,
-            )
+        manager
+            .upload(&upload_path, &version_file, &collection, new_version)
             .await
             .unwrap();
 
         // Expected path should follow the new Go-style format: {version_id:06d}_{uuid}_flush
         // We'll check that the path contains the expected components
-        assert!(uploaded_path.contains(&format!(
+        assert!(upload_path.contains(&format!(
             "tenant/{}/database/{}/collection/{}/versionfiles/",
-            collection.tenant, collection.database, collection.collection_id
+            collection.tenant, collection.database_id, collection.collection_id
         )));
-        assert!(uploaded_path.contains("_flush"));
+        assert!(upload_path.contains("_flush"));
 
         // Check that the version ID part is present in the path (formatted as 6 digits)
-        assert!(uploaded_path.contains(&format!("{:06}", new_version)));
+        assert!(upload_path.contains(&format!("{:06}", new_version)));
 
         // Test fetching the uploaded file
         let mut collection_with_path = collection.clone();
-        collection_with_path.version_file_path = Some(uploaded_path.clone());
+        collection_with_path.version_file_path = Some(upload_path.clone());
         let fetched_file = manager.fetch(&collection_with_path).await.unwrap();
 
         // Verify the content
@@ -538,15 +529,18 @@ mod tests {
         let (storage, _temp_dir) = create_test_storage().await;
         let manager = VersionFileManager::new(storage);
 
-        // Create a test file with proper version history for full validation
-        let mut valid_file = create_test_version_file();
-        let collection_id = valid_file
-            .collection_info_immutable
-            .as_ref()
-            .unwrap()
-            .collection_id
-            .clone();
+        // Create a test collection for validation
+        let test_collection = create_test_collection();
+        let collection_id = test_collection.collection_id.0.to_string();
         let version = 1;
+
+        // Create a test file with proper version history for full validation
+        let mut valid_file = create_test_version_file(&test_collection);
+
+        // Update the collection ID in the file to match our test collection
+        if let Some(ref mut collection_info) = valid_file.collection_info_immutable {
+            collection_info.collection_id = collection_id.clone();
+        }
 
         // Add version history with one version
         valid_file.version_history = Some(CollectionVersionHistory {
@@ -565,14 +559,14 @@ mod tests {
 
         // Valid version file should pass validation
         assert!(manager
-            .validate(&valid_file, &collection_id, version)
+            .validate(&valid_file, &test_collection, version)
             .is_ok());
 
         // Invalid version file (missing collection info) should fail
-        let mut invalid_file = create_test_version_file();
+        let mut invalid_file = create_test_version_file(&test_collection);
         invalid_file.collection_info_immutable = None;
         assert!(matches!(
-            manager.validate(&invalid_file, "test-id", 1),
+            manager.validate(&invalid_file, &test_collection, 1),
             Err(VersionFileError::MissingCollectionInfo)
         ));
     }
@@ -582,11 +576,13 @@ mod tests {
         let (storage, _temp_dir) = create_test_storage().await;
         let manager = VersionFileManager::new(storage);
 
-        let collection_id = "test-collection-id";
+        // Create test collections
+        let test_collection = create_test_collection();
+        let collection_id = test_collection.collection_id.0.to_string();
         let version = 1;
 
         // Create a test file with proper version history
-        let mut test_file = create_test_version_file();
+        let mut test_file = create_test_version_file(&test_collection);
         test_file
             .collection_info_immutable
             .as_mut()
@@ -609,7 +605,9 @@ mod tests {
         });
 
         // Test with matching collection_id and version should pass
-        assert!(manager.validate(&test_file, collection_id, version).is_ok());
+        assert!(manager
+            .validate(&test_file, &test_collection, version)
+            .is_ok());
 
         // Test with mismatching collection_id should fail
         let mut mismatching_file = test_file.clone();
@@ -620,7 +618,7 @@ mod tests {
             .collection_id = "different-id".to_string();
 
         assert!(matches!(
-            manager.validate(&mismatching_file, collection_id, version),
+            manager.validate(&mismatching_file, &test_collection, version),
             Err(VersionFileError::ValidationFailed(msg)) if msg.contains("collection id mismatch")
         ));
 
@@ -641,7 +639,7 @@ mod tests {
             .version = 999;
 
         assert!(matches!(
-            manager.validate(&version_mismatch_file, collection_id, version),
+            manager.validate(&version_mismatch_file, &test_collection, version),
             Err(VersionFileError::ValidationFailed(msg)) if msg.contains("version mismatch")
         ));
     }
@@ -650,7 +648,7 @@ mod tests {
     async fn test_extract_collection_id() {
         let (storage, _temp_dir) = create_test_storage().await;
         let manager = VersionFileManager::new(storage);
-        let version_file = create_test_version_file();
+        let version_file = create_test_version_file(&create_test_collection());
 
         let expected_id = version_file
             .collection_info_immutable
@@ -685,7 +683,7 @@ mod tests {
         let collection = create_test_collection();
 
         // Create initial version file with matching collection ID
-        let mut version_file = create_test_version_file();
+        let mut version_file = create_test_version_file(&collection);
         version_file
             .collection_info_immutable
             .as_mut()
@@ -708,17 +706,15 @@ mod tests {
             }],
         });
 
+        // Generate the version file path from collection metadata
+        let initial_path =
+            manager.generate_file_path(&collection, new_version, VersionFileType::Compaction);
+
         // Upload initial version
         let upload_result = manager
-            .upload(
-                &version_file,
-                &collection,
-                VersionFileType::Compaction,
-                new_version as i64,
-            )
+            .upload(&initial_path, &version_file, &collection, new_version)
             .await;
         assert!(upload_result.is_ok());
-        let initial_path = upload_result.unwrap();
 
         // Download and validate
         let mut collection_with_initial_path = collection.clone();
@@ -786,22 +782,29 @@ mod tests {
         let mut modified_collection = collection.clone();
         modified_collection.version = 999;
 
-        let reupload_result = manager
+        // Generate the version file path for the modified version
+        let modified_path = manager.generate_file_path(
+            &modified_collection,
+            modified_version_id,
+            VersionFileType::Compaction,
+        );
+
+        let res = manager
             .upload(
+                &modified_path,
                 &version_file,
                 &modified_collection,
-                VersionFileType::Compaction,
                 modified_version_id,
             )
             .await;
-        let modified_path = reupload_result.unwrap();
+        assert!(res.is_ok());
 
         // Validate that the path follows the new Go-style format: {version_id:06d}_{uuid}_flush
         // We'll check that the path contains the expected components
         assert!(modified_path.contains(&format!(
             "tenant/{}/database/{}/collection/{}/versionfiles/",
             modified_collection.tenant,
-            modified_collection.database,
+            modified_collection.database_id,
             modified_collection.collection_id
         )));
         assert!(modified_path.contains("_flush"));
