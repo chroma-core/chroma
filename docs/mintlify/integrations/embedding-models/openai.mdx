@@ -5,12 +5,14 @@ title: OpenAI
 import { Callout } from '/snippets/callout.mdx';
 
 Chroma provides a convenient wrapper around OpenAI's embedding API. This embedding function runs remotely on OpenAI's servers, and requires an API key. You can get an API key by signing up for an account at [OpenAI](https://openai.com/api/).
+By default, the wrapper checks `OPENAI_API_KEY` envionment variable for the API key. Optionally, you can pass in the API key directly.
 
 The following OpenAI Embedding Models are supported:
 
 - `text-embedding-ada-002`
 - `text-embedding-3-small`
 - `text-embedding-3-large`
+
 
 <Callout>
 Visit OpenAI Embeddings [documentation](https://platform.openai.com/docs/guides/embeddings) for more information.
@@ -56,10 +58,7 @@ You can pass in an optional `model` argument, which lets you choose which OpenAI
 import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
-    apiKeyEnvVar: "OPENAI_API_KEY",
     modelName: "text-embedding-3-small",
-    // Optional: specify API base (e.g. for Azure OpenAI)
-    apiBase: "your-api-base"
 });
 
 // use directly
@@ -73,6 +72,26 @@ let collection = await client.createCollection({
 collection = await client.getCollection({
     name: "name",
     embeddingFunction: embeddingFunction,
+});
+```
+
+To supply the API key directly
+
+```typescript
+const embeddingFunction = new OpenAIEmbeddingFunction({
+    modelName: "text-embedding-3-small",
+    apiKey: "YOUR_API_KEY",
+});
+```
+
+To use the OpenAI embedding models on other platforms such as GitHub AI Model, you can supply the endpoint through the `apiBase` parameter:
+
+```typescript
+import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
+
+const embeddingFunction = new OpenAIEmbeddingFunction({
+    modelName: "openai/text-embedding-3-small", // GitHub uses provider prefix for model names
+    apiBase: "https://models.github.ai/inference"
 });
 ```
 
