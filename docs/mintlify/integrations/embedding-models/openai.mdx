@@ -91,7 +91,8 @@ import { OpenAIEmbeddingFunction } from "@chroma-core/openai";
 
 const embeddingFunction = new OpenAIEmbeddingFunction({
     modelName: "openai/text-embedding-3-small", // GitHub uses provider prefix for model names
-    apiBase: "https://models.github.ai/inference"
+    apiBase: "https://models.github.ai/inference",
+    apiKey: "YOUR_GITHUB_TOKEN",
 });
 ```
 
