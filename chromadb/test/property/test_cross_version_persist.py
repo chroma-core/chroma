@@ -86,7 +86,7 @@ def _patch_telemetry_client(
 ) -> None:
     # chroma 0.4.14 added OpenTelemetry, distinct from ProductTelemetry. Before 0.4.14
     # ProductTelemetry was simply called Telemetry.
-    settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
+    settings.chroma_telemetry_impl = "chromadb.telemetry.product.ProductTelemetryClient"
 
 
 version_patches: List[
