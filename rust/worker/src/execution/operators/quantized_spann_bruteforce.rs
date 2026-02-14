@@ -1,15 +1,20 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_segment::quantized_spann::{QuantizedSpannSegmentError, QuantizedSpannSegmentReader};
+use chroma_index::spann::utils::query_quantized_cluster;
 use chroma_system::Operator;
-use chroma_types::{operator::RecordMeasure, SignedRoaringBitmap};
+use chroma_types::{
+    operator::RecordMeasure, QuantizedCluster, QuantizedClusterOwned, SignedRoaringBitmap,
+};
 use thiserror::Error;
 
 #[derive(Debug)]
 pub struct QuantizedSpannBruteforceInput {
-    pub cluster_id: u32,
+    pub cluster: QuantizedClusterOwned,
+    pub global_versions: HashMap<u32, u32>,
 }
 
 #[derive(Debug)]
@@ -19,14 +24,14 @@ pub struct QuantizedSpannBruteforceOutput {
 
 #[derive(Error, Debug)]
 pub enum QuantizedSpannBruteforceError {
-    #[error("Error in quantized spann bruteforce: {0}")]
-    BruteforceError(#[from] QuantizedSpannSegmentError),
+    #[error("Error in quantized spann bruteforce")]
+    BruteforceError,
 }
 
 impl ChromaError for QuantizedSpannBruteforceError {
     fn code(&self) -> ErrorCodes {
         match self {
-            Self::BruteforceError(e) => e.code(),
+            Self::BruteforceError => ErrorCodes::Internal,
         }
     }
 }
@@ -34,8 +39,8 @@ impl ChromaError for QuantizedSpannBruteforceError {
 #[derive(Debug, Clone)]
 pub struct QuantizedSpannBruteforceOperator {
     pub count: usize,
+    pub distance_function: DistanceFunction,
     pub filter: SignedRoaringBitmap,
-    pub reader: QuantizedSpannSegmentReader,
     pub rotated_query: Arc<[f32]>,
 }
 
@@ -49,18 +54,30 @@ impl Operator<QuantizedSpannBruteforceInput, QuantizedSpannBruteforceOutput>
         &self,
         input: &QuantizedSpannBruteforceInput,
     ) -> Result<QuantizedSpannBruteforceOutput, QuantizedSpannBruteforceError> {
-        let mut records = self
-            .reader
-            .bruteforce(input.cluster_id, &self.rotated_query)
-            .await?;
+        let cluster = QuantizedCluster::from(&input.cluster);
 
-        // Apply metadata/document filter.
-        records.retain(|record| match &self.filter {
-            SignedRoaringBitmap::Include(rbm) => rbm.contains(record.offset_id),
-            SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(record.offset_id),
-        });
+        let result = query_quantized_cluster(
+            &cluster,
+            &self.rotated_query,
+            &self.distance_function,
+            |id, version| {
+                if input.global_versions.get(&id) != Some(&version) {
+                    return false;
+                }
+                match &self.filter {
+                    SignedRoaringBitmap::Include(rbm) => rbm.contains(id),
+                    SignedRoaringBitmap::Exclude(rbm) => !rbm.contains(id),
+                }
+            },
+        );
 
-        // Truncate to top-k (records are already sorted by increasing distance).
+        let mut records = result
+            .keys
+            .into_iter()
+            .zip(result.distances)
+            .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
+            .collect::<Vec<_>>();
+
         records.truncate(self.count);
 
         Ok(QuantizedSpannBruteforceOutput { records })

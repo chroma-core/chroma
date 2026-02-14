@@ -51,7 +51,7 @@ pub struct QuantizedSpannKnnOrchestrator {
     // State tracking.
     // num_bruteforces is set when either there is no reader (0) or center search completes.
     num_bruteforces: Option<usize>,
-    records: Vec<Vec<RecordMeasure>>,
+    log_and_bruteforce_results: Vec<Vec<RecordMeasure>>,
 
     // Result channel.
     result_channel: Option<Sender<Result<Vec<RecordMeasure>, KnnError>>>,
@@ -76,7 +76,7 @@ impl QuantizedSpannKnnOrchestrator {
             rotated_query: None,
             spann_provider,
             num_bruteforces: None,
-            records: Vec::new(),
+            log_and_bruteforce_results: Vec::new(),
             result_channel: None,
         }
     }
@@ -85,12 +85,12 @@ impl QuantizedSpannKnnOrchestrator {
         // Merge once KnnLog + all bruteforces report in.
         if self
             .num_bruteforces
-            .is_some_and(|num_bruteforces| self.records.len() > num_bruteforces)
+            .is_some_and(|num_bruteforces| self.log_and_bruteforce_results.len() > num_bruteforces)
         {
             let task = wrap(
                 Box::new(Merge { k: self.knn.fetch }),
                 KnnMergeInput {
-                    batch_measures: std::mem::take(&mut self.records),
+                    batch_measures: std::mem::take(&mut self.log_and_bruteforce_results),
                 },
                 ctx.receiver(),
                 self.context.task_cancellation_token.clone(),
@@ -184,7 +184,7 @@ impl Handler<TaskResult<KnnOutput, KnnLogError>> for QuantizedSpannKnnOrchestrat
             Some(output) => output,
             None => return,
         };
-        self.records.push(output.distances);
+        self.log_and_bruteforce_results.push(output.distances);
         self.try_merge(ctx).await;
     }
 }
@@ -290,10 +290,11 @@ impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClust
             None => return,
         };
 
-        let reader = self
+        let distance_function = self
             .reader
             .as_ref()
             .expect("reader must be set when load cluster succeeds")
+            .distance_function()
             .clone();
 
         let rotated_query = self
@@ -304,19 +305,20 @@ impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClust
 
         let bf_operator = QuantizedSpannBruteforceOperator {
             count: self.knn.fetch as usize,
+            distance_function,
             filter: self
                 .knn_filter_output
                 .filter_output
                 .compact_offset_ids
                 .clone(),
-            reader,
             rotated_query,
         };
 
         let bf_task = wrap(
             Box::new(bf_operator),
             QuantizedSpannBruteforceInput {
-                cluster_id: output.cluster_id,
+                cluster: output.cluster,
+                global_versions: output.global_versions,
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -339,7 +341,7 @@ impl Handler<TaskResult<QuantizedSpannBruteforceOutput, QuantizedSpannBruteforce
             Some(output) => output,
             None => return,
         };
-        self.records.push(output.records);
+        self.log_and_bruteforce_results.push(output.records);
         self.try_merge(ctx).await;
     }
 }
