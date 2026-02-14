@@ -76,7 +76,7 @@ pub struct GarbageCollectorOrchestrator {
     graph: Option<VersionGraph>,
     soft_deleted_collections_to_gc: HashSet<CollectionUuid>,
     tenant: Option<String>,
-    database_name: Option<String>,
+    database_name: Option<DatabaseName>,
 
     num_files_deleted: u32,
     num_versions_deleted: u32,
@@ -88,6 +88,7 @@ pub struct GarbageCollectorOrchestrator {
 impl GarbageCollectorOrchestrator {
     pub fn new(
         collection_id: CollectionUuid,
+        database_name: Option<DatabaseName>,
         version_file_path: String,
         lineage_file_path: Option<String>,
         version_absolute_cutoff_time: DateTime<Utc>,
@@ -129,7 +130,7 @@ impl GarbageCollectorOrchestrator {
             graph: None,
             soft_deleted_collections_to_gc: HashSet::new(),
             tenant: None,
-            database_name: None,
+            database_name,
 
             num_files_deleted: 0,
             num_versions_deleted: 0,
@@ -796,7 +797,7 @@ impl GarbageCollectorOrchestrator {
         let tenant_id = collection_info.tenant_id.clone();
         self.tenant = Some(tenant_id.clone());
         let database_name = collection_info.database_name.clone();
-        self.database_name = Some(database_name.clone());
+        self.database_name = DatabaseName::new(database_name);
 
         let task = wrap(
             Box::new(DeleteUnusedFilesOperator::new(
@@ -1003,11 +1004,12 @@ impl GarbageCollectorOrchestrator {
                             .ok_or(GarbageCollectorError::InvariantViolation(
                                 "Expected tenant to be set".to_string(),
                             ))?,
-                        self.database_name.clone().ok_or(
-                            GarbageCollectorError::InvariantViolation(
+                        self.database_name
+                            .clone()
+                            .ok_or(GarbageCollectorError::InvariantViolation(
                                 "Expected database to be set".to_string(),
-                            ),
-                        )?,
+                            ))?
+                            .into_string(),
                         collection_id,
                     )
                     .await?;
@@ -1268,6 +1270,7 @@ mod tests {
         let logs = Log::InMemory(chroma_log::in_memory_log::InMemoryLog::default());
         let orchestrator = GarbageCollectorOrchestrator::new(
             root_collection_id,
+            None,
             root_collection.version_file_path.unwrap(),
             None,
             now,
