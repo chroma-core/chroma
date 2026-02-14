@@ -296,6 +296,7 @@ impl LogFetchOrchestrator {
         database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
         fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
         max_compaction_size: usize,
         max_partition_size: usize,
         log: Log,
@@ -308,6 +309,7 @@ impl LogFetchOrchestrator {
         let context = CompactionContext::new(
             is_rebuild,
             fetch_log_batch_size,
+            fetch_log_concurrency,
             max_compaction_size,
             max_partition_size,
             log,
@@ -485,6 +487,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     collection_uuid: collection.collection_id,
                     tenant: collection.tenant.clone(),
                     database_name,
+                    fetch_log_concurrency: self.context.fetch_log_concurrency,
                 }),
                 (),
                 ctx.receiver(),
