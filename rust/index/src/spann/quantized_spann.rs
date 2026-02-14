@@ -1888,8 +1888,7 @@ mod tests {
             .finish(&usearch_provider)
             .await
             .expect("Failed to finish");
-        let flusher = writer
-            .commit(&blockfile_provider, &usearch_provider)
+        let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
         let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
@@ -2458,8 +2457,7 @@ mod tests {
             .finish(&usearch_provider)
             .await
             .expect("Failed to finish");
-        let flusher = writer
-            .commit(&blockfile_provider, &usearch_provider)
+        let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
         let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
@@ -2516,8 +2514,7 @@ mod tests {
             .finish(&usearch_provider)
             .await
             .expect("Failed to finish");
-        let flusher = writer
-            .commit(&blockfile_provider, &usearch_provider)
+        let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
         let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
@@ -2799,8 +2796,7 @@ mod tests {
                 .finish(&usearch_provider)
                 .await
                 .expect("finish failed");
-            let flusher = writer
-                .commit(&blockfile_provider, &usearch_provider)
+            let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
                 .await
                 .expect("commit failed");
             file_ids = Box::pin(flusher.flush()).await.expect("flush failed");

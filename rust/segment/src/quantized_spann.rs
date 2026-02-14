@@ -263,11 +263,12 @@ impl QuantizedSpannSegmentWriter {
     }
 
     pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusher, Box<dyn ChromaError>> {
-        let flusher = self
-            .index
-            .commit(&self.blockfile_provider, &self.usearch_provider)
-            .await
-            .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
+        let flusher = Box::pin(
+            self.index
+                .commit(&self.blockfile_provider, &self.usearch_provider),
+        )
+        .await
+        .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
         Ok(QuantizedSpannSegmentFlusher {
             flusher,
             id: self.id,
