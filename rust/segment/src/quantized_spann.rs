@@ -1,22 +1,34 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
-use chroma_blockstore::{arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider};
-use chroma_distance::DistanceFunction;
+use chroma_blockstore::{
+    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileReader,
+};
+use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
-    spann::quantized_spann::{
-        QuantizedSpannError, QuantizedSpannFlusher, QuantizedSpannIds, QuantizedSpannIndexWriter,
+    spann::{
+        quantized_spann::{
+            QuantizedSpannError, QuantizedSpannFlusher, QuantizedSpannIds,
+            QuantizedSpannIndexWriter, PREFIX_CENTER, PREFIX_ROTATION, PREFIX_VERSION,
+            SINGLETON_KEY,
+        },
+        utils::query_quantized_cluster,
     },
-    usearch::{USearchIndex, USearchIndexProvider},
-    IndexUuid,
+    usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
+    IndexUuid, OpenMode, VectorIndex, VectorIndexProvider,
 };
 use chroma_types::{
-    Collection, MaterializedLogOperation, Schema, SchemaError, Segment, SegmentScope, SegmentType,
-    SegmentUuid, OFFSET_ID_TO_DATA, QUANTIZED_SPANN_CLUSTER, QUANTIZED_SPANN_EMBEDDING_METADATA,
+    default_construction_ef_spann, default_m_spann, default_search_ef_spann,
+    operator::RecordMeasure, Collection, MaterializedLogOperation, QuantizedCluster, Schema,
+    SchemaError, Segment, SegmentScope, SegmentType, SegmentUuid, OFFSET_ID_TO_DATA,
+    QUANTIZED_SPANN_CLUSTER, QUANTIZED_SPANN_EMBEDDING_METADATA,
     QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
     QUANTIZED_SPANN_SCALAR_METADATA,
 };
+use faer::{col::ColRef, Mat};
+use futures::future;
 use thiserror::Error;
 
 use crate::blockfile_record::ApplyMaterializedLogError;
@@ -28,6 +40,8 @@ pub enum QuantizedSpannSegmentError {
     Config(String),
     #[error("quantized spann data error: {0}")]
     Data(String),
+    #[error("dimension mismatch: expected {expected}, got {actual}")]
+    DimensionMismatch { expected: usize, actual: usize },
     #[error(transparent)]
     Index(#[from] QuantizedSpannError),
     #[error(transparent)]
@@ -39,6 +53,7 @@ impl ChromaError for QuantizedSpannSegmentError {
         match self {
             Self::Config(_) => ErrorCodes::InvalidArgument,
             Self::Data(_) => ErrorCodes::Internal,
+            Self::DimensionMismatch { .. } => ErrorCodes::InvalidArgument,
             Self::Index(e) => e.code(),
             Self::Schema(e) => e.code(),
         }
@@ -325,39 +340,359 @@ impl QuantizedSpannSegmentFlusher {
     }
 }
 
+#[derive(Clone)]
+pub struct QuantizedSpannSegmentReader {
+    // Centroid index (for navigate)
+    quantized_centroid: USearchIndex,
+
+    // Quantization parameters (for rotate + scoring)
+    dimension: usize,
+    distance_function: DistanceFunction,
+    rotation: Arc<Mat<f32>>,
+
+    // Blockfile readers
+    quantized_cluster_reader: BlockfileReader<'static, u32, QuantizedCluster<'static>>,
+    versions_reader: BlockfileReader<'static, u32, u32>,
+}
+
+impl Debug for QuantizedSpannSegmentReader {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QuantizedSpannSegmentReader").finish()
+    }
+}
+
+impl QuantizedSpannSegmentReader {
+    pub async fn from_segment(
+        collection: &Collection,
+        vector_segment: &Segment,
+        blockfile_provider: &BlockfileProvider,
+        usearch_provider: &USearchIndexProvider,
+    ) -> Result<Self, QuantizedSpannSegmentError> {
+        if vector_segment.r#type != SegmentType::QuantizedSpann
+            || vector_segment.scope != SegmentScope::VECTOR
+        {
+            return Err(QuantizedSpannSegmentError::Config(
+                "segment type must be QuantizedSpann with VECTOR scope".to_string(),
+            ));
+        }
+
+        let schema = match &collection.schema {
+            Some(schema) => schema.clone(),
+            None => Schema::try_from(&collection.config)?,
+        };
+
+        let (spann_config, space) = schema.get_spann_config().ok_or_else(|| {
+            QuantizedSpannSegmentError::Config("missing spann configuration".to_string())
+        })?;
+        let distance_function: DistanceFunction = space.into();
+
+        let dimension = collection.dimension.ok_or_else(|| {
+            QuantizedSpannSegmentError::Config("collection dimension not set".to_string())
+        })? as usize;
+
+        // Parse file paths — all 5 must be present for a readable segment.
+        let file_path_keys = [
+            QUANTIZED_SPANN_CLUSTER,
+            QUANTIZED_SPANN_EMBEDDING_METADATA,
+            QUANTIZED_SPANN_QUANTIZED_CENTROID,
+            QUANTIZED_SPANN_RAW_CENTROID,
+            QUANTIZED_SPANN_SCALAR_METADATA,
+        ];
+
+        let mut parsed = Vec::new();
+        for key in &file_path_keys {
+            let paths = vector_segment.file_path.get(*key).ok_or_else(|| {
+                QuantizedSpannSegmentError::Data("uninitialized segment".to_string())
+            })?;
+            let path = paths.first().ok_or_else(|| {
+                QuantizedSpannSegmentError::Config(format!("empty file path for {key}"))
+            })?;
+            let (prefix, id) = Segment::extract_prefix_and_id(path).map_err(|e| {
+                QuantizedSpannSegmentError::Config(format!(
+                    "failed to parse file path for {key}: {e}"
+                ))
+            })?;
+            parsed.push((prefix, id));
+        }
+
+        // Validate all prefixes are consistent.
+        let prefix_path = parsed[0].0;
+        for (i, (p, _)) in parsed.iter().enumerate().skip(1) {
+            if *p != prefix_path {
+                return Err(QuantizedSpannSegmentError::Config(format!(
+                    "inconsistent prefix path for {}",
+                    file_path_keys[i]
+                )));
+            }
+        }
+        let prefix_path = prefix_path.to_string();
+
+        // Decompose parsed file IDs.
+        // Order matches file_path_keys: cluster[0], embedding_metadata[1],
+        // quantized_centroid[2], raw_centroid[3], scalar_metadata[4].
+        let cluster_id = parsed[0].1;
+        let embedding_metadata_id = parsed[1].1;
+        let quantized_centroid_id = IndexUuid(parsed[2].1);
+        // parsed[3] is raw_centroid — not needed for the reader.
+        let scalar_metadata_id = parsed[4].1;
+
+        // Step 1: Open embedding_metadata → load rotation matrix + center.
+        let emb_meta_options =
+            BlockfileReaderOptions::new(embedding_metadata_id, prefix_path.clone());
+        let emb_meta_reader = blockfile_provider
+            .read::<u32, &'static [f32]>(emb_meta_options)
+            .await
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!(
+                    "failed to open embedding metadata reader: {e}"
+                ))
+            })?;
+
+        let columns = emb_meta_reader
+            .get_range(PREFIX_ROTATION..=PREFIX_ROTATION, ..)
+            .await
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!("failed to read rotation matrix: {e}"))
+            })?
+            .collect::<Vec<_>>();
+
+        if columns.len() != dimension {
+            return Err(QuantizedSpannSegmentError::Data(format!(
+                "rotation matrix column count mismatch: expected {dimension}, got {}",
+                columns.len()
+            )));
+        }
+        for (_prefix, _key, col) in &columns {
+            if col.len() != dimension {
+                return Err(QuantizedSpannSegmentError::Data(format!(
+                    "rotation matrix column length mismatch: expected {dimension}, got {}",
+                    col.len()
+                )));
+            }
+        }
+        let rotation = Mat::from_fn(dimension, dimension, |i, j| columns[j].2[i]).into();
+
+        let center = emb_meta_reader
+            .get(PREFIX_CENTER, SINGLETON_KEY)
+            .await
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!("failed to read quantization center: {e}"))
+            })?
+            .map(Arc::<[f32]>::from)
+            .unwrap_or_else(|| vec![0.0; dimension].into());
+
+        // Step 2: Open quantized centroid usearch index (read-only).
+        let max_neighbors = spann_config.max_neighbors.unwrap_or(default_m_spann());
+        let ef_construction = spann_config
+            .ef_construction
+            .unwrap_or(default_construction_ef_spann());
+        let ef_search = spann_config.ef_search.unwrap_or(default_search_ef_spann());
+
+        let usearch_config = USearchIndexConfig {
+            collection_id: vector_segment.collection,
+            cmek: schema.cmek.clone(),
+            prefix_path: prefix_path.clone(),
+            dimensions: dimension,
+            distance_function: distance_function.clone(),
+            connectivity: max_neighbors,
+            expansion_add: ef_construction,
+            expansion_search: ef_search,
+            quantization_center: Some(center),
+        };
+        let quantized_centroid = usearch_provider
+            .open(&usearch_config, OpenMode::Open(quantized_centroid_id))
+            .await
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!(
+                    "failed to open quantized centroid index: {e}"
+                ))
+            })?;
+
+        // Step 3: Open quantized cluster blockfile reader.
+        let cluster_options = BlockfileReaderOptions::new(cluster_id, prefix_path.clone());
+        let quantized_cluster_reader =
+            blockfile_provider
+                .read(cluster_options)
+                .await
+                .map_err(|e| {
+                    QuantizedSpannSegmentError::Data(format!(
+                        "failed to open quantized cluster reader: {e}"
+                    ))
+                })?;
+
+        // Step 4: Open scalar_metadata blockfile reader (for version lookups)
+        //         and preload all version blocks into the blockfile cache.
+        let scalar_options = BlockfileReaderOptions::new(scalar_metadata_id, prefix_path.clone());
+        let versions_reader = blockfile_provider.read(scalar_options).await.map_err(|e| {
+            QuantizedSpannSegmentError::Data(format!("failed to open scalar metadata reader: {e}"))
+        })?;
+        versions_reader
+            .load_blocks_for_prefixes(std::iter::once(PREFIX_VERSION))
+            .await;
+
+        Ok(Self {
+            dimension,
+            distance_function,
+            quantized_centroid,
+            quantized_cluster_reader,
+            rotation,
+            versions_reader,
+        })
+    }
+
+    /// Rotate a query vector into the quantized space.
+    /// Applies normalization for cosine distance, then multiplies by the rotation matrix.
+    pub fn rotate(&self, query: &[f32]) -> Result<Vec<f32>, QuantizedSpannSegmentError> {
+        if query.len() != self.dimension {
+            return Err(QuantizedSpannSegmentError::DimensionMismatch {
+                expected: self.dimension,
+                actual: query.len(),
+            });
+        }
+
+        let rotated = match self.distance_function {
+            DistanceFunction::Cosine => {
+                let normalized = normalize(query);
+                self.rotation.as_ref() * ColRef::from_slice(&normalized)
+            }
+            _ => self.rotation.as_ref() * ColRef::from_slice(query),
+        };
+        Ok(rotated.iter().copied().collect())
+    }
+
+    /// Find nearest cluster heads using the quantized centroid index.
+    /// `rotated_query` must be the output of `rotate()`.
+    pub fn navigate(
+        &self,
+        rotated_query: &[f32],
+        count: usize,
+    ) -> Result<Vec<u32>, QuantizedSpannSegmentError> {
+        if rotated_query.len() != self.dimension {
+            return Err(QuantizedSpannSegmentError::DimensionMismatch {
+                expected: self.dimension,
+                actual: rotated_query.len(),
+            });
+        }
+
+        let result = self
+            .quantized_centroid
+            .search(rotated_query, count)
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!("centroid search failed: {e}"))
+            })?;
+        Ok(result.keys)
+    }
+
+    /// Preload a single cluster's blockfile data into cache.
+    pub async fn load_cluster(&self, cluster_id: u32) {
+        self.quantized_cluster_reader
+            .load_data_for_keys(std::iter::once((String::new(), cluster_id)))
+            .await;
+    }
+
+    /// Score all valid entries in a cluster against the rotated query.
+    /// Returns scored results sorted by increasing distance for all valid, unique entries.
+    /// `rotated_query` must be the output of `rotate()`.
+    pub async fn bruteforce(
+        &self,
+        cluster_id: u32,
+        rotated_query: &[f32],
+    ) -> Result<Vec<RecordMeasure>, QuantizedSpannSegmentError> {
+        if rotated_query.len() != self.dimension {
+            return Err(QuantizedSpannSegmentError::DimensionMismatch {
+                expected: self.dimension,
+                actual: rotated_query.len(),
+            });
+        }
+
+        let cluster = self
+            .quantized_cluster_reader
+            .get("", cluster_id)
+            .await
+            .map_err(|e| {
+                QuantizedSpannSegmentError::Data(format!(
+                    "failed to read cluster {cluster_id}: {e}"
+                ))
+            })?;
+
+        let Some(cluster) = cluster else {
+            return Ok(Vec::new());
+        };
+
+        if cluster.ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fetch global versions for all entries in parallel.
+        let versions = future::try_join_all(cluster.ids.iter().map(|id| async move {
+            let global = self
+                .versions_reader
+                .get(PREFIX_VERSION, *id)
+                .await
+                .map_err(|e| {
+                    QuantizedSpannSegmentError::Data(format!(
+                        "failed to read version for id {id}: {e}"
+                    ))
+                })?;
+            Ok::<_, QuantizedSpannSegmentError>(global.map(|v| (*id, v)))
+        }))
+        .await?
+        .into_iter()
+        .flatten()
+        .collect::<HashMap<_, _>>();
+
+        let result = query_quantized_cluster(
+            &cluster,
+            rotated_query,
+            &self.distance_function,
+            |id, version| versions.get(&id) == Some(&version),
+        );
+
+        Ok(result
+            .keys
+            .into_iter()
+            .zip(result.distances)
+            .map(|(offset_id, measure)| RecordMeasure { offset_id, measure })
+            .collect())
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::atomic::AtomicU32;
     use std::sync::Arc;
 
     use chroma_blockstore::{
         arrow::{
             config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES},
-            provider::{ArrowBlockfileProvider, BlockfileReaderOptions},
+            provider::ArrowBlockfileProvider,
         },
         provider::BlockfileProvider,
         BlockfileWriterOptions,
     };
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
+
     use chroma_index::usearch::USearchIndexProvider;
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DataRecord, DatabaseUuid,
         InternalCollectionConfiguration, InternalSpannConfiguration, LogRecord, Operation,
-        OperationRecord, Schema, Segment, SegmentScope, SegmentType, SegmentUuid,
+        OperationRecord, Schema, Segment, SegmentScope, SegmentType, SegmentUuid, Space,
         VectorIndexConfiguration, OFFSET_ID_TO_DATA, QUANTIZED_SPANN_CLUSTER,
         QUANTIZED_SPANN_EMBEDDING_METADATA, QUANTIZED_SPANN_QUANTIZED_CENTROID,
         QUANTIZED_SPANN_RAW_CENTROID, QUANTIZED_SPANN_SCALAR_METADATA,
     };
+    use rand::{Rng, SeedableRng};
 
-    use super::QuantizedSpannSegmentWriter;
+    use super::{QuantizedSpannSegmentReader, QuantizedSpannSegmentWriter};
     use crate::types::materialize_logs;
 
     const CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
-    const DIMENSION: usize = 4;
-    const NUM_CYCLES: usize = 3;
-    const BATCH_SIZE: usize = 10;
+    const DIMENSION: usize = 1024;
+    const NUM_CYCLES: usize = 4;
+    const BATCH_SIZE: usize = 32;
+    const SEED: u64 = 42;
     const TOTAL_POINTS: usize = NUM_CYCLES * BATCH_SIZE;
 
     fn test_blockfile_provider(storage: Storage) -> BlockfileProvider {
@@ -379,7 +714,23 @@ mod test {
     }
 
     fn test_collection(collection_id: CollectionUuid, db_id: DatabaseUuid) -> Collection {
-        let params = InternalSpannConfiguration::default();
+        let params = InternalSpannConfiguration {
+            ef_construction: 32,
+            ef_search: 16,
+            max_neighbors: 8,
+            merge_threshold: 2,
+            nreplica_count: 2,
+            reassign_neighbor_count: 6,
+            search_nprobe: 4,
+            search_rng_epsilon: 4.0,
+            search_rng_factor: 1.0,
+            space: Space::Cosine,
+            split_threshold: 8,
+            write_nprobe: 4,
+            write_rng_epsilon: 4.0,
+            write_rng_factor: 1.0,
+            ..Default::default()
+        };
         let config = InternalCollectionConfiguration {
             vector_index: VectorIndexConfiguration::Spann(params),
             embedding_function: None,
@@ -399,27 +750,26 @@ mod test {
         }
     }
 
-    /// Generate embeddings for all points upfront. Index i corresponds to
-    /// offset_id (i + 1).
+    /// Generate embeddings for all points upfront with fixed-seed RNG.
+    /// Index i corresponds to offset_id (i + 1).
     fn test_embeddings() -> Vec<[f32; DIMENSION]> {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(SEED);
         (0..TOTAL_POINTS)
-            .map(|i| {
-                let v = i as f32;
-                [v, v + 0.1, v + 0.2, v + 0.3]
-            })
+            .map(|_| std::array::from_fn(|_| rng.gen()))
             .collect()
     }
 
-    fn make_log_records(start_id: usize, count: usize) -> Vec<LogRecord> {
-        (0..count)
-            .map(|i| {
+    fn make_log_records(start_id: usize, embeddings: &[[f32; DIMENSION]]) -> Vec<LogRecord> {
+        embeddings
+            .iter()
+            .enumerate()
+            .map(|(i, emb)| {
                 let id = start_id + i;
-                let val = id as f32;
                 LogRecord {
                     log_offset: (id + 1) as i64,
                     record: OperationRecord {
                         id: format!("point_{id}"),
-                        embedding: Some(vec![val, val + 0.1, val + 0.2, val + 0.3]),
+                        embedding: Some(emb.to_vec()),
                         encoding: None,
                         metadata: None,
                         document: None,
@@ -527,7 +877,7 @@ mod test {
             .unwrap_or_else(|e| panic!("cycle {cycle}: from_segment failed: {e}"));
 
             let start_id = cycle * BATCH_SIZE;
-            let logs = make_log_records(start_id, BATCH_SIZE);
+            let logs = make_log_records(start_id, &embeddings[start_id..start_id + BATCH_SIZE]);
             let chunked = Chunk::new(logs.into());
             let materialized = materialize_logs(&None, chunked, Some(next_offset_id.clone()))
                 .await
@@ -592,20 +942,26 @@ mod test {
         .await
         .expect("final reopen failed");
 
-        // Open the scalar metadata blockfile and verify versions exist for all points.
-        let scalar_path = &vector_segment.file_path[QUANTIZED_SPANN_SCALAR_METADATA][0];
-        let (prefix, id) = Segment::extract_prefix_and_id(scalar_path)
-            .expect("failed to parse scalar metadata path");
-        let reader = blockfile_provider
-            .read::<u32, u32>(BlockfileReaderOptions::new(id, prefix.to_string()))
-            .await
-            .expect("failed to open scalar metadata reader");
+        // === Reader verification ===
+        let blockfile_provider = test_blockfile_provider(storage.clone());
+        let usearch_provider = test_usearch_provider(storage.clone());
 
-        let versions: Vec<(&str, u32, u32)> = reader
-            .get_range("version"..="version", ..)
+        let reader = QuantizedSpannSegmentReader::from_segment(
+            &collection,
+            &vector_segment,
+            &blockfile_provider,
+            &usearch_provider,
+        )
+        .await
+        .expect("failed to open reader");
+
+        // Verify versions exist for all points.
+        let versions = reader
+            .versions_reader
+            .get_range(super::PREFIX_VERSION..=super::PREFIX_VERSION, ..)
             .await
             .expect("failed to read versions")
-            .collect();
+            .collect::<Vec<_>>();
 
         assert_eq!(
             versions.len(),
@@ -614,14 +970,94 @@ mod test {
             versions.len(),
         );
 
-        // Verify every offset_id 1..=TOTAL_POINTS has a version entry.
-        let version_ids: std::collections::HashSet<u32> =
-            versions.iter().map(|(_, id, _)| *id).collect();
+        let version_ids = versions
+            .iter()
+            .map(|(_, id, _)| *id)
+            .collect::<HashSet<_>>();
         for offset_id in 1..=TOTAL_POINTS as u32 {
             assert!(
                 version_ids.contains(&offset_id),
                 "missing version entry for offset_id {offset_id}",
             );
         }
+
+        // Scan all cluster IDs from the blockfile.
+        let all_clusters = reader
+            .quantized_cluster_reader
+            .get_range(.., ..)
+            .await
+            .expect("failed to scan clusters")
+            .map(|(_, key, _)| key)
+            .collect::<Vec<u32>>();
+        assert!(
+            !all_clusters.is_empty(),
+            "expected at least one cluster in blockfile",
+        );
+
+        // Rotate a query vector.
+        let query = embeddings[0].as_slice();
+        let rotated = reader.rotate(query).expect("rotate failed");
+        assert_eq!(rotated.len(), DIMENSION);
+
+        // Navigate — request enough to cover all clusters.
+        let navigate_ids = reader
+            .navigate(&rotated, TOTAL_POINTS)
+            .expect("navigate failed");
+        assert!(!navigate_ids.is_empty());
+
+        // Verify navigate returns valid cluster IDs.
+        let cluster_id_set = all_clusters.iter().copied().collect::<HashSet<_>>();
+        for id in &navigate_ids {
+            assert!(
+                cluster_id_set.contains(id),
+                "navigate returned unknown cluster id {id}",
+            );
+        }
+
+        // Bruteforce each cluster and merge results.
+        let mut all_results = HashMap::new();
+
+        for cluster_id in &all_clusters {
+            let results = reader
+                .bruteforce(*cluster_id, &rotated)
+                .await
+                .unwrap_or_else(|e| panic!("bruteforce cluster {cluster_id} failed: {e}"));
+
+            // Verify sorted distances.
+            for w in results.windows(2) {
+                assert!(
+                    w[0].measure <= w[1].measure,
+                    "bruteforce results not sorted: {} > {}",
+                    w[0].measure,
+                    w[1].measure,
+                );
+            }
+
+            for r in results {
+                all_results.entry(r.offset_id).or_insert(r.measure);
+            }
+        }
+
+        // Verify all points are present.
+        for offset_id in 1..=TOTAL_POINTS as u32 {
+            assert!(
+                all_results.contains_key(&offset_id),
+                "missing offset_id {offset_id} in bruteforce results",
+            );
+        }
+
+        // Verify P95 relative error within 1% (BITS=4, dim=1024 quantization bound).
+        let mut rel_errors = all_results
+            .iter()
+            .map(|(offset_id, measure)| {
+                let emb = embeddings[(*offset_id - 1) as usize].as_slice();
+                let rotated_emb = reader.rotate(emb).expect("rotate failed");
+                let exact = reader.distance_function.distance(&rotated, &rotated_emb);
+                (measure - exact).abs() / exact.abs().max(f32::EPSILON)
+            })
+            .collect::<Vec<_>>();
+        rel_errors.sort_by(|a, b| a.total_cmp(b));
+        let p90 = rel_errors[rel_errors.len() * 90 / 100];
+        assert!(p90 < 1e-2, "P90 relative error {p90} exceeds 1% bound",);
     }
 }

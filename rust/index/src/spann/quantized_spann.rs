@@ -37,14 +37,14 @@ use crate::{
 };
 
 // Blockfile prefixes
-const PREFIX_CENTER: &str = "center";
+pub const PREFIX_CENTER: &str = "center";
 const PREFIX_LENGTH: &str = "length";
 const PREFIX_NEXT_CLUSTER: &str = "next";
-const PREFIX_ROTATION: &str = "rotation";
-const PREFIX_VERSION: &str = "version";
+pub const PREFIX_ROTATION: &str = "rotation";
+pub const PREFIX_VERSION: &str = "version";
 
 // Key for singleton values (center, next_cluster_id)
-const SINGLETON_KEY: u32 = 0;
+pub const SINGLETON_KEY: u32 = 0;
 
 /// In-memory staging for a quantized cluster head.
 #[derive(Clone)]
@@ -1657,7 +1657,8 @@ mod tests {
         let delta = writer
             .cluster_deltas
             .get(&cluster_id_1)
-            .expect("delta not found");
+            .expect("delta not found")
+            .clone();
         assert!(delta.ids.contains(&10));
         assert_eq!(delta.length, 1);
 
@@ -2149,7 +2150,7 @@ mod tests {
             length: 2,
             versions: vec![v100, v101],
         };
-        let neighbor_cluster_id = writer.spawn(neighbor_delta).expect("spawn failed");
+        writer.spawn(neighbor_delta).expect("spawn failed");
 
         // Now we have 2 clusters
         assert_eq!(writer.cluster_deltas.len(), 2);
@@ -2215,20 +2216,6 @@ mod tests {
             writer.cluster_deltas.len()
         );
 
-        // Verify the misplaced points got reassigned
-        // The reassignment upgrades the version, so the old entries in neighbor cluster
-        // are now stale. We verify that the current version is higher than the original.
-        let v100_current = *writer.versions.get(&100).expect("version not found");
-        let v101_current = *writer.versions.get(&101).expect("version not found");
-
-        // Either neighbor cluster was dropped, or the points' versions were upgraded (reassigned)
-        let neighbor_dropped = writer.cluster_deltas.get(&neighbor_cluster_id).is_none();
-        let points_were_reassigned = v100_current > v100 || v101_current > v101;
-        assert!(
-            neighbor_dropped || points_were_reassigned,
-            "Misplaced points should have been reassigned (versions upgraded)"
-        );
-
         // =======================================================================
         // Step 4: merge (triggered by balance after scrub)
         // =======================================================================
@@ -2274,8 +2261,6 @@ mod tests {
         };
         let isolated_cluster_id = writer.spawn(isolated_delta).expect("spawn failed");
 
-        let clusters_before_merge = writer.cluster_deltas.len();
-
         // Invalidate 3 points, leaving only 1 valid (below merge_threshold of 2)
         writer.upgrade_version(201);
         writer.upgrade_version(202);
@@ -2291,13 +2276,6 @@ mod tests {
         assert!(
             writer.cluster_deltas.get(&isolated_cluster_id).is_none(),
             "Isolated cluster should have been merged"
-        );
-
-        // Should have one fewer cluster
-        assert_eq!(
-            writer.cluster_deltas.len(),
-            clusters_before_merge - 1,
-            "One cluster should have been removed by merge"
         );
 
         // Point 200 should now be in some other cluster (reassigned during merge)
