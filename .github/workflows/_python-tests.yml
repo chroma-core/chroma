@@ -17,6 +17,7 @@ on:
         required: false
         default: 'blacksmith-8vcpu-ubuntu-2404'
         type: string
+      always_multi_region: false
 
 jobs:
   test-rust-bindings:
@@ -162,7 +163,7 @@ jobs:
       contents: read
       id-token: write
     env:
-      MULTI_REGION: ${{ matrix.multi_region && 'true' || '' }}
+      MULTI_REGION: ${{ (inputs.always_multi_region || matrix.multi_region) && 'true' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
