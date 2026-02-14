@@ -7,13 +7,14 @@ use chroma_cache::nop::NopCache;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::{
     hnsw_provider::{HnswIndexProvider, FILES},
+    usearch::USearchIndex,
     IndexUuid,
 };
 use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionSegmentInfo, CollectionVersionFile, VersionListForCollection},
-    Segment, HNSW_PATH,
+    Segment, HNSW_PATH, QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -103,6 +104,23 @@ impl ComputeUnusedFilesOperator {
                     }
                     continue;
                 }
+                // For usearch index files, add the single .bin file directly.
+                if file_type == QUANTIZED_SPANN_RAW_CENTROID
+                    || file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID
+                {
+                    let quantized = file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID;
+                    for file_path in file_paths.paths.iter() {
+                        let (prefix, id) =
+                            Segment::extract_prefix_and_id(file_path).map_err(|e| {
+                                tracing::error!(error = %e, "Failed to extract prefix and ID");
+                                ComputeUnusedFilesError::InvalidUuid(e, file_path.to_string())
+                            })?;
+                        let s3_key =
+                            USearchIndex::format_storage_key(prefix, IndexUuid(id), quantized);
+                        unused_hnsw_prefixes.push(s3_key);
+                    }
+                    continue;
+                }
                 for file_path in &file_paths.paths {
                     tracing::debug!(
                         line = line!(),
@@ -118,7 +136,11 @@ impl ComputeUnusedFilesOperator {
         let mut newer_si_ids = Vec::new();
         for segment_compaction_info in newer_segment_info.segment_compaction_info.iter() {
             for (file_type, file_paths) in &segment_compaction_info.file_paths {
-                if file_type == "hnsw_index" || file_type == HNSW_PATH {
+                if file_type == "hnsw_index"
+                    || file_type == HNSW_PATH
+                    || file_type == QUANTIZED_SPANN_RAW_CENTROID
+                    || file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID
+                {
                     continue;
                 }
 
