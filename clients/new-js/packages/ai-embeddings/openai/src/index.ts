@@ -5,7 +5,6 @@ import {
   registerEmbeddingFunction,
 } from "chromadb";
 import OpenAI from "openai";
-import type { ClientOptions } from 'openai';
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 
 const NAME = "openai";
