@@ -151,3 +151,130 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+def test_persistent_client_close() -> None:
+    """Test that close() properly releases resources in PersistentClient."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a client, add some data, and close it
+        client = chromadb.PersistentClient(path=tmpdir)
+        collection = client.create_collection("test_collection")
+        collection.add(
+            ids=["id1", "id2"],
+            documents=["doc1", "doc2"],
+            metadatas=[{"key": "value1"}, {"key": "value2"}],
+        )
+
+        # Save a reference to the system before close() removes it from the cache
+        system = client._system
+
+        # Close the client
+        client.close()
+
+        # Verify the system is stopped
+        assert system._running is False
+
+        # Create a new client with the same path to verify data was persisted
+        client2 = chromadb.PersistentClient(path=tmpdir)
+        collection2 = client2.get_collection("test_collection")
+        results = collection2.get()
+        assert len(results["ids"]) == 2
+        assert "id1" in results["ids"]
+        assert "id2" in results["ids"]
+
+        client2.close()
+        client.clear_system_cache()
+        client2.clear_system_cache()
+
+
+def test_persistent_client_context_manager() -> None:
+    """Test that PersistentClient works as a context manager."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Use client as context manager
+        with chromadb.PersistentClient(path=tmpdir) as client:
+            # Save a reference to the system before close() removes it from the cache
+            system = client._system
+            collection = client.create_collection("test_collection")
+            collection.add(
+                ids=["id1", "id2"],
+                documents=["doc1", "doc2"],
+                metadatas=[{"key": "value1"}, {"key": "value2"}],
+            )
+
+        # Verify the system is stopped after context exit
+        assert system._running is False
+
+        # Verify data was persisted
+        with chromadb.PersistentClient(path=tmpdir) as client2:
+            collection2 = client2.get_collection("test_collection")
+            results = collection2.get()
+            assert len(results["ids"]) == 2
+
+        client.clear_system_cache()
+        client2.clear_system_cache()
+
+
+def test_ephemeral_client_close() -> None:
+    """Test that close() works with EphemeralClient."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    client = chromadb.EphemeralClient()
+    # Save a reference to the system before close() removes it from the cache
+    system = client._system
+    collection = client.create_collection("test_collection")
+    collection.add(ids=["id1"], documents=["doc1"])
+
+    # Close the client
+    client.close()
+
+    # Verify the system is stopped
+    assert system._running is False
+
+    client.clear_system_cache()
+
+
+def test_ephemeral_client_context_manager() -> None:
+    """Test that EphemeralClient works as a context manager."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with chromadb.EphemeralClient() as client:
+        # Save a reference to the system before close() removes it from the cache
+        system = client._system
+        collection = client.create_collection("test_collection")
+        collection.add(ids=["id1"], documents=["doc1"])
+        assert system._running is True
+
+    # Verify the system is stopped after context exit
+    assert system._running is False
+
+    client.clear_system_cache()
+
+
+def test_client_close_idempotent() -> None:
+    """Test that calling close() multiple times is a safe no-op."""
+    if os.environ.get("CHROMA_INTEGRATION_TEST_ONLY"):
+        pytest.skip("Integration test only")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        client = chromadb.PersistentClient(path=tmpdir)
+        collection = client.create_collection("test_collection")
+        collection.add(ids=["id1"], documents=["doc1"])
+
+        # First close should work normally
+        client.close()
+
+        # Second close should be a no-op, not raise KeyError
+        client.close()
+
+        # Third close should also be safe
+        client.close()
+
+        client.clear_system_cache()
