@@ -123,6 +123,8 @@ pub enum AttachedFunctionOrchestratorError {
     RecordSegmentReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error creating hnsw writer: {0}")]
     HnswSegment(#[from] DistributedHNSWSegmentFromSegmentError),
+    #[error("Error creating quantized spann writer: {0}")]
+    QuantizedSpannSegment(#[from] chroma_segment::quantized_spann::QuantizedSpannSegmentError),
     #[error("Error creating spann writer: {0}")]
     SpannSegment(#[from] SpannSegmentWriterError),
 }
@@ -149,6 +151,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.code(),
             AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.code(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.code(),
+            AttachedFunctionOrchestratorError::QuantizedSpannSegment(e) => e.code(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.code(),
         }
     }
@@ -176,6 +179,7 @@ impl ChromaError for AttachedFunctionOrchestratorError {
             AttachedFunctionOrchestratorError::RecordSegmentWriter(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::RecordSegmentReader(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::HnswSegment(e) => e.should_trace_error(),
+            AttachedFunctionOrchestratorError::QuantizedSpannSegment(e) => e.should_trace_error(),
             AttachedFunctionOrchestratorError::SpannSegment(e) => e.should_trace_error(),
         }
     }
@@ -676,6 +680,23 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
         };
 
         let (hnsw_index_uuid, vector_writer) = match message.vector_segment.r#type {
+            SegmentType::QuantizedSpann => match self
+                .ok_or_terminate(
+                    self.output_context
+                        .spann_provider
+                        .write_quantized_usearch(
+                            collection,
+                            &message.vector_segment,
+                            &message.record_segment,
+                        )
+                        .await,
+                    ctx,
+                )
+                .await
+            {
+                Some(writer) => (None, VectorSegmentWriter::QuantizedSpann(writer)),
+                None => return,
+            },
             SegmentType::Spann => match self
                 .ok_or_terminate(
                     self.output_context
@@ -686,7 +707,10 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 )
                 .await
             {
-                Some(writer) => (writer.hnsw_index_uuid(), VectorSegmentWriter::Spann(writer)),
+                Some(writer) => (
+                    Some(writer.hnsw_index_uuid()),
+                    VectorSegmentWriter::Spann(writer),
+                ),
                 None => return,
             },
             _ => match self
@@ -704,7 +728,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
                 )
                 .await
             {
-                Some(writer) => (writer.index_uuid(), VectorSegmentWriter::Hnsw(writer)),
+                Some(writer) => (Some(writer.index_uuid()), VectorSegmentWriter::Hnsw(writer)),
                 None => return,
             },
         };
@@ -745,7 +769,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             collection: message.collection.clone(),
             writers: Some(writers),
             pulled_log_offset: message.collection.log_position,
-            hnsw_index_uuid: Some(hnsw_index_uuid),
+            hnsw_index_uuid,
             schema: message.collection.schema.clone(),
         };
 

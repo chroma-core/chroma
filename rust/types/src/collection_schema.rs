@@ -18,14 +18,13 @@ use crate::{
     default_batch_size, default_center_drift_threshold, default_construction_ef,
     default_construction_ef_spann, default_initial_lambda, default_m, default_m_spann,
     default_merge_threshold, default_nreplica_count, default_num_centers_to_merge_to,
-    default_num_samples_kmeans, default_num_threads, default_quantize,
-    default_reassign_neighbor_count, default_resize_factor, default_search_ef,
-    default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
-    default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
-    HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
-    InternalUpdateCollectionConfiguration, KnnIndex, Segment, UpdateCollectionConfiguration,
-    CHROMA_KEY,
+    default_num_samples_kmeans, default_num_threads, default_reassign_neighbor_count,
+    default_resize_factor, default_search_ef, default_search_ef_spann, default_search_nprobe,
+    default_search_rng_epsilon, default_search_rng_factor, default_space, default_split_threshold,
+    default_sync_threshold, default_write_nprobe, default_write_rng_epsilon,
+    default_write_rng_factor, ConversionError, HnswParametersFromSegmentError,
+    InternalHnswConfiguration, InternalSpannConfiguration, InternalUpdateCollectionConfiguration,
+    KnnIndex, Segment, UpdateCollectionConfiguration, CHROMA_KEY,
 };
 
 impl ChromaError for SchemaError {
@@ -794,7 +793,7 @@ impl Schema {
                         ef_search: Some(default_search_ef_spann()),
                         max_neighbors: Some(default_m_spann()),
                         center_drift_threshold: None,
-                        quantize: default_quantize(),
+                        quantize: Quantization::None,
                     }),
                 },
             },
@@ -889,7 +888,7 @@ impl Schema {
                                 ef_search: Some(default_search_ef_spann()),
                                 max_neighbors: Some(default_m_spann()),
                                 center_drift_threshold: None,
-                                quantize: default_quantize(),
+                                quantize: Quantization::None,
                             }),
                         },
                     },
@@ -978,8 +977,7 @@ impl Schema {
                 .config
                 .spann
                 .as_ref()
-                .map(|config| config.quantize)
-                .unwrap_or(false)
+                .is_some_and(|config| !matches!(config.quantize, Quantization::None))
         };
 
         self.keys
@@ -1021,6 +1019,38 @@ impl Schema {
         }
 
         None
+    }
+
+    /// Set the quantization variant and apply impl-specific SPANN config defaults.
+    /// Note: this intentionally skips `SpannIndexConfig::validate()` because the
+    /// hardcoded quantization defaults (e.g. split_threshold=512) exceed the
+    /// user-facing validation ranges. Those ranges gate user input only;
+    /// programmatic defaults set here are known-good constants.
+    pub fn quantize(&mut self, variant: Quantization) {
+        if let Some(spann_config) = self.get_spann_config_mut() {
+            *spann_config = match variant {
+                Quantization::None => SpannIndexConfig {
+                    quantize: variant,
+                    ..*spann_config
+                },
+                Quantization::FourBitRabitQWithUSearch => SpannIndexConfig {
+                    search_nprobe: Some(64),
+                    nreplica_count: Some(2),
+                    write_rng_factor: Some(4.0),
+                    write_rng_epsilon: Some(8.0),
+                    split_threshold: Some(512),
+                    reassign_neighbor_count: Some(32),
+                    merge_threshold: Some(128),
+                    write_nprobe: Some(64),
+                    ef_construction: Some(256),
+                    ef_search: Some(128),
+                    max_neighbors: Some(24),
+                    center_drift_threshold: Some(0.125),
+                    quantize: variant,
+                    ..*spann_config
+                },
+            };
+        }
     }
 
     pub fn get_internal_hnsw_config(&self) -> Option<InternalHnswConfiguration> {
@@ -1647,10 +1677,12 @@ impl Schema {
     ) -> Result<Option<SpannIndexConfig>, SchemaError> {
         match (default_spann, user_spann) {
             (Some(default), Some(user)) => {
-                // Validate that quantize is always false (should only be set programmatically by frontend)
-                if user.quantize != default_quantize() || default.quantize != default_quantize() {
+                // Validate that quantize is always None (should only be set programmatically by frontend)
+                if !matches!(user.quantize, Quantization::None)
+                    || !matches!(default.quantize, Quantization::None)
+                {
                     return Err(SchemaError::InvalidUserInput {
-                        reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                        reason: "quantize field cannot be set in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
                 }
                 Ok(Some(SpannIndexConfig {
@@ -1677,23 +1709,23 @@ impl Schema {
                     center_drift_threshold: user
                         .center_drift_threshold
                         .or(default.center_drift_threshold),
-                    quantize: default_quantize(), // Always false - quantization is set programmatically
+                    quantize: Quantization::None, // Always None - quantization is set programmatically
                 }))
             }
             (Some(default), None) => {
-                // Validate default is also false
-                if default.quantize != default_quantize() {
+                // Validate default is also None
+                if !matches!(default.quantize, Quantization::None) {
                     return Err(SchemaError::InvalidUserInput {
-                        reason: "quantize field cannot be set to true in default schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                        reason: "quantize field cannot be set in default schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
                 }
                 Ok(Some(default.clone()))
             }
             (None, Some(user)) => {
-                // Validate user is false
-                if user.quantize != default_quantize() {
+                // Validate user is None
+                if !matches!(user.quantize, Quantization::None) {
                     return Err(SchemaError::InvalidUserInput {
-                        reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                        reason: "quantize field cannot be set in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
                 }
                 Ok(Some(user.clone()))
@@ -2734,6 +2766,20 @@ impl HnswIndexConfig {
     }
 }
 
+/// Quantization implementation for SPANN vector index.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Quantization {
+    #[default]
+    None,
+    FourBitRabitQWithUSearch,
+}
+
+fn is_default_quantization(v: &Quantization) -> bool {
+    matches!(v, Quantization::None)
+}
+
 /// Configuration for SPANN vector index algorithm parameters
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -2790,13 +2836,9 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 0.1, max = 1.0))]
     pub center_drift_threshold: Option<f32>,
-    /// Enable quantization for vector search (cloud-only feature)
-    #[serde(default = "default_quantize", skip_serializing_if = "is_false")]
-    pub quantize: bool,
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
+    /// Quantization implementation for vector search (cloud-only feature)
+    #[serde(default, skip_serializing_if = "is_default_quantization")]
+    pub quantize: Quantization,
 }
 
 impl SpannIndexConfig {
@@ -2888,7 +2930,7 @@ impl SpannIndexConfig {
                 return false;
             }
         }
-        if self.quantize != default_quantize() {
+        if !matches!(self.quantize, Quantization::None) {
             return false;
         }
         true
@@ -3054,7 +3096,7 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     ef_search: Some(spann_config.ef_search),
                     max_neighbors: Some(spann_config.max_neighbors),
                     center_drift_threshold: None,
-                    quantize: default_quantize(),
+                    quantize: Quantization::None,
                 }),
             },
         };
@@ -3425,7 +3467,7 @@ mod tests {
                         ef_search: Some(40),
                         max_neighbors: Some(20),
                         center_drift_threshold: None,
-                        quantize: false,
+                        quantize: Quantization::None,
                     });
                 }
             }
@@ -3603,7 +3645,7 @@ mod tests {
             ef_search: Some(10),
             max_neighbors: Some(16),
             center_drift_threshold: None,
-            quantize: false,
+            quantize: Quantization::None,
         };
 
         let user_spann = SpannIndexConfig {
@@ -3624,7 +3666,7 @@ mod tests {
             ef_search: None,
             max_neighbors: None,
             center_drift_threshold: None,
-            quantize: false,
+            quantize: Quantization::None,
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann))
@@ -3663,7 +3705,7 @@ mod tests {
             ef_search: Some(10),
             max_neighbors: Some(16),
             center_drift_threshold: None,
-            quantize: false,
+            quantize: Quantization::None,
         };
 
         let user_spann_with_quantize = SpannIndexConfig {
@@ -3684,7 +3726,7 @@ mod tests {
             ef_search: None,
             max_neighbors: None,
             center_drift_threshold: None,
-            quantize: true, // This should be rejected
+            quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
         };
 
         // Should reject user schema with quantize: true
@@ -3693,7 +3735,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(SchemaError::InvalidUserInput { reason }) => {
-                assert!(reason.contains("quantize field cannot be set to true"));
+                assert!(reason.contains("quantize field cannot be set"));
             }
             _ => panic!("Expected InvalidUserInput error"),
         }
@@ -3717,14 +3759,14 @@ mod tests {
             ef_search: Some(10),
             max_neighbors: Some(16),
             center_drift_threshold: None,
-            quantize: true, // This should be rejected
+            quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann_with_quantize), None);
         assert!(result.is_err());
         match result {
             Err(SchemaError::InvalidUserInput { reason }) => {
-                assert!(reason.contains("quantize field cannot be set to true"));
+                assert!(reason.contains("quantize field cannot be set"));
             }
             _ => panic!("Expected InvalidUserInput error"),
         }
@@ -3734,7 +3776,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(SchemaError::InvalidUserInput { reason }) => {
-                assert!(reason.contains("quantize field cannot be set to true"));
+                assert!(reason.contains("quantize field cannot be set"));
             }
             _ => panic!("Expected InvalidUserInput error"),
         }
@@ -3760,7 +3802,7 @@ mod tests {
             ef_search: Some(170),
             max_neighbors: Some(32),
             center_drift_threshold: None,
-            quantize: false,
+            quantize: Quantization::None,
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -3876,7 +3918,7 @@ mod tests {
                 ef_search: None,
                 max_neighbors: None,
                 center_drift_threshold: None,
-                quantize: false,
+                quantize: Quantization::None,
             }), // Add SPANN config
         };
 
@@ -6257,7 +6299,7 @@ mod tests {
                         ef_search,
                         max_neighbors,
                         center_drift_threshold: None,
-                        quantize: false,
+                        quantize: Quantization::None,
                     },
                 )
         }
@@ -6443,7 +6485,7 @@ mod tests {
                         ef_search: Some(spann_config.ef_search),
                         max_neighbors: Some(spann_config.max_neighbors),
                         center_drift_threshold: None,
-                        quantize: false,
+                        quantize: Quantization::None,
                     }),
                 },
             }
@@ -6609,7 +6651,7 @@ mod tests {
                 ef_search: Some(config.ef_search),
                 max_neighbors: Some(config.max_neighbors),
                 center_drift_threshold: None,
-                quantize: false,
+                quantize: Quantization::None,
             })
         }
 
