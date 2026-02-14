@@ -191,6 +191,7 @@ class Client(SharedSystemClient, ClientAPI):
             Collection: The created collection.
 
         Raises:
+            UniqueConstraintError: If the collection already exists and get_or_create is False.
             ValueError: If the embedding function conflicts with configuration.
         """
         if configuration is None:
@@ -243,6 +244,7 @@ class Client(SharedSystemClient, ClientAPI):
             Collection: The requested collection.
 
         Raises:
+            NotFoundError: If the collection does not exist.
             ValueError: If the embedding function conflicts with configuration.
         """
         model = self._server.get_collection(
