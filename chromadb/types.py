@@ -120,7 +120,7 @@ class Collection(
         if key == "configuration":
             return self.get_configuration()
         # For the other model attributes we allow the user to access them directly
-        if key in self.get_model_fields():
+        if key in type(self).model_fields:
             return getattr(self, key)
         return None
 
@@ -130,18 +130,18 @@ class Collection(
         # For the model attributes we allow the user to access them directly
         if key == "configuration":
             self.set_configuration(value)
-        if key in self.get_model_fields():
+        if key in type(self).model_fields:
             setattr(self, key, value)
         else:
             raise KeyError(
-                f"No such key: {key}, valid keys are: {self.get_model_fields()}"
+                f"No such key: {key}, valid keys are: {type(self).model_fields}"
             )
 
     def __eq__(self, __value: object) -> bool:
         # Check that all the model fields are equal
         if not isinstance(__value, Collection):
             return False
-        for field in self.get_model_fields():
+        for field in type(self).model_fields:
             if getattr(self, field) != getattr(__value, field):
                 return False
         return True
@@ -166,13 +166,6 @@ class Collection(
     def set_serialized_schema(self, serialized_schema: Dict[str, Any]) -> None:
         """Sets the serialized_schema of the collection"""
         self.serialized_schema = serialized_schema
-
-    def get_model_fields(self) -> Dict[Any, Any]:
-        """Used for backward compatibility with Pydantic 1.x"""
-        try:
-            return type(self).model_fields  # pydantic 2.x, pydantic 3.x
-        except AttributeError:
-            return self.__fields__  # pydantic 1.x
 
     def pretty_schema(self) -> str:
         """Returns a pretty-printed version of the serialized schema."""
