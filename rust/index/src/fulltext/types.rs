@@ -205,8 +205,7 @@ impl FullTextIndexWriter {
                             let document_id = last_key.get_offset_id();
                             self.posting_lists_blockfile_writer
                                 .set(&token, document_id, posting_list.clone())
-                                .await
-                                .unwrap();
+                                .await?;
                             posting_list.clear();
                         }
                         last_key = this_key;
@@ -220,8 +219,7 @@ impl FullTextIndexWriter {
                         let document_id = last_key.get_offset_id();
                         self.posting_lists_blockfile_writer
                             .set(&token, document_id, posting_list.clone())
-                            .await
-                            .unwrap();
+                            .await?;
                         posting_list.clear();
                         last_key = encoded_instance.omit_position();
                     }
@@ -232,8 +230,7 @@ impl FullTextIndexWriter {
                             &encoded_instance.get_token(),
                             encoded_instance.get_offset_id(),
                         )
-                        .await
-                        .unwrap();
+                        .await?;
                 }
             }
         }
@@ -243,8 +240,7 @@ impl FullTextIndexWriter {
             let document_id = last_key.get_offset_id();
             self.posting_lists_blockfile_writer
                 .set(&token, document_id, posting_list.clone())
-                .await
-                .unwrap();
+                .await?;
         }
 
         Ok(())
