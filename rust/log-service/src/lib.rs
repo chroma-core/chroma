@@ -2720,8 +2720,8 @@ impl LogService for LogServerWrapper {
 
 impl LogServerWrapper {
     pub(crate) async fn run(log_server: LogServer) -> Result<(), Box<dyn std::error::Error>> {
-        let addr = format!("[::]:{}", log_server.config.port).parse().unwrap();
-        println!("Log listening on {}", addr);
+        let addr = format!("[::]:{}", log_server.config.port).parse()?;
+        tracing::info!("Log listening on {}", addr);
 
         let (health_reporter, health_service) = tonic_health::server::health_reporter();
         health_reporter
@@ -2757,8 +2757,18 @@ impl LogServerWrapper {
                     return;
                 }
             };
-            sigterm.recv().await;
-            tracing::info!("Received SIGTERM, waiting for grace period...");
+            let mut sigint = match signal(SignalKind::interrupt()) {
+                Ok(sigint) => sigint,
+                Err(e) => {
+                    tracing::error!("Failed to create signal handler: {:?}", e);
+                    return;
+                }
+            };
+            let signal_name = tokio::select! {
+                _ = sigterm.recv() => "SIGTERM",
+                _ = sigint.recv() => "SIGINT",
+            };
+            tracing::info!("Received {}, waiting for grace period...", signal_name);
             // Note: gRPC calls can still be successfully made during this period. We rely on the memberlist updating to stop clients from sending new requests. Ideally there would be a Tower layer that rejected new requests during this period with UNAVAILABLE or similar.
             tokio::time::sleep(shutdown_grace_period).await;
             tracing::info!("Grace period ended, shutting down server...");
@@ -2835,16 +2845,7 @@ impl RootConfig {
     /// Values in the environment variables take precedence over values in the YAML file.
     // NOTE:  Copied to ../load/src/config.rs.
     pub fn load_from_path(path: &str) -> Self {
-        println!("loading config from {path}");
-        println!(
-            r#"Full config is:
-================================================================================
-{}
-================================================================================
-"#,
-            std::fs::read_to_string(path)
-                .expect("should be able to open and read config to string")
-        );
+        tracing::info!("loading config from {path}");
         // Unfortunately, figment doesn't support environment variables with underscores. So we have to map and replace them.
         // Excluding our own environment variables, which are prefixed with CHROMA_.
         let mut f = figment::Figment::from(Env::prefixed("CHROMA_").map(|k| match k {
@@ -3086,7 +3087,6 @@ impl Configurable<LogServerConfig> for LogServer {
             } else {
                 None
             };
-        config.validate_storage_xor()?;
         let regions_and_topologies =
             if let Some(regions_and_topologies) = config.regions_and_topologies.clone() {
                 regions_and_topologies
