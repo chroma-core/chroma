@@ -24,6 +24,7 @@ use chroma_types::{
 };
 use faer::{col::ColRef, Mat};
 use thiserror::Error;
+use tracing::Instrument;
 
 use crate::blockfile_record::ApplyMaterializedLogError;
 use crate::types::{ChromaSegmentFlusher, MaterializeLogsResult};
@@ -262,11 +263,12 @@ impl QuantizedSpannSegmentWriter {
     }
 
     pub async fn commit(self) -> Result<QuantizedSpannSegmentFlusher, Box<dyn ChromaError>> {
-        let flusher = self
-            .index
-            .commit(&self.blockfile_provider, &self.usearch_provider)
-            .await
-            .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
+        let flusher = Box::pin(
+            self.index
+                .commit(&self.blockfile_provider, &self.usearch_provider),
+        )
+        .await
+        .map_err(|e| Box::new(QuantizedSpannSegmentError::from(e)) as Box<dyn ChromaError>)?;
         Ok(QuantizedSpannSegmentFlusher {
             flusher,
             id: self.id,
@@ -495,6 +497,10 @@ impl QuantizedSpannSegmentReader {
         };
         let quantized_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Open(quantized_centroid_id))
+            .instrument(tracing::trace_span!(
+                "Open quantized centroid index",
+                index_id = %quantized_centroid_id.0
+            ))
             .await
             .map_err(|e| {
                 QuantizedSpannSegmentError::Data(format!(
