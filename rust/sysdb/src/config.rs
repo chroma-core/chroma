@@ -93,15 +93,16 @@ impl Default for SysDbConfig {
 impl Injectable for SysDb {}
 
 #[async_trait]
-impl Configurable<SysDbConfig> for SysDb {
+impl Configurable<(SysDbConfig, Option<GrpcSysDbConfig>)> for SysDb {
     async fn try_from_config(
-        config: &SysDbConfig,
+        config: &(SysDbConfig, Option<GrpcSysDbConfig>),
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
-        let out = match &config {
-            SysDbConfig::Grpc(grpc_config) => {
-                SysDb::Grpc(GrpcSysDb::try_from_config(grpc_config, registry).await?)
-            }
+        let out = match &config.0 {
+            SysDbConfig::Grpc(grpc_config) => SysDb::Grpc(
+                GrpcSysDb::try_from_config(&(grpc_config.clone(), config.1.clone()), registry)
+                    .await?,
+            ),
             SysDbConfig::Sqlite(sqlite_config) => {
                 SysDb::Sqlite(SqliteSysDb::try_from_config(sqlite_config, registry).await?)
             }

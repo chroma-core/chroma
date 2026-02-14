@@ -1,0 +1,773 @@
+---
+title: Filtering with Where
+description: Learn how to filter search results using Where expressions and the Key/K class to narrow down your search to specific documents, IDs, or metadata values.
+---
+
+import { Callout, Warning } from '/snippets/callout.mdx';
+
+## The Key/K Class
+
+The `Key` class (aliased as `K` for brevity) provides a fluent interface for building filter expressions. Use `K` to reference document fields, IDs, and metadata properties.
+
+<CodeGroup>
+```python Python
+from chromadb import K
+
+# K is an alias for Key - use K for more concise code
+# Filter by metadata field
+K("status") == "active"
+
+# Filter by document content
+K.DOCUMENT.contains("machine learning")
+
+# Filter by document IDs
+K.ID.is_in(["doc1", "doc2", "doc3"])
+```
+
+```typescript TypeScript
+import { K } from 'chromadb';
+
+// K is an alias for Key - use K for more concise code
+// Filter by metadata field
+K("status").eq("active");
+
+// Filter by document content
+K.DOCUMENT.contains("machine learning");
+
+// Filter by document IDs
+K.ID.isIn(["doc1", "doc2", "doc3"]);
+```
+
+```rust Rust
+use chroma::types::Key;
+
+Key::field("status").eq("active");
+Key::Document.contains("machine learning");
+Key::Id.is_in(["doc1", "doc2", "doc3"]);
+```
+</CodeGroup>
+
+## Filterable Fields
+
+| Field | Usage | Description |
+|-------|-------|-------------|
+| `K.ID` | `K.ID.is_in(["id1", "id2"])` | Filter by document IDs |
+| `K.DOCUMENT` | `K.DOCUMENT.contains("text")` | Filter by document content |
+| `K("field_name")` | `K("status") == "active"` | Filter by any metadata field |
+
+## Comparison Operators
+
+**Supported operators:**
+- `==` - Equality (all types: string, numeric, boolean)
+- `!=` - Inequality (all types: string, numeric, boolean)
+- `>` - Greater than (numeric only)
+- `>=` - Greater than or equal (numeric only)
+- `<` - Less than (numeric only)
+- `<=` - Less than or equal (numeric only)
+
+<CodeGroup>
+```python Python
+# Equality and inequality (all types)
+K("status") == "published"     # String equality
+K("views") != 0                # Numeric inequality
+K("featured") == True          # Boolean equality
+
+# Numeric comparisons (numbers only)
+K("price") > 100               # Greater than
+K("rating") >= 4.5             # Greater than or equal
+K("stock") < 10                # Less than
+K("discount") <= 0.25          # Less than or equal
+```
+
+```typescript TypeScript
+// Equality and inequality (all types)
+K("status").eq("published");     // String equality
+K("views").ne(0);                // Numeric inequality
+K("featured").eq(true);          // Boolean equality
+
+// Numeric comparisons (numbers only)
+K("price").gt(100);              // Greater than
+K("rating").gte(4.5);            // Greater than or equal
+K("stock").lt(10);               // Less than
+K("discount").lte(0.25);         // Less than or equal
+```
+
+```rust Rust
+use chroma::types::Key;
+
+Key::field("status").eq("published");
+Key::field("views").ne(0);
+Key::field("featured").eq(true);
+Key::field("price").gt(100);
+Key::field("rating").gte(4.5);
+Key::field("stock").lt(10);
+Key::field("discount").lte(0.25);
+```
+</CodeGroup>
+
+<Callout>
+Chroma supports three data types for metadata: strings, numbers (int/float), and booleans. Order comparison operators (`>`, `<`, `>=`, `<=`) currently only work with numeric types.
+</Callout>
+
+## Set and String Operators
+
+**Supported operators:**
+- `is_in()` - Value matches any in the list
+- `not_in()` - Value doesn't match any in the list
+- `contains()` - On `K.DOCUMENT`: substring search (case-sensitive). On metadata fields: checks if an array contains a scalar value.
+- `not_contains()` - On `K.DOCUMENT`: excludes by substring. On metadata fields: checks that an array does not contain a scalar value.
+- `regex()` - String matches regex pattern (currently K.DOCUMENT only)
+- `not_regex()` - String doesn't match regex pattern (currently K.DOCUMENT only)
+
+<CodeGroup>
+```python Python
+# Set membership operators (works on all fields)
+K.ID.is_in(["doc1", "doc2", "doc3"])           # Match any ID in list
+K("category").is_in(["tech", "science"])       # Match any category
+K("status").not_in(["draft", "deleted"])       # Exclude specific values
+
+# String content operators (K.DOCUMENT only)
+K.DOCUMENT.contains("machine learning")        # Substring search in document
+K.DOCUMENT.not_contains("deprecated")          # Exclude documents with text
+K.DOCUMENT.regex(r"\bAPI\b")                   # Match whole word "API" in document
+
+# Array membership operators (metadata fields)
+K("tags").contains("action")                   # Array contains value
+K("tags").not_contains("draft")                # Array does not contain value
+K("scores").contains(42)                       # Works with numbers
+K("flags").contains(True)                      # Works with booleans
+
+# Note: String pattern matching on metadata scalar fields not yet supported
+# K("title").regex(r".*Python.*")              # NOT YET SUPPORTED
+```
+
+```typescript TypeScript
+// Set membership operators (works on all fields)
+K.ID.isIn(["doc1", "doc2", "doc3"]);           // Match any ID in list
+K("category").isIn(["tech", "science"]);       // Match any category
+K("status").notIn(["draft", "deleted"]);       // Exclude specific values
+
+// String content operators (K.DOCUMENT only)
+K.DOCUMENT.contains("machine learning");       // Substring search in document
+K.DOCUMENT.notContains("deprecated");          // Exclude documents with text
+K.DOCUMENT.regex("\\bAPI\\b");                 // Match whole word "API" in document
+
+// Array membership operators (metadata fields)
+K("tags").contains("action");                  // Array contains value
+K("tags").notContains("draft");                // Array does not contain value
+K("scores").contains(42);                      // Works with numbers
+K("flags").contains(true);                     // Works with booleans
+
+// Note: String pattern matching on metadata scalar fields not yet supported
+// K("title").regex(".*Python.*")              // NOT YET SUPPORTED
+```
+
+```rust Rust
+use chroma::types::Key;
+
+Key::Id.is_in(["doc1", "doc2", "doc3"]);
+Key::field("category").is_in(["tech", "science"]);
+Key::field("status").not_in(["draft", "deleted"]);
+Key::Document.contains("machine learning");
+Key::Document.not_contains("deprecated");
+Key::Document.regex(r"\bAPI\b");
+
+// Array membership operators (metadata fields)
+Key::field("tags").contains_value("action");
+Key::field("tags").not_contains_value("draft");
+Key::field("scores").contains_value(42);
+Key::field("flags").contains_value(true);
+```
+</CodeGroup>
+
+<Callout>
+String operations like `contains()` and `regex()` on `K.DOCUMENT` are case-sensitive by default. When used on metadata fields, `contains()` checks array membership rather than substring matching. The `is_in()` operator is efficient even with large lists.
+</Callout>
+
+## Array Metadata
+
+Chroma supports storing arrays of values in metadata fields. You can use `contains()` / `not_contains()` (or `$contains` / `$not_contains` in dictionary syntax) to filter records based on whether an array includes a specific scalar value.
+
+### Storing Array Metadata
+
+Arrays can contain strings, numbers, or booleans. All elements in an array must be the same type. Empty arrays are not allowed.
+
+<CodeGroup>
+```python Python
+collection.add(
+    ids=["m1", "m2", "m3"],
+    embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    metadatas=[
+        {"genres": ["action", "comedy"], "year": 2020},
+        {"genres": ["drama"], "year": 2021},
+        {"genres": ["action", "thriller"], "year": 2022},
+    ],
+)
+```
+
+```typescript TypeScript
+await collection.add({
+    ids: ["m1", "m2", "m3"],
+    embeddings: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    metadatas: [
+        { genres: ["action", "comedy"], year: 2020 },
+        { genres: ["drama"], year: 2021 },
+        { genres: ["action", "thriller"], year: 2022 },
+    ],
+});
+```
+
+```rust Rust
+use chroma::types::{Metadata, MetadataValue};
+
+let mut m = Metadata::new();
+m.insert(
+    "genres".into(),
+    MetadataValue::StringArray(vec!["action".to_string(), "comedy".to_string()]),
+);
+m.insert("year".into(), MetadataValue::Int(2020));
+
+// Also supports IntArray, FloatArray, and BoolArray
+let mut m2 = Metadata::new();
+m2.insert("scores".into(), MetadataValue::IntArray(vec![10, 20, 30]));
+```
+</CodeGroup>
+
+### Filtering Arrays
+
+Use `contains()` to check if a metadata array includes a value, and `not_contains()` to check that it does not.
+
+<CodeGroup>
+```python Python
+from chromadb import Search, K
+
+# Find all records where genres contains "action"
+search = Search().where(K("genres").contains("action"))
+
+# Exclude records with a specific tag
+search = Search().where(K("tags").not_contains("draft"))
+
+# Works with numbers and booleans too
+search = Search().where(K("scores").contains(42))
+
+# Combine with other filters
+search = Search().where(
+    K("genres").contains("action") &
+    (K("year") >= 2021)
+)
+```
+
+```typescript TypeScript
+import { Search, K } from 'chromadb';
+
+// Find all records where genres contains "action"
+const search1 = new Search().where(K("tags").contains("action"));
+
+// Exclude records with a specific tag
+const search2 = new Search().where(K("tags").notContains("draft"));
+
+// Works with numbers and booleans too
+const search3 = new Search().where(K("scores").contains(42));
+
+// Combine with other filters
+const search4 = new Search().where(
+    K("genres").contains("action")
+        .and(K("year").gte(2021))
+);
+```
+
+```rust Rust
+use chroma::types::{Key, SearchPayload};
+
+// Find all records where genres contains "action"
+let search = SearchPayload::default()
+    .r#where(Key::field("tags").contains_value("action"));
+
+// Exclude records with a specific tag
+let search = SearchPayload::default()
+    .r#where(Key::field("tags").not_contains_value("draft"));
+
+// Works with numbers and booleans too
+let search = SearchPayload::default()
+    .r#where(Key::field("scores").contains_value(42));
+
+// Combine with other filters
+let search = SearchPayload::default()
+    .r#where(
+        Key::field("genres").contains_value("action")
+            & Key::field("year").gte(2021i64),
+    );
+
+let results = collection.search(vec![search]).await?;
+```
+</CodeGroup>
+
+### Supported Array Types
+
+| Type | Python | TypeScript | Rust |
+|------|--------|------------|------|
+| String | `["a", "b"]` | `["a", "b"]` | `MetadataValue::StringArray(...)` |
+| Integer | `[1, 2, 3]` | `[1, 2, 3]` | `MetadataValue::IntArray(...)` |
+| Float | `[1.5, 2.5]` | `[1.5, 2.5]` | `MetadataValue::FloatArray(...)` |
+| Boolean | `[true, false]` | `[true, false]` | `MetadataValue::BoolArray(...)` |
+
+<Warning>
+The `$contains` value must be a scalar that matches the array's element type. All elements in an array must be the same type, and nested arrays are not supported.
+</Warning>
+
+## Logical Operators
+
+**Supported operators:**
+- `&` - Logical AND (all conditions must match)
+- `|` - Logical OR (any condition can match)
+
+Combine multiple conditions using these operators. Always use parentheses to ensure correct precedence.
+
+<CodeGroup>
+```python Python
+# AND operator (&) - all conditions must match
+(K("status") == "published") & (K("year") >= 2020)
+
+# OR operator (|) - any condition can match
+(K("category") == "tech") | (K("category") == "science")
+
+# Combining with document and ID filters
+(K.DOCUMENT.contains("AI")) & (K("author") == "Smith")
+(K.ID.is_in(["id1", "id2"])) | (K("featured") == True)
+
+# Complex nesting - use parentheses for clarity
+(
+    (K("status") == "published") &
+    ((K("category") == "tech") | (K("category") == "science")) &
+    (K("rating") >= 4.0)
+)
+```
+
+```typescript TypeScript
+// AND operator - all conditions must match
+K("status").eq("published").and(K("year").gte(2020));
+
+// OR operator - any condition can match
+K("category").eq("tech").or(K("category").eq("science"));
+
+// Combining with document and ID filters
+K.DOCUMENT.contains("AI").and(K("author").eq("Smith"));
+K.ID.isIn(["id1", "id2"]).or(K("featured").eq(true));
+
+// Complex nesting - use chaining for clarity
+K("status").eq("published")
+  .and(
+    K("category").eq("tech").or(K("category").eq("science"))
+  )
+  .and(K("rating").gte(4.0));
+```
+
+```rust Rust
+use chroma::types::Key;
+
+(Key::field("status").eq("published")) & (Key::field("year").gte(2020));
+(Key::field("category").eq("tech")) | (Key::field("category").eq("science"));
+Key::Document.contains("AI") & Key::field("author").eq("Smith");
+Key::Id.is_in(["id1", "id2"]) | Key::field("featured").eq(true);
+```
+</CodeGroup>
+
+<Warning>
+Always use parentheses around each condition when using logical operators. Python's operator precedence may not work as expected without them.
+</Warning>
+
+## Dictionary Syntax (MongoDB-style)
+
+You can also use dictionary syntax instead of K expressions. This is useful when building filters programmatically.
+
+**Supported dictionary operators:**
+- Direct value - Shorthand for equality
+- `$eq` - Equality
+- `$ne` - Not equal
+- `$gt` - Greater than (numeric only)
+- `$gte` - Greater than or equal (numeric only)
+- `$lt` - Less than (numeric only)
+- `$lte` - Less than or equal (numeric only)
+- `$in` - Value in list
+- `$nin` - Value not in list
+- `$contains` - On `#document`: substring search. On metadata fields: array contains value.
+- `$not_contains` - On `#document`: excludes by substring. On metadata fields: array does not contain value.
+- `$regex` - Regex match
+- `$not_regex` - Regex doesn't match
+- `$and` - Logical AND
+- `$or` - Logical OR
+
+<CodeGroup>
+```python Python
+# Direct equality (shorthand)
+{"status": "active"}                        # Same as K("status") == "active"
+
+# Comparison operators
+{"status": {"$eq": "published"}}            # Same as K("status") == "published"
+{"count": {"$ne": 0}}                       # Same as K("count") != 0
+{"price": {"$gt": 100}}                     # Same as K("price") > 100 (numbers only)
+{"rating": {"$gte": 4.5}}                   # Same as K("rating") >= 4.5 (numbers only)
+{"stock": {"$lt": 10}}                      # Same as K("stock") < 10 (numbers only)
+{"discount": {"$lte": 0.25}}                # Same as K("discount") <= 0.25 (numbers only)
+
+# Set membership operators
+{"#id": {"$in": ["id1", "id2"]}}            # Same as K.ID.is_in(["id1", "id2"])
+{"category": {"$in": ["tech", "ai"]}}       # Same as K("category").is_in(["tech", "ai"])
+{"status": {"$nin": ["draft", "deleted"]}}  # Same as K("status").not_in(["draft", "deleted"])
+
+# String operators (K.DOCUMENT only)
+{"#document": {"$contains": "API"}}         # Same as K.DOCUMENT.contains("API")
+# {"email": {"$regex": ".*@example\\.com"}} # Not yet supported - metadata fields
+# {"version": {"$not_regex": "^beta"}}      # Not yet supported - metadata fields
+
+# Array membership operators (metadata fields)
+{"genres": {"$contains": "action"}}         # Same as K("genres").contains("action")
+{"genres": {"$not_contains": "draft"}}      # Same as K("genres").not_contains("draft")
+{"scores": {"$contains": 42}}               # Works with numbers
+
+# Logical operators
+{"$and": [
+    {"status": "published"},
+    {"year": {"$gte": 2020}},
+    {"#document": {"$contains": "AI"}}
+]}                                          # Combines multiple conditions with AND
+
+{"$or": [
+    {"category": "tech"},
+    {"category": "science"},
+    {"featured": True}
+]}                                          # Combines multiple conditions with OR
+
+# Complex nested example
+{
+    "$and": [
+        {"$or": [
+            {"category": "tech"},
+            {"category": "science"}
+        ]},
+        {"status": "published"},
+        {"quality_score": {"$gte": 0.8}}
+    ]
+}
+```
+
+```typescript TypeScript
+// Direct equality (shorthand)
+{ status: "active" }                        // Same as K("status").eq("active")
+
+// Comparison operators
+{ status: { $eq: "published" } }            // Same as K("status").eq("published")
+{ count: { $ne: 0 } }                       // Same as K("count").ne(0)
+{ price: { $gt: 100 } }                     // Same as K("price").gt(100) (numbers only)
+{ rating: { $gte: 4.5 } }                   // Same as K("rating").gte(4.5) (numbers only)
+{ stock: { $lt: 10 } }                      // Same as K("stock").lt(10) (numbers only)
+{ discount: { $lte: 0.25 } }                // Same as K("discount").lte(0.25) (numbers only)
+
+// Set membership operators
+{ "#id": { $in: ["id1", "id2"] } }          // Same as K.ID.isIn(["id1", "id2"])
+{ category: { $in: ["tech", "ai"] } }       // Same as K("category").isIn(["tech", "ai"])
+{ status: { $nin: ["draft", "deleted"] } }  // Same as K("status").notIn(["draft", "deleted"])
+
+// String operators (K.DOCUMENT only)
+{ "#document": { $contains: "API" } }       // Same as K.DOCUMENT.contains("API")
+// { email: { $regex: ".*@example\\.com" } } // Not yet supported - metadata fields
+// { version: { $not_regex: "^beta" } }     // Not yet supported - metadata fields
+
+// Array membership operators (metadata fields)
+{ genres: { $contains: "action" } }         // Same as K("genres").contains("action")
+{ genres: { $not_contains: "draft" } }      // Same as K("genres").notContains("draft")
+{ scores: { $contains: 42 } }               // Works with numbers
+
+// Logical operators
+{
+  $and: [
+    { status: "published" },
+    { year: { $gte: 2020 } },
+    { "#document": { $contains: "AI" } }
+  ]
+}                                           // Combines multiple conditions with AND
+
+{
+  $or: [
+    { category: "tech" },
+    { category: "science" },
+    { featured: true }
+  ]
+}                                           // Combines multiple conditions with OR
+
+// Complex nested example
+{
+  $and: [
+    {
+      $or: [
+        { category: "tech" },
+        { category: "science" }
+      ]
+    },
+    { status: "published" },
+    { quality_score: { $gte: 0.8 } }
+  ]
+}
+```
+</CodeGroup>
+
+<Callout>
+Each dictionary can only contain one field or one logical operator (`$and`/`$or`). For field dictionaries, only one operator is allowed per field.
+</Callout>
+
+## Common Filtering Patterns
+
+<CodeGroup>
+```python Python
+# Filter by specific document IDs
+search = Search().where(K.ID.is_in(["doc_001", "doc_002", "doc_003"]))
+
+# Exclude already processed documents
+processed_ids = ["doc_100", "doc_101"]
+search = Search().where(K.ID.not_in(processed_ids))
+
+# Full-text search in documents
+search = Search().where(K.DOCUMENT.contains("quantum computing"))
+
+# Combine document search with metadata
+search = Search().where(
+    K.DOCUMENT.contains("machine learning") &
+    (K("language") == "en")
+)
+
+# Price range filtering
+search = Search().where(
+    (K("price") >= 100) &
+    (K("price") <= 500)
+)
+
+# Multi-field filtering
+search = Search().where(
+    (K("status") == "active") &
+    (K("category").is_in(["tech", "ai", "ml"])) &
+    (K("score") >= 0.8)
+)
+```
+
+```typescript TypeScript
+// Filter by specific document IDs
+const search1 = new Search().where(K.ID.isIn(["doc_001", "doc_002", "doc_003"]));
+
+// Exclude already processed documents
+const processedIds = ["doc_100", "doc_101"];
+const search2 = new Search().where(K.ID.notIn(processedIds));
+
+// Full-text search in documents
+const search3 = new Search().where(K.DOCUMENT.contains("quantum computing"));
+
+// Combine document search with metadata
+const search4 = new Search().where(
+  K.DOCUMENT.contains("machine learning")
+    .and(K("language").eq("en"))
+);
+
+// Price range filtering
+const search5 = new Search().where(
+  K("price").gte(100)
+    .and(K("price").lte(500))
+);
+
+// Multi-field filtering
+const search6 = new Search().where(
+  K("status").eq("active")
+    .and(K("category").isIn(["tech", "ai", "ml"]))
+    .and(K("score").gte(0.8))
+);
+```
+</CodeGroup>
+
+
+
+
+
+
+## Edge Cases and Important Behavior
+
+### Missing Keys
+When filtering on a metadata field that doesn't exist for a document:
+- Most operators (`==`, `>`, `<`, `>=`, `<=`, `is_in()`) evaluate to `false` - the document won't match
+- `!=` evaluates to `true` - documents without the field are considered "not equal" to any value
+- `not_in()` evaluates to `true` - documents without the field are not in any list
+
+<CodeGroup>
+```python Python
+# If a document doesn't have a "category" field:
+K("category") == "tech"         # false - won't match
+K("category") != "tech"         # true - will match
+K("category").is_in(["tech"])   # false - won't match
+K("category").not_in(["tech"])  # true - will match
+```
+
+```typescript TypeScript
+// If a document doesn't have a "category" field:
+K("category").eq("tech");        // false - won't match
+K("category").ne("tech");        // true - will match
+K("category").isIn(["tech"]);    // false - won't match
+K("category").notIn(["tech"]);   // true - will match
+```
+</CodeGroup>
+
+### Mixed Types
+Avoid storing different data types under the same metadata key across documents. Query behavior is undefined when comparing values of different types.
+
+<CodeGroup>
+```python Python
+# DON'T DO THIS - undefined behavior
+# Document 1: {"score": 95}      (numeric)
+# Document 2: {"score": "95"}    (string)
+# Document 3: {"score": true}    (boolean)
+
+K("score") > 90  # Undefined results when mixed types exist
+
+# DO THIS - consistent types
+# All documents: {"score": <numeric>} or all {"score": <string>}
+```
+
+```typescript TypeScript
+// DON'T DO THIS - undefined behavior
+// Document 1: {score: 95}       (numeric)
+// Document 2: {score: "95"}     (string)
+// Document 3: {score: true}     (boolean)
+
+K("score").gt(90);  // Undefined results when mixed types exist
+
+// DO THIS - consistent types
+// All documents: {score: <numeric>} or all {score: <string>}
+```
+</CodeGroup>
+
+### String Pattern Matching Limitations
+
+**`regex()` and `not_regex()` only work on `K.DOCUMENT`**. These operators do not yet support metadata fields.
+
+`contains()` and `not_contains()` have different behavior depending on the field:
+- On `K.DOCUMENT`: substring search (the pattern must have at least 3 literal characters)
+- On metadata fields: array membership check (see [Array Metadata](#array-metadata) above)
+
+Substring matching on metadata scalar fields (e.g. checking if a string field contains a substring) is not yet supported.
+
+<CodeGroup>
+```python Python
+# Substring search on K.DOCUMENT - works
+K.DOCUMENT.contains("API")              # Works
+K.DOCUMENT.regex(r"v\d\.\d\.\d")       # Works
+
+# Array membership on metadata fields - works
+K("tags").contains("action")            # Works - checks if array contains value
+
+# Substring/regex on metadata scalar fields - NOT YET SUPPORTED
+# K("title").regex(r".*Python.*")       # Not supported yet
+
+# Pattern length requirements (for K.DOCUMENT substring search)
+K.DOCUMENT.contains("API")              # 3 characters - good
+K.DOCUMENT.contains("AI")               # Only 2 characters - may give incorrect results
+K.DOCUMENT.regex(r"\d+")                # No literal characters - may give incorrect results
+```
+
+```typescript TypeScript
+// Substring search on K.DOCUMENT - works
+K.DOCUMENT.contains("API");              // Works
+K.DOCUMENT.regex("v\\d\\.\\d\\.\\d");    // Works
+
+// Array membership on metadata fields - works
+K("tags").contains("action");            // Works - checks if array contains value
+
+// Substring/regex on metadata scalar fields - NOT YET SUPPORTED
+// K("title").regex(".*Python.*")        // Not supported yet
+
+// Pattern length requirements (for K.DOCUMENT substring search)
+K.DOCUMENT.contains("API");              // 3 characters - good
+K.DOCUMENT.contains("AI");               // Only 2 characters - may give incorrect results
+K.DOCUMENT.regex("\\d+");                // No literal characters - may give incorrect results
+```
+</CodeGroup>
+
+<Warning>
+`regex()` and `not_regex()` currently only work on `K.DOCUMENT`. Substring matching on metadata scalar fields is not yet available. Also, patterns with fewer than 3 literal characters may return incorrect results.
+</Warning>
+
+<Callout>
+Substring and regex matching on metadata scalar fields is not currently supported. Full support is coming in a future release, which will allow users to opt-in to additional indexes for string pattern matching on specific metadata fields.
+</Callout>
+
+## Complete Example
+
+Here's a practical example combining different filter types:
+
+<CodeGroup>
+```python Python
+from chromadb import Search, K, Knn
+
+# Complex filter combining IDs, document content, and metadata
+search = (Search()
+    .where(
+        # Exclude specific documents
+        K.ID.not_in(["excluded_001", "excluded_002"]) &
+
+        # Must contain specific content
+        K.DOCUMENT.contains("artificial intelligence") &
+
+        # Metadata conditions
+        (K("status") == "published") &
+        (K("quality_score") >= 0.75) &
+        (
+            (K("category") == "research") |
+            (K("category") == "tutorial")
+        ) &
+        (K("year") >= 2023)
+    )
+    .rank(Knn(query="latest AI research developments"))
+    .limit(10)
+    .select(K.DOCUMENT, "title", "author", "year")
+)
+
+results = collection.search(search)
+```
+
+```typescript TypeScript
+import { Search, K, Knn } from 'chromadb';
+
+// Complex filter combining IDs, document content, and metadata
+const search = new Search()
+  .where(
+    // Exclude specific documents
+    K.ID.notIn(["excluded_001", "excluded_002"])
+
+      // Must contain specific content
+      .and(K.DOCUMENT.contains("artificial intelligence"))
+
+      // Metadata conditions
+      .and(K("status").eq("published"))
+      .and(K("quality_score").gte(0.75))
+      .and(
+        K("category").eq("research")
+          .or(K("category").eq("tutorial"))
+      )
+      .and(K("year").gte(2023))
+  )
+  .rank(Knn({ query: "latest AI research developments" }))
+  .limit(10)
+  .select(K.DOCUMENT, "title", "author", "year");
+
+const results = await collection.search(search);
+```
+</CodeGroup>
+
+## Tips and Best Practices
+
+- **Use parentheses liberally** when combining conditions with `&` and `|` to avoid precedence issues
+- **Filter before ranking** when possible to reduce the number of vectors to score
+- **Be specific with ID filters** - using `K.ID.is_in()` with a small list is very efficient
+- **String matching is case-sensitive** - normalize your data if case-insensitive matching is needed
+- **Use the right operator** - `is_in()` for multiple exact matches, `contains()` for substring search
+
+## Next Steps
+
+- Learn about [ranking and scoring](./ranking) to order your filtered results
+- See [practical examples](./examples) of filtering in real-world scenarios
+- Explore [batch operations](./batch-operations) for running multiple filtered searches

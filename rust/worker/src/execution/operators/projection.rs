@@ -14,7 +14,7 @@ use chroma_types::{
 };
 use futures::future::try_join_all;
 use thiserror::Error;
-use tracing::{error, Instrument, Span};
+use tracing::{Instrument, Span};
 
 /// The `Projection` operator retrieves record content by offset ids
 ///

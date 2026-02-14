@@ -1,9 +1,10 @@
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName, JobId};
 use tokio::sync::oneshot;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct CompactionJob {
     pub(crate) collection_id: CollectionUuid,
+    pub(crate) database_name: DatabaseName,
 }
 
 #[derive(Clone, Debug)]
@@ -21,5 +22,5 @@ pub struct RebuildMessage {
 
 #[derive(Debug)]
 pub struct ListDeadJobsMessage {
-    pub response_tx: oneshot::Sender<Vec<CollectionUuid>>,
+    pub response_tx: oneshot::Sender<Vec<JobId>>,
 }

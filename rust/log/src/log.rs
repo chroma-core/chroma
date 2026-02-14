@@ -5,8 +5,8 @@ use crate::types::CollectionInfo;
 use chroma_error::ChromaError;
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
-    CollectionUuid, ForkCollectionError, ForkLogsResponse, LogRecord, OperationRecord, ResetError,
-    ResetResponse,
+    Cmek, CollectionUuid, DatabaseName, ForkCollectionError, ForkLogsResponse, LogRecord,
+    OperationRecord, ResetError, ResetResponse,
 };
 use std::fmt::Debug;
 
@@ -14,6 +14,7 @@ use std::fmt::Debug;
 pub struct CollectionRecord {
     pub collection_id: CollectionUuid,
     pub tenant_id: String,
+    pub database_name: String,
     pub last_compaction_time: i64,
     #[allow(dead_code)]
     pub first_record_time: i64,
@@ -49,6 +50,7 @@ impl Log {
     pub async fn read(
         &mut self,
         tenant: &str,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         offset: i64,
         batch_size: i32,
@@ -60,7 +62,13 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .read(collection_id, offset, batch_size, end_timestamp)
+                .read(
+                    database_name,
+                    collection_id,
+                    offset,
+                    batch_size,
+                    end_timestamp,
+                )
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => Ok(log
@@ -74,6 +82,7 @@ impl Log {
     pub async fn scout_logs(
         &mut self,
         tenant: &str,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         starting_offset: u64,
     ) -> Result<u64, Box<dyn ChromaError>> {
@@ -83,7 +92,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .scout_logs(collection_id, starting_offset)
+                .scout_logs(database_name, collection_id, starting_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => log
@@ -97,8 +106,10 @@ impl Log {
     pub async fn push_logs(
         &mut self,
         tenant: &str,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(log) => log
@@ -106,7 +117,7 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .push_logs(collection_id, records)
+                .push_logs(database_name, collection_id, records, cmek)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
@@ -117,13 +128,20 @@ impl Log {
     pub async fn fork_logs(
         &mut self,
         tenant: &str,
+        database_name: DatabaseName,
         source_collection_id: CollectionUuid,
         target_collection_id: CollectionUuid,
+        cmek: Option<Cmek>,
     ) -> Result<ForkLogsResponse, ForkCollectionError> {
         match self {
             Log::Sqlite(_) => Err(ForkCollectionError::Local),
             Log::Grpc(log) => log
-                .fork_logs(source_collection_id, target_collection_id)
+                .fork_logs(
+                    database_name,
+                    source_collection_id,
+                    target_collection_id,
+                    cmek,
+                )
                 .await
                 .map_err(|err| err.boxed().into()),
             Log::InMemory(_) => Err(ForkCollectionError::Local),
@@ -152,6 +170,7 @@ impl Log {
     pub async fn update_collection_log_offset(
         &mut self,
         tenant: &str,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), Box<dyn ChromaError>> {
@@ -161,13 +180,12 @@ impl Log {
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .update_collection_log_offset(collection_id, new_offset)
+                .update_collection_log_offset(database_name, collection_id, new_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => {
                 log.update_collection_log_offset(collection_id, new_offset)
-                    .await;
-                Ok(())
+                    .await
             }
         }
     }
@@ -176,13 +194,18 @@ impl Log {
     #[tracing::instrument(skip(self), err(Display))]
     pub async fn update_collection_log_offset_on_every_node(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         new_offset: i64,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(_) => Ok(()),
             Log::Grpc(log) => log
-                .update_collection_log_offset_on_every_node(collection_id, new_offset)
+                .update_collection_log_offset_on_every_node(
+                    database_name,
+                    collection_id,
+                    new_offset,
+                )
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => Ok(()),
@@ -261,10 +284,14 @@ impl Log {
 
     pub async fn garbage_collect_phase2(
         &mut self,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
     ) -> Result<(), GarbageCollectError> {
         match self {
-            Log::Grpc(log) => log.garbage_collect_phase2(collection_id).await,
+            Log::Grpc(log) => {
+                log.garbage_collect_phase2(database_name, collection_id)
+                    .await
+            }
             Log::Sqlite(_) => Err(GarbageCollectError::Unimplemented),
             Log::InMemory(_) => Ok(()),
         }

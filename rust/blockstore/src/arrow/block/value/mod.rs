@@ -1,5 +1,7 @@
 pub(super) mod data_record_value;
 pub(super) mod f32_value;
+pub(super) mod float32array_value;
+pub(super) mod quantized_cluster_value;
 pub(super) mod roaring_bitmap_value;
 pub(super) mod spann_posting_list_value;
 pub(super) mod str_value;

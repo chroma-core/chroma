@@ -207,7 +207,7 @@ impl Operator<RankInput, RankOutput> for RankExpr {
 
 #[cfg(test)]
 mod tests {
-    use chroma_types::operator::KnnQuery;
+    use chroma_types::operator::{Key, KnnQuery};
 
     use super::*;
 
@@ -215,7 +215,7 @@ mod tests {
     async fn test_rank_with_knn_results() {
         let query = KnnQuery {
             query: chroma_types::operator::QueryVector::Dense(vec![0.1, 0.2, 0.3]),
-            key: String::new(),
+            key: Key::Embedding,
             limit: 3,
         };
         let knn_results = vec![vec![
@@ -236,7 +236,7 @@ mod tests {
         // Test simple KNN rank
         let expr = RankExpr::Knn {
             query: query.query.clone(),
-            key: String::new(),
+            key: Key::Embedding,
             limit: query.limit,
             default: None,
             return_rank: false,
@@ -254,15 +254,16 @@ mod tests {
     async fn test_rank_arithmetic_operations() {
         let query1 = KnnQuery {
             query: chroma_types::operator::QueryVector::Dense(vec![0.1]),
-            key: String::new(),
+            key: Key::Embedding,
             limit: 2,
         };
         let query2 = KnnQuery {
             query: chroma_types::operator::QueryVector::Sparse(chroma_types::SparseVector {
                 indices: vec![0],
                 values: vec![1.0],
+                tokens: None,
             }),
-            key: "sparse".to_string(),
+            key: Key::field("sparse"),
             limit: 2,
         };
         let mut knn_results = vec![
@@ -292,14 +293,14 @@ mod tests {
         let expr = RankExpr::Summation(vec![
             RankExpr::Knn {
                 query: query1.query.clone(),
-                key: String::new(),
+                key: Key::Embedding,
                 limit: query1.limit,
                 default: None,
                 return_rank: false,
             },
             RankExpr::Knn {
                 query: query2.query.clone(),
-                key: "sparse".to_string(),
+                key: Key::field("sparse"),
                 limit: query2.limit,
                 default: None,
                 return_rank: false,
@@ -323,7 +324,7 @@ mod tests {
         let expr = RankExpr::Multiplication(vec![
             RankExpr::Knn {
                 query: query1.query.clone(),
-                key: String::new(),
+                key: Key::Embedding,
                 limit: query1.limit,
                 default: None,
                 return_rank: false,
@@ -343,7 +344,7 @@ mod tests {
     async fn test_rank_min_max_functions() {
         let query = KnnQuery {
             query: chroma_types::operator::QueryVector::Dense(vec![0.1]),
-            key: String::new(),
+            key: Key::Embedding,
             limit: 2,
         };
         let knn_results = vec![vec![
@@ -361,7 +362,7 @@ mod tests {
         let expr = RankExpr::Maximum(vec![
             RankExpr::Knn {
                 query: query.query.clone(),
-                key: String::new(),
+                key: Key::Embedding,
                 limit: query.limit,
                 default: None,
                 return_rank: false,
@@ -383,7 +384,7 @@ mod tests {
         let expr = RankExpr::Minimum(vec![
             RankExpr::Knn {
                 query: query.query.clone(),
-                key: String::new(),
+                key: Key::Embedding,
                 limit: query.limit,
                 default: None,
                 return_rank: false,

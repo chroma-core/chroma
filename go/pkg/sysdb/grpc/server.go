@@ -57,6 +57,11 @@ type Config struct {
 	LogServiceMemberlistName string
 	LogServicePodLabel       string
 
+	// Heap service config (colocated with log service)
+	HeapServiceEnabled          bool
+	HeapServicePort             int    // Default: 50052
+	HeapServiceAssignmentHasher string // Assignment policy hasher: "murmur3" (default), etc.
+
 	// Config for testing
 	Testing bool
 
@@ -146,7 +151,15 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		return nil, err
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, s3MetaStore, config.VersionFileEnabled)
+	coordinator, err := coordinator.NewCoordinator(ctx, coordinator.CoordinatorConfig{
+		ObjectStore:                 s3MetaStore,
+		VersionFileEnabled:          config.VersionFileEnabled,
+		HeapServiceEnabled:          config.HeapServiceEnabled,
+		HeapServicePort:             config.HeapServicePort,
+		HeapServiceAssignmentHasher: config.HeapServiceAssignmentHasher,
+		KubernetesNamespace:         config.KubernetesNamespace,
+		LogServiceMemberlistName:    config.LogServiceMemberlistName,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -180,12 +193,11 @@ func createMemberlistManager(namespace string, memberlistName string, podLabel s
 	if err != nil {
 		return nil, err
 	}
-	dynamicClient, err := utils.GetKubernetesDynamicInterface()
+	memberlistStore, err := memberlist_manager.NewCRMemberlistStoreFromK8s(namespace, memberlistName)
 	if err != nil {
 		return nil, err
 	}
 	nodeWatcher := memberlist_manager.NewKubernetesWatcher(clientset, namespace, podLabel, watchInterval)
-	memberlistStore := memberlist_manager.NewCRMemberlistStore(dynamicClient, namespace, memberlistName)
 	memberlist_manager := memberlist_manager.NewMemberlistManager(nodeWatcher, memberlistStore)
 	memberlist_manager.SetReconcileInterval(reconcileInterval)
 	memberlist_manager.SetReconcileCount(reconcileCount)

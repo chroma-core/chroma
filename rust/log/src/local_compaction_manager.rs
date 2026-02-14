@@ -14,7 +14,10 @@ use chroma_sqlite::db::SqliteDb;
 use chroma_sysdb::SysDb;
 use chroma_system::Handler;
 use chroma_system::{Component, ComponentContext};
-use chroma_types::{Chunk, CollectionUuid, GetCollectionWithSegmentsError, LogRecord};
+use chroma_types::{
+    Chunk, CollectionUuid, DatabaseName, GetCollectionWithSegmentsError, LogRecord, Schema,
+    SchemaError,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -94,6 +97,8 @@ pub enum CompactionManagerError {
     HnswReaderConstructionError(#[from] LocalSegmentManagerError),
     #[error("Error purging logs")]
     PurgeLogsFailure,
+    #[error("Failed to reconcile collection schema: {0}")]
+    SchemaReconcileError(#[from] SchemaError),
 }
 
 impl ChromaError for CompactionManagerError {
@@ -108,6 +113,7 @@ impl ChromaError for CompactionManagerError {
             CompactionManagerError::HnswReaderError(e) => e.code(),
             CompactionManagerError::HnswReaderConstructionError(e) => e.code(),
             CompactionManagerError::PurgeLogsFailure => ErrorCodes::Internal,
+            CompactionManagerError::SchemaReconcileError(e) => e.code(),
         }
     }
 }
@@ -131,10 +137,17 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
         message: BackfillMessage,
         _: &ComponentContext<LocalCompactionManager>,
     ) -> Self::Result {
-        let collection_and_segments = self
+        let mut collection_and_segments = self
             .sysdb
-            .get_collection_with_segments(message.collection_id)
+            .get_collection_with_segments(None, message.collection_id)
             .await?;
+        let schema_previously_persisted = collection_and_segments.collection.schema.is_some();
+        if !schema_previously_persisted {
+            collection_and_segments.collection.schema = Some(
+                Schema::try_from(&collection_and_segments.collection.config)
+                    .map_err(CompactionManagerError::SchemaReconcileError)?,
+            );
+        }
         // If collection is uninitialized, that means nothing has been written yet.
         let dim = match collection_and_segments.collection.dimension {
             Some(dim) => dim,
@@ -165,10 +178,14 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             Err(e) => return Err(CompactionManagerError::HnswReaderConstructionError(e)),
         };
         // Get the logs from log service beyond this offset to backfill.
+        let dbname = DatabaseName::new(collection_and_segments.collection.database.clone())
+            .ok_or(CompactionManagerError::PullLogsFailure)?;
         let logs = self
             .log
             .read(
                 &collection_and_segments.collection.tenant,
+                // It is up to the log impl to use or not use this.
+                dbname,
                 collection_and_segments.collection.collection_id,
                 mt_max_seq_id.min(hnsw_max_seq_id) as i64,
                 -1,
@@ -198,14 +215,31 @@ impl Handler<BackfillMessage> for LocalCompactionManager {
             .begin()
             .await
             .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
-        metadata_writer
+        let apply_outcome = metadata_writer
             .apply_logs(
                 mt_data_chunk,
                 collection_and_segments.metadata_segment.id,
+                if schema_previously_persisted {
+                    collection_and_segments.collection.schema.clone()
+                } else {
+                    None
+                },
                 &mut *tx,
             )
             .await
             .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
+        if schema_previously_persisted {
+            if let Some(updated_schema) = apply_outcome.schema_update {
+                metadata_writer
+                    .update_collection_schema(
+                        collection_and_segments.collection.collection_id,
+                        &updated_schema,
+                        &mut *tx,
+                    )
+                    .await
+                    .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
+            }
+        }
         tx.commit()
             .await
             .map_err(|_| CompactionManagerError::MetadataApplyLogsFailed)?;
@@ -238,10 +272,17 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
     ) -> Self::Result {
         let collection_segments = self
             .sysdb
-            .get_collection_with_segments(message.collection_id)
+            .get_collection_with_segments(None, message.collection_id)
             .await?;
+        let mut collection = collection_segments.collection.clone();
+        if collection.schema.is_none() {
+            collection.schema = Some(
+                Schema::try_from(&collection.config)
+                    .map_err(CompactionManagerError::SchemaReconcileError)?,
+            );
+        }
         // If dimension is None, that means nothing has been written yet.
-        let dim = match collection_segments.collection.dimension {
+        let dim = match collection.dimension {
             Some(dim) => dim,
             None => return Ok(()),
         };
@@ -252,7 +293,7 @@ impl Handler<PurgeLogsMessage> for LocalCompactionManager {
         let hnsw_reader = self
             .hnsw_segment_manager
             .get_hnsw_reader(
-                &collection_segments.collection,
+                &collection,
                 &collection_segments.vector_segment,
                 dim as usize,
             )

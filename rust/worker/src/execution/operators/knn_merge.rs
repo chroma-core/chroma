@@ -49,7 +49,7 @@ impl Operator<KnnMergeInput, KnnMergeOutput> for Merge {
         let reversed_distances = input
             .batch_measures
             .iter()
-            .map(|batch| batch.iter().map(|m| Reverse(m.clone())).collect())
+            .map(|batch| batch.iter().map(|m| Reverse(*m)).collect())
             .collect();
         Ok(KnnMergeOutput {
             measures: self

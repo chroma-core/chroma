@@ -33,12 +33,14 @@ def test_get_builtins_holds() -> None:
         "GoogleGenerativeAiEmbeddingFunction",
         "GooglePalmEmbeddingFunction",
         "GoogleVertexEmbeddingFunction",
+        "GoogleGenaiEmbeddingFunction",
         "HuggingFaceEmbeddingFunction",
         "HuggingFaceEmbeddingServer",
         "InstructorEmbeddingFunction",
         "JinaEmbeddingFunction",
         "MistralEmbeddingFunction",
         "MorphEmbeddingFunction",
+        "NomicEmbeddingFunction",
         "ONNXMiniLM_L6_V2",
         "OllamaEmbeddingFunction",
         "OpenAIEmbeddingFunction",
@@ -53,6 +55,8 @@ def test_get_builtins_holds() -> None:
         "FastembedSparseEmbeddingFunction",
         "Bm25EmbeddingFunction",
         "ChromaCloudQwenEmbeddingFunction",
+        "ChromaCloudSpladeEmbeddingFunction",
+        "ChromaBm25EmbeddingFunction",
     }
 
     assert expected_builtins == embedding_functions.get_builtins()

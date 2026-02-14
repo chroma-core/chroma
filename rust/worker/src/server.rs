@@ -1,10 +1,11 @@
-use std::{collections::HashSet, time::Duration};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::usearch::USearchIndexProvider;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
@@ -17,7 +18,7 @@ use chroma_types::{
         query_executor_server::{QueryExecutor, QueryExecutorServer},
     },
     operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
-    plan::SearchPayload,
+    plan::{ReadLevel, SearchPayload},
     CollectionAndSegments, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
@@ -29,14 +30,15 @@ use crate::{
     execution::{
         operators::fetch_log::FetchLogOperator,
         orchestration::{
+            count::CountOrchestrator,
             get::GetOrchestrator,
             knn::KnnOrchestrator,
             knn_filter::KnnFilterOrchestrator,
             projection::ProjectionOrchestrator,
+            quantized_spann_knn::QuantizedSpannKnnOrchestrator,
             rank::{RankOrchestrator, RankOrchestratorOutput},
             spann_knn::SpannKnnOrchestrator,
             sparse_knn::SparseKnnOrchestrator,
-            CountOrchestrator,
         },
     },
 };
@@ -58,7 +60,6 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     shutdown_grace_period: Duration,
-    bm25_tenant: HashSet<String>,
 }
 
 #[async_trait]
@@ -68,7 +69,9 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
         registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (config, system) = config;
-        let sysdb = SysDb::try_from_config(&config.sysdb, registry).await?;
+        let sysdb =
+            SysDb::try_from_config(&(config.sysdb.clone(), config.mcmr_sysdb.clone()), registry)
+                .await?;
         let log = Log::try_from_config(&(config.log.clone(), system.clone()), registry).await?;
         let storage = Storage::try_from_config(&config.storage, registry).await?;
         let blockfile_provider = BlockfileProvider::try_from_config(
@@ -81,11 +84,16 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
+        let usearch_cache =
+            chroma_cache::from_config(&config.spann_provider.usearch_provider.cache_config).await?;
+        let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
+
         let spann_provider = SpannProvider::try_from_config(
             &(
                 hnsw_index_provider.clone(),
                 blockfile_provider.clone(),
                 config.spann_provider.clone(),
+                usearch_provider,
             ),
             registry,
         )
@@ -102,7 +110,6 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
-            bm25_tenant: config.bm25_tenant.clone(),
         })
     }
 }
@@ -112,7 +119,8 @@ impl WorkerServer {
         let addr = format!("[::]:{}", worker.port).parse().unwrap();
         println!("Worker listening on {}", addr);
 
-        let (mut health_reporter, health_service) = tonic_health::server::health_reporter();
+        let blockfile_provider = worker.blockfile_provider.clone();
+        let (health_reporter, health_service) = tonic_health::server::health_reporter();
 
         let server = Server::builder()
             .layer(chroma_tracing::GrpcServerTraceLayer)
@@ -167,6 +175,11 @@ impl WorkerServer {
 
         server.await?;
 
+        tracing::info!("Closing blockfile provider caches");
+        if let Err(e) = blockfile_provider.close().await {
+            tracing::error!("Failed to close blockfile provider: {:?}", e);
+        }
+
         // Shutdown pprof server after server is finished shutting down
         if let Some(shutdown_tx) = pprof_shutdown_tx {
             let _ = shutdown_tx.send(());
@@ -187,8 +200,11 @@ impl WorkerServer {
         &self,
         collection_and_segments: &CollectionAndSegments,
         batch_size: u32,
-    ) -> FetchLogOperator {
-        FetchLogOperator {
+    ) -> Result<FetchLogOperator, Status> {
+        let database_name =
+            chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
+                .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
+        Ok(FetchLogOperator {
             log_client: self.log.clone(),
             batch_size,
             // The collection log position is inclusive, and we want to start from the next log
@@ -198,7 +214,8 @@ impl WorkerServer {
             maximum_fetch_count: None,
             collection_uuid: collection_and_segments.collection.collection_id,
             tenant: collection_and_segments.collection.tenant.clone(),
-        }
+            database_name,
+        })
     }
 
     async fn orchestrate_count(
@@ -211,7 +228,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let count_orchestrator = CountOrchestrator::new(
             self.blockfile_provider.clone(),
@@ -241,7 +258,7 @@ impl WorkerServer {
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let filter = get_inner
             .filter
@@ -298,7 +315,7 @@ impl WorkerServer {
 
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
 
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         let filter = knn_inner
             .filter
@@ -340,6 +357,7 @@ impl WorkerServer {
             collection_and_segments.clone(),
             fetch_log,
             filter.try_into()?,
+            ReadLevel::IndexAndWal, // Full consistency for KNN queries
         );
 
         let matching_records = match knn_filter_orchestrator.run(system.clone()).await {
@@ -351,7 +369,10 @@ impl WorkerServer {
 
         let pulled_log_bytes = matching_records.fetch_log_bytes;
 
-        if vector_segment_type == SegmentType::Spann {
+        if matches!(
+            vector_segment_type,
+            SegmentType::Spann | SegmentType::QuantizedSpann
+        ) {
             tracing::debug!("Running KNN on SPANN segment");
             // Create unified futures that run KNN then projection
             let knn_with_projection_futures =
@@ -363,22 +384,35 @@ impl WorkerServer {
                     let system = system.clone();
                     let blockfile_provider = self.blockfile_provider.clone();
                     let knn_projection = knn_projection.clone();
+                    let segment_type = vector_segment_type;
 
                     async move {
-                        // Run KNN orchestrator
-                        let knn_orchestrator = SpannKnnOrchestrator::new(
-                            spann_provider,
-                            dispatcher.clone(),
-                            1000,
-                            collection_and_segments.clone(),
-                            matching_records.clone(),
-                            knn.fetch as usize,
-                            knn.embedding,
-                        );
-                        let record_distances = knn_orchestrator
+                        // Run KNN orchestrator — dispatch based on segment type.
+                        let record_distances = match segment_type {
+                            SegmentType::QuantizedSpann => QuantizedSpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher.clone(),
+                                1000,
+                                collection_and_segments.clone(),
+                                matching_records.clone(),
+                                knn,
+                            )
                             .run(system.clone())
                             .await
-                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?;
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                            _ => SpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher.clone(),
+                                1000,
+                                collection_and_segments.clone(),
+                                matching_records.clone(),
+                                knn.fetch as usize,
+                                knn.embedding,
+                            )
+                            .run(system.clone())
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                        };
 
                         // Run projection orchestrator
                         let projection_orchestrator = ProjectionOrchestrator::new(
@@ -476,10 +510,11 @@ impl WorkerServer {
         &self,
         scan: chroma_proto::ScanOperator,
         payload: chroma_proto::SearchPayload,
+        read_level: ReadLevel,
     ) -> Result<RankOrchestratorOutput, Status> {
         let collection_and_segments = Scan::try_from(scan)?.collection_and_segments;
         let search_payload = SearchPayload::try_from(payload)?;
-        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size);
+        let fetch_log = self.fetch_log(&collection_and_segments, self.fetch_log_batch_size)?;
 
         // We return early on uninitialized collection, otherwise
         // the downstream will error due to missing dimension
@@ -495,6 +530,7 @@ impl WorkerServer {
             collection_and_segments.clone(),
             fetch_log,
             search_payload.filter.clone(),
+            read_level, // Use the specified read level
         );
 
         let knn_filter_output = match knn_filter_orchestrator.run(self.system.clone()).await {
@@ -522,9 +558,22 @@ impl WorkerServer {
                         let vector_segment_type =
                             collection_and_segments_clone.vector_segment.r#type;
 
-                        if vector_segment_type == SegmentType::Spann {
-                            // Use SPANN KNN orchestrator
-                            let spann_orchestrator = SpannKnnOrchestrator::new(
+                        match vector_segment_type {
+                            SegmentType::QuantizedSpann => QuantizedSpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher,
+                                1000,
+                                collection_and_segments_clone,
+                                knn_filter_output_clone,
+                                Knn {
+                                    embedding: query,
+                                    fetch: knn_query.limit,
+                                },
+                            )
+                            .run(system_clone)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                            SegmentType::Spann => SpannKnnOrchestrator::new(
                                 spann_provider,
                                 dispatcher,
                                 1000,
@@ -532,46 +581,40 @@ impl WorkerServer {
                                 knn_filter_output_clone,
                                 knn_query.limit as usize,
                                 query,
-                            );
+                            )
+                            .run(system_clone)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                            _ => {
+                                let knn = Knn {
+                                    embedding: query,
+                                    fetch: knn_query.limit,
+                                };
 
-                            spann_orchestrator
+                                KnnOrchestrator::new(
+                                    blockfile_provider,
+                                    dispatcher,
+                                    1000,
+                                    collection_and_segments_clone,
+                                    knn_filter_output_clone,
+                                    knn,
+                                )
                                 .run(system_clone)
                                 .await
                                 .map_err(|e| Status::new(e.code().into(), e.to_string()))?
-                        } else {
-                            // Use HNSW KNN orchestrator
-                            let knn = Knn {
-                                embedding: query,
-                                fetch: knn_query.limit,
-                            };
-
-                            let knn_orchestrator = KnnOrchestrator::new(
-                                blockfile_provider,
-                                dispatcher,
-                                1000,
-                                collection_and_segments_clone,
-                                knn_filter_output_clone,
-                                knn,
-                            );
-
-                            knn_orchestrator
-                                .run(system_clone)
-                                .await
-                                .map_err(|e| Status::new(e.code().into(), e.to_string()))?
+                            }
                         }
                     }
                     QueryVector::Sparse(query) => {
                         // Use Sparse KNN orchestrator
-                        let tenant = collection_and_segments_clone.collection.tenant.clone();
                         let sparse_orchestrator = SparseKnnOrchestrator::new(
                             blockfile_provider,
                             dispatcher,
                             1000,
                             collection_and_segments_clone,
-                            self.bm25_tenant.contains(&tenant),
                             knn_filter_output_clone,
                             query,
-                            knn_query.key.clone(),
+                            knn_query.key.to_string(),
                             knn_query.limit,
                         );
 
@@ -599,6 +642,7 @@ impl WorkerServer {
             knn_filter_output,
             knn_results,
             search_payload.rank,
+            search_payload.group_by,
             search_payload.limit,
             search_payload.select,
             collection_and_segments,
@@ -615,6 +659,7 @@ impl WorkerServer {
         search: Request<chroma_proto::SearchPlan>,
     ) -> Result<Response<chroma_proto::SearchResult>, Status> {
         let search_plan = search.into_inner();
+        let read_level: ReadLevel = search_plan.read_level().into();
         let scan = search_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
@@ -622,7 +667,7 @@ impl WorkerServer {
         let futures = search_plan
             .payloads
             .into_iter()
-            .map(|payload| self.orchestrate_search(scan.clone(), payload));
+            .map(|payload| self.orchestrate_search(scan.clone(), payload, read_level));
 
         let orchestrator_results = stream::iter(futures)
             .buffered(32) // Process up to 32 payloads concurrently
@@ -642,6 +687,7 @@ impl WorkerServer {
         }))
     }
 
+    #[allow(clippy::result_large_err)]
     fn clone_dispatcher(&self) -> Result<ComponentHandle<Dispatcher>, Status> {
         self.dispatcher
             .as_ref()
@@ -735,7 +781,6 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             shutdown_grace_period: Duration::from_secs(1),
-            bm25_tenant: HashSet::new(),
         };
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
@@ -1109,5 +1154,51 @@ mod tests {
         assert!(response.is_err());
         let err = response.unwrap_err();
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    fn gen_search_request(scan_operator: chroma_proto::ScanOperator) -> chroma_proto::SearchPlan {
+        chroma_proto::SearchPlan {
+            scan: Some(scan_operator),
+            payloads: vec![chroma_proto::SearchPayload {
+                filter: Some(chroma_proto::FilterOperator {
+                    ids: None,
+                    r#where: None,
+                    where_document: None,
+                }),
+                rank: Some(chroma_proto::RankOperator { expr: None }),
+                group_by: None,
+                limit: Some(chroma_proto::LimitOperator {
+                    offset: 0,
+                    limit: Some(10),
+                }),
+                select: Some(chroma_proto::SelectOperator { keys: vec![] }),
+            }],
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
+        }
+    }
+
+    #[tokio::test]
+    async fn search_accepts_read_level_index_and_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = gen_search_request(scan_operator);
+
+        let response = executor.search(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn search_accepts_read_level_index_only() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let mut request = gen_search_request(scan_operator);
+        request.read_level = chroma_proto::ReadLevel::IndexOnly as i32;
+
+        let response = executor.search(request).await;
+        assert!(response.is_ok());
     }
 }

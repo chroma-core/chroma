@@ -17,7 +17,7 @@ fn main() {
     eprintln!("offset: {offset:#?}");
     let garbage = Garbage::bug_patch_construct_garbage_from_manifest(
         &manifest,
-        FragmentSeqNo(seq_no),
+        FragmentSeqNo::from_u64(seq_no),
         LogPosition::from_offset(offset),
     );
     println!("{}", serde_json::to_string(&garbage).unwrap());

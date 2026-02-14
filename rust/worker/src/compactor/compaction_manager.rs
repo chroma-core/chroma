@@ -12,8 +12,7 @@ use crate::execution::operators::repair_log_offsets::RepairLogOffsets;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsError;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsInput;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsOutput;
-use crate::execution::orchestration::CompactOrchestrator;
-use crate::execution::orchestration::CompactionResponse;
+use crate::execution::orchestration::compact::{compact, CompactionResponse};
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -21,21 +20,22 @@ use chroma_config::registry::Registry;
 use chroma_config::Configurable;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::usearch::USearchIndexProvider;
 use chroma_log::Log;
 use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
-use chroma_system::wrap;
-use chroma_system::Dispatcher;
-use chroma_system::Orchestrator;
-use chroma_system::TaskResult;
-use chroma_system::{Component, ComponentContext, ComponentHandle, Handler, System};
-use chroma_types::CollectionUuid;
+use chroma_system::{
+    wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System, TaskResult,
+};
+use chroma_types::{CollectionUuid, JobId};
 use futures::stream::FuturesUnordered;
 use futures::FutureExt;
 use futures::StreamExt;
 use opentelemetry::trace::TraceContextExt;
+use s3heap_service::client::GrpcHeapService;
+use s3heap_service::client::HeapServiceConfig;
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -59,12 +59,12 @@ type CompactionOutput = Result<CompactionResponse, Box<dyn ChromaError>>;
 type BoxedFuture = Pin<Box<dyn Future<Output = CompactionOutput> + Send>>;
 
 struct CompactionTask {
-    collection_id: CollectionUuid,
+    job_id: JobId,
     future: BoxedFuture,
 }
 
 struct CompactionTaskCompletion {
-    collection_id: CollectionUuid,
+    job_id: JobId,
     result: CompactionOutput,
 }
 
@@ -74,6 +74,8 @@ pub(crate) struct CompactionManagerContext {
     // Dependencies
     log: Log,
     sysdb: SysDb,
+    #[allow(dead_code)]
+    heap_service: Option<s3heap_service::client::GrpcHeapService>,
     #[allow(dead_code)]
     storage: Storage,
     blockfile_provider: BlockfileProvider,
@@ -91,6 +93,7 @@ pub(crate) struct CompactionManagerContext {
     fetch_log_batch_size: u32,
     purge_dirty_log_timeout_seconds: u64,
     repair_log_offsets_timeout_seconds: u64,
+    disabled_function_collections: HashSet<CollectionUuid>,
 }
 
 pub(crate) struct CompactionManager {
@@ -106,12 +109,15 @@ pub(crate) struct CompactionManager {
 pub(crate) enum CompactionError {
     #[error("Failed to compact")]
     FailedToCompact,
+    #[error("Invalid collection UUID in config: {0}")]
+    InvalidCollectionUuid(String),
 }
 
 impl ChromaError for CompactionError {
     fn code(&self) -> ErrorCodes {
         match self {
             CompactionError::FailedToCompact => ErrorCodes::Internal,
+            CompactionError::InvalidCollectionUuid(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -135,7 +141,9 @@ impl CompactionManager {
         fetch_log_batch_size: u32,
         purge_dirty_log_timeout_seconds: u64,
         repair_log_offsets_timeout_seconds: u64,
-    ) -> Self {
+        heap_service: Option<GrpcHeapService>,
+        disabled_function_collections: HashSet<CollectionUuid>,
+    ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
 
@@ -146,7 +154,8 @@ impl CompactionManager {
         let compact_awaiter = tokio::spawn(async {
             compact_awaiter_loop(compact_awaiter_rx, completion_tx).await;
         });
-        CompactionManager {
+
+        Ok(CompactionManager {
             scheduler,
             context: CompactionManagerContext {
                 system,
@@ -165,21 +174,24 @@ impl CompactionManager {
                 fetch_log_batch_size,
                 purge_dirty_log_timeout_seconds,
                 repair_log_offsets_timeout_seconds,
+                disabled_function_collections,
+                heap_service,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
             compact_awaiter_completion_channel: completion_rx,
             compact_awaiter,
-        }
+        })
     }
 
     #[instrument(name = "CompactionManager::start_compaction_batch", skip(self))]
     async fn start_compaction_batch(&mut self) {
-        self.process_completions();
+        self.process_completions().await;
         let compact_awaiter_channel = &self.compact_awaiter_channel;
         self.scheduler.schedule().await;
-        let jobs_iter = self.scheduler.get_jobs();
-        for job in jobs_iter {
+
+        let jobs: Vec<_> = self.scheduler.get_jobs().cloned().collect();
+        for job in jobs {
             let instrumented_span = span!(
                 parent: None,
                 tracing::Level::INFO,
@@ -191,23 +203,34 @@ impl CompactionManager {
             let future = self
                 .context
                 .clone()
-                .compact(job.collection_id, false)
+                .compact(job.collection_id, job.database_name.clone(), false)
                 .instrument(instrumented_span);
-            compact_awaiter_channel
+            if let Err(e) = compact_awaiter_channel
                 .send(CompactionTask {
-                    collection_id: job.collection_id,
+                    job_id: job.collection_id.into(),
                     future: Box::pin(future),
                 })
                 .await
-                .unwrap();
+            {
+                tracing::error!(
+                    collection_id = ?job.collection_id,
+                    error = ?e,
+                    "Failed to send start scheduled compaction task"
+                );
+            }
         }
     }
 
     #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
     pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
+        // TODO(tanujnay112): Implement this for MCMR by accepting a database/topo name on this method.
         let _ = collection_ids
             .iter()
-            .map(|id| self.context.clone().compact(*id, true))
+            .map(|id| {
+                let database_name =
+                    chroma_types::DatabaseName::new("default").expect("default should be valid");
+                self.context.clone().compact(*id, database_name, true)
+            })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
             .await;
@@ -286,34 +309,47 @@ impl CompactionManager {
         self.context.dispatcher = Some(dispatcher);
     }
 
-    fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
+    /// Get a mutable reference to the heap service client if available.
+    #[allow(dead_code)]
+    pub(crate) fn heap_service(&mut self) -> Option<&mut s3heap_service::client::GrpcHeapService> {
+        self.context.heap_service.as_mut()
+    }
+
+    async fn process_completions(&mut self) -> Vec<CompactionTaskCompletion> {
         let compact_awaiter_completion_channel = &mut self.compact_awaiter_completion_channel;
         let mut completed_collections = Vec::new();
         while let Ok(resp) = compact_awaiter_completion_channel.try_recv() {
             match resp.result {
                 Ok(ref compaction_response) => match compaction_response {
-                    CompactionResponse::Success { collection_id } => {
-                        if *collection_id != resp.collection_id {
-                            tracing::event!(Level::ERROR, name = "mismatched collection ids in result", lhs =? *collection_id, rhs =? resp.collection_id);
+                    CompactionResponse::Success { job_id, .. } => {
+                        if job_id != &resp.job_id {
+                            tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *job_id, rhs =? resp.job_id);
                         }
-                        self.scheduler.succeed_collection(resp.collection_id);
+                        self.scheduler.succeed_job(resp.job_id);
                     }
                     CompactionResponse::RequireCompactionOffsetRepair {
-                        collection_id,
+                        job_id: collection_id,
+                        database_name,
                         witnessed_offset_in_sysdb,
                     } => {
-                        if *collection_id != resp.collection_id {
-                            tracing::event!(Level::ERROR, name = "mismatched collection ids in result", lhs =? *collection_id, rhs =? resp.collection_id);
-                            self.scheduler.succeed_collection(resp.collection_id);
+                        if *collection_id != resp.job_id {
+                            tracing::event!(Level::ERROR, name = "mismatched job ids in result", lhs =? *collection_id, rhs =? resp.job_id);
+                            self.scheduler.fail_job(resp.job_id).await;
                         } else {
-                            self.scheduler
-                                .require_repair(resp.collection_id, *witnessed_offset_in_sysdb);
-                            self.scheduler.succeed_collection(resp.collection_id);
+                            self.scheduler.require_repair(
+                                chroma_types::CollectionUuid(resp.job_id.0),
+                                database_name.clone(),
+                                *witnessed_offset_in_sysdb,
+                            );
+                            self.scheduler.succeed_job(resp.job_id);
                         }
                     }
                 },
-                Err(_) => {
-                    self.scheduler.fail_collection(resp.collection_id);
+                Err(ref e) => {
+                    let job_id = resp.job_id;
+                    let error_msg = e.to_string();
+                    self.scheduler.fail_job(job_id).await;
+                    tracing::error!("Failed to compact collection: {} - {}", job_id, error_msg);
                 }
             }
             completed_collections.push(resp);
@@ -333,7 +369,8 @@ impl CompactionManagerContext {
     async fn compact(
         self,
         collection_id: CollectionUuid,
-        rebuild: bool,
+        database_name: chroma_types::DatabaseName,
+        is_rebuild: bool,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         tracing::info!("Compacting collection: {}", collection_id);
         let dispatcher = match self.dispatcher {
@@ -344,9 +381,15 @@ impl CompactionManagerContext {
             }
         };
 
-        let orchestrator = CompactOrchestrator::new(
+        // fetch data to compact -> execute_task/compact -> register
+        // Use the compact function to handle the entire orchestration process
+        let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
+
+        let compact_result = Box::pin(compact(
+            self.system.clone(),
             collection_id,
-            rebuild,
+            database_name,
+            is_rebuild,
             self.fetch_log_batch_size,
             self.max_compaction_size,
             self.max_partition_size,
@@ -355,20 +398,20 @@ impl CompactionManagerContext {
             self.blockfile_provider.clone(),
             self.hnsw_index_provider.clone(),
             self.spann_provider.clone(),
-            dispatcher,
+            dispatcher.clone(),
+            is_function_disabled,
+            #[cfg(test)]
             None,
-        );
+        ))
+        .await;
 
-        match orchestrator.run(self.system.clone()).await {
-            Ok(result) => {
-                tracing::info!("Compaction Job completed: {:?}", result);
-                return Ok(result);
-            }
+        match compact_result {
+            Ok(response) => Ok(response),
             Err(e) => {
                 if e.should_trace_error() {
-                    tracing::error!("Compaction Job failed: {:?}", e);
+                    tracing::error!("Compaction failed: {:?}", e);
                 }
-                return Err(Box::new(e));
+                Err(e.boxed())
             }
         }
     }
@@ -389,8 +432,8 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 return Err(err);
             }
         };
-        let sysdb_config = &config.sysdb;
-        let sysdb = match SysDb::try_from_config(sysdb_config, registry).await {
+        let sysdb_config = (config.sysdb.clone(), config.mcmr_sysdb.clone());
+        let sysdb = match SysDb::try_from_config(&sysdb_config, registry).await {
             Ok(sysdb) => sysdb,
             Err(err) => {
                 return Err(err);
@@ -419,7 +462,22 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let mut disabled_collections =
             HashSet::with_capacity(config.compactor.disabled_collections.len());
         for collection_id_str in &config.compactor.disabled_collections {
-            disabled_collections.insert(CollectionUuid(Uuid::from_str(collection_id_str).unwrap()));
+            let uuid = Uuid::from_str(collection_id_str).map_err(|_| {
+                Box::new(CompactionError::InvalidCollectionUuid(
+                    collection_id_str.clone(),
+                )) as Box<dyn ChromaError>
+            })?;
+            disabled_collections.insert(CollectionUuid(uuid));
+        }
+        let mut disabled_function_collections =
+            HashSet::with_capacity(config.compactor.disabled_function_collections.len());
+        for collection_id_str in &config.compactor.disabled_function_collections {
+            let uuid = Uuid::from_str(collection_id_str).map_err(|_| {
+                Box::new(CompactionError::InvalidCollectionUuid(
+                    collection_id_str.clone(),
+                )) as Box<dyn ChromaError>
+            })?;
+            disabled_function_collections.insert(CollectionUuid(uuid));
         }
 
         let assignment_policy_config = &config.assignment_policy;
@@ -432,7 +490,6 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             my_ip,
             log.clone(),
             sysdb.clone(),
-            storage.clone(),
             policy,
             max_concurrent_jobs,
             min_compaction_size,
@@ -454,17 +511,47 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         )
         .await?;
 
+        let usearch_cache =
+            chroma_cache::from_config(&config.spann_provider.usearch_provider.cache_config).await?;
+        let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
+
         let spann_provider = SpannProvider::try_from_config(
             &(
                 hnsw_index_provider.clone(),
                 blockfile_provider.clone(),
                 config.spann_provider.clone(),
+                usearch_provider,
             ),
             registry,
         )
         .await?;
 
-        Ok(CompactionManager::new(
+        // Initialize heap service if enabled
+        let heap_service = match &config.heap_service {
+            HeapServiceConfig::Grpc(heap_config) if heap_config.enabled => {
+                match GrpcHeapService::try_from_config(
+                    &(heap_config.clone(), system.clone()),
+                    registry,
+                )
+                .await
+                {
+                    Ok(service) => {
+                        tracing::info!("Heap service client initialized");
+                        Some(service)
+                    }
+                    Err(err) => {
+                        tracing::warn!("Failed to initialize heap service: {:?}", err);
+                        None
+                    }
+                }
+            }
+            _ => {
+                tracing::info!("Heap service is disabled");
+                None
+            }
+        };
+
+        CompactionManager::new(
             system.clone(),
             scheduler,
             log,
@@ -481,7 +568,9 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-        ))
+            heap_service,
+            disabled_function_collections,
+        )
     }
 }
 
@@ -497,21 +586,21 @@ async fn compact_awaiter_loop(
                     let result = AssertUnwindSafe(job.future).catch_unwind().await;
                     match result {
                         Ok(response) => CompactionTaskCompletion {
-                            collection_id: job.collection_id,
+                            job_id: job.job_id,
                             result: response,
                         },
                         Err(_) => CompactionTaskCompletion {
-                            collection_id: job.collection_id,
+                            job_id: job.job_id,
                             result: Err(Box::new(CompactionError::FailedToCompact)),
                         },
                     }
                 });
             }
             Some(completed_job) = futures.next() => {
-                let collection_id = completed_job.collection_id;
+                let job_id = completed_job.job_id;
                 match completion_tx.send(completed_job) {
                     Ok(_) => {},
-                    Err(_) => tracing::error!("Failed to record compaction result for collection {}", collection_id),
+                    Err(_) => tracing::error!("Failed to record compaction result for job {}", job_id),
                 }
             }
             else => {
@@ -540,6 +629,15 @@ impl Component for CompactionManager {
             ctx,
             || Some(span!(parent: None, tracing::Level::INFO, "Scheduled compaction")),
         );
+    }
+
+    async fn on_stop(&mut self) -> Result<(), Box<dyn ChromaError>> {
+        tracing::info!("Closing blockfile provider caches");
+        self.context
+            .blockfile_provider
+            .close()
+            .await
+            .map_err(|e| e.boxed())
     }
 }
 
@@ -695,9 +793,11 @@ impl Handler<ListDeadJobsMessage> for CompactionManager {
         message: ListDeadJobsMessage,
         _ctx: &ComponentContext<CompactionManager>,
     ) {
-        let dead_jobs = self.scheduler.get_dead_jobs();
-        if let Err(e) = message.response_tx.send(dead_jobs) {
-            tracing::error!("Failed to send dead jobs response: {:?}", e);
+        // Dead jobs are now tracked in sysdb via compaction_failure_count, not in memory
+        // Return empty list as this endpoint is deprecated
+        // TODO(tanujnay112): remove this endpoint
+        if let Err(e) = message.response_tx.send(Vec::new()) {
+            tracing::warn!("Failed to send dead jobs response: {:?}", e);
         }
     }
 }
@@ -713,7 +813,6 @@ mod tests {
     use chroma_log::in_memory_log::{InMemoryLog, InternalLogRecord};
     use chroma_memberlist::memberlist_provider::Member;
     use chroma_storage::local::LocalStorage;
-    use chroma_storage::s3_client_for_test_with_new_bucket;
     use chroma_sysdb::TestSysDb;
     use chroma_system::{Dispatcher, DispatcherConfig};
     use chroma_types::SegmentUuid;
@@ -903,7 +1002,6 @@ mod tests {
             my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
-            storage.clone(),
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
             min_compaction_size,
@@ -941,13 +1039,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
         let system = System::new();
         let mut manager = CompactionManager::new(
@@ -967,7 +1070,10 @@ mod tests {
             fetch_log_batch_size,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
-        );
+            None,           // heap_service not needed in tests
+            HashSet::new(), // disabled_function_collections
+        )
+        .expect("Failed to create compaction manager in test");
 
         let dispatcher = Dispatcher::new(DispatcherConfig {
             num_worker_threads: 10,
@@ -982,19 +1088,20 @@ mod tests {
 
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(10);
-        let expected_compactions = HashSet::from([collection_uuid_1, collection_uuid_2]);
+        let expected_compactions =
+            HashSet::from([collection_uuid_1.into(), collection_uuid_2.into()]);
 
         let mut completed_compactions = HashSet::new();
 
         while completed_compactions.len() < expected_compactions.len() && start.elapsed() < timeout
         {
-            let completed = manager.process_completions();
+            let completed = manager.process_completions().await;
             completed_compactions.extend(
                 completed
                     .iter()
                     .filter(|c| c.result.is_ok())
-                    .map(|c| c.collection_id)
-                    .collect::<Vec<CollectionUuid>>(),
+                    .map(|c| c.job_id)
+                    .collect::<Vec<JobId>>(),
             );
         }
 
@@ -1016,42 +1123,5 @@ mod tests {
                 panic!("Expected hnsw purge to be successful")
             }
         }
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_list_dead_jobs() {
-        // Create a simple system for testing
-        let system = System::new();
-        let dispatcher = Dispatcher::new(DispatcherConfig::default());
-        let _dispatcher_handle = system.start_component(dispatcher);
-
-        let storage = s3_client_for_test_with_new_bucket().await;
-
-        // Create test scheduler with dead jobs
-        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
-        assignment_policy.set_members(vec!["test-member".to_string()]);
-
-        let mut scheduler = Scheduler::new(
-            "test-member".to_string(),
-            Log::InMemory(InMemoryLog::new()),
-            SysDb::Test(TestSysDb::new()),
-            storage,
-            Box::new(LasCompactionTimeSchedulerPolicy {}),
-            10,
-            100,
-            assignment_policy,
-            HashSet::new(),
-            60,
-            3,
-        );
-
-        // Simulate a dead job by marking a collection as killed (moved to dead_jobs)
-        let test_collection_id = CollectionUuid::new();
-        scheduler.kill_collection(test_collection_id);
-
-        // Verify it's in dead jobs
-        let dead_jobs = scheduler.get_dead_jobs();
-        assert_eq!(dead_jobs.len(), 1);
-        assert!(dead_jobs.contains(&test_collection_id));
     }
 }

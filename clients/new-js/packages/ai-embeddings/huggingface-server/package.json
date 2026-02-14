@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/huggingface-server",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "Huggingface Server embedding provider for Chroma",
   "main": "dist/cjs/huggingface-server.cjs",

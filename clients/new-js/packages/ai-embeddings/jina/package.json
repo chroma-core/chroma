@@ -1,6 +1,6 @@
 {
   "name": "@chroma-core/jina",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": false,
   "description": "Jina embedding provider for Chroma",
   "main": "dist/cjs/jina.cjs",

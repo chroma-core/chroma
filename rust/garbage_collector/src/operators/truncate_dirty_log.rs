@@ -7,7 +7,10 @@ use chroma_storage::Storage;
 use chroma_system::{Operator, OperatorType};
 use futures::future::try_join_all;
 use thiserror::Error;
-use wal3::{GarbageCollectionOptions, GarbageCollector, LogWriterOptions};
+use wal3::{
+    create_s3_factories, FragmentSeqNo, GarbageCollectionOptions, GarbageCollector, LogPosition,
+    LogReaderOptions, LogWriterOptions, S3FragmentManagerFactory, S3ManifestManagerFactory,
+};
 
 #[derive(Clone, Debug)]
 pub struct TruncateDirtyLogOperator {
@@ -56,12 +59,21 @@ impl Operator<TruncateDirtyLogInput, TruncateDirtyLogOutput> for TruncateDirtyLo
         let mut replica_id = 0u64;
         loop {
             let dirty_log_prefix = format!("dirty-rust-log-service-{replica_id}");
-            match GarbageCollector::open(
-                LogWriterOptions::default(),
+            let options = LogWriterOptions::default();
+            let (fragment_manager_factory, manifest_manager_factory) = create_s3_factories(
+                options.clone(),
+                LogReaderOptions::default(),
                 storage_arc.clone(),
-                &dirty_log_prefix,
-                "garbage collection service",
-            )
+                dirty_log_prefix.clone(),
+                "garbage collection service".to_string(),
+                Arc::new(()),
+                Arc::new(()),
+            );
+            match GarbageCollector::<
+                (FragmentSeqNo, LogPosition),
+                S3FragmentManagerFactory,
+                S3ManifestManagerFactory,
+            >::open(options, fragment_manager_factory, manifest_manager_factory)
             .await
             {
                 Ok(log_writer) => dirty_log_writers.push((log_writer, replica_id)),

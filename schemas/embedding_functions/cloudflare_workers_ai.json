@@ -18,7 +18,10 @@
             "description": "The environment variable name that contains your API key for the Cloudflare Workers AI API"
         },
         "gateway_id": {
-            "type": "string",
+            "type": [
+                "string",
+                "null"
+            ],
             "description": "The ID of the Cloudflare AI Gateway to use for a more customized solution"
         }
     },

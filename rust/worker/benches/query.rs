@@ -8,7 +8,7 @@ use chroma_benchmark::{
 use chroma_config::{registry::Registry, Configurable};
 use chroma_segment::test::TestDistributedSegment;
 use chroma_system::{ComponentHandle, Dispatcher, Orchestrator, System};
-use chroma_types::operator::Knn;
+use chroma_types::{operator::Knn, plan::ReadLevel};
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{stream, StreamExt, TryStreamExt};
 use load::{
@@ -39,6 +39,7 @@ fn trivial_knn_filter(
         test_segments.into(),
         empty_fetch_log(collection_uuid),
         trivial_filter(),
+        ReadLevel::IndexAndWal,
     )
 }
 
@@ -57,6 +58,7 @@ fn always_true_knn_filter(
         test_segments.into(),
         empty_fetch_log(collection_uuid),
         always_true_filter_for_modulo_metadata(),
+        ReadLevel::IndexAndWal,
     )
 }
 
@@ -75,6 +77,7 @@ fn always_false_knn_filter(
         test_segments.into(),
         empty_fetch_log(collection_uuid),
         always_false_filter_for_modulo_metadata(),
+        ReadLevel::IndexAndWal,
     )
 }
 

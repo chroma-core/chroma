@@ -1,4 +1,4 @@
-use super::{Index, IndexConfig, IndexUuid, PersistentIndex};
+use super::{IndexConfig, IndexUuid};
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
 use std::path::Path;
@@ -144,10 +144,8 @@ impl HnswIndex {
     pub fn close_fd(&self) {
         self.index.close_fd();
     }
-}
 
-impl Index<HnswIndexConfig> for HnswIndex {
-    fn init(
+    pub fn init(
         index_config: &IndexConfig,
         hnsw_config: Option<&HnswIndexConfig>,
         id: IndexUuid,
@@ -177,19 +175,19 @@ impl Index<HnswIndexConfig> for HnswIndex {
         }
     }
 
-    fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>> {
+    pub fn add(&self, id: usize, vector: &[f32]) -> Result<(), Box<dyn ChromaError>> {
         self.index
             .add(id, vector)
             .map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    fn delete(&self, id: usize) -> Result<(), Box<dyn ChromaError>> {
+    pub fn delete(&self, id: usize) -> Result<(), Box<dyn ChromaError>> {
         self.index
             .delete(id)
             .map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    fn query(
+    pub fn query(
         &self,
         vector: &[f32],
         k: usize,
@@ -201,30 +199,28 @@ impl Index<HnswIndexConfig> for HnswIndex {
             .map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>> {
+    pub fn get(&self, id: usize) -> Result<Option<Vec<f32>>, Box<dyn ChromaError>> {
         self.index.get(id).map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
+    pub fn get_all_ids_sizes(&self) -> Result<Vec<usize>, Box<dyn ChromaError>> {
         self.index
             .get_all_ids_sizes()
             .map_err(|e| WrappedHnswError(e).boxed())
     }
 
-    fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>> {
+    pub fn get_all_ids(&self) -> Result<(Vec<usize>, Vec<usize>), Box<dyn ChromaError>> {
         self.index
             .get_all_ids()
             .map_err(|e| WrappedHnswError(e).boxed())
     }
-}
 
-impl PersistentIndex<HnswIndexConfig> for HnswIndex {
-    fn save(&self) -> Result<(), Box<dyn ChromaError>> {
+    pub fn save(&self) -> Result<(), Box<dyn ChromaError>> {
         self.index.save().map_err(|e| WrappedHnswError(e).boxed())
     }
 
     #[instrument(name = "HnswIndex load", level = "info")]
-    fn load(
+    pub fn load(
         path: &str,
         index_config: &IndexConfig,
         ef_search: usize,
@@ -246,7 +242,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
     }
 
     #[instrument(skip(hnsw_data))]
-    fn load_from_hnsw_data(
+    pub fn load_from_hnsw_data(
         hnsw_data: &hnswlib::HnswData,
         index_config: &IndexConfig,
         ef_search: usize,
@@ -269,7 +265,7 @@ impl PersistentIndex<HnswIndexConfig> for HnswIndex {
         })
     }
 
-    fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, WrappedHnswError> {
+    pub fn serialize_to_hnsw_data(&self) -> Result<hnswlib::HnswData, WrappedHnswError> {
         self.index
             .serialize_index_to_hnsw_data()
             .map_err(WrappedHnswError)

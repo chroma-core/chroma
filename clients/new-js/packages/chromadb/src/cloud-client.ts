@@ -16,6 +16,10 @@ export class CloudClient extends ChromaClient {
     args: Partial<{
       /** API key for authentication (or set CHROMA_API_KEY env var) */
       apiKey?: string;
+      /** Host address of the Chroma cloud server. Defaults to 'api.trychroma.com' */
+      host?: string;
+      /** Port number of the Chroma cloud server. Defaults to 443 */
+      port?: number;
       /** Tenant name for multi-tenant deployments */
       tenant?: string;
       /** Database name to connect to */
@@ -35,8 +39,8 @@ export class CloudClient extends ChromaClient {
     const database = args.database || process.env.CHROMA_DATABASE;
 
     super({
-      host: "api.trychroma.com",
-      port: 8000,
+      host: args.host || "api.trychroma.com",
+      port: args.port || 443,
       ssl: true,
       tenant,
       database,
@@ -63,6 +67,10 @@ export class AdminCloudClient extends AdminClient {
     args: Partial<{
       /** API key for authentication (or set CHROMA_API_KEY env var) */
       apiKey?: string;
+      /** Host address of the Chroma cloud server. Defaults to 'api.trychroma.com' */
+      host?: string;
+      /** Port number of the Chroma cloud server. Defaults to 443 */
+      port?: number;
       /** Additional fetch options for HTTP requests */
       fetchOptions?: RequestInit;
     }> = {},
@@ -75,8 +83,8 @@ export class AdminCloudClient extends AdminClient {
     }
 
     super({
-      host: "api.trychroma.com",
-      port: 8000,
+      host: args.host || "api.trychroma.com",
+      port: args.port || 443,
       ssl: true,
       headers: { "x-chroma-token": apiKey },
       fetchOptions: args.fetchOptions,

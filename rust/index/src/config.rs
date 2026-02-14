@@ -73,14 +73,24 @@ impl Default for PlGarbageCollectionPolicyConfig {
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]
 pub struct SpannProviderConfig {
+    #[serde(default = "default_adaptive_search_nprobe")]
+    pub adaptive_search_nprobe: bool,
+    #[serde(default = "default_hnsw_garbage_collection")]
+    pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
     #[serde(default = "default_pl_block_size")]
     pub pl_block_size: usize,
     #[serde(default = "default_pl_garbage_collection")]
     pub pl_garbage_collection: PlGarbageCollectionConfig,
-    #[serde(default = "default_hnsw_garbage_collection")]
-    pub hnsw_garbage_collection: HnswGarbageCollectionConfig,
-    #[serde(default = "default_adaptive_search_nprobe")]
-    pub adaptive_search_nprobe: bool,
+    #[cfg(feature = "usearch")]
+    #[serde(default)]
+    pub usearch_provider: USearchProviderConfig,
+}
+
+#[cfg(feature = "usearch")]
+#[derive(Deserialize, Debug, Clone, Default, Serialize)]
+pub struct USearchProviderConfig {
+    #[serde(default)]
+    pub cache_config: CacheConfig,
 }
 
 #[derive(Deserialize, Debug, Clone, Serialize, Default)]

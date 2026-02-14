@@ -20,7 +20,7 @@ sysdb:
   replicaCount: 1
   env:
     - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+      value: 'value: "jaeger.chroma.svc.cluster.local:4317"'
   resources:
     limits:
       cpu: '2000m'
@@ -28,27 +28,30 @@ sysdb:
     requests:
       cpu: '1000m'
       memory: '512Mi'
-  flags:
 rustLogService:
   image:
     repository: 'rust-log-service'
     tag: 'latest'
   cache:
     hostPath: '/local/cache/chroma-log-service'
+    type: DirectoryOrCreate
     mountPath: '/cache/'
-heapTenderService:
-  enabled: false
-  image:
-    repository: 'heap-tender-service'
-    tag: 'latest'
+    additionalVolumes: []
 queryService:
   image:
     repository: 'query-service'
     tag: 'latest'
+  updateStrategy:
+    type: 'RollingUpdate'
+    # For staged/canary rollouts, set partition > 0 to keep lower-ordinal pods on the old version.
+    # rollingUpdate:
+    #   partition: 1
   env:
   cache:
     hostPath: '/local/cache/chroma-query-service'
+    type: DirectoryOrCreate
     mountPath: '/cache/'
+    additionalVolumes: []
   replicaCount: 2
 compactionService:
   image:
@@ -57,7 +60,9 @@ compactionService:
   env:
   cache:
     hostPath: '/local/cache/chroma-compaction-service'
+    type: DirectoryOrCreate
     mountPath: '/cache/'
+    additionalVolumes: []
   replicaCount: 1
 sysdbMigration:
   image:
@@ -85,3 +90,15 @@ garbageCollector:
   cache:
     hostPath: '/local/cache/chroma-garbage-collector'
     mountPath: '/cache/'
+rustSysdbService:
+  image:
+    repository: 'rust-sysdb-service'
+    tag: 'latest'
+  replicaCount: 0
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'

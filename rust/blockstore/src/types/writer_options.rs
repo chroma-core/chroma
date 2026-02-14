@@ -1,3 +1,4 @@
+use chroma_types::Cmek;
 use uuid::Uuid;
 
 #[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
@@ -13,6 +14,7 @@ pub struct BlockfileWriterOptions {
     pub(crate) fork_from: Option<Uuid>,
     pub(crate) prefix_path: String,
     pub(crate) max_block_size_bytes: Option<usize>,
+    pub(crate) cmek: Option<Cmek>,
 }
 
 impl BlockfileWriterOptions {
@@ -22,6 +24,7 @@ impl BlockfileWriterOptions {
             fork_from: None,
             mutation_ordering: BlockfileWriterMutationOrdering::default(),
             max_block_size_bytes: None,
+            cmek: None,
         }
     }
 
@@ -52,6 +55,11 @@ impl BlockfileWriterOptions {
 
     pub fn max_block_size_bytes(mut self, size: usize) -> Self {
         self.max_block_size_bytes = Some(size);
+        self
+    }
+
+    pub fn with_cmek(mut self, cmek: Cmek) -> Self {
+        self.cmek = Some(cmek);
         self
     }
 }

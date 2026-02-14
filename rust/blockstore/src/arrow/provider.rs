@@ -21,6 +21,7 @@ use chroma_storage::{
     admissioncontrolleds3::StorageRequestPriority, GetOptions, PutOptions, Storage, StorageError,
 };
 use chroma_tracing::util::{LogSlowOperation, Stopwatch};
+use chroma_types::Cmek;
 use futures::{stream::FuturesUnordered, StreamExt};
 use opentelemetry::global;
 use std::{
@@ -135,25 +136,37 @@ impl ArrowBlockfileProvider {
 
         let mut futures = FuturesUnordered::new();
         for block_id in block_ids.iter() {
-            // Don't prefetch if already cached.
-            if !self.block_manager.cached(block_id).await {
-                futures.push(self.block_manager.get(
-                    prefix_path,
-                    block_id,
-                    StorageRequestPriority::P1,
-                ));
+            // Use prefetch to write to disk cache only, bypassing memory.
+            // This avoids polluting the memory cache with data that is not immediately needed.
+            // prefetch() internally skips blocks that are already cached.
+            futures.push(self.block_manager.prefetch(
+                prefix_path,
+                block_id,
+                StorageRequestPriority::P1,
+            ));
+        }
+        let total = futures.len();
+
+        tracing::info!(
+            "Prefetching up to {} blocks to disk for blockfile ID: {:?}",
+            total,
+            id
+        );
+
+        let mut fetched_count = 0;
+        while let Some(result) = futures.next().await {
+            if result?.is_some() {
+                fetched_count += 1;
             }
         }
-        let count = futures.len();
 
-        tracing::info!("Prefetching {} blocks for blockfile ID: {:?}", count, id);
-
-        while let Some(result) = futures.next().await {
-            result?;
-        }
-
-        tracing::info!("Prefetched {} blocks for blockfile ID: {:?}", count, id);
-        Ok(count)
+        tracing::info!(
+            "Prefetched {}/{} blocks to disk for blockfile ID: {:?}",
+            fetched_count,
+            total,
+            id
+        );
+        Ok(fetched_count)
     }
 
     pub async fn write<
@@ -188,6 +201,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         new_root,
+                        options.cmek,
                     );
 
                     Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
@@ -198,6 +212,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         new_root,
+                        options.cmek,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -216,6 +231,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         max_block_size_bytes,
+                        options.cmek,
                     );
 
                     Ok(BlockfileWriter::ArrowOrderedBlockfileWriter(file))
@@ -227,6 +243,7 @@ impl ArrowBlockfileProvider {
                         self.block_manager.clone(),
                         self.root_manager.clone(),
                         max_block_size_bytes,
+                        options.cmek,
                     );
                     Ok(BlockfileWriter::ArrowUnorderedBlockfileWriter(file))
                 }
@@ -239,6 +256,12 @@ impl ArrowBlockfileProvider {
         self.root_manager.cache.clear().await?;
         self.root_manager.prefetched_roots.lock().clear();
         Ok(())
+    }
+
+    /// Close the provider, flushing any in-memory cache entries to disk.
+    pub async fn close(&self) -> Result<(), CacheError> {
+        self.block_manager.close().await?;
+        self.root_manager.close().await
     }
 }
 
@@ -307,7 +330,7 @@ pub enum GetError {
     #[error(transparent)]
     BlockLoadError(#[from] BlockLoadError),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::StorageError),
+    StorageGetError(#[from] StorageError),
 }
 
 impl ChromaError for GetError {
@@ -447,14 +470,6 @@ impl BlockManager {
         block
     }
 
-    pub(super) async fn cached(&self, id: &Uuid) -> bool {
-        self.block_cache
-            .get(id)
-            .await
-            .map(|b| b.is_some())
-            .unwrap_or(false)
-    }
-
     pub fn format_key(prefix_path: &str, id: &Uuid) -> String {
         // For legacy collections, prefix_path is empty.
         if prefix_path.is_empty() {
@@ -469,11 +484,39 @@ impl BlockManager {
         id: &Uuid,
         priority: StorageRequestPriority,
     ) -> Result<Option<Block>, GetError> {
+        // Check cache first before going to storage.
         let block = self.block_cache.obtain(*id).await.ok().flatten();
         if let Some(block) = block {
             return Ok(Some(block));
         }
+        self.get_inner(prefix_path, id, priority, false).await
+    }
 
+    /// Prefetch a block to disk cache only, bypassing memory cache.
+    /// This is useful for prefetching data that is not immediately needed
+    /// but may be accessed later. By writing to disk only, we avoid polluting
+    /// the memory cache with data that is not immediately needed.
+    /// Returns Ok(None) if the block is already cached.
+    pub(super) async fn prefetch(
+        &self,
+        prefix_path: &str,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+    ) -> Result<Option<Block>, GetError> {
+        // Skip if already cached - cheap check to avoid unnecessary storage fetches.
+        if self.block_cache.may_contain(id).await {
+            return Ok(None);
+        }
+        self.get_inner(prefix_path, id, priority, true).await
+    }
+
+    async fn get_inner(
+        &self,
+        prefix_path: &str,
+        id: &Uuid,
+        priority: StorageRequestPriority,
+        disk_only: bool,
+    ) -> Result<Option<Block>, GetError> {
         // Closure cloning
         let key = Self::format_key(prefix_path, id);
         let id_clone = *id;
@@ -501,10 +544,21 @@ impl BlockManager {
                         }
                     };
                     num_get_requests_metric_clone.record(1, &[]);
-                    let block = Block::from_bytes(&bytes, id_clone);
+                    let block = match Arc::try_unwrap(bytes) {
+                        Ok(vec) => Block::from_bytes_owned(vec, id_clone),
+                        Err(arc) => Block::from_bytes(&arc, id_clone),
+                    };
                     match block {
                         Ok(block) => {
-                            block_cache_clone.insert(id_clone, block.clone()).await;
+                            if disk_only {
+                                // Write to disk cache only, bypassing memory
+                                block_cache_clone
+                                    .insert_to_disk(id_clone, block.clone())
+                                    .await;
+                            } else {
+                                // Write to both memory and disk cache
+                                block_cache_clone.insert(id_clone, block.clone()).await;
+                            }
                             Ok(block)
                         }
                         Err(e) => {
@@ -538,6 +592,7 @@ impl BlockManager {
         &self,
         block: &Block,
         prefix_path: &str,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         let bytes = match block.to_bytes() {
             Ok(bytes) => bytes,
@@ -553,14 +608,11 @@ impl BlockManager {
             chroma_tracing::util::StopWatchUnit::Millis,
         );
         let block_bytes_len = bytes.len();
-        let res = self
-            .storage
-            .put_bytes(
-                &key,
-                bytes,
-                PutOptions::with_priority(StorageRequestPriority::P0),
-            )
-            .await;
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+        let res = self.storage.put_bytes(&key, bytes, options).await;
         match res {
             Ok(_) => {
                 tracing::debug!(
@@ -584,6 +636,11 @@ impl BlockManager {
 
     pub(super) fn num_concurrent_block_flushes(&self) -> usize {
         self.num_concurrent_block_flushes
+    }
+
+    /// Close the block manager, flushing any in-memory cache entries to disk in the PersistentCache.
+    pub(super) async fn close(&self) -> Result<(), CacheError> {
+        self.block_cache.close().await
     }
 }
 
@@ -614,7 +671,7 @@ pub enum RootManagerError {
     #[error(transparent)]
     UUIDParseError(#[from] uuid::Error),
     #[error(transparent)]
-    StorageGetError(#[from] chroma_storage::StorageError),
+    StorageGetError(#[from] StorageError),
     #[error(transparent)]
     FromBytesError(#[from] FromBytesError),
 }
@@ -729,6 +786,7 @@ impl RootManager {
     pub async fn flush<'read, K: ArrowWriteableKey + 'read>(
         &self,
         root: &RootWriter,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<dyn ChromaError>> {
         let bytes = match root.to_bytes::<K>() {
             Ok(bytes) => bytes,
@@ -738,14 +796,11 @@ impl RootManager {
             }
         };
         let key = Self::get_storage_key(&root.prefix_path, &root.id);
-        let res = self
-            .storage
-            .put_bytes(
-                &key,
-                bytes,
-                PutOptions::with_priority(StorageRequestPriority::P0),
-            )
-            .await;
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+        let res = self.storage.put_bytes(&key, bytes, options).await;
         match res {
             Ok(_) => {
                 tracing::info!("Root written to storage");
@@ -820,6 +875,10 @@ impl RootManager {
             }
         }
     }
+
+    pub async fn close(&self) -> Result<(), CacheError> {
+        self.cache.close().await
+    }
 }
 
 #[cfg(test)]
@@ -830,7 +889,7 @@ mod tests {
     use chroma_storage::test_storage;
 
     #[tokio::test]
-    async fn test_cached() {
+    async fn test_cache_write_through() {
         let (_temp_dir, storage) = test_storage();
         let manager = BlockManager::new(
             storage,
@@ -838,10 +897,13 @@ mod tests {
             new_cache_for_test(),
             BlockManagerConfig::default_num_concurrent_block_flushes(),
         );
-        assert!(!manager.cached(&Uuid::new_v4()).await);
+        assert!(!manager.block_cache.may_contain(&Uuid::new_v4()).await);
 
         let delta = manager.create::<&str, String, UnorderedBlockDelta>();
         let block = manager.commit::<&str, String>(delta).await;
-        assert!(manager.cached(&block.id).await, "should be write-through");
+        assert!(
+            manager.block_cache.may_contain(&block.id).await,
+            "should be write-through"
+        );
     }
 }

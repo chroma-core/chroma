@@ -10,6 +10,7 @@ use chroma_memberlist::memberlist_provider::{
 use clap::Parser;
 use compactor::compaction_client::CompactionClient;
 use compactor::compaction_server::CompactionServer;
+use tokio::runtime::Handle;
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
@@ -60,6 +61,11 @@ pub async fn query_service_entrypoint() {
             }
         };
     worker_server.set_dispatcher(dispatcher_handle.clone());
+
+    tracing::info!(
+        "Starting worker server with {} tokio workers",
+        Handle::current().metrics().num_workers()
+    );
 
     // Server task will run until it receives a shutdown signal
     let _ = tokio::spawn(async move {

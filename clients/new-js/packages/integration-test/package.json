@@ -1,0 +1,31 @@
+{
+  "name": "@chroma-core/integration-test",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Integration tests for ChromaDB with embedding packages",
+  "type": "module",
+  "scripts": {
+    "test": "jest --runInBand",
+    "test:update": "jest --runInBand --updateSnapshot"
+  },
+  "dependencies": {
+    "@chroma-core/chroma-cloud-qwen": "workspace:^",
+    "@chroma-core/chroma-cloud-splade": "workspace:^",
+    "chromadb": "workspace:^",
+    "dotenv": "^16.5.0"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "@jest/types": "^29.6.3",
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.8.10",
+    "jest": "^29.5.0",
+    "jest-environment-node-single-context": "^29.4.0",
+    "testcontainers": "^10.9.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.0.4"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

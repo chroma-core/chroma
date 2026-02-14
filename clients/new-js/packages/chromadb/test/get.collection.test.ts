@@ -47,13 +47,13 @@ describe("get collections", () => {
       await collection.get({
         where: {
           //@ts-ignore supposed to fail
-          test: { $contains: "hello" },
+          test: { $invalid: "hello" },
         },
       });
     } catch (error: any) {
       expect(error).toBeDefined();
       expect(error.message).toMatchInlineSnapshot(
-        `"Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got $contains"`,
+        `"Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $contains, $not_contains, but got $invalid"`,
       );
     }
   });

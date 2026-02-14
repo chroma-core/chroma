@@ -43,6 +43,7 @@ pub enum Collections {
     Dimension,
     DatabaseId,
     ConfigJsonStr,
+    SchemaStr,
 }
 
 #[derive(Iden)]
@@ -142,6 +143,21 @@ impl MetadataTable for EmbeddingMetadata {
     fn bool_value_column() -> Self {
         EmbeddingMetadata::BoolValue
     }
+}
+
+/// Separate table for exploded array metadata values.
+/// Mirrors the column layout of [`EmbeddingMetadata`] but without a
+/// `PRIMARY KEY (id, key)` constraint, allowing multiple rows per key
+/// (one per array element).
+#[derive(Iden)]
+pub enum EmbeddingMetadataArray {
+    Table,
+    Id,
+    Key,
+    StringValue,
+    IntValue,
+    FloatValue,
+    BoolValue,
 }
 
 #[derive(Iden)]

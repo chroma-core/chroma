@@ -72,8 +72,6 @@ jobs:
           ghcr-password: ${{ secrets.GITHUB_TOKEN }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-password: ${{ secrets.DOCKERHUB_TOKEN }}
-          # Calling useblacksmith/build-push-action twice in the same job leads to strange errors
-          setup-blacksmith: false
 
       - name: Compute arch-specific tags
         id: tags
@@ -97,11 +95,11 @@ jobs:
           set -euo pipefail
 
           # Pre-pull base images to speed up the build
-          docker pull --platform ${{ matrix.docker_platform }} rust:1.85.0
+          docker pull --platform ${{ matrix.docker_platform }} rust:1.92.0
           docker pull --platform ${{ matrix.docker_platform }} debian:stable-slim
 
       - name: Build and push image
-        uses: useblacksmith/build-push-action@v1.1
+        uses: useblacksmith/build-push-action@v2
         with:
           context: .
           file: rust/Dockerfile

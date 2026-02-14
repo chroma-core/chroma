@@ -51,9 +51,8 @@ impl RecordDataset for SciDocsDataset {
                     }
 
                     let byte_stream = response.bytes_stream();
-                    let stream_reader = StreamReader::new(
-                        byte_stream.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-                    );
+                    let stream_reader =
+                        StreamReader::new(byte_stream.map_err(std::io::Error::other));
 
                     let mut decoder = GzipDecoder::new(stream_reader);
                     tokio::io::copy(&mut decoder, &mut writer).await?;

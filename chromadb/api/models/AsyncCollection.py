@@ -6,6 +6,7 @@ from chromadb.api.types import (
     Embedding,
     PyEmbedding,
     Include,
+    IndexingStatus,
     Metadata,
     Document,
     Image,
@@ -15,6 +16,7 @@ from chromadb.api.types import (
     QueryResult,
     ID,
     OneOrMany,
+    ReadLevel,
     WhereDocument,
     SearchResult,
     maybe_cast_one_to_many,
@@ -91,6 +93,22 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
         """
         return await self._client._count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    async def get_indexing_status(self) -> IndexingStatus:
+        """Get the indexing status of this collection.
+
+        Returns:
+            IndexingStatus: An object containing:
+                - num_indexed_ops: Number of user operations that have been indexed
+                - num_unindexed_ops: Number of user operations pending indexing
+                - total_ops: Total number of user operations in collection
+                - op_indexing_progress: Proportion of user operations that have been indexed as a float between 0 and 1
+        """
+        return await self._client._get_indexing_status(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
@@ -294,6 +312,7 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
     async def search(
         self,
         searches: OneOrMany[Search],
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Perform hybrid search on the collection.
         This is an experimental API that only works for Hosted Chroma for now.
@@ -304,6 +323,11 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
                 - select: Select configuration for keys to return (defaults to empty)
+            read_level: Controls whether to read from the write-ahead log (WAL):
+                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
+                  All committed writes will be visible.
+                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+                  Faster, but recent writes that haven't been compacted may not be visible.
 
         Returns:
             SearchResult: Column-major format response with:
@@ -344,24 +368,34 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
 
             # Single search
             result = await collection.search(search)
-            
+
             # Multiple searches at once
             searches = [
                 Search().where(K("type") == "article").rank(Knn(query=[0.1, 0.2])),
                 Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
             ]
             results = await collection.search(searches)
+
+            # Skip WAL for faster queries (may miss recent uncommitted writes)
+            from chromadb.api.types import ReadLevel
+            result = await collection.search(search, read_level=ReadLevel.INDEX_ONLY)
         """
         # Convert single search to list for consistent handling
         searches_list = maybe_cast_one_to_many(searches)
         if searches_list is None:
             searches_list = []
 
+        # Embed any string queries in Knn objects
+        embedded_searches = [
+            self._embed_search_string_queries(search) for search in searches_list
+        ]
+
         return await self._client._search(
             collection_id=self.id,
-            searches=cast(List[Search], searches_list),
+            searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
+            read_level=read_level,
         )
 
     async def update(

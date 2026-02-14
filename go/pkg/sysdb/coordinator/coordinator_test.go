@@ -14,9 +14,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dao"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/types/known/structpb"
 	"gorm.io/gorm"
 
 	"github.com/chroma-core/chroma/go/pkg/common"
@@ -83,7 +85,10 @@ func (suite *APIsTestSuite) SetupTest() {
 		collection.Name = "collection_" + suite.T().Name() + strconv.Itoa(index)
 	}
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, suite.s3MetaStore, true)
+	c, err := NewCoordinator(ctx, CoordinatorConfig{
+		ObjectStore:        suite.s3MetaStore,
+		VersionFileEnabled: true,
+	})
 	if err != nil {
 		suite.T().Fatalf("error creating coordinator: %v", err)
 	}
@@ -114,9 +119,16 @@ func (suite *APIsTestSuite) TearDownTest() {
 func testCollection(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, nil, false)
+	c, err := NewCoordinator(ctx, CoordinatorConfig{
+		ObjectStore:        nil,
+		VersionFileEnabled: false,
+	})
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
+	}
+	err = c.ResetState(ctx)
+	if err != nil {
+		t.Fatalf("error resetting coordinator state: %v", err)
 	}
 	t.Repeat(map[string]func(*rapid.T){
 		"create_collection": func(t *rapid.T) {
@@ -167,7 +179,10 @@ func testCollection(t *rapid.T) {
 func testSegment(t *rapid.T) {
 	dbcore.ConfigDatabaseForTesting()
 	ctx := context.Background()
-	c, err := NewCoordinator(ctx, nil, false)
+	c, err := NewCoordinator(ctx, CoordinatorConfig{
+		ObjectStore:        nil,
+		VersionFileEnabled: false,
+	})
 	if err != nil {
 		t.Fatalf("error creating coordinator: %v", err)
 	}
@@ -1908,6 +1923,212 @@ func (suite *APIsTestSuite) TestGetCollectionByResourceName() {
 	_, err = suite.coordinator.GetCollectionByResourceName(ctx, "non_existent_tenant_resource_name", suite.databaseName, testCollection.Name)
 	suite.Error(err)
 	suite.True(errors.Is(err, common.ErrCollectionNotFound))
+}
+
+func (suite *APIsTestSuite) TestDeleteCollectionWithAttachedFunction() {
+	ctx := context.Background()
+
+	// Create a test collection
+	collectionID := types.NewUniqueID()
+	collectionName := "test_collection_with_function"
+	createCollection := &model.CreateCollection{
+		ID:           collectionID,
+		Name:         collectionName,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err := suite.coordinator.CreateCollection(ctx, createCollection)
+	suite.NoError(err)
+
+	// Create a dummy function in the database
+	functionID := uuid.New()
+	functionName := "test_function"
+	err = suite.db.Create(&dbmodel.Function{
+		ID:            functionID,
+		Name:          functionName,
+		IsIncremental: false,
+		ReturnType:    "{}",
+	}).Error
+	suite.NoError(err)
+
+	// Attach function to the collection
+	attachedFnName := "test_attached_fn"
+	params := &structpb.Struct{Fields: map[string]*structpb.Value{}}
+
+	attachReq := &coordinatorpb.AttachFunctionRequest{
+		Name:                    attachedFnName,
+		InputCollectionId:       collectionID.String(),
+		OutputCollectionName:    "test_output_collection",
+		FunctionName:            functionName,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		MinRecordsForInvocation: 100,
+		Params:                  params,
+	}
+	attachRes, err := suite.coordinator.AttachFunction(ctx, attachReq)
+	suite.NoError(err)
+	attachedFnIDStr := attachRes.AttachedFunction.Id
+
+	attachedFnID, _ := uuid.Parse(attachedFnIDStr)
+
+	// Manually set is_ready = true so that GetByCollectionID picks it up
+	err = suite.db.Model(&dbmodel.AttachedFunction{}).Where("id = ?", attachedFnID).Update("is_ready", true).Error
+	suite.NoError(err)
+
+	// Soft delete the collection
+	deleteCollection := &model.DeleteCollection{
+		ID:           collectionID,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
+	suite.NoError(err)
+
+	// Verify attached function is soft deleted
+	var count int64
+	suite.db.Model(&dbmodel.AttachedFunction{}).Where("id = ? AND is_deleted = ?", attachedFnID, true).Count(&count)
+	suite.Equal(int64(1), count)
+
+	// Verify collection is soft deleted
+	suite.db.Model(&dbmodel.Collection{}).Where("id = ? AND is_deleted = ?", collectionID.String(), true).Count(&count)
+	suite.Equal(int64(1), count)
+}
+
+func (suite *APIsTestSuite) TestCannotAttachToOutputCollection() {
+	ctx := context.Background()
+
+	// Create a test collection (input)
+	inputCollectionID := types.NewUniqueID()
+	inputCollectionName := "test_input_collection"
+	createInputCollection := &model.CreateCollection{
+		ID:           inputCollectionID,
+		Name:         inputCollectionName,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err := suite.coordinator.CreateCollection(ctx, createInputCollection)
+	suite.NoError(err)
+
+	// Create a collection that simulates an output collection (has source_attached_function_id in schema)
+	outputCollectionID := types.NewUniqueID()
+	outputCollectionName := "simulated_output_collection"
+	outputSchemaStr := `{"defaults":{},"keys":{},"source_attached_function_id":"some-function-id"}`
+	createOutputCollection := &model.CreateCollection{
+		ID:           outputCollectionID,
+		Name:         outputCollectionName,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		SchemaStr:    &outputSchemaStr,
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
+	suite.NoError(err)
+
+	// Create a dummy function
+	functionID := uuid.New()
+	functionName := "test_function_for_output_test"
+	err = suite.db.Create(&dbmodel.Function{
+		ID:            functionID,
+		Name:          functionName,
+		IsIncremental: false,
+		ReturnType:    "{}",
+	}).Error
+	suite.NoError(err)
+
+	// Try to attach function to the output collection - should fail
+	attachReq := &coordinatorpb.AttachFunctionRequest{
+		Name:                    "test_attached_fn",
+		InputCollectionId:       outputCollectionID.String(),
+		OutputCollectionName:    "another_output_collection",
+		FunctionName:            functionName,
+		TenantId:                suite.tenantName,
+		Database:                suite.databaseName,
+		MinRecordsForInvocation: 100,
+		Params:                  &structpb.Struct{Fields: map[string]*structpb.Value{}},
+	}
+	_, err = suite.coordinator.AttachFunction(ctx, attachReq)
+	suite.Error(err)
+	suite.True(errors.Is(err, common.ErrCannotAttachToOutputCollection))
+
+	// Attaching to input collection should succeed
+	attachReq.InputCollectionId = inputCollectionID.String()
+	_, err = suite.coordinator.AttachFunction(ctx, attachReq)
+	suite.NoError(err)
+}
+
+func (suite *APIsTestSuite) TestDeleteOutputCollectionDeletesAttachedFunction() {
+	ctx := context.Background()
+
+	// Create a test input collection
+	inputCollectionID := types.NewUniqueID()
+	inputCollectionName := "test_input_for_delete_output"
+	createInputCollection := &model.CreateCollection{
+		ID:           inputCollectionID,
+		Name:         inputCollectionName,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	_, _, err := suite.coordinator.CreateCollection(ctx, createInputCollection)
+	suite.NoError(err)
+
+	// Create a dummy function
+	functionID := uuid.New()
+	functionName := "test_function_for_delete_output"
+	err = suite.db.Create(&dbmodel.Function{
+		ID:            functionID,
+		Name:          functionName,
+		IsIncremental: false,
+		ReturnType:    "{}",
+	}).Error
+	suite.NoError(err)
+
+	// Get database ID
+	databases, err := suite.coordinator.GetDatabase(ctx, &model.GetDatabase{Name: suite.databaseName, Tenant: suite.tenantName})
+	suite.NoError(err)
+
+	// Create attached function first (need its ID for the output collection metadata)
+	attachedFunctionID := uuid.New()
+	outputCollectionID := types.NewUniqueID()
+	outputCollectionIDStr := outputCollectionID.String()
+	err = suite.db.Create(&dbmodel.AttachedFunction{
+		ID:                   attachedFunctionID,
+		Name:                 "test_attached_for_delete_output",
+		TenantID:             suite.tenantName,
+		DatabaseID:           databases.ID,
+		InputCollectionID:    inputCollectionID.String(),
+		OutputCollectionName: "test_output_for_delete",
+		OutputCollectionID:   &outputCollectionIDStr,
+		FunctionID:           functionID,
+		FunctionParams:       "{}",
+		IsReady:              true,
+		IsDeleted:            false,
+	}).Error
+	suite.NoError(err)
+
+	// Create an output collection with schema pointing to the attached function
+	outputSchemaStr := fmt.Sprintf(`{"defaults":{},"keys":{},"source_attached_function_id":"%s"}`, attachedFunctionID.String())
+	createOutputCollection := &model.CreateCollection{
+		ID:           outputCollectionID,
+		Name:         "test_output_for_delete",
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+		SchemaStr:    &outputSchemaStr,
+	}
+	_, _, err = suite.coordinator.CreateCollection(ctx, createOutputCollection)
+	suite.NoError(err)
+
+	// Delete the output collection
+	deleteCollection := &model.DeleteCollection{
+		ID:           outputCollectionID,
+		TenantID:     suite.tenantName,
+		DatabaseName: suite.databaseName,
+	}
+	err = suite.coordinator.SoftDeleteCollection(ctx, deleteCollection)
+	suite.NoError(err)
+
+	// Verify attached function is soft deleted
+	var count int64
+	suite.db.Model(&dbmodel.AttachedFunction{}).Where("id = ? AND is_deleted = ?", attachedFunctionID, true).Count(&count)
+	suite.Equal(int64(1), count)
 }
 
 func TestAPIsTestSuite(t *testing.T) {

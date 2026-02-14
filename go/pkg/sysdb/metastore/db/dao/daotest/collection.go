@@ -172,3 +172,9 @@ func WithOldestVersionTs(oldestVersionTs time.Time) func(*dbmodel.Collection) {
 		collection.OldestVersionTs = oldestVersionTs
 	}
 }
+
+func WithCompactionFailureCount(compactionFailureCount int32) func(*dbmodel.Collection) {
+	return func(collection *dbmodel.Collection) {
+		collection.CompactionFailureCount = compactionFailureCount
+	}
+}

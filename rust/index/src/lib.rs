@@ -3,9 +3,12 @@ pub mod fulltext;
 mod hnsw;
 pub mod hnsw_provider;
 pub mod metadata;
+pub mod quantization;
 pub mod spann;
 pub mod sparse;
-mod types;
+pub mod types;
+#[cfg(feature = "usearch")]
+pub mod usearch;
 pub mod utils;
 
 // Re-export types

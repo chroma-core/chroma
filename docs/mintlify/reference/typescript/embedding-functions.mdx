@@ -1,0 +1,40 @@
+---
+title: "Embedding Functions"
+---
+
+## Embedding Functions
+
+### EmbeddingFunction
+
+Interface for embedding functions.
+Embedding functions transform text documents into numerical representations
+that can be used for similarity search and other vector operations.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="name" type="string | undefined">
+  Optional name identifier for the embedding function
+</ParamField>
+
+
+<span class="text-sm">Methods</span>
+
+`buildFromConfig()`, `defaultSpace()`, `generate()`, `generateForQueries()`, `getConfig()`, `supportedSpaces()`, `validateConfig()`, `validateConfigUpdate()`
+
+
+### SparseEmbeddingFunction
+
+Interface for sparse embedding functions.
+Sparse embedding functions transform text documents into sparse numerical representations
+where only non-zero values are stored, making them efficient for high-dimensional spaces.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="name" type="string | undefined">
+  Optional name identifier for the embedding function
+</ParamField>
+
+
+<span class="text-sm">Methods</span>
+
+`buildFromConfig()`, `generate()`, `generateForQueries()`, `getConfig()`, `validateConfig()`, `validateConfigUpdate()`

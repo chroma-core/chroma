@@ -14,7 +14,13 @@ import pytest
 import chromadb
 import chromadb.server.fastapi
 from chromadb.api.fastapi import FastAPI
-from chromadb.api.types import Document, EmbeddingFunction, QueryResult
+from chromadb.api.types import (
+    Document,
+    EmbeddingFunction,
+    QueryResult,
+    TYPE_KEY,
+    SPARSE_VECTOR_TYPE_VALUE,
+)
 from chromadb.config import Settings
 from chromadb.errors import (
     ChromaError,
@@ -871,18 +877,10 @@ def test_where_valid_operators(client):
     with pytest.raises(ValueError):
         collection.get(where={"$or": []})
 
+    # $contains on a metadata key is now valid (array contains).
+    # But a bare $contains at the top level (no field key) is still invalid.
     with pytest.raises(ValueError):
-        collection.get(where={"a": {"$contains": "test"}})
-
-    with pytest.raises(ValueError):
-        collection.get(
-            where={
-                "$or": [
-                    {"a": {"$contains": "first"}},  # invalid
-                    {"$contains": "second"},  # valid
-                ]
-            }
-        )
+        collection.get(where={"$contains": "test"})
 
 
 # TODO: Define the dimensionality of these embeddingds in terms of the default record
@@ -1897,15 +1895,21 @@ def test_validate_sparse_vector():
     SparseVector(indices=[0, 1], values=[True, False])  # True=1, False=0
 
     # Test 18: Invalid - unsorted indices
-    with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
         SparseVector(indices=[0, 2, 1], values=[0.1, 0.2, 0.3])
 
     # Test 19: Invalid - duplicate indices (not strictly ascending)
-    with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
         SparseVector(indices=[0, 1, 1, 2], values=[0.1, 0.2, 0.3, 0.4])
 
     # Test 20: Invalid - descending order
-    with pytest.raises(ValueError, match="indices must be sorted in strictly ascending order"):
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
         SparseVector(indices=[5, 3, 1], values=[0.5, 0.3, 0.1])
 
 
@@ -1942,7 +1946,7 @@ def test_sparse_vector_in_metadata_validation():
     with pytest.raises(
         ValueError, match="indices and values must have the same length"
     ):
-        invalid_metadata = {
+        invalid_metadata = {  # type: ignore
             "text": "invalid",
             "sparse_embedding": SparseVector(indices=[0, 1], values=[0.1]),
         }
@@ -1954,22 +1958,26 @@ def test_sparse_vector_in_metadata_validation():
     }
     with pytest.raises(
         ValueError,
-        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, list, or None",
     ):
         validate_metadata(invalid_metadata_2)
 
     # Test 5: Invalid sparse vector - negative index (construction fails)
     with pytest.raises(ValueError, match="SparseVector indices must be non-negative"):
-        invalid_metadata_3 = {
+        invalid_metadata_3 = {  # type: ignore
             "text": "negative index",
-            "sparse_embedding": SparseVector(indices=[0, -1, 2], values=[0.1, 0.2, 0.3]),
+            "sparse_embedding": SparseVector(
+                indices=[0, -1, 2], values=[0.1, 0.2, 0.3]
+            ),
         }
 
     # Test 6: Invalid sparse vector - non-numeric value (construction fails)
     with pytest.raises(ValueError, match="SparseVector values must be numbers"):
-        invalid_metadata_4 = {
+        invalid_metadata_4 = {  # type: ignore
             "text": "non-numeric value",
-            "sparse_embedding": SparseVector(indices=[0, 1], values=[0.1, "not_a_number"]),  # type: ignore
+            "sparse_embedding": SparseVector(
+                indices=[0, 1], values=[0.1, "not_a_number"]
+            ),  # type: ignore
         }
 
     # Test 7: Multiple sparse vectors in metadata
@@ -1988,7 +1996,7 @@ def test_sparse_vector_in_metadata_validation():
     }
     with pytest.raises(
         ValueError,
-        match="Expected metadata value to be a str, int, float, bool, SparseVector, or None",
+        match="Expected metadata value to be a str, int, float, bool, SparseVector, list, or None",
     ):
         validate_metadata(metadata_nested)
 
@@ -1999,6 +2007,606 @@ def test_sparse_vector_in_metadata_validation():
     )
     metadata_large = {"text": "large sparse", "large_sparse_vec": large_sparse}
     validate_metadata(metadata_large)
+
+
+def test_sparse_vector_dict_format_normalization():
+    """Test that dict-format sparse vectors are normalized to SparseVector instances."""
+    from chromadb.api.types import normalize_metadata, validate_metadata
+    from chromadb.base_types import SparseVector
+
+    # Test 1: Dict format with #type='sparse_vector' should be converted
+    metadata_dict_format = {
+        "text": "test document",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 2, 5],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    normalized = normalize_metadata(metadata_dict_format)
+
+    assert isinstance(normalized["sparse"], SparseVector)
+    assert normalized["sparse"].indices == [0, 2, 5]
+    assert normalized["sparse"].values == [1.0, 2.0, 3.0]
+
+    # Should pass validation after normalization
+    validate_metadata(normalized)
+
+    # Test 2: SparseVector instance should pass through unchanged
+    sparse_instance = SparseVector(indices=[1, 3, 4], values=[0.5, 1.5, 2.5])
+    metadata_instance_format = {
+        "text": "test document",
+        "sparse": sparse_instance,
+    }
+    normalized2 = normalize_metadata(metadata_instance_format)
+
+    assert normalized2["sparse"] is sparse_instance  # Same object
+    validate_metadata(normalized2)
+
+    # Test 3: Dict format with unsorted indices should be rejected during normalization
+    metadata_unsorted = {
+        "text": "unsorted",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [5, 0, 2],
+            "values": [3.0, 1.0, 2.0],
+        },
+    }
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
+        normalize_metadata(metadata_unsorted)
+
+    # Test 4: Dict format with duplicate indices should be rejected
+    metadata_duplicates = {
+        "text": "duplicates",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 2, 2],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    with pytest.raises(
+        ValueError, match="indices must be sorted in strictly ascending order"
+    ):
+        normalize_metadata(metadata_duplicates)
+
+    # Test 5: Dict format with negative indices should be rejected
+    metadata_negative = {
+        "text": "negative",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [-1, 0, 2],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    with pytest.raises(ValueError, match="indices must be non-negative"):
+        normalize_metadata(metadata_negative)
+
+    # Test 6: Dict format with length mismatch should be rejected
+    metadata_mismatch = {
+        "text": "mismatch",
+        "sparse": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 2],
+            "values": [1.0, 2.0, 3.0],
+        },
+    }
+    with pytest.raises(
+        ValueError, match="indices and values must have the same length"
+    ):
+        normalize_metadata(metadata_mismatch)
+
+    # Test 7: Regular dict without #type should not be converted
+    metadata_regular_dict = {
+        "text": "regular",
+        "config": {"key": "value"},
+    }
+    normalized3 = normalize_metadata(metadata_regular_dict)
+    assert isinstance(normalized3["config"], dict)
+    assert normalized3["config"]["key"] == "value"
+
+    # Test 8: Empty sparse vector in dict format
+    metadata_empty = {
+        "text": "empty",
+        "sparse": {TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE, "indices": [], "values": []},
+    }
+    normalized4 = normalize_metadata(metadata_empty)
+    assert isinstance(normalized4["sparse"], SparseVector)
+    assert normalized4["sparse"].indices == []
+    assert normalized4["sparse"].values == []
+
+    # Test 9: Multiple sparse vectors in dict format
+    metadata_multiple = {
+        "sparse1": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [0, 1],
+            "values": [1.0, 2.0],
+        },
+        "sparse2": {
+            TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+            "indices": [2, 3],
+            "values": [3.0, 4.0],
+        },
+        "regular": 42,
+    }
+    normalized5 = normalize_metadata(metadata_multiple)
+    assert isinstance(normalized5["sparse1"], SparseVector)
+    assert isinstance(normalized5["sparse2"], SparseVector)
+    assert normalized5["regular"] == 42
+
+
+def test_list_metadata_validation():
+    """Test that list metadata values are properly validated."""
+    from chromadb.api.types import validate_metadata, validate_update_metadata
+
+    # Valid list metadata
+    validate_metadata({"tags": ["action", "comedy"]})
+    validate_metadata({"scores": [1, 2, 3]})
+    validate_metadata({"ratings": [4.5, 3.2]})
+    validate_metadata({"flags": [True, False, True]})
+
+    # Lists can coexist with scalars
+    validate_metadata({"tags": ["a", "b"], "count": 5, "name": "test"})
+
+    # Empty list rejected
+    with pytest.raises(ValueError, match="non-empty"):
+        validate_metadata({"tags": []})
+
+    # Mixed types rejected
+    with pytest.raises(ValueError, match="same type"):
+        validate_metadata({"tags": ["a", 1]})
+
+    with pytest.raises(ValueError, match="same type"):
+        validate_metadata({"vals": [1, 1.5]})
+
+    with pytest.raises(ValueError, match="same type"):
+        validate_metadata({"vals": [True, "yes"]})
+
+    # Nested list rejected
+    with pytest.raises(ValueError, match="str, int, float, or bool"):
+        validate_metadata({"tags": [["nested"]]})
+
+    # validate_update_metadata also accepts lists
+    validate_update_metadata({"tags": ["action", "comedy"]})
+    validate_update_metadata({"scores": [1, 2, 3]})
+
+    # validate_update_metadata still allows None (for deletion)
+    validate_update_metadata({"tags": None})
+
+    # Empty list rejected in update too
+    with pytest.raises(ValueError, match="non-empty"):
+        validate_update_metadata({"tags": []})
+
+
+def test_where_contains_validation():
+    """Test that $contains/$not_contains are accepted in where clauses for metadata."""
+    from chromadb.api.types import validate_where
+
+    # All scalar types accepted
+    validate_where({"tags": {"$contains": "action"}})
+    validate_where({"scores": {"$contains": 42}})
+    validate_where({"ratings": {"$contains": 4.5}})
+    validate_where({"flags": {"$contains": True}})
+
+    # $not_contains
+    validate_where({"tags": {"$not_contains": "draft"}})
+    validate_where({"scores": {"$not_contains": 0}})
+
+    # List operand rejected (contains checks a single value, not a list)
+    with pytest.raises(ValueError):
+        validate_where({"tags": {"$contains": ["a", "b"]}})
+
+    # Dict operand rejected
+    with pytest.raises(ValueError):
+        validate_where({"tags": {"$contains": {"nested": True}}})
+
+    # Still works inside $and/$or
+    validate_where(
+        {"$and": [{"tags": {"$contains": "action"}}, {"year": {"$gt": 2020}}]}
+    )
+
+
+def _is_python_local_segment(client):
+    """Return True when the client is backed by the Python local segment API
+    (which does not yet support array metadata)."""
+    settings = client.get_settings()
+    return (
+        settings.chroma_api_impl == "chromadb.api.segment.SegmentAPI"
+        and settings.chroma_segment_manager_impl
+        == "chromadb.segment.impl.manager.local.LocalSegmentManager"
+    )
+
+
+def test_array_metadata_e2e(client):
+    """End-to-end test: write array metadata, read it back, and query with $contains."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_array_metadata_e2e")
+    collection.add(
+        ids=["id1", "id2", "id3"],
+        embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        metadatas=[
+            {"tags": ["action", "comedy"], "year": 2020},
+            {"tags": ["drama"], "year": 2021},
+            {"tags": ["action", "thriller"], "year": 2022},
+        ],
+    )
+
+    # Read back: arrays should round-trip
+    items = collection.get(ids=["id1"])
+    assert len(items["metadatas"]) == 1
+    assert sorted(items["metadatas"][0]["tags"]) == ["action", "comedy"]
+    assert items["metadatas"][0]["year"] == 2020
+
+    # $contains "action" -> id1 and id3
+    items = collection.get(where={"tags": {"$contains": "action"}})
+    ids = sorted([m["year"] for m in items["metadatas"]])
+    assert ids == [2020, 2022]
+
+    # $contains "drama" -> id2 only
+    items = collection.get(where={"tags": {"$contains": "drama"}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["year"] == 2021
+
+    # $not_contains "action" -> id2 only
+    items = collection.get(where={"tags": {"$not_contains": "action"}})
+    assert len(items["metadatas"]) == 1
+    assert items["metadatas"][0]["year"] == 2021
+
+    # $contains with no match
+    items = collection.get(where={"tags": {"$contains": "romance"}})
+    assert len(items["metadatas"]) == 0
+
+
+def test_array_metadata_int_contains_e2e(client):
+    """End-to-end: $contains on integer arrays."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_int_array_e2e")
+    collection.add(
+        ids=["id1", "id2"],
+        embeddings=[[1, 0, 0], [0, 1, 0]],
+        metadatas=[
+            {"scores": [10, 20, 30]},
+            {"scores": [40, 50]},
+        ],
+    )
+
+    items = collection.get(where={"scores": {"$contains": 20}})
+    assert len(items["ids"]) == 1
+    assert items["ids"][0] == "id1"
+
+    items = collection.get(where={"scores": {"$contains": 50}})
+    assert len(items["ids"]) == 1
+    assert items["ids"][0] == "id2"
+
+    items = collection.get(where={"scores": {"$not_contains": 10}})
+    assert len(items["ids"]) == 1
+    assert items["ids"][0] == "id2"
+
+
+def test_array_metadata_update_e2e(client):
+    """End-to-end: updating array metadata replaces old values."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_array_update_e2e")
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": ["old_a", "old_b"]}],
+    )
+
+    # Verify initial state
+    items = collection.get(where={"tags": {"$contains": "old_a"}})
+    assert len(items["ids"]) == 1
+
+    # Update to new tags
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": ["new_x"]}],
+    )
+
+    # Old values should be gone
+    items = collection.get(where={"tags": {"$contains": "old_a"}})
+    assert len(items["ids"]) == 0
+
+    # New value should be present
+    items = collection.get(where={"tags": {"$contains": "new_x"}})
+    assert len(items["ids"]) == 1
+
+    # Read back to confirm the array was replaced
+    items = collection.get(ids=["id1"])
+    assert items["metadatas"][0]["tags"] == ["new_x"]
+
+
+def test_array_metadata_mixed_with_scalar_e2e(client):
+    """End-to-end: records with both scalar and array metadata."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_mixed_e2e")
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"name": "Alice", "score": 42, "tags": ["admin", "user"]}],
+    )
+
+    items = collection.get(ids=["id1"])
+    md = items["metadatas"][0]
+    assert md["name"] == "Alice"
+    assert md["score"] == 42
+    assert sorted(md["tags"]) == ["admin", "user"]
+
+    # Filter by scalar
+    items = collection.get(where={"score": {"$eq": 42}})
+    assert len(items["ids"]) == 1
+
+    # Filter by array contains
+    items = collection.get(where={"tags": {"$contains": "admin"}})
+    assert len(items["ids"]) == 1
+
+    # Combined $and filter: scalar + array contains
+    items = collection.get(
+        where={
+            "$and": [
+                {"score": {"$gte": 40}},
+                {"tags": {"$contains": "admin"}},
+            ]
+        }
+    )
+    assert len(items["ids"]) == 1
+
+
+def test_metadata_type_change_scalar_to_array_e2e(client):
+    """End-to-end: changing a metadata field from scalar to array removes the old scalar."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_scalar_to_array")
+
+    # Add with scalar, then immediately update to array (no intermediate get,
+    # so both log entries are compacted together).
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": "old_scalar"}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": ["new_a", "new_b"]}],
+    )
+
+    # The old scalar value must no longer match
+    items = collection.get(where={"tags": {"$eq": "old_scalar"}})
+    assert len(items["ids"]) == 0, "Stale scalar value should have been removed"
+
+    # The new array value should be queryable via $contains
+    items = collection.get(where={"tags": {"$contains": "new_a"}})
+    assert len(items["ids"]) == 1
+
+    # Read back and verify the value is an array
+    items = collection.get(ids=["id1"])
+    assert sorted(items["metadatas"][0]["tags"]) == ["new_a", "new_b"]
+
+
+def test_metadata_type_change_array_to_scalar_e2e(client):
+    """End-to-end: changing a metadata field from array to scalar removes the old array rows."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_array_to_scalar")
+
+    # Add with array, then immediately update to scalar (no intermediate get,
+    # so both log entries are compacted together).
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": ["old_a", "old_b"]}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": "new_scalar"}],
+    )
+
+    # The old array values must no longer match
+    items = collection.get(where={"tags": {"$contains": "old_a"}})
+    assert len(items["ids"]) == 0, "Stale array rows should have been removed"
+
+    # The new scalar value should be queryable via equality
+    items = collection.get(where={"tags": {"$eq": "new_scalar"}})
+    assert len(items["ids"]) == 1
+
+    # Read back and verify the value is a scalar
+    items = collection.get(ids=["id1"])
+    assert items["metadatas"][0]["tags"] == "new_scalar"
+
+
+def test_metadata_type_change_via_upsert_e2e(client):
+    """End-to-end: upsert (not update) correctly cleans up when type changes."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_upsert_type_change")
+
+    # Upsert with scalar, then upsert again changing to array.
+    collection.upsert(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": "scalar_val"}],
+    )
+    collection.upsert(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": ["arr_a", "arr_b"]}],
+    )
+
+    # Old scalar must be gone.
+    items = collection.get(where={"tags": {"$eq": "scalar_val"}})
+    assert len(items["ids"]) == 0, "Stale scalar from upsert should be removed"
+
+    # New array must be queryable.
+    items = collection.get(where={"tags": {"$contains": "arr_a"}})
+    assert len(items["ids"]) == 1
+
+    items = collection.get(ids=["id1"])
+    assert sorted(items["metadatas"][0]["tags"]) == ["arr_a", "arr_b"]
+
+
+def test_metadata_rapid_type_flip_e2e(client):
+    """End-to-end: scalar -> array -> scalar leaves no stale data."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_rapid_flip")
+
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": "original"}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": ["mid_a"]}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": "final_scalar"}],
+    )
+
+    # Original scalar gone.
+    items = collection.get(where={"tags": {"$eq": "original"}})
+    assert len(items["ids"]) == 0, "Original scalar should be gone"
+
+    # Intermediate array gone.
+    items = collection.get(where={"tags": {"$contains": "mid_a"}})
+    assert len(items["ids"]) == 0, "Intermediate array should be gone"
+
+    # Final scalar present.
+    items = collection.get(where={"tags": {"$eq": "final_scalar"}})
+    assert len(items["ids"]) == 1
+
+    items = collection.get(ids=["id1"])
+    assert items["metadatas"][0]["tags"] == "final_scalar"
+
+
+def test_metadata_mixed_simultaneous_type_changes_e2e(client):
+    """End-to-end: one update changes 'color' scalar->array AND 'tags' array->scalar."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_mixed_type_change")
+
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"color": "red", "tags": ["old_a", "old_b"]}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"color": ["blue", "green"], "tags": "new_scalar"}],
+    )
+
+    # "color" old scalar gone.
+    items = collection.get(where={"color": {"$eq": "red"}})
+    assert len(items["ids"]) == 0, "Old color scalar should be gone"
+
+    # "color" new array present.
+    items = collection.get(where={"color": {"$contains": "blue"}})
+    assert len(items["ids"]) == 1
+
+    # "tags" old array gone.
+    items = collection.get(where={"tags": {"$contains": "old_a"}})
+    assert len(items["ids"]) == 0, "Old tags array should be gone"
+
+    # "tags" new scalar present.
+    items = collection.get(where={"tags": {"$eq": "new_scalar"}})
+    assert len(items["ids"]) == 1
+
+
+def test_metadata_delete_after_type_change_e2e(client):
+    """End-to-end: add scalar, update to array, then delete key entirely."""
+    if _is_python_local_segment(client):
+        pytest.skip("Python local segment does not support array metadata yet")
+    client.reset()
+    collection = client.create_collection("test_delete_after_type_change")
+
+    collection.add(
+        ids=["id1"],
+        embeddings=[[1, 0, 0]],
+        metadatas=[{"tags": "scalar_val", "keep": "yes"}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": ["arr_a", "arr_b"]}],
+    )
+    collection.update(
+        ids=["id1"],
+        metadatas=[{"tags": None}],
+    )
+
+    # Record still exists (has "keep" key) but "tags" is gone.
+    items = collection.get(ids=["id1"])
+    assert len(items["ids"]) == 1
+    assert (
+        "tags" not in items["metadatas"][0]
+    ), f"tags key should be deleted, got {items['metadatas'][0]}"
+    assert items["metadatas"][0]["keep"] == "yes"
+
+    # Neither scalar nor array queries should match.
+    items = collection.get(where={"tags": {"$eq": "scalar_val"}})
+    assert len(items["ids"]) == 0
+
+    items = collection.get(where={"tags": {"$contains": "arr_a"}})
+    assert len(items["ids"]) == 0
+
+
+def test_sparse_vector_dict_format_in_record_set():
+    """Test that dict-format sparse vectors work in normalize_insert_record_set."""
+    from chromadb.api.types import (
+        normalize_insert_record_set,
+        validate_insert_record_set,
+    )
+    from chromadb.base_types import SparseVector
+
+    # Test 1: Mix of dict format and SparseVector instances
+    record_set = normalize_insert_record_set(
+        ids=["doc1", "doc2", "doc3"],
+        embeddings=None,
+        metadatas=[
+            {
+                "text": "test1",
+                "sparse": {
+                    TYPE_KEY: SPARSE_VECTOR_TYPE_VALUE,
+                    "indices": [0, 2],
+                    "values": [1.0, 2.0],
+                },
+            },
+            {
+                "text": "test2",
+                "sparse": SparseVector(indices=[1, 3], values=[1.5, 2.5]),
+            },
+            {"text": "test3"},  # No sparse vector
+        ],
+        documents=["doc one", "doc two", "doc three"],
+    )
+
+    # Both should be converted to SparseVector instances
+    assert isinstance(record_set["metadatas"][0]["sparse"], SparseVector)
+    assert isinstance(record_set["metadatas"][1]["sparse"], SparseVector)
+    assert "sparse" not in record_set["metadatas"][2]
+
+    # Validation should pass
+    validate_insert_record_set(record_set)
+
+    # Test 2: Verify values are correct after normalization
+    assert record_set["metadatas"][0]["sparse"].indices == [0, 2]
+    assert record_set["metadatas"][0]["sparse"].values == [1.0, 2.0]
+    assert record_set["metadatas"][1]["sparse"].indices == [1, 3]
+    assert record_set["metadatas"][1]["sparse"].values == [1.5, 2.5]
 
 
 def test_search_result_rows() -> None:
@@ -2497,6 +3105,59 @@ def test_rrf_to_dict() -> None:
     print("All RRF tests passed!")
 
 
+def test_group_by_serialization() -> None:
+    """Test GroupBy, MinK, and MaxK serialization and deserialization."""
+    import pytest
+    from chromadb.execution.expression.operator import (
+        GroupBy,
+        MinK,
+        MaxK,
+        Key,
+        Aggregate,
+    )
+
+    # to_dict with OneOrMany keys
+    group_by = GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=3))
+    assert group_by.to_dict() == {
+        "keys": ["category"],
+        "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}},
+    }
+
+    # to_dict with multiple keys and MaxK
+    group_by = GroupBy(
+        keys=[Key("year"), Key("category")],
+        aggregate=MaxK(keys=[Key.SCORE, Key("priority")], k=5),
+    )
+    assert group_by.to_dict() == {
+        "keys": ["year", "category"],
+        "aggregate": {"$max_k": {"keys": ["#score", "priority"], "k": 5}},
+    }
+
+    # Round-trip
+    original = GroupBy(keys=[Key("category")], aggregate=MinK(keys=[Key.SCORE], k=3))
+    assert GroupBy.from_dict(original.to_dict()).to_dict() == original.to_dict()
+
+    # Empty GroupBy serializes to {} and from_dict({}) returns default GroupBy
+    empty_group_by = GroupBy()
+    assert empty_group_by.to_dict() == {}
+    assert GroupBy.from_dict({}).to_dict() == {}
+
+    # Error cases
+    with pytest.raises(ValueError, match="requires 'keys' field"):
+        GroupBy.from_dict({"aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}})
+
+    with pytest.raises(ValueError, match="requires 'aggregate' field"):
+        GroupBy.from_dict({"keys": ["category"]})
+
+    with pytest.raises(ValueError, match="keys cannot be empty"):
+        GroupBy.from_dict(
+            {"keys": [], "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}}
+        )
+
+    with pytest.raises(ValueError, match="Unknown aggregate operator"):
+        Aggregate.from_dict({"$unknown": {"keys": ["#score"], "k": 3}})
+
+
 # Expression API Tests - Testing dict support and from_dict methods
 class TestSearchDictSupport:
     """Test Search class dict input support."""
@@ -2600,6 +3261,49 @@ class TestSearchDictSupport:
         with pytest.raises(TypeError, match="select must be"):
             Search(select=123)
 
+    def test_search_with_group_by(self):
+        """Test Search accepts group_by as dict, object, and builder method."""
+        import pytest
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import GroupBy, MinK, Key
+
+        # Dict input
+        search = Search(
+            group_by={
+                "keys": ["category"],
+                "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}},
+            }
+        )
+        assert isinstance(search._group_by, GroupBy)
+
+        # Object input and builder method
+        group_by = GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=3))
+        assert Search(group_by=group_by)._group_by is group_by
+        assert Search().group_by(group_by)._group_by.aggregate is not None
+
+        # Invalid inputs
+        with pytest.raises(TypeError, match="group_by must be"):
+            Search(group_by="invalid")
+        with pytest.raises(ValueError, match="requires 'aggregate' field"):
+            Search(group_by={"keys": ["category"]})
+
+    def test_search_group_by_serialization(self):
+        """Test Search serializes group_by correctly."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import GroupBy, MinK, Key, Knn
+
+        # Without group_by - empty dict
+        search = Search().rank(Knn(query=[0.1, 0.2])).limit(10)
+        assert search.to_dict()["group_by"] == {}
+
+        # With group_by - has keys and aggregate
+        search = Search().group_by(
+            GroupBy(keys=Key("category"), aggregate=MinK(keys=Key.SCORE, k=3))
+        )
+        result = search.to_dict()["group_by"]
+        assert result["keys"] == ["category"]
+        assert result["aggregate"] == {"$min_k": {"keys": ["#score"], "k": 3}}
+
 
 class TestWhereFromDict:
     """Test Where.from_dict() conversion."""
@@ -2677,6 +3381,106 @@ class TestWhereFromDict:
         # $not_regex
         where = Where.from_dict({"text": {"$not_regex": r"\d+"}})
         assert isinstance(where, NotRegex)
+
+    def test_array_contains_operators(self):
+        """Test $contains/$not_contains with all scalar types for metadata array queries."""
+        from chromadb.execution.expression.operator import Where, Contains, NotContains
+
+        # String
+        where = Where.from_dict({"tags": {"$contains": "action"}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"tags": {"$contains": "action"}}
+
+        # Integer
+        where = Where.from_dict({"scores": {"$contains": 42}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"scores": {"$contains": 42}}
+
+        # Float
+        where = Where.from_dict({"ratings": {"$contains": 4.5}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"ratings": {"$contains": 4.5}}
+
+        # Boolean
+        where = Where.from_dict({"flags": {"$contains": True}})
+        assert isinstance(where, Contains)
+        assert where.to_dict() == {"flags": {"$contains": True}}
+
+        # $not_contains
+        where = Where.from_dict({"tags": {"$not_contains": "draft"}})
+        assert isinstance(where, NotContains)
+        assert where.to_dict() == {"tags": {"$not_contains": "draft"}}
+
+        where = Where.from_dict({"scores": {"$not_contains": 0}})
+        assert isinstance(where, NotContains)
+        assert where.to_dict() == {"scores": {"$not_contains": 0}}
+
+    def test_array_contains_invalid_operands(self):
+        """Test $contains/$not_contains reject invalid operand types."""
+        import pytest
+        from chromadb.execution.expression.operator import Where
+
+        with pytest.raises(TypeError, match="\\$contains requires"):
+            Where.from_dict({"tags": {"$contains": [1, 2]}})
+
+        with pytest.raises(TypeError, match="\\$not_contains requires"):
+            Where.from_dict({"tags": {"$not_contains": {"nested": True}}})
+
+    def test_array_contains_round_trip(self):
+        """Test $contains round-trips through to_dict/from_dict."""
+        from chromadb.execution.expression.operator import Where, Key
+
+        cases = [
+            Key("tags").contains("action"),
+            Key("scores").contains(42),
+            Key("ratings").contains(4.5),
+            Key("flags").contains(True),
+            Key("tags").not_contains("draft"),
+        ]
+        for original in cases:
+            d = original.to_dict()
+            restored = Where.from_dict(d)
+            assert restored.to_dict() == d, f"Round-trip failed for {d}"
+
+    def test_array_contains_in_composite(self):
+        """Test $contains combined with other operators via $and/$or."""
+        from chromadb.execution.expression.operator import Where, And, Key
+
+        where = (Key("tags").contains("action")) & (Key("year") > 2020)
+        assert isinstance(where, And)
+        d = where.to_dict()
+        restored = Where.from_dict(d)
+        assert restored.to_dict() == d
+
+    def test_document_contains_requires_string(self):
+        """Key.DOCUMENT.contains/not_contains must receive a string."""
+        import pytest
+        from chromadb.execution.expression.operator import Key
+
+        # String is fine
+        expr = Key.DOCUMENT.contains("hello")
+        assert expr.to_dict() == {"#document": {"$contains": "hello"}}
+
+        expr = Key.DOCUMENT.not_contains("hello")
+        assert expr.to_dict() == {"#document": {"$not_contains": "hello"}}
+
+        # Non-string types must be rejected
+        for bad_value in [42, 3.14, True, False]:
+            with pytest.raises(
+                TypeError, match="\\$contains on #document requires a string"
+            ):
+                Key.DOCUMENT.contains(bad_value)
+
+            with pytest.raises(
+                TypeError, match="\\$not_contains on #document requires a string"
+            ):
+                Key.DOCUMENT.not_contains(bad_value)
+
+        # Metadata keys still accept non-string scalars
+        assert Key("scores").contains(42).to_dict() == {"scores": {"$contains": 42}}
+        assert Key("flags").not_contains(True).to_dict() == {
+            "flags": {"$not_contains": True}
+        }
 
     def test_logical_operators(self):
         """Test logical operator conversions."""
@@ -2770,7 +3574,7 @@ class TestRankFromDict:
         )
         assert rank.key == "sparse_embedding"
         assert rank.limit == 256
-        assert rank.return_rank == True
+        assert rank.return_rank
 
     def test_arithmetic_operators(self):
         """Test arithmetic operator conversions."""
@@ -3124,3 +3928,27 @@ class TestRoundTripConversion:
                 return d1 == d2
 
         assert compare_search_dicts(new_dict, search_dict)
+
+    def test_search_round_trip_with_group_by(self):
+        """Test Search round-trip with group_by."""
+        from chromadb.execution.expression.plan import Search
+        from chromadb.execution.expression.operator import Key, GroupBy, MinK
+
+        original = Search(
+            where=Key("status") == "active",
+            group_by=GroupBy(
+                keys=[Key("category")],
+                aggregate=MinK(keys=[Key.SCORE], k=3),
+            ),
+        )
+
+        # Verify group_by round-trip
+        search_dict = original.to_dict()
+        assert search_dict["group_by"]["keys"] == ["category"]
+        assert search_dict["group_by"]["aggregate"] == {
+            "$min_k": {"keys": ["#score"], "k": 3}
+        }
+
+        # Reconstruct and compare group_by
+        restored = Search(group_by=GroupBy.from_dict(search_dict["group_by"]))
+        assert restored.to_dict()["group_by"] == search_dict["group_by"]

@@ -23,3 +23,13 @@ export {
 } from "./rank";
 export { Search, type SearchInit, type SearchLike, toSearch } from "./search";
 export { SearchResult, type SearchResultRow } from "./searchResult";
+export {
+  Aggregate,
+  MinK,
+  MaxK,
+  GroupBy,
+  type AggregateJSON,
+  type AggregateInput,
+  type GroupByJSON,
+  type GroupByInput,
+} from "./groupBy";

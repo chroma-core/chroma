@@ -10,7 +10,7 @@ describe("OpenAIEmbeddingFunction", () => {
 
   const defaultParametersTest = "should initialize with default parameters";
   if (!process.env.OPENAI_API_KEY) {
-    it.skip(defaultParametersTest, () => {});
+    it.skip(defaultParametersTest, () => { });
   } else {
     it(defaultParametersTest, () => {
       const embedder = new OpenAIEmbeddingFunction({ modelName: MODEL });
@@ -21,12 +21,13 @@ describe("OpenAIEmbeddingFunction", () => {
       expect(config.api_key_env_var).toBe("OPENAI_API_KEY");
       expect(config.dimensions).toBeUndefined();
       expect(config.organization_id).toBeUndefined();
+      expect(config.api_base).toBeUndefined();
     });
   }
 
   const customParametersTest = "should initialize with custom parameters";
   if (!process.env.OPENAI_API_KEY) {
-    it.skip(customParametersTest, () => {});
+    it.skip(customParametersTest, () => { });
   } else {
     it(customParametersTest, () => {
       const embedder = new OpenAIEmbeddingFunction({
@@ -34,6 +35,7 @@ describe("OpenAIEmbeddingFunction", () => {
         dimensions: 2000,
         apiKeyEnvVar: "OPENAI_API_KEY",
         organizationId: "custom-organization-id",
+        apiBase: "https://custom-api.example.com/v1",
       });
 
       const config = embedder.getConfig();
@@ -41,6 +43,7 @@ describe("OpenAIEmbeddingFunction", () => {
       expect(config.organization_id).toBe("custom-organization-id");
       expect(config.dimensions).toBe(2000);
       expect(config.api_key_env_var).toBe("OPENAI_API_KEY");
+      expect(config.api_base).toBe("https://custom-api.example.com/v1");
     });
   }
 
@@ -78,7 +81,7 @@ describe("OpenAIEmbeddingFunction", () => {
 
   const buildFromConfigTest = "should build from config";
   if (!process.env.OPENAI_API_KEY) {
-    it.skip(buildFromConfigTest, () => {});
+    it.skip(buildFromConfigTest, () => { });
   } else {
     it(buildFromConfigTest, () => {
       const config = {
@@ -86,6 +89,7 @@ describe("OpenAIEmbeddingFunction", () => {
         model_name: "config-model",
         dimensions: 2000,
         organization_id: "custom-organization-id",
+        api_base: "https://custom-api.example.com/v1",
       };
 
       const embedder = OpenAIEmbeddingFunction.buildFromConfig(config);
@@ -95,7 +99,7 @@ describe("OpenAIEmbeddingFunction", () => {
 
     const generateEmbeddingsTest = "should generate embeddings";
     if (!process.env.OPENAI_API_KEY) {
-      it.skip(generateEmbeddingsTest, () => {});
+      it.skip(generateEmbeddingsTest, () => { });
     } else {
       it(generateEmbeddingsTest, async () => {
         const embedder = new OpenAIEmbeddingFunction({ modelName: MODEL });

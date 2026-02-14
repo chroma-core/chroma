@@ -52,6 +52,7 @@ pub fn modulo_metadata(value: usize) -> HashMap<String, UpdateMetadataValue> {
         ("id".to_string(), UpdateMetadataValue::Int(value as i64)),
         (
             "is_even".to_string(),
+            #[allow(clippy::manual_is_multiple_of)]
             UpdateMetadataValue::Bool(value % 2 == 0),
         ),
         (
@@ -71,6 +72,7 @@ pub fn random_document(len: usize) -> String {
         .collect()
 }
 
+#[allow(clippy::manual_is_multiple_of)]
 pub fn modulo_document(value: usize) -> String {
     let cat = if value % 3 == 0 { "<cat>" } else { "" };
     let dog = if value % 5 == 0 { "<dog>" } else { "" };
@@ -92,6 +94,7 @@ pub fn upsert_generator(offset: usize) -> OperationRecord {
 ///
 /// # Illustration for head of log
 /// [Add 1], [Add 2], [Add 3], [Add 4], [Add 5], [Del 1], [Add 6] ...
+#[allow(clippy::manual_is_multiple_of)]
 pub fn add_delete_generator(offset: usize) -> OperationRecord {
     if offset % 6 == 0 {
         OperationRecord {
@@ -104,6 +107,33 @@ pub fn add_delete_generator(offset: usize) -> OperationRecord {
         }
     } else {
         let int_id = offset - offset / 6;
+        OperationRecord {
+            id: int_as_id(int_id),
+            embedding: Some(random_embedding(TEST_EMBEDDING_DIMENSION)),
+            encoding: None,
+            metadata: Some(modulo_metadata(int_id)),
+            document: Some(modulo_document(int_id)),
+            operation: Operation::Add,
+        }
+    }
+}
+
+/// Adds new record and deletes from the start every 6 records`
+///
+/// # Illustration for head of log
+/// [Add 1], [Del 1], [Add 2], [Del 2], [Add 3], [Del 3], [Add 4] ...
+pub fn add_delete_net_zero_generator(offset: usize) -> OperationRecord {
+    if offset % 2 == 1 {
+        OperationRecord {
+            id: int_as_id(offset / 2),
+            embedding: None,
+            encoding: None,
+            metadata: None,
+            document: None,
+            operation: Operation::Delete,
+        }
+    } else {
+        let int_id = offset / 2;
         OperationRecord {
             id: int_as_id(int_id),
             embedding: Some(random_embedding(TEST_EMBEDDING_DIMENSION)),

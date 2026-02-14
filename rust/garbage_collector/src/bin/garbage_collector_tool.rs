@@ -196,7 +196,10 @@ async fn main() {
                 .expect("Failed to create storage client");
 
             let mut sysdb_client = SysDb::try_from_config(
-                &chroma_sysdb::SysDbConfig::Grpc(config.sysdb_config),
+                &(
+                    chroma_sysdb::SysDbConfig::Grpc(config.sysdb_config.clone()),
+                    config.mcmr_sysdb_config.clone(),
+                ),
                 &registry,
             )
             .await
@@ -245,6 +248,7 @@ async fn main() {
                 config.min_versions_to_keep,
                 enable_log_gc,
                 enable_dangerous_option_to_ignore_min_versions_for_wal3,
+                10,
             );
 
             let result = orchestrator.run(system.clone()).await;

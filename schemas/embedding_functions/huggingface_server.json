@@ -10,7 +10,10 @@
             "description": "The URL of the HuggingFace Embedding Server"
         },
         "api_key_env_var": {
-            "type": "string",
+            "type": [
+                "string",
+                "null"
+            ],
             "description": "The environment variable name that contains your API key for the HuggingFace API"
         }
     },

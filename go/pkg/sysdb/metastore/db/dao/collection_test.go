@@ -692,6 +692,41 @@ func (suite *CollectionDbTestSuite) TestCollectionDb_UpdateComplexConfiguration(
 	suite.NoError(err)
 }
 
+func (suite *CollectionDbTestSuite) TestCollectionDb_CompactionFailureCount() {
+	collectionName := "test_collection_compaction_failure_count"
+	dim := int32(128)
+
+	// Create a collection with a specific compaction failure count
+	collection := daotest.NewTestCollection(
+		suite.tenantName,
+		suite.databaseId,
+		collectionName,
+		daotest.WithDimension(dim),
+		daotest.WithCompactionFailureCount(5),
+	)
+	collectionID, err := CreateTestCollection(suite.db, collection)
+	suite.NoError(err)
+
+	// Verify the compaction failure count is returned when getting the collection
+	collections, err := suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(int32(5), collections[0].Collection.CompactionFailureCount)
+
+	// Increment the compaction failure count
+	err = suite.collectionDb.IncrementCompactionFailureCount(collectionID)
+	suite.NoError(err)
+
+	// Verify the incremented count is returned
+	collections, err = suite.collectionDb.GetCollections([]string{collectionID}, nil, "", "", nil, nil, false)
+	suite.NoError(err)
+	suite.Len(collections, 1)
+	suite.Equal(int32(6), collections[0].Collection.CompactionFailureCount)
+
+	err = CleanUpTestCollection(suite.db, collectionID)
+	suite.NoError(err)
+}
+
 func TestCollectionDbTestSuiteSuite(t *testing.T) {
 	testSuite := new(CollectionDbTestSuite)
 	suite.Run(t, testSuite)

@@ -19,8 +19,9 @@ use chroma_index::sparse::reader::SparseReader;
 use chroma_index::sparse::types::DEFAULT_BLOCK_SIZE;
 use chroma_index::sparse::writer::SparseFlusher;
 use chroma_index::sparse::writer::SparseWriter;
+use chroma_types::Cmek;
 use chroma_types::DatabaseUuid;
-use chroma_types::InternalSchema;
+use chroma_types::Schema;
 use chroma_types::SegmentType;
 use chroma_types::BOOL_METADATA;
 use chroma_types::F32_METADATA;
@@ -113,6 +114,7 @@ impl<'me> MetadataSegmentWriter<'me> {
         database_id: &DatabaseUuid,
         segment: &Segment,
         blockfile_provider: &BlockfileProvider,
+        cmek: Option<Cmek>,
     ) -> Result<MetadataSegmentWriter<'me>, MetadataSegmentError> {
         if segment.r#type != SegmentType::BlockfileMetadata {
             return Err(MetadataSegmentError::InvalidSegmentType);
@@ -137,26 +139,32 @@ impl<'me> MetadataSegmentWriter<'me> {
                     let (prefix, pls_uuid) = Segment::extract_prefix_and_id(pls_path)
                         .map_err(|_| MetadataSegmentError::UuidParseError(pls_path.to_string()))?;
 
-                    blockfile_provider
-                        .write::<u32, Vec<u32>>(
-                            BlockfileWriterOptions::new(prefix.to_string())
-                                .fork(pls_uuid)
-                                .ordered_mutations(),
-                        )
-                        .await
-                        .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                    {
+                        let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                            .fork(pls_uuid)
+                            .ordered_mutations();
+                        if let Some(cmek) = &cmek {
+                            options = options.with_cmek(cmek.clone());
+                        }
+                        blockfile_provider
+                            .write::<u32, Vec<u32>>(options)
+                            .await
+                            .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+                    }
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider
-                .write::<u32, Vec<u32>>(
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations(),
-                )
-                .await
-            {
-                Ok(writer) => writer,
-                Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-            },
+            None => {
+                let mut options =
+                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                match blockfile_provider.write::<u32, Vec<u32>>(options).await {
+                    Ok(writer) => writer,
+                    Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                }
+            }
         };
 
         let full_text_writer_tokenizer = NgramTokenizer::new(3, 3, false).unwrap();
@@ -173,15 +181,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                         Segment::extract_prefix_and_id(string_metadata_path).map_err(|_| {
                             MetadataSegmentError::UuidParseError(string_metadata_path.to_string())
                         })?;
-                    let string_metadata_writer = match blockfile_provider
-                        .write::<&str, RoaringBitmap>(
-                            BlockfileWriterOptions::new(prefix.to_string())
-                                .fork(string_metadata_uuid),
-                        )
-                        .await
-                    {
-                        Ok(writer) => writer,
-                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    let string_metadata_writer = {
+                        let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                            .fork(string_metadata_uuid);
+                        if let Some(cmek) = &cmek {
+                            options = options.with_cmek(cmek.clone());
+                        }
+                        match blockfile_provider
+                            .write::<&str, RoaringBitmap>(options)
+                            .await
+                        {
+                            Ok(writer) => writer,
+                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                        }
                     };
                     let read_options =
                         BlockfileReaderOptions::new(string_metadata_uuid, prefix.to_string());
@@ -196,13 +208,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                 None => return Err(MetadataSegmentError::EmptyPathVector),
             },
-            None => match blockfile_provider
-                .write::<&str, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
-                .await
-            {
-                Ok(writer) => (writer, None),
-                Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-            },
+            None => {
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                match blockfile_provider
+                    .write::<&str, RoaringBitmap>(options)
+                    .await
+                {
+                    Ok(writer) => (writer, None),
+                    Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                }
+            }
         };
         let string_metadata_index_writer =
             MetadataIndexWriter::new_string(string_metadata_writer, string_metadata_index_reader);
@@ -215,15 +233,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Segment::extract_prefix_and_id(bool_metadata_path).map_err(|_| {
                                 MetadataSegmentError::UuidParseError(bool_metadata_path.to_string())
                             })?;
-                        let bool_metadata_writer = match blockfile_provider
-                            .write::<bool, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix.to_string())
-                                    .fork(bool_metadata_uuid),
-                            )
-                            .await
-                        {
-                            Ok(writer) => writer,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                        let bool_metadata_writer = {
+                            let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                                .fork(bool_metadata_uuid);
+                            if let Some(cmek) = &cmek {
+                                options = options.with_cmek(cmek.clone());
+                            }
+                            match blockfile_provider
+                                .write::<bool, RoaringBitmap>(options)
+                                .await
+                            {
+                                Ok(writer) => writer,
+                                Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                            }
                         };
                         let read_options =
                             BlockfileReaderOptions::new(bool_metadata_uuid, prefix.to_string());
@@ -238,13 +260,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider
-                    .write::<bool, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
-                    .await
-                {
-                    Ok(writer) => (writer, None),
-                    Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                },
+                None => {
+                    let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    match blockfile_provider
+                        .write::<bool, RoaringBitmap>(options)
+                        .await
+                    {
+                        Ok(writer) => (writer, None),
+                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    }
+                }
             };
         let bool_metadata_index_writer =
             MetadataIndexWriter::new_bool(bool_metadata_writer, bool_metadata_index_reader);
@@ -257,15 +285,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Segment::extract_prefix_and_id(f32_metadata_path).map_err(|_| {
                                 MetadataSegmentError::UuidParseError(f32_metadata_path.to_string())
                             })?;
-                        let f32_metadata_writer = match blockfile_provider
-                            .write::<f32, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix.to_string())
-                                    .fork(f32_metadata_uuid),
-                            )
-                            .await
-                        {
-                            Ok(writer) => writer,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                        let f32_metadata_writer = {
+                            let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                                .fork(f32_metadata_uuid);
+                            if let Some(cmek) = &cmek {
+                                options = options.with_cmek(cmek.clone());
+                            }
+                            match blockfile_provider
+                                .write::<f32, RoaringBitmap>(options)
+                                .await
+                            {
+                                Ok(writer) => writer,
+                                Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                            }
                         };
                         let read_options =
                             BlockfileReaderOptions::new(f32_metadata_uuid, prefix.to_string());
@@ -280,13 +312,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider
-                    .write::<f32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
-                    .await
-                {
-                    Ok(writer) => (writer, None),
-                    Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                },
+                None => {
+                    let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    match blockfile_provider
+                        .write::<f32, RoaringBitmap>(options)
+                        .await
+                    {
+                        Ok(writer) => (writer, None),
+                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    }
+                }
             };
         let f32_metadata_index_writer =
             MetadataIndexWriter::new_f32(f32_metadata_writer, f32_metadata_index_reader);
@@ -299,15 +337,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                             Segment::extract_prefix_and_id(u32_metadata_path).map_err(|_| {
                                 MetadataSegmentError::UuidParseError(u32_metadata_path.to_string())
                             })?;
-                        let u32_metadata_writer = match blockfile_provider
-                            .write::<u32, RoaringBitmap>(
-                                BlockfileWriterOptions::new(prefix.to_string())
-                                    .fork(u32_metadata_uuid),
-                            )
-                            .await
-                        {
-                            Ok(writer) => writer,
-                            Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                        let u32_metadata_writer = {
+                            let mut options = BlockfileWriterOptions::new(prefix.to_string())
+                                .fork(u32_metadata_uuid);
+                            if let Some(cmek) = &cmek {
+                                options = options.with_cmek(cmek.clone());
+                            }
+                            match blockfile_provider
+                                .write::<u32, RoaringBitmap>(options)
+                                .await
+                            {
+                                Ok(writer) => writer,
+                                Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                            }
                         };
                         let read_options =
                             BlockfileReaderOptions::new(u32_metadata_uuid, prefix.to_string());
@@ -322,13 +364,19 @@ impl<'me> MetadataSegmentWriter<'me> {
                     }
                     None => return Err(MetadataSegmentError::EmptyPathVector),
                 },
-                None => match blockfile_provider
-                    .write::<u32, RoaringBitmap>(BlockfileWriterOptions::new(prefix_path.clone()))
-                    .await
-                {
-                    Ok(writer) => (writer, None),
-                    Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
-                },
+                None => {
+                    let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                    if let Some(cmek) = &cmek {
+                        options = options.with_cmek(cmek.clone());
+                    }
+                    match blockfile_provider
+                        .write::<u32, RoaringBitmap>(options)
+                        .await
+                    {
+                        Ok(writer) => (writer, None),
+                        Err(e) => return Err(MetadataSegmentError::BlockfileError(*e)),
+                    }
+                }
             };
         let u32_metadata_index_writer =
             MetadataIndexWriter::new_u32(u32_metadata_writer, u32_metadata_index_reader);
@@ -353,12 +401,17 @@ impl<'me> MetadataSegmentWriter<'me> {
                 ))
                 .await
                 .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-            let max_writer = blockfile_provider
-                .write::<u32, f32>(
-                    BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid),
-                )
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let max_writer = {
+                let mut options =
+                    BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid);
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                blockfile_provider
+                    .write::<u32, f32>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
             let (offset_value_prefix, offset_value_uuid) =
                 Segment::extract_prefix_and_id(offset_value_file_path).map_err(|_| {
                     MetadataSegmentError::UuidParseError(offset_value_file_path.to_string())
@@ -370,13 +423,17 @@ impl<'me> MetadataSegmentWriter<'me> {
                 ))
                 .await
                 .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
-            let offset_value_writer = blockfile_provider
-                .write::<u32, f32>(
-                    BlockfileWriterOptions::new(offset_value_prefix.to_string())
-                        .fork(offset_value_uuid),
-                )
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let offset_value_writer = {
+                let mut options = BlockfileWriterOptions::new(offset_value_prefix.to_string())
+                    .fork(offset_value_uuid);
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                blockfile_provider
+                    .write::<u32, f32>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
             Some(SparseWriter::new(
                 DEFAULT_BLOCK_SIZE,
                 max_writer,
@@ -384,14 +441,26 @@ impl<'me> MetadataSegmentWriter<'me> {
                 Some(SparseReader::new(max_reader, offset_value_reader)),
             ))
         } else {
-            let max_writer = blockfile_provider
-                .write::<u32, f32>(BlockfileWriterOptions::new(prefix_path.clone()))
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
-            let offset_value_writer = blockfile_provider
-                .write::<u32, f32>(BlockfileWriterOptions::new(prefix_path.clone()))
-                .await
-                .map_err(|e| MetadataSegmentError::BlockfileError(*e))?;
+            let max_writer = {
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                blockfile_provider
+                    .write::<u32, f32>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
+            let offset_value_writer = {
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
+                if let Some(cmek) = &cmek {
+                    options = options.with_cmek(cmek.clone());
+                }
+                blockfile_provider
+                    .write::<u32, f32>(options)
+                    .await
+                    .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
+            };
             Some(SparseWriter::new(
                 DEFAULT_BLOCK_SIZE,
                 max_writer,
@@ -483,6 +552,64 @@ impl<'me> MetadataSegmentWriter<'me> {
                     None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
                 }
             },
+            // Array types: explode the array and index each element separately
+            // This enables efficient CONTAINS queries via the inverted index
+            MetadataValue::StringArray(values) => {
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, v.as_str(), offset_id).await {
+                                tracing::error!("Error inserting into str metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::IntArray(values) => {
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, *v as u32, offset_id).await {
+                                tracing::error!("Error inserting into u32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::FloatArray(values) => {
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, *v as f32, offset_id).await {
+                                tracing::error!("Error inserting into f32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::BoolArray(values) => {
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.set(prefix, *v, offset_id).await {
+                                tracing::error!("Error inserting into bool metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
         }
     }
 
@@ -556,6 +683,63 @@ impl<'me> MetadataSegmentWriter<'me> {
                 }
                     None => panic!("Invariant violation. sparse index writer should be set for metadata segment"),
             },
+            // Array types: delete each element from the inverted index
+            MetadataValue::StringArray(values) => {
+                match &self.string_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, v.as_str(), offset_id).await {
+                                tracing::error!("Error deleting from str metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. String metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::IntArray(values) => {
+                match &self.u32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, *v as u32, offset_id).await {
+                                tracing::error!("Error deleting from u32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. u32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::FloatArray(values) => {
+                match &self.f32_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, *v as f32, offset_id).await {
+                                tracing::error!("Error deleting from f32 metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. f32 metadata index writer should be set for metadata segment"),
+                }
+            }
+            MetadataValue::BoolArray(values) => {
+                match &self.bool_metadata_index_writer {
+                    Some(writer) => {
+                        for v in values {
+                            if let Err(e) = writer.delete(prefix, *v, offset_id).await {
+                                tracing::error!("Error deleting from bool metadata index writer {:?}", e);
+                                return Err(e);
+                            }
+                        }
+                        Ok(())
+                    }
+                    None => panic!("Invariant violation. bool metadata index writer should be set for metadata segment"),
+                }
+            }
         }
     }
 
@@ -576,8 +760,8 @@ impl<'me> MetadataSegmentWriter<'me> {
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
-        schema: Option<InternalSchema>,
-    ) -> Result<Option<InternalSchema>, ApplyMaterializedLogError> {
+        schema: Option<Schema>,
+    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
         let mut count = 0u64;
         let mut schema = schema;
         let mut schema_modified = false;
@@ -845,7 +1029,10 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = full_text_index_writer.write_to_blockfiles().await;
+        let res = full_text_index_writer
+            .write_to_blockfiles()
+            .instrument(tracing::info_span!("fts writer write_to_blockfiles"))
+            .await;
         self.full_text_index_writer = Some(full_text_index_writer);
         match res {
             Ok(_) => {}
@@ -856,7 +1043,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = string_metadata_index_writer.write_to_blockfile().await;
+        let res = string_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "string metadata writer write_to_blockfile"
+            ))
+            .await;
         self.string_metadata_index_writer = Some(string_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -867,7 +1059,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = bool_metadata_index_writer.write_to_blockfile().await;
+        let res = bool_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "bool metadata writer write_to_blockfile"
+            ))
+            .await;
         self.bool_metadata_index_writer = Some(bool_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -878,7 +1075,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = f32_metadata_index_writer.write_to_blockfile().await;
+        let res = f32_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "f32 metadata writer write_to_blockfile"
+            ))
+            .await;
         self.f32_metadata_index_writer = Some(f32_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -889,7 +1091,12 @@ impl<'me> MetadataSegmentWriter<'me> {
             Some(writer) => writer,
             None => return Err(Box::new(MetadataSegmentError::NoWriter)),
         };
-        let res = u32_metadata_index_writer.write_to_blockfile().await;
+        let res = u32_metadata_index_writer
+            .write_to_blockfile()
+            .instrument(tracing::info_span!(
+                "u32 metadata writer write_to_blockfile"
+            ))
+            .await;
         self.u32_metadata_index_writer = Some(u32_metadata_index_writer);
         match res {
             Ok(_) => {}
@@ -1288,6 +1495,7 @@ mod test {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1296,6 +1504,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1427,6 +1636,7 @@ mod test {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1435,6 +1645,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1517,6 +1728,7 @@ mod test {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1525,6 +1737,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1614,6 +1827,7 @@ mod test {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1622,6 +1836,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1756,6 +1971,7 @@ mod test {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1764,6 +1980,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1886,6 +2103,7 @@ mod test {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1894,6 +2112,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2001,6 +2220,7 @@ mod test {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2009,6 +2229,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2127,6 +2348,7 @@ mod test {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2135,6 +2357,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2231,6 +2454,7 @@ mod test {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2239,6 +2463,7 @@ mod test {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -2356,6 +2581,7 @@ mod test {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2364,6 +2590,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2643,6 +2870,7 @@ mod test {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2652,6 +2880,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -2666,10 +2895,10 @@ mod test {
             let mut update_metadata1 = HashMap::new();
             update_metadata1.insert(
                 String::from("sparse_vec"),
-                UpdateMetadataValue::SparseVector(chroma_types::SparseVector::new(
-                    vec![0, 5, 10],
-                    vec![0.1, 0.5, 0.9],
-                )),
+                UpdateMetadataValue::SparseVector(
+                    chroma_types::SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9])
+                        .expect("valid sparse vector"),
+                ),
             );
             update_metadata1.insert(
                 String::from("category"),
@@ -2800,6 +3029,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating metadata writer");
@@ -2848,6 +3078,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating metadata writer");
@@ -2927,6 +3158,7 @@ mod test {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating metadata writer");

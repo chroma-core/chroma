@@ -260,26 +260,59 @@ export const validateMetadata = (metadata?: Metadata) => {
     throw new ChromaValueError("Expected metadata to be non-empty");
   }
 
-  if (
-    !Object.values(metadata).every(
-      (v: any) =>
-        v === null ||
-        v === undefined ||
-        typeof v === "string" ||
-        typeof v === "number" ||
-        typeof v === "boolean" ||
-        validateSparseVector(v),
-    )
-  ) {
+  const validateMetadataListValue = (key: string, v: unknown[]): void => {
+    if (v.length === 0) {
+      throw new ChromaValueError(
+        `Expected metadata list value for key '${key}' to be non-empty`,
+      );
+    }
+    const firstType = typeof v[0];
+    for (const item of v) {
+      if (
+        typeof item !== "string" &&
+        typeof item !== "number" &&
+        typeof item !== "boolean"
+      ) {
+        throw new ChromaValueError(
+          `Expected metadata list value for key '${key}' to contain only strings, numbers, or booleans, got ${typeof item}`,
+        );
+      }
+      if (typeof item !== firstType) {
+        throw new ChromaValueError(
+          `Expected metadata list value for key '${key}' to contain only the same type, got mixed types`,
+        );
+      }
+    }
+  };
+
+  for (const [key, v] of Object.entries(metadata)) {
+    if (
+      v === null ||
+      v === undefined ||
+      typeof v === "string" ||
+      typeof v === "number" ||
+      typeof v === "boolean"
+    ) {
+      continue;
+    }
+    if (validateSparseVector(v)) {
+      continue;
+    }
+    if (Array.isArray(v)) {
+      validateMetadataListValue(key, v);
+      continue;
+    }
     throw new ChromaValueError(
-      "Expected metadata to be a string, number, boolean, SparseVector, or nullable",
+      `Expected metadata value for key '${key}' to be a string, number, boolean, SparseVector, typed array (string[], number[], boolean[]), or null`,
     );
   }
 };
 
 const SPARSE_VECTOR_TYPE = "sparse_vector" as const;
 
-type SerializedSparseVector = SparseVector & { "#type": typeof SPARSE_VECTOR_TYPE };
+type SerializedSparseVector = SparseVector & {
+  "#type": typeof SPARSE_VECTOR_TYPE;
+};
 
 type SerializedMetadataValue =
   | boolean
@@ -287,11 +320,16 @@ type SerializedMetadataValue =
   | string
   | SerializedSparseVector
   | SparseVector
+  | Array<boolean>
+  | Array<number>
+  | Array<string>
   | null;
 
 export type SerializedMetadata = Record<string, SerializedMetadataValue>;
 
-const toSerializedSparseVector = (vector: SparseVector): SerializedSparseVector => ({
+const toSerializedSparseVector = (
+  vector: SparseVector,
+): SerializedSparseVector => ({
   "#type": SPARSE_VECTOR_TYPE,
   indices: vector.indices,
   values: vector.values,
@@ -311,10 +349,13 @@ export const serializeMetadata = (
   const result: SerializedMetadata = {};
 
   Object.entries(metadata).forEach(([key, value]) => {
+    if (value === null || value === undefined) {
+      return;
+    }
     if (validateSparseVector(value)) {
       result[key] = toSerializedSparseVector(value);
     } else {
-      result[key] = value ?? null;
+      result[key] = value;
     }
   });
 
@@ -335,7 +376,9 @@ export const serializeMetadatas = (
   return metadatas.map((metadata) => serializeMetadata(metadata) ?? null);
 };
 
-const isSerializedSparseVector = (value: unknown): value is SerializedSparseVector => {
+const isSerializedSparseVector = (
+  value: unknown,
+): value is SerializedSparseVector => {
   if (typeof value !== "object" || value === null) {
     return false;
   }
@@ -549,12 +592,30 @@ export const validateWhere = (where: Where) => {
       }
 
       if (
-        !["$gt", "$gte", "$lt", "$lte", "$ne", "$eq", "$in", "$nin"].includes(
-          operator,
-        )
+        ["$contains", "$not_contains"].includes(operator) &&
+        !["string", "number", "boolean"].includes(typeof operand)
       ) {
         throw new ChromaValueError(
-          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, but got ${operator}`,
+          `Expected operand value to be a string, number, or boolean for ${operator}, but got ${typeof operand}`,
+        );
+      }
+
+      if (
+        ![
+          "$gt",
+          "$gte",
+          "$lt",
+          "$lte",
+          "$ne",
+          "$eq",
+          "$in",
+          "$nin",
+          "$contains",
+          "$not_contains",
+        ].includes(operator)
+      ) {
+        throw new ChromaValueError(
+          `Expected operator to be one of $gt, $gte, $lt, $lte, $ne, $eq, $in, $nin, $contains, $not_contains, but got ${operator}`,
         );
       }
 

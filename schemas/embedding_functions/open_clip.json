@@ -14,7 +14,10 @@
       "description": "Parameter checkpoint for the open_clip embedding function"
     },
     "device": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter device for the open_clip embedding function"
     }
   },

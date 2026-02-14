@@ -1,0 +1,4 @@
+# CODEOWNERS for Rust components
+rust/error/ @codetheweb @rescrv
+rust/api_types/ @codetheweb @rescrv
+rust/chroma/ @codetheweb @rescrv

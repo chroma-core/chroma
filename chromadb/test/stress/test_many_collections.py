@@ -21,7 +21,8 @@ def test_many_collections(client: ServerAPI) -> None:
         # point is to test the file handle limit
         return
 
-    num_collections = 10000
+    # NOTE(rescrv): 10k collections blows memory, 7.5k gives 25% headroom
+    num_collections = 7500
     collections: List[Collection] = []
     for i in range(num_collections):
         new_collection = client.create_collection(

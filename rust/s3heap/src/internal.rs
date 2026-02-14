@@ -5,7 +5,7 @@ use arrow::array::{Array, ArrayRef, RecordBatch, StringArray};
 use backon::Retryable;
 use bytes::Bytes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
-use chroma_storage::{DeleteOptions, ETag, GetOptions, PutOptions, Storage, StorageError};
+use chroma_storage::{DeleteOptions, ETag, GetOptions, PutMode, PutOptions, Storage, StorageError};
 use chrono::round::DurationRound;
 use chrono::{DateTime, TimeDelta, Timelike, Utc};
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -359,10 +359,11 @@ impl Internal {
 
         let path = self.path_for_bucket(bucket);
         let buffer = construct_parquet(items)?;
+        let options = PutOptions::default().with_priority(StorageRequestPriority::P0);
         let options = if let Some(e_tag) = e_tag.as_ref() {
-            PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
+            options.with_mode(PutMode::IfMatch(e_tag.clone()))
         } else {
-            PutOptions::if_not_exists(StorageRequestPriority::P0)
+            options.with_mode(PutMode::IfNotExist)
         };
 
         (|| async {
@@ -904,7 +905,7 @@ mod tests {
             nonce: Uuid::new_v4(),
         };
 
-        let result = construct_parquet(&[item.clone()]);
+        let result = construct_parquet(std::slice::from_ref(&item));
         assert!(result.is_ok());
         let buffer = result.unwrap();
 

@@ -154,6 +154,10 @@ class Settings(BaseSettings):  # type: ignore
     # eg ["http://localhost:8000"]
     chroma_server_cors_allow_origins: List[str] = []
 
+    chroma_http_keepalive_secs: Optional[float] = 40.0
+    chroma_http_max_connections: Optional[int] = None
+    chroma_http_max_keepalive_connections: Optional[int] = None
+
     # ==================
     # Server config
     # ==================

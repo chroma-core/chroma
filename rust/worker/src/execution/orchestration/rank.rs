@@ -6,7 +6,7 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::{Limit, Rank, RecordMeasure, SearchPayloadResult, Select},
+    operator::{GroupBy, Limit, Rank, RecordMeasure, SearchPayloadResult, Select},
     CollectionAndSegments,
 };
 use thiserror::Error;
@@ -17,6 +17,7 @@ use crate::execution::{
     operators::{
         limit::{LimitError, LimitInput, LimitOutput},
         rank::{RankError, RankInput, RankOutput},
+        ranked_group_by::{RankedGroupByError, RankedGroupByInput, RankedGroupByOutput},
         select::{SelectError, SelectInput, SelectOutput},
     },
     orchestration::knn_filter::KnnFilterOutput,
@@ -32,6 +33,8 @@ pub enum RankOrchestratorError {
     Limit(#[from] LimitError),
     #[error("Panic: {0}")]
     Panic(#[from] PanicError),
+    #[error("Error running RankedGroupBy operator: {0}")]
+    RankedGroupBy(#[from] RankedGroupByError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Error running Rank operator: {0}")]
@@ -47,6 +50,7 @@ impl ChromaError for RankOrchestratorError {
             RankOrchestratorError::Channel(err) => err.code(),
             RankOrchestratorError::Limit(e) => e.code(),
             RankOrchestratorError::Panic(_) => ErrorCodes::Aborted,
+            RankOrchestratorError::RankedGroupBy(e) => e.code(),
             RankOrchestratorError::Result(_) => ErrorCodes::Internal,
             RankOrchestratorError::Rank(err) => err.code(),
             RankOrchestratorError::Select(err) => err.code(),
@@ -84,8 +88,13 @@ pub struct RankOrchestratorOutput {
 ///            │
 ///            ▼
 ///   ┌──────────────────┐
-///   │  Rank Operator   │
+///   │      Rank        │
 ///   └────────┬─────────┘
+///            │
+///            ▼
+///   ┌──────────────────┐
+///   │  RankedGroupBy   │
+///   └──────────────────┘
 ///            │
 ///            ▼
 ///   ┌──────────────────┐
@@ -94,7 +103,7 @@ pub struct RankOrchestratorOutput {
 ///            │
 ///            ▼
 ///   ┌──────────────────┐
-///   │ Select Operator  │
+///   │     Select       │
 ///   └────────┬─────────┘
 ///            │
 ///            ▼
@@ -107,12 +116,12 @@ pub struct RankOrchestratorOutput {
 ///            │
 ///            ▼
 ///   ┌──────────────────┐
-///   │  Limit Operator  │
+///   │      Limit       │
 ///   └────────┬─────────┘
 ///            │
 ///            ▼
 ///   ┌──────────────────┐
-///   │ Select Operator  │
+///   │     Select       │
 ///   └────────┬─────────┘
 ///            │
 ///            ▼
@@ -129,6 +138,7 @@ pub struct RankOrchestrator {
     knn_filter_output: KnnFilterOutput,
     knn_results: Vec<Vec<RecordMeasure>>,
     rank: Rank,
+    group_by: GroupBy,
     limit: Limit,
     select: Select,
 
@@ -148,6 +158,7 @@ impl RankOrchestrator {
         knn_filter_output: KnnFilterOutput,
         knn_results: Vec<Vec<RecordMeasure>>,
         rank: Rank,
+        group_by: GroupBy,
         limit: Limit,
         select: Select,
         collection_and_segments: CollectionAndSegments,
@@ -159,12 +170,44 @@ impl RankOrchestrator {
             queue,
             knn_results,
             rank,
+            group_by,
             limit,
             select,
             collection_and_segments,
             knn_filter_output,
             result_channel: None,
         }
+    }
+
+    /// Dispatch Select operator for the given records
+    async fn select(&mut self, records: Vec<RecordMeasure>, ctx: &ComponentContext<Self>) {
+        let task = wrap(
+            Box::new(self.select.clone()),
+            SelectInput {
+                records,
+                logs: self.knn_filter_output.logs.clone(),
+                blockfile_provider: self.blockfile_provider.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+
+        self.send(task, ctx, Some(Span::current())).await;
+    }
+
+    /// Apply limit slice to records and dispatch Select operator
+    async fn slice_and_select(
+        &mut self,
+        records: Vec<RecordMeasure>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let offset = self.limit.offset as usize;
+        let limit = self.limit.limit.unwrap_or(u32::MAX) as usize;
+
+        let sliced_records = records.into_iter().skip(offset).take(limit).collect();
+
+        self.select(sliced_records, ctx).await;
     }
 }
 
@@ -248,27 +291,17 @@ impl Handler<TaskResult<LimitOutput, LimitError>> for RankOrchestrator {
             None => return,
         };
 
-        let task = wrap(
-            Box::new(self.select.clone()),
-            SelectInput {
-                records: output
-                    .offset_ids
-                    .iter()
-                    .enumerate()
-                    .map(|(rank_position, offset_id)| RecordMeasure {
-                        offset_id,
-                        measure: rank_position as f32,
-                    })
-                    .collect(),
-                logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
+        let records = output
+            .offset_ids
+            .iter()
+            .enumerate()
+            .map(|(rank_position, offset_id)| RecordMeasure {
+                offset_id,
+                measure: rank_position as f32,
+            })
+            .collect();
 
-        self.send(task, ctx, Some(Span::current())).await;
+        self.select(records, ctx).await;
     }
 }
 
@@ -286,31 +319,43 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
             None => return,
         };
 
-        // Apply limit (offset and limit) directly on the ranked results
-        // This slices the ranked records instead of using the Limit operator
-        let offset = self.limit.offset as usize;
-        let limit = self.limit.limit.unwrap_or(u32::MAX) as usize;
+        // If group_by is configured, dispatch RankedGroupBy operator
+        // Otherwise, proceed directly to limit + select
+        if !self.group_by.keys.is_empty() && self.group_by.aggregate.is_some() {
+            let task = wrap(
+                Box::new(self.group_by.clone()),
+                RankedGroupByInput {
+                    records: output.ranks,
+                    logs: self.knn_filter_output.logs.clone(),
+                    blockfile_provider: self.blockfile_provider.clone(),
+                    record_segment: self.collection_and_segments.record_segment.clone(),
+                },
+                ctx.receiver(),
+                self.context.task_cancellation_token.clone(),
+            );
 
-        let sliced_records = output
-            .ranks
-            .into_iter()
-            .skip(offset)
-            .take(limit)
-            .collect::<Vec<_>>();
+            self.send(task, ctx, Some(Span::current())).await;
+        } else {
+            self.slice_and_select(output.ranks, ctx).await;
+        }
+    }
+}
 
-        let task = wrap(
-            Box::new(self.select.clone()),
-            SelectInput {
-                records: sliced_records,
-                logs: self.knn_filter_output.logs.clone(),
-                blockfile_provider: self.blockfile_provider.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
+#[async_trait]
+impl Handler<TaskResult<RankedGroupByOutput, RankedGroupByError>> for RankOrchestrator {
+    type Result = ();
 
-        self.send(task, ctx, Some(Span::current())).await;
+    async fn handle(
+        &mut self,
+        message: TaskResult<RankedGroupByOutput, RankedGroupByError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        self.slice_and_select(output.records, ctx).await;
     }
 }
 

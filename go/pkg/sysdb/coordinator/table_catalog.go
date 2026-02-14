@@ -10,6 +10,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/common"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator/model"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbmodel"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/types"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
 const (
@@ -280,7 +282,7 @@ func (tc *Catalog) createCollectionImpl(txCtx context.Context, createCollection 
 		return nil, false, err
 	}
 	if len(databases) == 0 {
-		log.Error("database not found", zap.Error(err))
+		log.Error("database not found for database", zap.String("database_name", databaseName), zap.String("tenant_id", tenantID))
 		return nil, false, common.ErrDatabaseNotFound
 	}
 
@@ -566,6 +568,7 @@ func (tc *Catalog) GetCollectionWithSegments(ctx context.Context, collectionID t
 		collection = collection_entry
 		return nil
 	})
+
 	if err != nil {
 		return nil, nil, err
 	}
@@ -710,6 +713,49 @@ func (tc *Catalog) softDeleteCollection(ctx context.Context, deleteCollection *m
 			return common.ErrCollectionDeleteNonExistingCollection
 		}
 
+		// List attached functions for this collection (as input) and soft delete them
+		deleteCollectionIDStr := deleteCollection.ID.String()
+		attachedFunctions, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(nil, nil, &deleteCollectionIDStr, true)
+		if err != nil {
+			return err
+		}
+		for _, attachedFunction := range attachedFunctions {
+			log.Info("Soft deleting attached function for input collection", zap.String("attached_function_id", attachedFunction.ID.String()), zap.String("collection_id", deleteCollection.ID.String()))
+			if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunction.ID, uuid.UUID(deleteCollection.ID)); err != nil {
+				return err
+			}
+		}
+
+		// If this collection is an output collection, soft delete the attached function that created it
+		// Check schema for source_attached_function_id
+		if sourceAttachedFunctionIDStr := model.GetSourceAttachedFunctionIDFromSchema(collections[0].Collection.SchemaStr); sourceAttachedFunctionIDStr != nil {
+			attachedFunctionID, parseErr := uuid.Parse(*sourceAttachedFunctionIDStr)
+			if parseErr != nil {
+				log.Error("Failed to parse attached function ID from schema", zap.Error(parseErr), zap.String("value", *sourceAttachedFunctionIDStr))
+				return parseErr
+			}
+			attachedFunction, err := tc.metaDomain.AttachedFunctionDb(txCtx).GetAttachedFunctions(&attachedFunctionID, nil, nil, true)
+			if err != nil {
+				log.Error("Failed to get attached function by ID", zap.Error(err), zap.String("attached_function_id", attachedFunctionID.String()))
+				return err
+			}
+			if len(attachedFunction) == 0 {
+				log.Info("Attached function not found, may have been deleted already", zap.String("attached_function_id", attachedFunctionID.String()))
+			} else {
+				inputCollectionID, parseErr := uuid.Parse(attachedFunction[0].InputCollectionID)
+				if parseErr != nil {
+					log.Error("Failed to parse input collection ID", zap.Error(parseErr), zap.String("input_collection_id", attachedFunction[0].InputCollectionID))
+					return parseErr
+				}
+				log.Info("Soft deleting attached function for output collection",
+					zap.String("attached_function_id", attachedFunctionID.String()),
+					zap.String("output_collection_id", deleteCollection.ID.String()))
+				if err := tc.metaDomain.AttachedFunctionDb(txCtx).SoftDeleteByID(attachedFunctionID, inputCollectionID); err != nil {
+					return err
+				}
+			}
+		}
+
 		// Generate new name with timestamp and random number
 		oldName := *collections[0].Collection.Name
 		newName := fmt.Sprintf("_deleted_%s_%s", oldName, deleteCollection.ID.String())
@@ -752,14 +798,31 @@ func (tc *Catalog) GetSoftDeletedCollections(ctx context.Context, collectionID *
 	return collectionList, nil
 }
 
-// updateCollectionConfiguration handles parsing and updating collection configuration
-func (tc *Catalog) updateCollectionConfiguration(
+// updateCollectionConfigurationAndSchema handles parsing and updating collection configuration and schema
+func (tc *Catalog) updateCollectionConfigurationAndSchema(
 	existingConfigJsonStr *string,
+	existingSchemaStr *string,
 	updateConfigJsonStr *string,
 	collectionMetadata []*dbmodel.CollectionMetadata,
-) (*string, error) {
-	if updateConfigJsonStr == nil {
-		return nil, nil
+) (*string, *string, error) {
+	if updateConfigJsonStr == nil || *updateConfigJsonStr == "{}" || *updateConfigJsonStr == "" {
+		return nil, nil, nil
+	}
+
+	// Parse update configuration
+	var updateConfig model.InternalUpdateCollectionConfiguration
+	if err := json.Unmarshal([]byte(*updateConfigJsonStr), &updateConfig); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse update configuration: %w", err)
+	}
+
+	// Check if schema exists and merge config into it
+	if existingSchemaStr != nil && *existingSchemaStr != "" && *existingSchemaStr != "{}" {
+		// Schema is the source of truth - merge the updated config into schema
+		newSchemaStr, err := model.UpdateSchemaFromConfig(updateConfig, *existingSchemaStr)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to merge config into schema: %w", err)
+		}
+		return nil, &newSchemaStr, nil
 	}
 
 	// Parse existing configuration
@@ -808,17 +871,11 @@ func (tc *Catalog) updateCollectionConfiguration(
 		}
 	}
 
-	// Parse update configuration
-	var updateConfig model.InternalUpdateCollectionConfiguration
-	if err := json.Unmarshal([]byte(*updateConfigJsonStr), &updateConfig); err != nil {
-		return nil, fmt.Errorf("failed to parse update configuration: %w", err)
-	}
-
 	// Update existing configuration with new values
 	if updateConfig.VectorIndex != nil {
 		if updateConfig.VectorIndex.Hnsw != nil {
 			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Hnsw == nil {
-				return existingConfigJsonStr, nil
+				return existingConfigJsonStr, nil, nil
 			}
 			if updateConfig.VectorIndex.Hnsw.EfSearch != nil {
 				existingConfig.VectorIndex.Hnsw.EfSearch = *updateConfig.VectorIndex.Hnsw.EfSearch
@@ -840,7 +897,7 @@ func (tc *Catalog) updateCollectionConfiguration(
 			}
 		} else if updateConfig.VectorIndex.Spann != nil {
 			if existingConfig.VectorIndex == nil || existingConfig.VectorIndex.Spann == nil {
-				return existingConfigJsonStr, nil
+				return existingConfigJsonStr, nil, nil
 			}
 			if updateConfig.VectorIndex.Spann.EfSearch != nil {
 				existingConfig.VectorIndex.Spann.EfSearch = *updateConfig.VectorIndex.Spann.EfSearch
@@ -858,10 +915,10 @@ func (tc *Catalog) updateCollectionConfiguration(
 	// Serialize updated config back to JSON
 	updatedConfigBytes, err := json.Marshal(existingConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to serialize updated configuration: %w", err)
+		return nil, nil, fmt.Errorf("failed to serialize updated configuration: %w", err)
 	}
 	updatedConfigStr := string(updatedConfigBytes)
-	return &updatedConfigStr, nil
+	return &updatedConfigStr, nil, nil
 }
 
 func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model.UpdateCollection, ts types.Timestamp) (*model.Collection, error) {
@@ -887,9 +944,10 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 		}
 		collection := collections[0]
 
-		// Update configuration
-		newConfigJsonStr, err := tc.updateCollectionConfiguration(
+		// Update configuration and/or schema
+		newConfigJsonStr, newSchemaStr, err := tc.updateCollectionConfigurationAndSchema(
 			collection.Collection.ConfigurationJsonStr,
+			collection.Collection.SchemaStr,
 			updateCollection.NewConfigurationJsonStr,
 			collection.CollectionMetadata,
 		)
@@ -902,6 +960,7 @@ func (tc *Catalog) UpdateCollection(ctx context.Context, updateCollection *model
 			Name:                 updateCollection.Name,
 			Dimension:            updateCollection.Dimension,
 			ConfigurationJsonStr: newConfigJsonStr,
+			SchemaStr:            newSchemaStr,
 			Ts:                   ts,
 		}
 		err = tc.metaDomain.CollectionDb(txCtx).Update(dbCollection)
@@ -1343,7 +1402,7 @@ func (tc *Catalog) CreateCollectionAndSegments(ctx context.Context, createCollec
 			return nil, false, err
 		}
 		if len(databases) == 0 {
-			log.Error("database not found", zap.Error(err))
+			log.Error("database not found for database", zap.String("database_name", createCollection.DatabaseName), zap.String("tenant_id", createCollection.TenantID))
 			return nil, false, common.ErrDatabaseNotFound
 		}
 
@@ -1665,7 +1724,7 @@ func (tc *Catalog) updateVersionFileInS3(ctx context.Context, versionFilePb *coo
 func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
 	// This is the core path now, since version files are enabled
 	if tc.versionFileEnabled {
-		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction)
+		return tc.FlushCollectionCompactionForVersionedCollection(ctx, flushCollectionCompaction, nil)
 	}
 	collectionID := types.FromUniqueID(flushCollectionCompaction.ID)
 
@@ -1673,6 +1732,7 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		ID: flushCollectionCompaction.ID.String(),
 	}
 
+	// Use explicit transaction parameter to ensure both operations run in the same transaction
 	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
 		// Check if collection exists.
 		collection, err := tc.metaDomain.CollectionDb(txCtx).GetCollectionWithoutMetadata(collectionID, nil, nil)
@@ -1717,6 +1777,73 @@ func (tc *Catalog) FlushCollectionCompaction(ctx context.Context, flushCollectio
 		return nil, err
 	}
 	return flushCollectionInfo, nil
+}
+
+// FlushCollectionCompactionsAndAttachedFunction atomically updates multiple collection compaction data
+// and attached function completion offset in a single transaction.
+func (tc *Catalog) FlushCollectionCompactionsAndAttachedFunction(
+	ctx context.Context,
+	collectionCompactions []*model.FlushCollectionCompaction,
+	attachedFunctionID uuid.UUID,
+	completionOffset int64,
+) (*model.ExtendedFlushCollectionInfo, error) {
+	if !tc.versionFileEnabled {
+		// Attached-function-based compactions are only supported with versioned collections
+		log.Error("FlushCollectionCompactionsAndAttachedFunction is only supported for versioned collections")
+		return nil, errors.New("attached-function-based compaction requires versioned collections")
+	}
+
+	if len(collectionCompactions) == 0 {
+		return nil, errors.New("at least one collection compaction is required")
+	}
+
+	flushInfos := make([]*model.FlushCollectionInfo, 0, len(collectionCompactions))
+
+	err := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		var err error
+		// Get the transaction from context to pass to FlushCollectionCompactionForVersionedCollection
+		tx := dbcore.GetDB(txCtx)
+
+		// Handle all collection compactions
+		for _, collectionCompaction := range collectionCompactions {
+			log.Info("FlushCollectionCompactionsAndAttachedFunction", zap.String("collection_id", collectionCompaction.ID.String()))
+			flushInfo, err := tc.FlushCollectionCompactionForVersionedCollection(txCtx, collectionCompaction, tx)
+			if err != nil {
+				return err
+			}
+			flushInfos = append(flushInfos, flushInfo)
+		}
+
+		err = tc.metaDomain.AttachedFunctionDb(txCtx).Update(&dbmodel.AttachedFunction{
+			ID:               attachedFunctionID,
+			CompletionOffset: completionOffset,
+		})
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Populate attached function fields with authoritative values from database
+	for _, flushInfo := range flushInfos {
+		flushInfo.AttachedFunctionCompletionOffset = &completionOffset
+	}
+
+	// Log with first collection ID (typically the output collection)
+	log.Info("FlushCollectionCompactionsAndAttachedFunction",
+		zap.String("first_collection_id", collectionCompactions[0].ID.String()),
+		zap.Int("collection_count", len(collectionCompactions)),
+		zap.String("attached_function_id", attachedFunctionID.String()),
+		zap.Int64("completion_offset", completionOffset))
+
+	return &model.ExtendedFlushCollectionInfo{
+		Collections: flushInfos,
+	}, nil
 }
 
 func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVersionFile, collectionID string, version int64) error {
@@ -1781,13 +1908,20 @@ func (tc *Catalog) validateVersionFile(versionFile *coordinatorpb.CollectionVers
 // 4. Till the CAS operation succeeds, retry the operation (i.e. goto 1)
 // 5. 		If version CAS fails - then fail the operation to the Compactor.
 // 6. 		If version file name CAS fails - read updated file and write a new version file to S3.
-func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction) (*model.FlushCollectionInfo, error) {
+func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.Context, flushCollectionCompaction *model.FlushCollectionCompaction, tx *gorm.DB) (*model.FlushCollectionInfo, error) {
 	// The result that is sent back to the Compactor.
 	flushCollectionInfo := &model.FlushCollectionInfo{
 		ID: flushCollectionCompaction.ID.String(),
 	}
 
 	log.Info("FlushCollectionCompaction", zap.String("collection_id", flushCollectionInfo.ID), zap.Int64("log_position", flushCollectionCompaction.LogPosition))
+
+	// If a transaction is provided, do a single attempt without retry - any failure should propagate up
+	// to let the outer transaction fail atomically.
+	maxAttemptsForThisCall := maxAttempts
+	if tx != nil {
+		maxAttemptsForThisCall = 1
+	}
 
 	// Do the operation in a loop until the CollectionEntry is updated,
 	// 		OR FAIL the operation if the version is stale
@@ -1799,7 +1933,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 	// to mark certain versions and then tries to update the VersionFileName in
 	// the table at the same time.
 	numAttempts := 0
-	for numAttempts < maxAttempts {
+	for numAttempts < maxAttemptsForThisCall {
 		numAttempts++
 		// Get the current version info and the version file from the table.
 		collectionEntry, segments, err := tc.GetCollectionWithSegments(ctx, flushCollectionCompaction.ID, true)
@@ -1882,7 +2016,10 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 
 		numActiveVersions := tc.getNumberOfActiveVersions(existingVersionFilePb)
 
-		txErr := tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+		// Execute the database operations - either within provided transaction or new transaction
+		var txErr error
+
+		executeOperations := func(ctx context.Context, tx *gorm.DB) error {
 			// NOTE: DO NOT move UpdateTenantLastCompactionTime & RegisterFilePaths to the end of the transaction.
 			//		 Keep both these operations before the UpdateLogPositionAndVersionInfo.
 			//       UpdateLogPositionAndVersionInfo acts as a CAS operation whose failure will roll back the transaction.
@@ -1891,8 +2028,13 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// The other approach is to use a "SELECT FOR UPDATE" to lock the Collection entry at the start of the transaction,
 			// which is costlier than the current approach that does not lock the Collection entry.
 
+			// Create context with transaction if provided
+			if tx != nil {
+				ctx = dbcore.CtxWithTransaction(ctx, tx)
+			}
+
 			// register files to Segment metadata
-			err = tc.metaDomain.SegmentDb(txCtx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
+			err := tc.metaDomain.SegmentDb(ctx).RegisterFilePaths(flushCollectionCompaction.FlushSegmentCompactions)
 			if err != nil {
 				return err
 			}
@@ -1900,7 +2042,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// TODO: add a system configuration to disable
 			// since this might cause resource contention if one tenant has a lot of collection compactions at the same time
 			lastCompactionTime := time.Now().Unix()
-			err = tc.metaDomain.TenantDb(txCtx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
+			err = tc.metaDomain.TenantDb(ctx).UpdateTenantLastCompactionTime(flushCollectionCompaction.TenantID, lastCompactionTime)
 			if err != nil {
 				return err
 			}
@@ -1913,7 +2055,7 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			// if the Collection entry is updated by another Tx.
 
 			// Update collection log position and version
-			rowsAffected, err := tc.metaDomain.CollectionDb(txCtx).UpdateLogPositionAndVersionInfo(
+			rowsAffected, err := tc.metaDomain.CollectionDb(ctx).UpdateLogPositionAndVersionInfo(
 				flushCollectionCompaction.ID.String(),
 				flushCollectionCompaction.LogPosition,
 				flushCollectionCompaction.CurrentCollectionVersion,
@@ -1944,9 +2086,20 @@ func (tc *Catalog) FlushCollectionCompactionForVersionedCollection(ctx context.C
 			flushCollectionInfo.TenantLastCompactionTime = lastCompactionTime
 			flushCollectionInfo.CollectionVersion = flushCollectionCompaction.CurrentCollectionVersion + 1
 
-			// return nil will commit the transaction
+			// Success
 			return nil
-		}) // End of transaction
+		}
+
+		// Check if a transaction was provided - if so, use it directly instead of creating nested transaction
+		if tx != nil {
+			// Use provided transaction directly - no nested transaction
+			txErr = executeOperations(ctx, tx)
+		} else {
+			// Create new transaction
+			txErr = tc.txImpl.Transaction(ctx, func(txCtx context.Context) error {
+				return executeOperations(txCtx, nil)
+			})
+		}
 
 		if txErr == nil {
 			// CAS operation succeeded.
@@ -2309,4 +2462,8 @@ func (tc *Catalog) GetVersionFileNamesForCollection(ctx context.Context, tenantI
 
 func (tc *Catalog) FinishDatabaseDeletion(ctx context.Context, cutoffTime time.Time) (uint64, error) {
 	return tc.metaDomain.DatabaseDb(ctx).FinishDatabaseDeletion(cutoffTime)
+}
+
+func (tc *Catalog) IncrementCompactionFailureCount(ctx context.Context, collectionID types.UniqueID) error {
+	return tc.metaDomain.CollectionDb(ctx).IncrementCompactionFailureCount(collectionID.String())
 }

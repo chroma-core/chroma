@@ -1,6 +1,6 @@
 [package]
 name = "chroma-cli"
-version = "1.1.11"
+version = "1.4.0"
 edition = "2021"
 
 [dependencies]
@@ -8,6 +8,7 @@ axum = { workspace = true }
 arboard = "3.4.1"
 clap = { version = "4.5.28", features = ["derive"] }
 chroma = { workspace = true }
+chroma-api-types = { workspace = true }
 chroma-frontend = { workspace = true }
 chroma-config = { workspace = true }
 chroma-system = { workspace = true }
@@ -16,6 +17,7 @@ chroma-segment = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-types = { workspace = true }
 chroma-log = { workspace = true }
+chrono = { workspace = true }
 colored = "3.0.0"
 dialoguer = "0.11.0"
 dirs = "6.0.0"

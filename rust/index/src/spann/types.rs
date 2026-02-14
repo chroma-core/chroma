@@ -16,8 +16,7 @@ use chroma_config::{registry::Registry, Configurable};
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_tracing::util::Stopwatch;
-use chroma_types::SpannPostingList;
-use chroma_types::{CollectionUuid, InternalSpannConfiguration};
+use chroma_types::{Cmek, CollectionUuid, InternalSpannConfiguration, SpannPostingList};
 use futures::future;
 use opentelemetry::global;
 use rand::seq::SliceRandom;
@@ -36,7 +35,7 @@ use crate::{
         HnswIndexRef,
     },
     spann::utils::cluster,
-    Index, IndexUuid,
+    IndexUuid,
 };
 
 use super::utils::{rng_query, KMeansAlgorithmInput, KMeansError, RngQueryError};
@@ -68,6 +67,14 @@ impl GarbageCollectionContext {
             pl_context,
             hnsw_context,
         })
+    }
+
+    pub fn pl_context(&self) -> &PlGarbageCollectionContext {
+        &self.pl_context
+    }
+
+    pub fn hnsw_context(&self) -> &HnswGarbageCollectionContext {
+        &self.hnsw_context
     }
 }
 
@@ -320,6 +327,7 @@ pub struct SpannIndexWriter {
     pub prefix_path: String,
     metrics: SpannMetrics,
     stats: WriteStats,
+    cmek: Option<Cmek>,
 }
 
 #[derive(Error, Debug)]
@@ -444,6 +452,7 @@ impl SpannIndexWriter {
         collection_id: CollectionUuid,
         metrics: SpannMetrics,
         prefix_path: String,
+        cmek: Option<Cmek>,
     ) -> Self {
         SpannIndexWriter {
             hnsw_index,
@@ -461,6 +470,7 @@ impl SpannIndexWriter {
             metrics,
             stats: WriteStats::default(),
             prefix_path,
+            cmek,
         }
     }
 
@@ -570,10 +580,14 @@ impl SpannIndexWriter {
         blockfile_id: &Uuid,
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
+        cmek: Option<Cmek>,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
         let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string());
         bf_options = bf_options.unordered_mutations();
         bf_options = bf_options.fork(*blockfile_id);
+        if let Some(cmek) = cmek {
+            bf_options = bf_options.with_cmek(cmek);
+        }
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await
@@ -594,10 +608,14 @@ impl SpannIndexWriter {
         blockfile_provider: &BlockfileProvider,
         prefix_path: &str,
         pl_block_size: usize,
+        cmek: Option<Cmek>,
     ) -> Result<BlockfileWriter, SpannIndexWriterError> {
         let mut bf_options = BlockfileWriterOptions::new(prefix_path.to_string())
             .max_block_size_bytes(pl_block_size);
         bf_options = bf_options.unordered_mutations();
+        if let Some(cmek) = cmek {
+            bf_options = bf_options.with_cmek(cmek);
+        }
         match blockfile_provider
             .write::<u32, &SpannPostingList<'_>>(bf_options)
             .await
@@ -625,6 +643,7 @@ impl SpannIndexWriter {
         gc_context: GarbageCollectionContext,
         pl_block_size: usize,
         metrics: SpannMetrics,
+        cmek: Option<Cmek>,
     ) -> Result<Self, SpannIndexWriterError> {
         let distance_function = DistanceFunction::from(params.space.clone());
         // Create the HNSW index.
@@ -667,10 +686,22 @@ impl SpannIndexWriter {
         // Fork the posting list writer.
         let posting_list_writer = match posting_list_id {
             Some(posting_list_id) => {
-                Self::fork_postings_list(posting_list_id, blockfile_provider, prefix_path).await?
+                Self::fork_postings_list(
+                    posting_list_id,
+                    blockfile_provider,
+                    prefix_path,
+                    cmek.clone(),
+                )
+                .await?
             }
             None => {
-                Self::create_posting_list(blockfile_provider, prefix_path, pl_block_size).await?
+                Self::create_posting_list(
+                    blockfile_provider,
+                    prefix_path,
+                    pl_block_size,
+                    cmek.clone(),
+                )
+                .await?
             }
         };
 
@@ -706,6 +737,7 @@ impl SpannIndexWriter {
             *collection_id,
             metrics,
             prefix_path.to_string(),
+            cmek,
         ))
     }
 
@@ -766,11 +798,66 @@ impl SpannIndexWriter {
         Ok(false)
     }
 
+    async fn try_delete_posting_list(&self, head_id: u32) -> Result<(), SpannIndexWriterError> {
+        let _write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
+        if self.is_head_deleted(head_id as usize).await? {
+            return Ok(());
+        }
+        let result = self
+            .posting_list_writer
+            .get_owned::<u32, &SpannPostingList<'_>>("", head_id)
+            .await;
+        // If the error is posting list not found, then return ok.
+        match result {
+            Ok(Some((doc_offset_ids, doc_versions, _))) => {
+                let mut outdated_count = 0;
+                for (doc_offset_id, doc_version) in doc_offset_ids.iter().zip(doc_versions.iter()) {
+                    if self.is_outdated(*doc_offset_id, *doc_version).await? {
+                        outdated_count += 1;
+                    }
+                }
+                if outdated_count == doc_offset_ids.len() {
+                    {
+                        let hnsw_write_guard = self.hnsw_index.inner.write();
+                        hnsw_write_guard
+                            .hnsw_index
+                            .delete(head_id as usize)
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error deleting head {} from hnsw index: {}",
+                                    head_id,
+                                    e
+                                );
+                                SpannIndexWriterError::HnswIndexMutateError(e)
+                            })?;
+                    }
+                    self.posting_list_writer
+                        .delete::<u32, &SpannPostingList<'_>>("", head_id)
+                        .await
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error deleting posting list for head {}: {}",
+                                head_id,
+                                e
+                            );
+                            SpannIndexWriterError::PostingListSetError(e)
+                        })?;
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                tracing::error!("Error getting posting list for head {}: {}", head_id, e);
+                return Err(SpannIndexWriterError::PostingListGetError(e));
+            }
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn collect_and_reassign_split_points(
         &self,
         new_head_ids: &[i32],
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
@@ -814,6 +901,8 @@ impl SpannIndexWriter {
                     .await?;
                 }
             }
+            // Delete head if all points were moved out.
+            self.try_delete_posting_list(new_head_ids[k] as u32).await?;
         }
         Ok(assigned_ids)
     }
@@ -938,7 +1027,7 @@ impl SpannIndexWriter {
         head_id: usize,
         head_embedding: &[f32],
         assigned_ids: &mut HashSet<u32>,
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
     ) -> Result<(), SpannIndexWriterError> {
         // Get posting list of each neighbour and check for reassignment criteria.
@@ -946,17 +1035,20 @@ impl SpannIndexWriter {
         let doc_versions;
         let doc_embeddings;
         {
-            // TODO(Sanket): Check if head is deleted, can happen if another concurrent thread
-            // deletes it.
-            (doc_offset_ids, doc_versions, doc_embeddings) = self
+            let result = self
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", head_id as u32)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Error getting posting list for head {}: {}", head_id, e);
-                    SpannIndexWriterError::PostingListGetError(e)
-                })?
-                .ok_or(SpannIndexWriterError::PostingListNotFound)?;
+                .await;
+            match result {
+                Ok(Some((offset_ids, versions, embeddings))) => {
+                    doc_offset_ids = offset_ids;
+                    doc_versions = versions;
+                    doc_embeddings = embeddings;
+                }
+                // Posting list can be concurrent deleted so bail out early if not found.
+                Ok(None) => return Ok(()),
+                Err(e) => return Err(SpannIndexWriterError::PostingListGetError(e)),
+            }
         }
         for (index, doc_offset_id) in doc_offset_ids.iter().enumerate() {
             if assigned_ids.contains(doc_offset_id)
@@ -1004,6 +1096,8 @@ impl SpannIndexWriter {
             )
             .await?;
         }
+        // Delete head if all points were moved out.
+        self.try_delete_posting_list(head_id as u32).await?;
         Ok(())
     }
 
@@ -1011,7 +1105,7 @@ impl SpannIndexWriter {
     async fn collect_and_reassign(
         &self,
         new_head_ids: &[i32],
-        new_head_embeddings: &[Option<&Vec<f32>>],
+        new_head_embeddings: &[Option<&[f32]>],
         old_head_embedding: &[f32],
         split_doc_offset_ids: &[Vec<u32>],
         split_doc_versions: &[Vec<u32>],
@@ -1065,7 +1159,7 @@ impl SpannIndexWriter {
         let mut new_doc_offset_ids: Vec<Vec<u32>> = Vec::with_capacity(2);
         let mut new_doc_versions: Vec<Vec<u32>> = Vec::with_capacity(2);
         let mut new_head_ids = vec![-1; 2];
-        let mut new_head_embeddings = vec![None; 2];
+        let mut new_head_embeddings: Vec<Option<&[f32]>> = vec![None; 2];
         let clustering_output;
         {
             let write_guard = self.posting_list_partitioned_mutex.lock(&head_id).await;
@@ -1175,10 +1269,18 @@ impl SpannIndexWriter {
             // Shuffle local_indices.
             local_indices.shuffle(&mut rand::thread_rng());
             let last = local_indices.len();
+            // Convert flat embeddings to Arc<[f32]> format for kmeans.
+            let doc_embeddings_arc: Vec<Arc<[f32]>> = (0..doc_offset_ids.len())
+                .map(|i| {
+                    Arc::from(
+                        &doc_embeddings[i * self.dimensionality..(i + 1) * self.dimensionality],
+                    )
+                })
+                .collect();
             // Prepare KMeans.
             let mut kmeans_input = KMeansAlgorithmInput::new(
                 local_indices,
-                &doc_embeddings,
+                &doc_embeddings_arc,
                 self.dimensionality,
                 /* k */ 2,
                 /* first */ 0,
@@ -1233,7 +1335,7 @@ impl SpannIndexWriter {
                 return Ok(());
             } else {
                 // None of the cluster_counts should be 0. Points to some error if it is.
-                if clustering_output.cluster_counts.iter().any(|&x| x == 0) {
+                if clustering_output.cluster_counts.contains(&0) {
                     tracing::error!("Zero points in a cluster after clustering");
                     return Err(SpannIndexWriterError::KMeansClusteringError(
                         KMeansError::ZeroPointsInCluster,
@@ -1264,6 +1366,7 @@ impl SpannIndexWriter {
                     if !same_head
                         && distance_function
                             .distance(&clustering_output.cluster_centers[k], &head_embedding)
+                            .abs()
                             < 1e-6
                     {
                         same_head = true;
@@ -1287,7 +1390,7 @@ impl SpannIndexWriter {
                             .num_pl_modified
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         new_head_ids[k] = head_id as i32;
-                        new_head_embeddings[k] = Some(&head_embedding);
+                        new_head_embeddings[k] = Some(head_embedding.as_slice());
                     } else {
                         // Create new head.
                         let next_id = self
@@ -1314,7 +1417,7 @@ impl SpannIndexWriter {
                             .num_pl_modified
                             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         new_head_ids[k] = next_id as i32;
-                        new_head_embeddings[k] = Some(&clustering_output.cluster_centers[k]);
+                        new_head_embeddings[k] = Some(&*clustering_output.cluster_centers[k]);
                         // Insert to hnsw now.
                         let mut hnsw_write_guard = self.hnsw_index.inner.write();
                         let hnsw_len = hnsw_write_guard.hnsw_index.len_with_deleted();
@@ -1350,17 +1453,32 @@ impl SpannIndexWriter {
                 }
                 if !same_head {
                     // Delete the old head
-                    let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard
-                        .hnsw_index
-                        .delete(head_id as usize)
+                    // First delete from hnsw then from postings list. This order
+                    // ensures that the head is never dangling.
+                    {
+                        let hnsw_write_guard = self.hnsw_index.inner.write();
+                        hnsw_write_guard
+                            .hnsw_index
+                            .delete(head_id as usize)
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error deleting head {} from hnsw index: {}",
+                                    head_id,
+                                    e
+                                );
+                                SpannIndexWriterError::HnswIndexMutateError(e)
+                            })?;
+                    }
+                    self.posting_list_writer
+                        .delete::<u32, &SpannPostingList<'_>>("", head_id)
+                        .await
                         .map_err(|e| {
                             tracing::error!(
-                                "Error deleting head {} from hnsw index: {}",
+                                "Error deleting posting list for head {}: {}",
                                 head_id,
                                 e
                             );
-                            SpannIndexWriterError::HnswIndexMutateError(e)
+                            SpannIndexWriterError::PostingListSetError(e)
                         })?;
                     self.stats
                         .num_heads_deleted
@@ -1755,12 +1873,29 @@ impl SpannIndexWriter {
                     self.stats
                         .num_pl_modified
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    // Delete from hnsw.
-                    let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
-                        tracing::error!("Error deleting head {} from hnsw index: {}", head_id, e);
-                        SpannIndexWriterError::HnswIndexMutateError(e)
-                    })?;
+                    {
+                        // Delete from hnsw.
+                        let hnsw_write_guard = self.hnsw_index.inner.write();
+                        hnsw_write_guard.hnsw_index.delete(head_id).map_err(|e| {
+                            tracing::error!(
+                                "Error deleting head {} from hnsw index: {}",
+                                head_id,
+                                e
+                            );
+                            SpannIndexWriterError::HnswIndexMutateError(e)
+                        })?;
+                    }
+                    self.posting_list_writer
+                        .delete::<u32, &SpannPostingList<'_>>("", head_id as u32)
+                        .await
+                        .map_err(|e| {
+                            tracing::error!(
+                                "Error deleting posting list for head {}: {}",
+                                head_id,
+                                e
+                            );
+                            SpannIndexWriterError::PostingListSetError(e)
+                        })?;
                     self.stats
                         .num_heads_deleted
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1779,18 +1914,31 @@ impl SpannIndexWriter {
                     self.stats
                         .num_pl_modified
                         .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    // Delete from hnsw.
-                    let hnsw_write_guard = self.hnsw_index.inner.write();
-                    hnsw_write_guard
-                        .hnsw_index
-                        .delete(nearest_head_id)
+                    {
+                        // Delete from hnsw.
+                        let hnsw_write_guard = self.hnsw_index.inner.write();
+                        hnsw_write_guard
+                            .hnsw_index
+                            .delete(nearest_head_id)
+                            .map_err(|e| {
+                                tracing::error!(
+                                    "Error deleting head {} from hnsw index: {}",
+                                    nearest_head_id,
+                                    e
+                                );
+                                SpannIndexWriterError::HnswIndexMutateError(e)
+                            })?;
+                    }
+                    self.posting_list_writer
+                        .delete::<u32, &SpannPostingList<'_>>("", nearest_head_id as u32)
+                        .await
                         .map_err(|e| {
                             tracing::error!(
-                                "Error deleting head {} from hnsw index: {}",
+                                "Error deleting posting list for head {}: {}",
                                 nearest_head_id,
                                 e
                             );
-                            SpannIndexWriterError::HnswIndexMutateError(e)
+                            SpannIndexWriterError::PostingListSetError(e)
                         })?;
                     self.stats
                         .num_heads_deleted
@@ -2207,6 +2355,9 @@ impl SpannIndexWriter {
             // Versions map. Create a writer, write all the data and commit.
             let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
             bf_options = bf_options.unordered_mutations();
+            if let Some(cmek) = &self.cmek {
+                bf_options = bf_options.with_cmek(cmek.clone());
+            }
             let versions_map_bf_writer = self
                 .blockfile_provider
                 .write::<u32, u32>(bf_options)
@@ -2249,6 +2400,9 @@ impl SpannIndexWriter {
         // Next head.
         let mut bf_options = BlockfileWriterOptions::new(self.prefix_path.clone());
         bf_options = bf_options.unordered_mutations();
+        if let Some(cmek) = &self.cmek {
+            bf_options = bf_options.with_cmek(cmek.clone());
+        }
         let max_head_id_bf = self
             .blockfile_provider
             .write::<&str, u32>(bf_options)
@@ -2272,7 +2426,7 @@ impl SpannIndexWriter {
         tracing::info!("Committed max head id");
 
         // Hnsw.
-        let (hnsw_id, prefix_path) = {
+        let (hnsw_id, prefix_path, hnsw_index) = {
             let stopwatch = Stopwatch::new(
                 &self.metrics.hnsw_commit_latency,
                 &[],
@@ -2295,7 +2449,7 @@ impl SpannIndexWriter {
                     (id, prefix_path, self.hnsw_index.clone())
                 }
             };
-            self.hnsw_provider.commit(hnsw_index).map_err(|e| {
+            self.hnsw_provider.commit(hnsw_index.clone()).map_err(|e| {
                 tracing::error!("Error committing hnsw index: {}", e);
                 SpannIndexWriterError::HnswIndexCommitError(e)
             })?;
@@ -2303,7 +2457,7 @@ impl SpannIndexWriter {
                 "Committed hnsw index in {} ms",
                 stopwatch.elapsed_micros() / 1000
             );
-            (hnsw_id, prefix_path)
+            (hnsw_id, prefix_path, hnsw_index)
         };
 
         Ok(SpannIndexFlusher {
@@ -2314,7 +2468,8 @@ impl SpannIndexWriter {
                 provider: self.hnsw_provider,
                 prefix_path,
                 index_id: hnsw_id,
-                hnsw_index: self.hnsw_index,
+                hnsw_index,
+                cmek: self.cmek,
             },
             metrics: SpannIndexFlusherMetrics {
                 pl_flush_latency: self.metrics.pl_flush_latency.clone(),
@@ -2330,20 +2485,20 @@ impl SpannIndexWriter {
     }
 }
 
-struct SpannIndexFlusherMetrics {
-    pl_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    versions_map_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    hnsw_flush_latency: opentelemetry::metrics::Histogram<u64>,
-    num_pl_entries_flushed: opentelemetry::metrics::Counter<u64>,
-    num_versions_map_entries_flushed: opentelemetry::metrics::Counter<u64>,
+pub(crate) struct SpannIndexFlusherMetrics {
+    pub(crate) pl_flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub(crate) versions_map_flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub(crate) hnsw_flush_latency: opentelemetry::metrics::Histogram<u64>,
+    pub(crate) num_pl_entries_flushed: opentelemetry::metrics::Counter<u64>,
+    pub(crate) num_versions_map_entries_flushed: opentelemetry::metrics::Counter<u64>,
 }
 
 pub struct SpannIndexFlusher {
-    pl_flusher: BlockfileFlusher,
-    versions_map_flusher: BlockfileFlusher,
-    max_head_id_flusher: BlockfileFlusher,
-    hnsw_flusher: HnswIndexFlusher,
-    metrics: SpannIndexFlusherMetrics,
+    pub(crate) pl_flusher: BlockfileFlusher,
+    pub(crate) versions_map_flusher: BlockfileFlusher,
+    pub(crate) max_head_id_flusher: BlockfileFlusher,
+    pub(crate) hnsw_flusher: HnswIndexFlusher,
+    pub(crate) metrics: SpannIndexFlusherMetrics,
 }
 
 #[derive(Debug)]
@@ -2430,6 +2585,7 @@ impl SpannIndexFlusher {
                     &self.hnsw_flusher.prefix_path,
                     &self.hnsw_flusher.index_id,
                     &self.hnsw_flusher.hnsw_index,
+                    self.hnsw_flusher.cmek.clone(),
                 )
                 .await
                 .map_err(|e| {
@@ -2863,7 +3019,6 @@ mod tests {
             GarbageCollectionContext, SpannIndexReader, SpannIndexWriter, SpannIndexWriterError,
             SpannMetrics,
         },
-        Index,
     };
 
     #[tokio::test]
@@ -2923,6 +3078,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3144,6 +3300,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3409,6 +3566,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3583,7 +3741,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reassign() {
+    async fn test_reassign_and_delete_center() {
         let tmp_dir = tempfile::tempdir().unwrap();
         let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
         let block_cache = new_cache_for_test();
@@ -3639,6 +3797,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -3765,7 +3924,7 @@ mod tests {
         writer
             .collect_and_reassign(
                 &[1, 2],
-                &[Some(&vec![0.0, 0.0]), Some(&vec![1000.0, 1000.0])],
+                &[Some(&[0.0, 0.0]), Some(&[1000.0, 1000.0])],
                 &[5000.0, 5000.0],
                 &[split_doc_offset_ids1.clone(), split_doc_offset_ids2.clone()],
                 &[split_doc_versions1.clone(), split_doc_versions2.clone()],
@@ -3775,16 +3934,19 @@ mod tests {
             .expect("Expected reassign to succeed");
         // See the reassigned points.
         {
-            // Center 1 should remain unchanged.
+            // Center 1 should get 100 points: original 50 + 50 reassigned from center 3.
+            // Points 51-100 from center 3 (near 1000,1000) get reassigned because center 2
+            // was deleted, and center 1 is the only remaining nearby center.
             let pl = writer
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 1)
                 .await
                 .expect("Error getting posting list")
                 .unwrap();
-            assert_eq!(pl.0.len(), 50);
-            assert_eq!(pl.1.len(), 50);
-            assert_eq!(pl.2.len(), 100);
+            assert_eq!(pl.0.len(), 100);
+            assert_eq!(pl.1.len(), 100);
+            assert_eq!(pl.2.len(), 200);
+            // First 50 are original points 1-50 at version 1
             for i in 1..=50 {
                 assert_eq!(pl.0[i - 1], i as u32);
                 assert_eq!(pl.1[i - 1], 1);
@@ -3794,28 +3956,26 @@ mod tests {
                     split_doc_embeddings1[(i - 1) * 2 + 1]
                 );
             }
-            // Center 2 should get 50 points, all with version 2 migrating from center 3.
+            // Next 50 are reassigned points 51-100 at version 2 (from center 3)
+            for i in 51..=100 {
+                assert_eq!(pl.0[i - 1], i as u32);
+                assert_eq!(pl.1[i - 1], 2);
+                assert_eq!(pl.2[(i - 1) * 2], split_doc_embeddings3[(i - 51) * 2]);
+                assert_eq!(
+                    pl.2[(i - 1) * 2 + 1],
+                    split_doc_embeddings3[(i - 51) * 2 + 1]
+                );
+            }
+            // Center 2 should be deleted (all its original points were reassigned out).
             let pl = writer
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 2)
                 .await
-                .expect("Error getting posting list")
-                .unwrap();
-            assert_eq!(pl.0.len(), 50);
-            assert_eq!(pl.1.len(), 50);
-            assert_eq!(pl.2.len(), 100);
-            for i in 1..=50 {
-                assert_eq!(pl.0[i - 1], 50 + i as u32);
-                assert_eq!(pl.1[i - 1], 2);
-                assert_eq!(pl.2[(i - 1) * 2], split_doc_embeddings3[(i - 1) * 2]);
-                assert_eq!(
-                    pl.2[(i - 1) * 2 + 1],
-                    split_doc_embeddings3[(i - 1) * 2 + 1]
-                );
-            }
-            // Center 3 should get 100 points. 50 points with version 1 which weere
-            // originally in center 3 and 50 points with version 2 which were originally
-            // in center 2.
+                .expect("Error getting posting list");
+            assert!(pl.is_none());
+            // Center 3 should get 100 points. 50 points with version 1 which were
+            // originally in center 3 (now outdated since reassigned to center 1) and
+            // 50 points with version 2 which were originally in center 2.
             let pl = writer
                 .posting_list_writer
                 .get_owned::<u32, &SpannPostingList<'_>>("", 3)
@@ -3910,6 +4070,7 @@ mod tests {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann index writer");
@@ -4224,6 +4385,7 @@ mod tests {
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");
@@ -4340,6 +4502,7 @@ mod tests {
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");
@@ -4480,6 +4643,7 @@ mod tests {
                     gc_context.clone(),
                     pl_block_size,
                     SpannMetrics::default(),
+                    None,
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4623,6 +4787,7 @@ mod tests {
                     gc_context.clone(),
                     pl_block_size,
                     SpannMetrics::default(),
+                    None,
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4787,6 +4952,7 @@ mod tests {
                     gc_context.clone(),
                     pl_block_size,
                     SpannMetrics::default(),
+                    None,
                 )
                 .await
                 .expect("Error creating spann index writer");
@@ -4903,6 +5069,7 @@ mod tests {
                 gc_context.clone(),
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");
@@ -5026,6 +5193,7 @@ mod tests {
                 gc_context,
                 pl_block_size,
                 SpannMetrics::default(),
+                None,
             )
             .await
             .expect("Error creating spann index writer");

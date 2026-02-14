@@ -1,4 +1,5 @@
 use chroma_log::CollectionRecord;
+use chroma_types::DatabaseName;
 
 use crate::compactor::types::CompactionJob;
 
@@ -44,8 +45,20 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         };
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
+            let database_name = match DatabaseName::new(collection.database_name.clone()) {
+                Some(db_name) => db_name,
+                None => {
+                    tracing::warn!(
+                        "Invalid database name for collection {}: {}",
+                        collection.collection_id,
+                        collection.database_name
+                    );
+                    continue;
+                }
+            };
             tasks.push(CompactionJob {
                 collection_id: collection.collection_id,
+                database_name,
             });
         }
         tasks
@@ -68,6 +81,7 @@ mod tests {
         let collections = vec![
             CollectionRecord {
                 collection_id: collection_uuid_1,
+                database_name: "test_db".to_string(),
                 tenant_id: "test".to_string(),
                 last_compaction_time: 1,
                 first_record_time: 1,
@@ -77,6 +91,7 @@ mod tests {
             },
             CollectionRecord {
                 collection_id: collection_uuid_2,
+                database_name: "test_db".to_string(),
                 tenant_id: "test".to_string(),
                 last_compaction_time: 0,
                 first_record_time: 0,

@@ -15,6 +15,8 @@ pub struct GrpcLogConfig {
     pub memberlist_provider: chroma_memberlist::config::MemberlistProviderConfig,
     #[serde(default = "GrpcLogConfig::default_assignment")]
     pub assignment: chroma_config::assignment::config::AssignmentPolicyConfig,
+    #[serde(default = "GrpcLogConfig::default_port")]
+    pub port: u16,
 }
 
 impl GrpcLogConfig {
@@ -51,6 +53,10 @@ impl GrpcLogConfig {
             },
         )
     }
+
+    fn default_port() -> u16 {
+        50051
+    }
 }
 
 impl Default for GrpcLogConfig {
@@ -62,6 +68,7 @@ impl Default for GrpcLogConfig {
             max_decoding_message_size: GrpcLogConfig::default_max_decoding_message_size(),
             memberlist_provider: GrpcLogConfig::default_memberlist_provider(),
             assignment: GrpcLogConfig::default_assignment(),
+            port: GrpcLogConfig::default_port(),
         }
     }
 }

@@ -1,6 +1,30 @@
-import { describe, expect, test } from "@jest/globals";
+import { describe, expect, jest, test } from "@jest/globals";
 import { K, Knn, Rrf, Search, SearchResult, Val, toSearch } from "../src";
 import type { SearchResponse, SparseVector } from "../src/api";
+import { CollectionImpl } from "../src/collection";
+import type { CollectionConfiguration } from "../src/collection-configuration";
+import type { ChromaClient } from "../src/chroma-client";
+import type {
+  EmbeddingFunction,
+  SparseEmbeddingFunction,
+} from "../src/embedding-function";
+
+class QueryMockEmbedding implements EmbeddingFunction {
+  public readonly name = "query_mock";
+
+  constructor(
+    private readonly queryVector: number[] = [0.42, 0.24, 0.11],
+    private readonly denseVector: number[] = [0.9, 0.8, 0.7],
+  ) {}
+
+  async generate(texts: string[]): Promise<number[][]> {
+    return texts.map(() => this.denseVector.slice());
+  }
+
+  async generateForQueries(texts: string[]): Promise<number[][]> {
+    return texts.map(() => this.queryVector.slice());
+  }
+}
 
 describe("search expression DSL", () => {
   test("builder chain converts to API payload", () => {
@@ -277,6 +301,61 @@ describe("search expression DSL", () => {
     ]);
   });
 
+  test("K.DOCUMENT.contains rejects non-string values", () => {
+    expect(() => K.DOCUMENT.contains(1 as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.contains(1 as any)).toThrow(
+      "K.DOCUMENT.contains requires a string value",
+    );
+    expect(() => K.DOCUMENT.contains(true as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.contains(true as any)).toThrow(
+      "K.DOCUMENT.contains requires a string value",
+    );
+  });
+
+  test("K.DOCUMENT.notContains rejects non-string values", () => {
+    expect(() => K.DOCUMENT.notContains(42 as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.notContains(42 as any)).toThrow(
+      "K.DOCUMENT.notContains requires a string value",
+    );
+    expect(() => K.DOCUMENT.notContains(false as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.notContains(false as any)).toThrow(
+      "K.DOCUMENT.notContains requires a string value",
+    );
+  });
+
+  test("K.DOCUMENT.contains accepts string values", () => {
+    const expr = K.DOCUMENT.contains("machine learning");
+    const payload = new Search({ where: expr }).toPayload();
+    expect(payload.filter).toEqual({
+      "#document": { $contains: "machine learning" },
+    });
+  });
+
+  test("K.DOCUMENT.notContains accepts string values", () => {
+    const expr = K.DOCUMENT.notContains("deprecated");
+    const payload = new Search({ where: expr }).toPayload();
+    expect(payload.filter).toEqual({
+      "#document": { $not_contains: "deprecated" },
+    });
+  });
+
+  test("metadata key contains/notContains still accepts numbers and booleans", () => {
+    const containsNum = K("scores").contains(42);
+    expect(new Search({ where: containsNum }).toPayload().filter).toEqual({
+      scores: { $contains: 42 },
+    });
+
+    const containsBool = K("flags").contains(true);
+    expect(new Search({ where: containsBool }).toPayload().filter).toEqual({
+      flags: { $contains: true },
+    });
+
+    const notContainsNum = K("scores").notContains(42);
+    expect(new Search({ where: notContainsNum }).toPayload().filter).toEqual({
+      scores: { $not_contains: 42 },
+    });
+  });
+
   test("K helper maps metadata selections and operators", () => {
     const where = K("author")
       .isIn(["alice", "bob"])
@@ -316,5 +395,262 @@ describe("search expression DSL", () => {
     expect(sumOperand).toBeDefined();
     expect(Array.isArray(sumOperand.$sum)).toBe(true);
     expect(sumOperand.$sum.some((item: any) => item?.$div)).toBe(true);
+  });
+
+  test("search auto-embeds string knn queries before sending to API", async () => {
+    const queryText = "semantic search request";
+    const embeddedVector = [0.42, 0.24, 0.11];
+    const embeddingFunction = new QueryMockEmbedding(
+      embeddedVector,
+      [0.9, 0.8, 0.7],
+    );
+    const generateSpy = jest.spyOn(embeddingFunction, "generate");
+    const generateForQueriesSpy = jest.spyOn(
+      embeddingFunction,
+      "generateForQueries",
+    );
+
+    let capturedBody: any;
+    const mockChromaClient = {
+      getMaxBatchSize: jest.fn<() => Promise<number>>().mockResolvedValue(1000),
+      supportsBase64Encoding: jest
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false),
+      _path: jest
+        .fn<() => Promise<{ path: string; tenant: string; database: string }>>()
+        .mockResolvedValue({
+          path: "/api/v1",
+          tenant: "default_tenant",
+          database: "default_database",
+        }),
+    };
+
+    const mockApiClient = {
+      post: jest.fn().mockImplementation(async (options: any) => {
+        capturedBody = options.body;
+        return {
+          data: {
+            ids: [],
+            documents: [],
+            embeddings: [],
+            metadatas: [],
+            scores: [],
+            select: [],
+          } as SearchResponse,
+        };
+      }),
+    };
+
+    const collection = new CollectionImpl({
+      chromaClient: mockChromaClient as unknown as ChromaClient,
+      apiClient: mockApiClient as any,
+      id: "col-id",
+      name: "test",
+      tenant: "default_tenant",
+      database: "default_database",
+      configuration: {} as CollectionConfiguration,
+      metadata: undefined,
+      embeddingFunction,
+      schema: undefined,
+    });
+
+    await collection.search(
+      new Search().rank(Knn({ query: queryText, limit: 7 })),
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(generateForQueriesSpy).toHaveBeenCalledTimes(1);
+    expect(generateForQueriesSpy).toHaveBeenCalledWith([queryText]);
+    expect(generateSpy).not.toHaveBeenCalled();
+
+    expect(capturedBody).toBeDefined();
+    expect(Array.isArray(capturedBody.searches)).toBe(true);
+    expect(capturedBody.searches).toHaveLength(1);
+
+    const knnPayload = capturedBody.searches[0].rank.$knn;
+    expect(knnPayload.query).toEqual(embeddedVector);
+    expect(knnPayload.key).toBe("#embedding");
+    expect(knnPayload.limit).toBe(7);
+  });
+
+  test("search auto-embeds string knn queries with sparse embedding function", async () => {
+    const queryText = "hello world";
+
+    class DeterministicSparseEmbedding implements SparseEmbeddingFunction {
+      public readonly name = "deterministic_sparse";
+
+      constructor(private readonly label = "sparse") {}
+
+      async generate(texts: string[]): Promise<SparseVector[]> {
+        return texts.map((text) => {
+          if (text === "hello world") {
+            return { indices: [0], values: [11.0] };
+          }
+          return { indices: [], values: [] };
+        });
+      }
+
+      getConfig(): Record<string, any> {
+        return { label: this.label };
+      }
+
+      static buildFromConfig(
+        config: Record<string, any>,
+      ): DeterministicSparseEmbedding {
+        return new DeterministicSparseEmbedding(config.label);
+      }
+    }
+
+    const sparseEf = new DeterministicSparseEmbedding("sparse");
+    const generateSpy = jest.spyOn(sparseEf, "generate");
+
+    const { Schema, SparseVectorIndexConfig } = await import("../src/schema");
+    const schema = new Schema().createIndex(
+      new SparseVectorIndexConfig({
+        sourceKey: "raw_text",
+        embeddingFunction: sparseEf,
+      }),
+      "sparse_metadata",
+    );
+
+    let capturedBody: any;
+    const mockChromaClient = {
+      getMaxBatchSize: jest.fn<() => Promise<number>>().mockResolvedValue(1000),
+      supportsBase64Encoding: jest
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false),
+      _path: jest
+        .fn<() => Promise<{ path: string; tenant: string; database: string }>>()
+        .mockResolvedValue({
+          path: "/api/v1",
+          tenant: "default_tenant",
+          database: "default_database",
+        }),
+    };
+
+    const mockApiClient = {
+      post: jest.fn().mockImplementation(async (options: any) => {
+        capturedBody = options.body;
+        return {
+          data: {
+            ids: [],
+            documents: [],
+            embeddings: [],
+            metadatas: [],
+            scores: [],
+            select: [],
+          } as SearchResponse,
+        };
+      }),
+    };
+
+    const collection = new CollectionImpl({
+      chromaClient: mockChromaClient as unknown as ChromaClient,
+      apiClient: mockApiClient as any,
+      id: "col-id",
+      name: "test",
+      tenant: "default_tenant",
+      database: "default_database",
+      configuration: {} as CollectionConfiguration,
+      metadata: undefined,
+      embeddingFunction: undefined,
+      schema,
+    });
+
+    await collection.search(
+      new Search().rank(
+        Knn({ key: "sparse_metadata", query: queryText, limit: 10 }),
+      ),
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledTimes(1);
+    expect(generateSpy).toHaveBeenCalledWith([queryText]);
+
+    expect(capturedBody).toBeDefined();
+    expect(Array.isArray(capturedBody.searches)).toBe(true);
+    expect(capturedBody.searches).toHaveLength(1);
+
+    const knnPayload = capturedBody.searches[0].rank.$knn;
+    expect(knnPayload.query).toEqual({ indices: [0], values: [11.0] });
+    expect(knnPayload.key).toBe("sparse_metadata");
+    expect(knnPayload.limit).toBe(10);
+  });
+
+  test("search passes readLevel option to API", async () => {
+    const { ReadLevel } = await import("../src/types");
+
+    let capturedBody: any;
+    const mockChromaClient = {
+      getMaxBatchSize: jest.fn<() => Promise<number>>().mockResolvedValue(1000),
+      supportsBase64Encoding: jest
+        .fn<() => Promise<boolean>>()
+        .mockResolvedValue(false),
+      _path: jest
+        .fn<() => Promise<{ path: string; tenant: string; database: string }>>()
+        .mockResolvedValue({
+          path: "/api/v1",
+          tenant: "default_tenant",
+          database: "default_database",
+        }),
+    };
+
+    const mockApiClient = {
+      post: jest.fn().mockImplementation(async (options: any) => {
+        capturedBody = options.body;
+        return {
+          data: {
+            ids: [],
+            documents: [],
+            embeddings: [],
+            metadatas: [],
+            scores: [],
+            select: [],
+          } as SearchResponse,
+        };
+      }),
+    };
+
+    const collection = new CollectionImpl({
+      chromaClient: mockChromaClient as unknown as ChromaClient,
+      apiClient: mockApiClient as any,
+      id: "col-id",
+      name: "test",
+      tenant: "default_tenant",
+      database: "default_database",
+      configuration: {} as CollectionConfiguration,
+      metadata: undefined,
+      embeddingFunction: undefined,
+      schema: undefined,
+    });
+
+    // Test with INDEX_ONLY
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+      { readLevel: ReadLevel.INDEX_ONLY },
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody).toBeDefined();
+    expect(capturedBody.read_level).toBe("index_only");
+
+    // Test with INDEX_AND_WAL
+    mockApiClient.post.mockClear();
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+      { readLevel: ReadLevel.INDEX_AND_WAL },
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody.read_level).toBe("index_and_wal");
+
+    // Test without readLevel (should be undefined)
+    mockApiClient.post.mockClear();
+    await collection.search(
+      new Search().rank(Knn({ query: [0.1, 0.2], limit: 5 })),
+    );
+
+    expect(mockApiClient.post).toHaveBeenCalledTimes(1);
+    expect(capturedBody.read_level).toBeUndefined();
   });
 });

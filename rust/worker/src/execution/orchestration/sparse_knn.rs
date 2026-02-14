@@ -83,10 +83,6 @@ pub struct SparseKnnOrchestrator {
     // Collection information
     collection_and_segments: CollectionAndSegments,
 
-    // TODO: This is a temporary config to enable bm25 for certain tenants.
-    // This should be removed once we have collection schema ready.
-    use_bm25: bool,
-
     // Output from KnnFilterOrchestrator
     knn_filter_output: KnnFilterOutput,
 
@@ -112,7 +108,6 @@ impl SparseKnnOrchestrator {
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
         collection_and_segments: CollectionAndSegments,
-        use_bm25: bool,
         knn_filter_output: KnnFilterOutput,
         query: SparseVector,
         key: String,
@@ -124,7 +119,6 @@ impl SparseKnnOrchestrator {
             blockfile_provider,
             queue,
             collection_and_segments,
-            use_bm25,
             knn_filter_output,
             query,
             key,
@@ -209,28 +203,27 @@ impl Orchestrator for SparseKnnOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        let use_bm25 = self.use_bm25
-            || self
-                .collection_and_segments
-                .collection
-                .schema
-                .as_ref()
-                .is_some_and(|schema| {
-                    if let Some(flag) = schema.keys.get(&self.key).and_then(|uvt| {
-                        uvt.sparse_vector.as_ref().and_then(|vt| {
-                            vt.sparse_vector_index
-                                .as_ref()
-                                .and_then(|it| it.config.bm25)
-                        })
-                    }) {
-                        return flag;
-                    }
-                    schema.defaults.sparse_vector.as_ref().is_some_and(|vt| {
+        let use_bm25 = self
+            .collection_and_segments
+            .collection
+            .schema
+            .as_ref()
+            .is_some_and(|schema| {
+                if let Some(flag) = schema.keys.get(&self.key).and_then(|uvt| {
+                    uvt.sparse_vector.as_ref().and_then(|vt| {
                         vt.sparse_vector_index
                             .as_ref()
-                            .is_some_and(|it| it.config.bm25.unwrap_or_default())
+                            .and_then(|it| it.config.bm25)
                     })
-                });
+                }) {
+                    return flag;
+                }
+                schema.defaults.sparse_vector.as_ref().is_some_and(|vt| {
+                    vt.sparse_vector_index
+                        .as_ref()
+                        .is_some_and(|it| it.config.bm25.unwrap_or_default())
+                })
+            });
         if use_bm25 {
             let idf_task = wrap(
                 Box::new(Idf {

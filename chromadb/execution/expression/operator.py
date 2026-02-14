@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, List, Dict, Set, Any, Union
+from typing import Optional, List, Dict, Set, Any, Union, cast
+
+from chromadb.base_types import LiteralValue
 
 import numpy as np
 from numpy.typing import NDArray
@@ -8,7 +9,11 @@ from chromadb.api.types import (
     Embeddings,
     IDs,
     Include,
+    OneOrMany,
     SparseVector,
+    TYPE_KEY,
+    SPARSE_VECTOR_TYPE_VALUE,
+    maybe_cast_one_to_many,
     normalize_embeddings,
     validate_embeddings,
 )
@@ -180,15 +185,15 @@ class Where:
                         )
                     return Key(field).not_in(value)
                 elif op == "$contains":
-                    if not isinstance(value, str):
+                    if not isinstance(value, (str, int, float, bool)):
                         raise TypeError(
-                            f"$contains requires a string, got {type(value).__name__}"
+                            f"$contains requires a str, int, float, or bool, got {type(value).__name__}"
                         )
                     return Key(field).contains(value)
                 elif op == "$not_contains":
-                    if not isinstance(value, str):
+                    if not isinstance(value, (str, int, float, bool)):
                         raise TypeError(
-                            f"$not_contains requires a string, got {type(value).__name__}"
+                            f"$not_contains requires a str, int, float, or bool, got {type(value).__name__}"
                         )
                     return Key(field).not_contains(value)
                 elif op == "$regex":
@@ -348,24 +353,24 @@ class Nin(Where):
 
 @dataclass
 class Contains(Where):
-    """Contains comparison for document content"""
+    """Contains comparison for document content or metadata array membership"""
 
     key: str
-    content: str
+    value: LiteralValue
 
     def to_dict(self) -> Dict[str, Any]:
-        return {self.key: {"$contains": self.content}}
+        return {self.key: {"$contains": self.value}}
 
 
 @dataclass
 class NotContains(Where):
-    """Not contains comparison for document content"""
+    """Not-contains comparison for document content or metadata array membership"""
 
     key: str
-    content: str
+    value: LiteralValue
 
     def to_dict(self) -> Dict[str, Any]:
-        return {self.key: {"$not_contains": self.content}}
+        return {self.key: {"$not_contains": self.value}}
 
 
 @dataclass
@@ -392,7 +397,7 @@ class NotRegex(Where):
 
 # Field proxy for building Where conditions
 class Key:
-    """Field proxy for building Where conditions with operator overloading.
+    """Field proxy for building Where filter expressions.
 
     The Key class allows for readable field references using either:
     1. Predefined constants for special fields: K.EMBEDDING, K.DOCUMENT, K.SCORE, etc.
@@ -483,13 +488,34 @@ class Key:
         """Field should not match regex: Key('field').not_regex('^pattern')"""
         return NotRegex(self.name, pattern)
 
-    def contains(self, content: str) -> Contains:
-        """Check if field contains text: Key('field').contains('text')"""
-        return Contains(self.name, content)
+    def contains(self, value: LiteralValue) -> Contains:
+        """Check if field contains a value.
 
-    def not_contains(self, content: str) -> NotContains:
-        """Check if field doesn't contain text: Key('field').not_contains('text')"""
-        return NotContains(self.name, content)
+        On Key.DOCUMENT: substring search (value must be a string).
+        On metadata fields: checks if the array field contains the scalar value.
+
+        Examples:
+            Key.DOCUMENT.contains("machine learning")  # document substring
+            Key("tags").contains("action")              # metadata array contains
+            Key("scores").contains(42)                  # metadata array contains
+        """
+        if self.name == "#document" and not isinstance(value, str):
+            raise TypeError("$contains on #document requires a string pattern")
+        return Contains(self.name, value)
+
+    def not_contains(self, value: LiteralValue) -> NotContains:
+        """Check if field does not contain a value.
+
+        On Key.DOCUMENT: excludes documents containing the substring.
+        On metadata fields: checks that the array field does not contain the scalar value.
+
+        Examples:
+            Key.DOCUMENT.not_contains("deprecated")  # document substring exclusion
+            Key("tags").not_contains("draft")         # metadata array not-contains
+        """
+        if self.name == "#document" and not isinstance(value, str):
+            raise TypeError("$not_contains on #document requires a string pattern")
+        return NotContains(self.name, value)
 
 
 # Initialize predefined key constants
@@ -593,7 +619,7 @@ class Projection:
 # Rank expression types for hybrid search
 @dataclass
 class Rank:
-    """Base class for Rank expressions (algebraic data type).
+    """Base class for rank expressions.
 
     Supports arithmetic operations for combining rank expressions:
         - Addition: rank1 + rank2, rank + 0.5
@@ -672,12 +698,12 @@ class Rank:
 
             if isinstance(query, dict):
                 # SparseVector case - deserialize from transport format
-                if query.get("#type") == "sparse_vector":
+                if query.get(TYPE_KEY) == SPARSE_VECTOR_TYPE_VALUE:
                     query = SparseVector.from_dict(query)
                 else:
                     # Old format or invalid - try to construct directly
                     raise ValueError(
-                        f"Expected dict with #type='sparse_vector', got {query}"
+                        f"Expected dict with {TYPE_KEY}='{SPARSE_VECTOR_TYPE_VALUE}', got {query}"
                     )
 
             elif isinstance(query, (list, tuple, np.ndarray)):
@@ -902,6 +928,10 @@ class Rank:
         """Absolute value: abs(rank)"""
         return Abs(self)
 
+    def abs(self) -> "Abs":
+        """Absolute value builder: rank.abs()"""
+        return Abs(self)
+
     # Builder methods for functions
     def exp(self) -> "Exp":
         """Exponential: e^rank"""
@@ -1011,35 +1041,45 @@ class Mul(Rank):
 
 @dataclass
 class Knn(Rank):
-    """KNN-based ranking
+    """KNN-based ranking expression.
 
     Args:
-        query: The query vector for KNN search (dense, sparse, or numpy array)
+        query: The query for KNN search. Can be:
+               - A string (will be automatically embedded using the collection's embedding function)
+               - A dense vector (list or numpy array)
+               - A sparse vector (SparseVector dict)
         key: The embedding key to search against. Can be:
-             - "#embedding" (default) - searches the main embedding field
+             - Key.EMBEDDING (default) - searches the main embedding field
              - A metadata field name (e.g., "my_custom_field") - searches that metadata field
         limit: Maximum number of results to consider (default: 16)
         default: Default score for records not in KNN results (default: None)
         return_rank: If True, return the rank position (0, 1, 2, ...) instead of distance (default: False)
 
     Examples:
-        # Search main embeddings (equivalent forms)
+        # Search with string query (automatically embedded)
+        Knn(query="hello world")  # Will use collection's embedding function
+
+        # Search main embeddings with vectors (equivalent forms)
         Knn(query=[0.1, 0.2])  # Uses default key="#embedding"
         Knn(query=[0.1, 0.2], key=K.EMBEDDING)
         Knn(query=[0.1, 0.2], key="#embedding")
 
-        # Search sparse embeddings stored in metadata
+        # Search sparse embeddings stored in metadata with string
+        Knn(query="hello world", key="custom_embedding")  # Will use schema's embedding function
+
+        # Search sparse embeddings stored in metadata with vector
         Knn(query=my_vector, key="custom_embedding")  # Example: searches a metadata field
     """
 
     query: Union[
+        str,
         List[float],
         SparseVector,
         "NDArray[np.float32]",
         "NDArray[np.float64]",
         "NDArray[np.int32]",
     ]
-    key: str = "#embedding"
+    key: Union[Key, str] = K.EMBEDDING
     limit: int = 16
     default: Optional[float] = None
     return_rank: bool = False
@@ -1054,8 +1094,12 @@ class Knn(Rank):
             # Convert numpy array to list
             query_value = query_value.tolist()
 
+        key_value = self.key
+        if isinstance(key_value, Key):
+            key_value = key_value.name
+
         # Build result dict - only include non-default values to keep JSON clean
-        result = {"query": query_value, "key": self.key, "limit": self.limit}
+        result = {"query": query_value, "key": key_value, "limit": self.limit}
 
         # Only include optional fields if they're set to non-default values
         if self.default is not None:
@@ -1099,7 +1143,7 @@ class Val(Rank):
 
 @dataclass
 class Rrf(Rank):
-    """Reciprocal Rank Fusion for combining multiple ranking strategies.
+    """Reciprocal Rank Fusion for combining ranking strategies.
 
     RRF formula: score = -sum(weight_i / (k + rank_i)) for each ranking strategy
     The negative is used because RRF produces higher scores for better results,
@@ -1276,3 +1320,216 @@ class Select:
 
         # Convert to set while preserving the Key instances
         return Select(keys=set(key_list))
+
+
+# GroupBy and Aggregate types for grouping search results
+
+
+def _keys_to_strings(keys: OneOrMany[Union[Key, str]]) -> List[str]:
+    """Convert OneOrMany[Key|str] to List[str] for serialization."""
+    keys_list = cast(List[Union[Key, str]], maybe_cast_one_to_many(keys))
+    return [k.name if isinstance(k, Key) else k for k in keys_list]
+
+
+def _strings_to_keys(keys: Union[List[Any], tuple[Any, ...]]) -> List[Union[Key, str]]:
+    """Convert List[str] to List[Key] for deserialization."""
+    return [Key(k) if isinstance(k, str) else k for k in keys]
+
+
+def _parse_k_aggregate(
+    op: str, data: Dict[str, Any]
+) -> tuple[List[Union[Key, str]], int]:
+    """Parse common fields for MinK/MaxK from dict.
+
+    Args:
+        op: The operator name (e.g., "$min_k" or "$max_k")
+        data: The dict containing the operator
+
+    Returns:
+        Tuple of (keys, k) where keys is List[Union[Key, str]] and k is int
+
+    Raises:
+        TypeError: If data types are invalid
+        ValueError: If required fields are missing or invalid
+    """
+    agg_data = data[op]
+    if not isinstance(agg_data, dict):
+        raise TypeError(f"{op} requires a dict, got {type(agg_data).__name__}")
+    if "keys" not in agg_data:
+        raise ValueError(f"{op} requires 'keys' field")
+    if "k" not in agg_data:
+        raise ValueError(f"{op} requires 'k' field")
+
+    keys = agg_data["keys"]
+    if not isinstance(keys, (list, tuple)):
+        raise TypeError(f"{op} keys must be a list, got {type(keys).__name__}")
+    if not keys:
+        raise ValueError(f"{op} keys cannot be empty")
+
+    k = agg_data["k"]
+    if not isinstance(k, int):
+        raise TypeError(f"{op} k must be an integer, got {type(k).__name__}")
+    if k <= 0:
+        raise ValueError(f"{op} k must be positive, got {k}")
+
+    return _strings_to_keys(keys), k
+
+
+@dataclass
+class Aggregate:
+    """Base class for aggregation expressions within groups.
+
+    Aggregations determine which records to keep from each group:
+    - MinK: Keep k records with minimum values (ascending order)
+    - MaxK: Keep k records with maximum values (descending order)
+
+    Examples:
+        # Keep top 3 by score per group (single key)
+        MinK(keys=Key.SCORE, k=3)
+
+        # Keep top 5 by priority, then score as tiebreaker (multiple keys)
+        MinK(keys=[Key("priority"), Key.SCORE], k=5)
+
+        # Keep bottom 2 by score per group
+        MaxK(keys=Key.SCORE, k=2)
+    """
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the Aggregate expression to a dictionary for JSON serialization"""
+        raise NotImplementedError("Subclasses must implement to_dict()")
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "Aggregate":
+        """Create Aggregate expression from dictionary.
+
+        Supports:
+        - {"$min_k": {"keys": [...], "k": n}} -> MinK(keys=[...], k=n)
+        - {"$max_k": {"keys": [...], "k": n}} -> MaxK(keys=[...], k=n)
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for Aggregate, got {type(data).__name__}")
+
+        if not data:
+            raise ValueError("Aggregate dict cannot be empty")
+
+        if len(data) != 1:
+            raise ValueError(
+                f"Aggregate dict must contain exactly one operator, got {len(data)}"
+            )
+
+        op = next(iter(data.keys()))
+
+        if op == "$min_k":
+            keys, k = _parse_k_aggregate(op, data)
+            return MinK(keys=keys, k=k)
+        elif op == "$max_k":
+            keys, k = _parse_k_aggregate(op, data)
+            return MaxK(keys=keys, k=k)
+        else:
+            raise ValueError(f"Unknown aggregate operator: {op}")
+
+
+@dataclass
+class MinK(Aggregate):
+    """Keep k records with minimum aggregate key values per group"""
+
+    keys: OneOrMany[Union[Key, str]]
+    k: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"$min_k": {"keys": _keys_to_strings(self.keys), "k": self.k}}
+
+
+@dataclass
+class MaxK(Aggregate):
+    """Keep k records with maximum aggregate key values per group"""
+
+    keys: OneOrMany[Union[Key, str]]
+    k: int
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"$max_k": {"keys": _keys_to_strings(self.keys), "k": self.k}}
+
+
+@dataclass
+class GroupBy:
+    """Group results by metadata keys and aggregate within each group.
+
+    Groups search results by one or more metadata fields, then applies an
+    aggregation (MinK or MaxK) to select records within each group.
+    The final output is flattened and sorted by score.
+
+    Args:
+        keys: Metadata key(s) to group by. Can be a single key or a list of keys.
+              E.g., Key("category") or [Key("category"), Key("author")]
+        aggregate: Aggregation to apply within each group (MinK or MaxK)
+
+    Note: Both keys and aggregate must be specified together.
+
+    Examples:
+        # Top 3 documents per category (single key)
+        GroupBy(
+            keys=Key("category"),
+            aggregate=MinK(keys=Key.SCORE, k=3)
+        )
+
+        # Top 2 per (year, category) combination (multiple keys)
+        GroupBy(
+            keys=[Key("year"), Key("category")],
+            aggregate=MinK(keys=Key.SCORE, k=2)
+        )
+
+        # Top 1 per category by priority, score as tiebreaker
+        GroupBy(
+            keys=Key("category"),
+            aggregate=MinK(keys=[Key("priority"), Key.SCORE], k=1)
+        )
+    """
+
+    keys: OneOrMany[Union[Key, str]] = field(default_factory=list)
+    aggregate: Optional[Aggregate] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert the GroupBy to a dictionary for JSON serialization"""
+        # Default GroupBy (no keys, no aggregate) serializes to {}
+        if not self.keys or self.aggregate is None:
+            return {}
+        result: Dict[str, Any] = {"keys": _keys_to_strings(self.keys)}
+        result["aggregate"] = self.aggregate.to_dict()
+        return result
+
+    @staticmethod
+    def from_dict(data: Dict[str, Any]) -> "GroupBy":
+        """Create GroupBy from dictionary.
+
+        Examples:
+        - {} -> GroupBy() (default, no grouping)
+        - {"keys": ["category"], "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}}
+        """
+        if not isinstance(data, dict):
+            raise TypeError(f"Expected dict for GroupBy, got {type(data).__name__}")
+
+        # Empty dict returns default GroupBy (no grouping)
+        if not data:
+            return GroupBy()
+
+        # Non-empty dict requires keys and aggregate
+        if "keys" not in data:
+            raise ValueError("GroupBy requires 'keys' field")
+        if "aggregate" not in data:
+            raise ValueError("GroupBy requires 'aggregate' field")
+
+        keys = data["keys"]
+        if not isinstance(keys, (list, tuple)):
+            raise TypeError(f"GroupBy keys must be a list, got {type(keys).__name__}")
+        if not keys:
+            raise ValueError("GroupBy keys cannot be empty")
+
+        aggregate_data = data["aggregate"]
+        if not isinstance(aggregate_data, dict):
+            raise TypeError(
+                f"GroupBy aggregate must be a dict, got {type(aggregate_data).__name__}"
+            )
+        aggregate = Aggregate.from_dict(aggregate_data)
+
+        return GroupBy(keys=_strings_to_keys(keys), aggregate=aggregate)

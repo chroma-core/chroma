@@ -28,6 +28,12 @@ pub const VERSION_MAP_PATH: &str = "version_map_path";
 pub const POSTING_LIST_PATH: &str = "posting_list_path";
 pub const MAX_HEAD_ID_BF_PATH: &str = "max_head_id_path";
 
+pub const QUANTIZED_SPANN_CLUSTER: &str = "quantized_spann_cluster";
+pub const QUANTIZED_SPANN_SCALAR_METADATA: &str = "quantized_spann_scalar_metadata";
+pub const QUANTIZED_SPANN_EMBEDDING_METADATA: &str = "quantized_spann_embedding_metadata";
+pub const QUANTIZED_SPANN_RAW_CENTROID: &str = "quantized_spann_raw_centroid";
+pub const QUANTIZED_SPANN_QUANTIZED_CENTROID: &str = "quantized_spann_quantized_centroid";
+
 /// SegmentUuid is a wrapper around Uuid to provide a type for the segment id.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct SegmentUuid(pub Uuid);
@@ -64,6 +70,7 @@ pub enum SegmentType {
     HnswLocalPersisted,
     Sqlite,
     Spann,
+    QuantizedSpann,
 }
 
 impl From<SegmentType> for String {
@@ -81,6 +88,7 @@ impl From<SegmentType> for String {
                 "urn:chroma:segment/vector/hnsw-local-persisted".to_string()
             }
             SegmentType::Spann => "urn:chroma:segment/vector/spann".to_string(),
+            SegmentType::QuantizedSpann => "urn:chroma:segment/vector/quantized-spann".to_string(),
             SegmentType::Sqlite => "urn:chroma:segment/metadata/sqlite".to_string(),
         }
     }
@@ -97,6 +105,7 @@ impl TryFrom<&str> for SegmentType {
             "urn:chroma:segment/vector/hnsw-local-memory" => Ok(SegmentType::HnswLocalMemory),
             "urn:chroma:segment/vector/hnsw-local-persisted" => Ok(Self::HnswLocalPersisted),
             "urn:chroma:segment/vector/spann" => Ok(SegmentType::Spann),
+            "urn:chroma:segment/vector/quantized-spann" => Ok(SegmentType::QuantizedSpann),
             "urn:chroma:segment/metadata/sqlite" => Ok(SegmentType::Sqlite),
             _ => Err(SegmentConversionError::InvalidSegmentType),
         }
@@ -117,13 +126,27 @@ impl Segment {
     pub fn prefetch_supported(&self) -> bool {
         matches!(
             self.r#type,
-            SegmentType::BlockfileMetadata | SegmentType::BlockfileRecord | SegmentType::Spann
+            SegmentType::BlockfileMetadata
+                | SegmentType::BlockfileRecord
+                | SegmentType::QuantizedSpann
+                | SegmentType::Spann
         )
     }
 
     pub fn filepaths_to_prefetch(&self) -> Vec<String> {
         let mut res = Vec::new();
         match self.r#type {
+            SegmentType::QuantizedSpann => {
+                for key in [
+                    QUANTIZED_SPANN_CLUSTER,
+                    QUANTIZED_SPANN_EMBEDDING_METADATA,
+                    QUANTIZED_SPANN_SCALAR_METADATA,
+                ] {
+                    if let Some(paths) = self.file_path.get(key) {
+                        res.extend(paths.iter().cloned());
+                    }
+                }
+            }
             SegmentType::Spann => {
                 if let Some(pl_path) = self.file_path.get(POSTING_LIST_PATH) {
                     res.extend(pl_path.iter().cloned());

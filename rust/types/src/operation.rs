@@ -9,6 +9,7 @@ pub enum Operation {
     Update,
     Upsert,
     Delete,
+    BackfillFn,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -53,6 +54,7 @@ impl TryFrom<chroma_proto::Operation> for Operation {
             chroma_proto::Operation::Upsert => Ok(Operation::Upsert),
             chroma_proto::Operation::Update => Ok(Operation::Update),
             chroma_proto::Operation::Delete => Ok(Operation::Delete),
+            chroma_proto::Operation::BackfillFn => Ok(Operation::BackfillFn),
         }
     }
 }
@@ -68,6 +70,7 @@ impl TryFrom<i32> for Operation {
                 chroma_proto::Operation::Upsert => Ok(Operation::Upsert),
                 chroma_proto::Operation::Update => Ok(Operation::Update),
                 chroma_proto::Operation::Delete => Ok(Operation::Delete),
+                chroma_proto::Operation::BackfillFn => Ok(Operation::BackfillFn),
             },
             Err(_) => Err(OperationConversionError::DecodeError(
                 ConversionError::DecodeError,

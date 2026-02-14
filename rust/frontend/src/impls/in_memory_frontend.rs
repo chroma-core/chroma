@@ -6,7 +6,8 @@ use chroma_types::operator::{Filter, KnnBatch, KnnProjection, Limit, Projection,
 use chroma_types::plan::{Count, Get, Knn};
 use chroma_types::{
     test_segment, Collection, CollectionAndSegments, CreateCollectionError, Database, Include,
-    IncludeList, InternalCollectionConfiguration, Segment, VectorIndexConfiguration,
+    IncludeList, InternalCollectionConfiguration, KnnIndex, Schema, SchemaError, Segment,
+    VectorIndexConfiguration,
 };
 use std::collections::HashSet;
 
@@ -43,8 +44,8 @@ impl InMemoryFrontend {
 
     pub fn heartbeat(
         &self,
-    ) -> Result<chroma::types::HeartbeatResponse, chroma_types::HeartbeatError> {
-        Ok(chroma::types::HeartbeatResponse {
+    ) -> Result<chroma_api_types::HeartbeatResponse, chroma_types::HeartbeatError> {
+        Ok(chroma_api_types::HeartbeatResponse {
             nanosecond_heartbeat: 0,
         })
     }
@@ -85,16 +86,16 @@ impl InMemoryFrontend {
     ) -> Result<chroma_types::CreateDatabaseResponse, chroma_types::CreateDatabaseError> {
         if self.inner.databases.iter().any(|db| {
             db.id == request.database_id
-                || (db.name == request.database_name && db.tenant == request.tenant_id)
+                || (request.database_name == db.name && db.tenant == request.tenant_id)
         }) {
             return Err(chroma_types::CreateDatabaseError::AlreadyExists(
-                request.database_name,
+                request.database_name.into_string(),
             ));
         }
 
         self.inner.databases.push(Database {
             id: request.database_id,
-            name: request.database_name,
+            name: request.database_name.into_string(),
             tenant: request.tenant_id,
         });
 
@@ -126,12 +127,12 @@ impl InMemoryFrontend {
             .inner
             .databases
             .iter()
-            .find(|db| db.name == request.database_name && db.tenant == request.tenant_id)
+            .find(|db| request.database_name == db.name && db.tenant == request.tenant_id)
         {
             Ok(db.clone())
         } else {
             Err(chroma_types::GetDatabaseError::NotFound(
-                request.database_name,
+                request.database_name.into_string(),
             ))
         }
     }
@@ -144,7 +145,7 @@ impl InMemoryFrontend {
             .inner
             .databases
             .iter()
-            .position(|db| db.name == request.database_name && db.tenant == request.tenant_id)
+            .position(|db| request.database_name == db.name && db.tenant == request.tenant_id)
         {
             self.inner.databases.remove(pos);
             Ok(chroma_types::DeleteDatabaseResponse {})
@@ -221,13 +222,24 @@ impl InMemoryFrontend {
             ));
         }
 
+        let schema = Schema::reconcile_schema_and_config(
+            request.schema.as_ref(),
+            request.configuration.as_ref(),
+            KnnIndex::Hnsw,
+        )
+        .map_err(CreateCollectionError::InvalidSchema)?;
+
+        let config = InternalCollectionConfiguration::try_from(&schema).map_err(|e| {
+            CreateCollectionError::InvalidSchema(SchemaError::InvalidUserInput { reason: e })
+        })?;
+
         let collection = Collection {
-            name: request.name,
-            tenant: request.tenant_id,
-            database: request.database_name,
-            config: request
-                .configuration
-                .unwrap_or(InternalCollectionConfiguration::default_hnsw()),
+            name: request.name.clone(),
+            tenant: request.tenant_id.clone(),
+            database: request.database_name.as_ref().to_string(),
+            metadata: request.metadata,
+            config,
+            schema: Some(schema),
             ..Default::default()
         };
 
@@ -433,6 +445,7 @@ impl InMemoryFrontend {
         Ok(chroma_types::UpsertCollectionRecordsResponse {})
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn delete(
         &mut self,
         request: chroma_types::DeleteCollectionRecordsRequest,
@@ -493,6 +506,7 @@ impl InMemoryFrontend {
         Ok(chroma_types::DeleteCollectionRecordsResponse {})
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn count(
         &self,
         request: chroma_types::CountRequest,
@@ -528,6 +542,7 @@ impl InMemoryFrontend {
         Ok(count.count)
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn get(
         &self,
         request: chroma_types::GetRequest,
@@ -586,6 +601,7 @@ impl InMemoryFrontend {
         Ok((get_response, include).into())
     }
 
+    #[allow(clippy::result_large_err)]
     pub fn query(
         &mut self,
         request: chroma_types::QueryRequest,
@@ -620,10 +636,15 @@ impl InMemoryFrontend {
 
         let params = collection
             .collection
-            .config
-            .get_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            .schema
+            .as_ref()
+            .map(|schema| {
+                schema.get_internal_hnsw_config_with_legacy_fallback(&collection.vector_segment)
+            })
+            .transpose()
             .map_err(|e| e.boxed())?
-            .unwrap();
+            .flatten()
+            .expect("HNSW configuration missing for collection schema");
         let distance_function: DistanceFunction = params.space.into();
 
         let query_response = collection
@@ -672,15 +693,15 @@ impl InMemoryFrontend {
 #[cfg(test)]
 mod tests {
     use chroma_types::{
-        DocumentExpression, IncludeList, Metadata, MetadataComparison, MetadataExpression,
-        MetadataValue, PrimitiveOperator, Where,
+        DatabaseName, DocumentExpression, IncludeList, Metadata, MetadataComparison,
+        MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
 
     use super::*;
 
     fn create_test_collection() -> (InMemoryFrontend, Collection) {
         let tenant_name = "test".to_string();
-        let database_name = "test".to_string();
+        let database_name = DatabaseName::new("test").unwrap();
         let collection_name = "test".to_string();
 
         let mut frontend = InMemoryFrontend::new();
@@ -696,7 +717,7 @@ mod tests {
 
         let request = chroma_types::CreateCollectionRequest::try_new(
             tenant_name.clone(),
-            database_name.clone(),
+            database_name,
             collection_name.clone(),
             None,
             None,

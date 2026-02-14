@@ -4,8 +4,8 @@ use prost_types::value::Kind;
 use tonic::transport::Channel;
 
 #[derive(Parser)]
-#[command(name = "chroma-sysdb")]
-#[command(about = "CLI client for Chroma coordinator task management", long_about = None)]
+#[command(name = "chroma-function-manager")]
+#[command(about = "CLI client for Chroma coordinator attached function management", long_about = None)]
 struct Cli {
     #[arg(
         long,
@@ -20,12 +20,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    #[command(about = "Create a new task")]
-    CreateTask {
-        #[arg(long, help = "Name of the task")]
+    #[command(about = "Attach a function to a collection")]
+    AttachFunction {
+        #[arg(long, help = "Name for this attached function")]
         name: String,
-        #[arg(long, help = "Name of the operator to apply")]
-        operator_name: String,
+        #[arg(long, help = "ID of the function to attach")]
+        function_id: String,
         #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
         #[arg(long, help = "Name for the output collection")]
@@ -39,46 +39,28 @@ enum Command {
         #[arg(
             long,
             default_value = "100",
-            help = "Minimum number of records required before task execution"
+            help = "Minimum number of records required before attached function execution"
         )]
-        min_records_for_task: u64,
+        min_records_for_invocation: u64,
     },
-    #[command(about = "Get task by name")]
-    GetTask {
+    #[command(about = "Get attached function by name")]
+    GetAttachedFunction {
         #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
-        #[arg(long, help = "Name of the task to retrieve")]
-        task_name: String,
+        #[arg(long, help = "Name of the attached function to retrieve")]
+        name: String,
     },
-    #[command(about = "Delete a task")]
-    DeleteTask {
+    #[command(about = "Detach a function")]
+    DetachFunction {
+        #[arg(long, help = "Name of the attached function to delete")]
+        name: String,
         #[arg(long, help = "ID of the input collection")]
         input_collection_id: String,
-        #[arg(long, help = "Name of the task to delete")]
-        task_name: String,
         #[arg(long, help = "Whether to delete the output collection")]
         delete_output: bool,
     },
-    #[command(about = "Mark a task run as ready to advance")]
-    AdvanceTask {
-        #[arg(long, help = "ID of the collection")]
-        collection_id: String,
-        #[arg(long, help = "ID of the task")]
-        task_id: String,
-        #[arg(long, help = "Nonce identifying the specific task run")]
-        task_run_nonce: String,
-    },
-    #[command(about = "Get all operators")]
-    GetOperators,
-    #[command(about = "Peek schedule by collection IDs")]
-    PeekSchedule {
-        #[arg(
-            long,
-            value_delimiter = ',',
-            help = "Comma-separated list of collection IDs"
-        )]
-        collection_ids: Vec<String>,
-    },
+    #[command(about = "Get all available functions")]
+    GetFunctions,
 }
 
 fn json_to_prost_value(json: serde_json::Value) -> prost_types::Value {
@@ -115,15 +97,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = chroma_proto::sys_db_client::SysDbClient::new(channel);
 
     match cli.command {
-        Command::CreateTask {
+        Command::AttachFunction {
             name,
-            operator_name,
+            function_id,
             input_collection_id,
             output_collection_name,
             params,
             tenant_id,
             database,
-            min_records_for_task,
+            min_records_for_invocation,
         } => {
             let params_json: serde_json::Value = serde_json::from_str(&params)?;
             let params_value = json_to_prost_value(params_json);
@@ -134,95 +116,89 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
 
-            let request = chroma_proto::CreateTaskRequest {
+            let request = chroma_proto::AttachFunctionRequest {
                 name,
-                operator_name,
+                function_name: function_id,
                 input_collection_id,
                 output_collection_name,
                 params: params_struct,
                 tenant_id,
                 database,
-                min_records_for_task,
+                min_records_for_invocation,
             };
 
-            let response = client.create_task(request).await?;
-            println!("Task created: {}", response.into_inner().task_id);
+            let response = client.attach_function(request).await?;
+            let attached_function = response
+                .into_inner()
+                .attached_function
+                .ok_or("Server did not return attached function")?;
+            println!("Attached Function created: {}", attached_function.id);
         }
-        Command::GetTask {
+        Command::GetAttachedFunction {
             input_collection_id,
-            task_name,
+            name,
         } => {
-            let request = chroma_proto::GetTaskByNameRequest {
-                input_collection_id,
-                task_name,
+            let request = chroma_proto::GetAttachedFunctionsRequest {
+                id: None,
+                name: Some(name),
+                input_collection_id: Some(input_collection_id),
+                only_ready: Some(true),
             };
 
-            let response = client.get_task_by_name(request).await?;
-            let task = response.into_inner();
+            let response = client.get_attached_functions(request).await?;
+            let attached_functions = response.into_inner().attached_functions;
+            let attached_function = attached_functions
+                .into_iter()
+                .next()
+                .ok_or("Server did not return attached function")?;
 
-            println!("Task ID: {:?}", task.task_id);
-            println!("Name: {:?}", task.name);
-            println!("Operator: {:?}", task.operator_name);
-            println!("Input Collection: {:?}", task.input_collection_id);
-            println!("Output Collection Name: {:?}", task.output_collection_name);
-            println!("Output Collection ID: {:?}", task.output_collection_id);
-            println!("Params: {:?}", task.params);
-            println!("Completion Offset: {:?}", task.completion_offset);
-            println!("Min Records: {:?}", task.min_records_for_task);
+            println!("Attached Function ID: {:?}", attached_function.id);
+            println!("Name: {:?}", attached_function.name);
+            println!("Function: {:?}", attached_function.function_name);
+            println!(
+                "Input Collection: {:?}",
+                attached_function.input_collection_id
+            );
+            println!(
+                "Output Collection Name: {:?}",
+                attached_function.output_collection_name
+            );
+            println!(
+                "Output Collection ID: {:?}",
+                attached_function.output_collection_id
+            );
+            println!("Params: {:?}", attached_function.params);
+            println!(
+                "Completion Offset: {:?}",
+                attached_function.completion_offset
+            );
+            println!(
+                "Min Records: {:?}",
+                attached_function.min_records_for_invocation
+            );
         }
-        Command::DeleteTask {
+        Command::DetachFunction {
+            name,
             input_collection_id,
-            task_name,
             delete_output,
         } => {
-            let request = chroma_proto::DeleteTaskRequest {
+            let request = chroma_proto::DetachFunctionRequest {
+                name,
                 input_collection_id,
-                task_name,
                 delete_output,
             };
 
-            let response = client.delete_task(request).await?;
-            println!("Task deleted: {}", response.into_inner().success);
+            let _response = client.detach_function(request).await?;
+            println!("Attached Function deleted successfully");
         }
-        Command::AdvanceTask {
-            collection_id,
-            task_id,
-            task_run_nonce,
-        } => {
-            let request = chroma_proto::AdvanceTaskRequest {
-                collection_id: Some(collection_id),
-                task_id: Some(task_id),
-                task_run_nonce: Some(task_run_nonce),
-            };
+        Command::GetFunctions => {
+            let request = chroma_proto::GetFunctionsRequest {};
 
-            client.advance_task(request).await?;
-            println!("Task marked as done");
-        }
-        Command::GetOperators => {
-            let request = chroma_proto::GetOperatorsRequest {};
+            let response = client.get_functions(request).await?;
+            let functions = response.into_inner().functions;
 
-            let response = client.get_operators(request).await?;
-            let operators = response.into_inner().operators;
-
-            for op in operators {
-                println!("  {} - {}", op.id, op.name);
-            }
-        }
-        Command::PeekSchedule { collection_ids } => {
-            let request = chroma_proto::PeekScheduleByCollectionIdRequest {
-                collection_id: collection_ids,
-            };
-
-            let response = client.peek_schedule_by_collection_id(request).await?;
-            let entries = response.into_inner().schedule;
-
-            println!("Schedule:");
-            for entry in entries {
-                println!("  Collection: {:?}", entry.collection_id);
-                println!("  Task ID: {:?}", entry.task_id);
-                println!("  Nonce: {:?}", entry.task_run_nonce);
-                println!("  When: {:?}", entry.when_to_run);
-                println!();
+            for func in functions {
+                println!("  {} - {}", func.id, func.name);
             }
         }
     }

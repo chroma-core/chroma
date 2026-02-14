@@ -1,0 +1,118 @@
+---
+title: "Schema"
+---
+
+## Schema
+
+Collection schema for indexing and encryption configuration.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="defaults" type="ValueTypes" />
+
+<ParamField path="keys" type="Dict[str, ValueTypes]" />
+
+<ParamField path="cmek" type="Optional[Cmek]" />
+
+
+---
+
+## Index configs
+
+### FtsIndexConfig
+
+Configuration for Full-Text Search index. No parameters required.
+
+
+### HnswIndexConfig
+
+Configuration for HNSW vector index.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="ef_construction" type="Optional[int]" />
+
+<ParamField path="max_neighbors" type="Optional[int]" />
+
+<ParamField path="ef_search" type="Optional[int]" />
+
+<ParamField path="num_threads" type="Optional[int]" />
+
+<ParamField path="batch_size" type="Optional[int]" />
+
+<ParamField path="sync_threshold" type="Optional[int]" />
+
+<ParamField path="resize_factor" type="Optional[float]" />
+
+
+### SpannIndexConfig
+
+Configuration for SPANN vector index.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="search_nprobe" type="Optional[int]" />
+
+<ParamField path="write_nprobe" type="Optional[int]" />
+
+<ParamField path="ef_construction" type="Optional[int]" />
+
+<ParamField path="ef_search" type="Optional[int]" />
+
+<ParamField path="max_neighbors" type="Optional[int]" />
+
+<ParamField path="reassign_neighbor_count" type="Optional[int]" />
+
+<ParamField path="split_threshold" type="Optional[int]" />
+
+<ParamField path="merge_threshold" type="Optional[int]" />
+
+
+### VectorIndexConfig
+
+Configuration for vector index with space, embedding function, and algorithm config.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="space" type="Optional[Literal[cosine, l2, ip]]" />
+
+<ParamField path="embedding_function" type="Optional[Any]" />
+
+<ParamField path="source_key" type="Optional[str]" />
+
+<ParamField path="hnsw" type="Optional[HnswIndexConfig]" />
+
+<ParamField path="spann" type="Optional[SpannIndexConfig]" />
+
+
+### SparseVectorIndexConfig
+
+Configuration for sparse vector index.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="embedding_function" type="Optional[Any]" />
+
+<ParamField path="source_key" type="Optional[str]" />
+
+<ParamField path="bm25" type="Optional[bool]" />
+
+
+### StringInvertedIndexConfig
+
+Configuration for string inverted index.
+
+
+### IntInvertedIndexConfig
+
+Configuration for integer inverted index.
+
+
+### FloatInvertedIndexConfig
+
+Configuration for float inverted index.
+
+
+### BoolInvertedIndexConfig
+
+Configuration for boolean inverted index.

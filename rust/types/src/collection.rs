@@ -1,52 +1,31 @@
 use std::str::FromStr;
+use std::time::{Duration, SystemTime};
 
 use super::{Metadata, MetadataValueConversionError};
 use crate::{
-    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration,
-    InternalSchema, Segment, SegmentScope,
+    chroma_proto, test_segment, CollectionConfiguration, InternalCollectionConfiguration, Schema,
+    SchemaError, Segment, SegmentScope, UpdateCollectionConfiguration, UpdateMetadata,
 };
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime};
 use thiserror::Error;
-use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[cfg(feature = "pyo3")]
-use pyo3::types::PyAnyMethods;
+use pyo3::{exceptions::PyValueError, types::PyAnyMethods};
 
-/// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
+// CollectionUuid is a wrapper around Uuid to provide a type for the collection id.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    ToSchema,
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CollectionUuid(pub Uuid);
 
 /// DatabaseUuid is a wrapper around Uuid to provide a type for the database id.
 #[derive(
-    Copy,
-    Clone,
-    Debug,
-    Default,
-    Deserialize,
-    Eq,
-    PartialEq,
-    Ord,
-    PartialOrd,
-    Hash,
-    Serialize,
-    ToSchema,
+    Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize,
 )]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DatabaseUuid(pub Uuid);
 
 impl DatabaseUuid {
@@ -116,7 +95,8 @@ fn deserialize_internal_collection_configuration<'de, D: serde::Deserializer<'de
         .map_err(serde::de::Error::custom)
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Collection {
     #[serde(rename = "id")]
@@ -127,9 +107,9 @@ pub struct Collection {
         deserialize_with = "deserialize_internal_collection_configuration",
         rename = "configuration_json"
     )]
-    #[schema(value_type = CollectionConfiguration)]
+    #[cfg_attr(feature = "utoipa", schema(value_type = CollectionConfiguration))]
     pub config: InternalCollectionConfiguration,
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub metadata: Option<Metadata>,
     pub dimension: Option<i32>,
     pub tenant: String,
@@ -152,6 +132,10 @@ pub struct Collection {
     pub updated_at: SystemTime,
     #[serde(skip)]
     pub database_id: DatabaseUuid,
+    /// Number of consecutive compaction failures for this collection.
+    /// Used by the scheduler to track and skip collections that repeatedly fail compaction.
+    #[serde(skip)]
+    pub compaction_failure_count: i32,
 }
 
 impl Default for Collection {
@@ -175,6 +159,7 @@ impl Default for Collection {
             lineage_file_path: None,
             updated_at: SystemTime::now(),
             database_id: DatabaseUuid::new(),
+            compaction_failure_count: 0,
         }
     }
 }
@@ -204,6 +189,24 @@ impl Collection {
     }
 
     #[getter]
+    fn schema<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<Option<pyo3::Bound<'py, pyo3::PyAny>>> {
+        match self.schema.as_ref() {
+            Some(schema) => {
+                let schema_json = serde_json::to_string(schema)
+                    .map_err(|err| PyValueError::new_err(err.to_string()))?;
+                let res = pyo3::prelude::PyModule::import(py, "json")?
+                    .getattr("loads")?
+                    .call1((schema_json,))?;
+                Ok(Some(res))
+            }
+            None => Ok(None),
+        }
+    }
+
+    #[getter]
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -230,6 +233,22 @@ impl Collection {
 }
 
 impl Collection {
+    /// Reconcile the collection schema and configuration when serving read requests.
+    ///
+    /// The read path needs to tolerate collections that only have a configuration persisted.
+    /// This helper hydrates `schema` from the stored configuration when needed, or regenerates
+    /// the configuration from the existing schema to keep both representations consistent.
+    pub fn reconcile_schema_for_read(&mut self) -> Result<(), SchemaError> {
+        if let Some(schema) = self.schema.as_ref() {
+            self.config = InternalCollectionConfiguration::try_from(schema)
+                .map_err(|reason| SchemaError::InvalidSchema { reason })?;
+        } else {
+            self.schema = Some(Schema::try_from(&self.config)?);
+        }
+
+        Ok(())
+    }
+
     pub fn test_collection(dim: i32) -> Self {
         Collection {
             name: "test_collection".to_string(),
@@ -319,6 +338,7 @@ impl TryFrom<chroma_proto::Collection> for Collection {
             lineage_file_path: proto_collection.lineage_file_path,
             updated_at,
             database_id,
+            compaction_failure_count: proto_collection.compaction_failure_count,
         })
     }
 }
@@ -363,6 +383,7 @@ impl TryFrom<Collection> for chroma_proto::Collection {
             lineage_file_path: value.lineage_file_path,
             updated_at: Some(value.updated_at.into()),
             database_id: Some(value.database_id.0.to_string()),
+            compaction_failure_count: value.compaction_failure_count,
         })
     }
 }
@@ -394,14 +415,33 @@ impl CollectionAndSegments {
     }
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct CreateCollectionPayload {
+    pub name: String,
+    pub schema: Option<Schema>,
+    pub configuration: Option<CollectionConfiguration>,
+    pub metadata: Option<Metadata>,
+    #[serde(default)]
+    pub get_or_create: bool,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpdateCollectionPayload {
+    pub new_name: Option<String>,
+    pub new_metadata: Option<UpdateMetadata>,
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
 
     #[test]
     fn test_collection_try_from() {
-        // Create a valid InternalSchema and serialize it
-        let schema = InternalSchema::new_default(crate::KnnIndex::Spann);
+        // Create a valid Schema and serialize it
+        let schema = Schema::new_default(crate::KnnIndex::Spann);
         let schema_str = serde_json::to_string(&schema).unwrap();
 
         let proto_collection = chroma_proto::Collection {
@@ -427,6 +467,7 @@ mod test {
                 nanos: 1,
             }),
             database_id: Some("00000000-0000-0000-0000-000000000000".to_string()),
+            compaction_failure_count: 0,
         };
         let converted_collection: Collection = proto_collection.try_into().unwrap();
         assert_eq!(

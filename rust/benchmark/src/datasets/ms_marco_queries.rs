@@ -43,7 +43,7 @@ impl RecordDataset for MicrosoftMarcoQueriesDataset {
 
                 let byte_stream = response.bytes_stream();
                 let mut stream_reader = StreamReader::new(
-                    futures::TryStreamExt::map_err(byte_stream, |e| std::io::Error::new(std::io::ErrorKind::Other, e)),
+                    futures::TryStreamExt::map_err(byte_stream, std::io::Error::other),
                 );
                 tokio::io::copy(&mut stream_reader, &mut writer).await?;
 

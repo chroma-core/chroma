@@ -8,7 +8,7 @@ use chroma_segment::{
     types::{ChromaSegmentWriter, LogMaterializerError, MaterializeLogsResult},
 };
 use chroma_system::Operator;
-use chroma_types::{InternalSchema, SegmentUuid};
+use chroma_types::{Schema, SegmentUuid};
 use thiserror::Error;
 use tracing::Instrument;
 
@@ -24,6 +24,9 @@ pub enum ApplyLogToSegmentWriterOperatorError {
     ApplyMaterializedLogsError(#[from] ApplyMaterializedLogError),
     #[error("Materialized logs failed to apply {0}")]
     ApplyMaterializedLogsErrorMetadataSegment(#[from] MetadataSegmentError),
+    #[cfg(test)]
+    #[error("Poison offset found in materialized logs")]
+    PoisonOffsetFound,
 }
 
 impl ChromaError for ApplyLogToSegmentWriterOperatorError {
@@ -38,6 +41,8 @@ impl ChromaError for ApplyLogToSegmentWriterOperatorError {
             ApplyLogToSegmentWriterOperatorError::ApplyMaterializedLogsErrorMetadataSegment(e) => {
                 e.code()
             }
+            #[cfg(test)]
+            ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound => ErrorCodes::Internal,
         }
     }
 }
@@ -56,7 +61,9 @@ pub struct ApplyLogToSegmentWriterInput<'bf> {
     segment_writer: ChromaSegmentWriter<'bf>,
     materialized_logs: MaterializeLogsResult,
     record_segment_reader: Option<RecordSegmentReader<'bf>>,
-    schema: Option<InternalSchema>,
+    schema: Option<Schema>,
+    #[cfg(test)]
+    poison_offset: Option<u32>,
 }
 
 impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
@@ -64,13 +71,16 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
         segment_writer: ChromaSegmentWriter<'bf>,
         materialized_logs: MaterializeLogsResult,
         record_segment_reader: Option<RecordSegmentReader<'bf>>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
+        #[cfg(test)] poison_offset: Option<u32>,
     ) -> Self {
         ApplyLogToSegmentWriterInput {
             segment_writer,
             materialized_logs,
             record_segment_reader,
             schema,
+            #[cfg(test)]
+            poison_offset,
         }
     }
 }
@@ -79,7 +89,26 @@ impl<'bf> ApplyLogToSegmentWriterInput<'bf> {
 pub struct ApplyLogToSegmentWriterOutput {
     pub segment_id: SegmentUuid,
     pub segment_type: &'static str,
-    pub schema_update: Option<InternalSchema>,
+    pub schema_update: Option<Schema>,
+}
+
+#[cfg(test)]
+impl ApplyLogToSegmentWriterOperator {
+    fn check_poison_offset(
+        &self,
+        input: &ApplyLogToSegmentWriterInput<'_>,
+    ) -> Result<(), ApplyLogToSegmentWriterOperatorError> {
+        if let Some(poison_offset) = input.poison_offset {
+            if input
+                .materialized_logs
+                .iter()
+                .any(|log| log.get_offset_id() == poison_offset)
+            {
+                return Err(ApplyLogToSegmentWriterOperatorError::PoisonOffsetFound);
+            }
+        }
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -99,6 +128,10 @@ impl Operator<ApplyLogToSegmentWriterInput<'_>, ApplyLogToSegmentWriterOutput>
         if input.materialized_logs.is_empty() {
             return Err(ApplyLogToSegmentWriterOperatorError::LogMaterializationResultEmpty);
         }
+
+        // FAILURE INJECTION CODE.
+        #[cfg(test)]
+        self.check_poison_offset(input)?;
 
         // Apply materialized records.
         let schema_update = match input

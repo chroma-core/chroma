@@ -1,20 +1,34 @@
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::{
     BatchGetCollectionSoftDeleteStatusError, BatchGetCollectionVersionFilePathsError, Collection,
     CollectionAndSegments, CollectionUuid, CountForksError, Database, FlushCompactionResponse,
     GetCollectionByCrnError, GetCollectionSizeError, GetCollectionWithSegmentsError,
-    GetSegmentsError, ListDatabasesError, ListDatabasesResponse, Segment, SegmentFlushInfo,
-    SegmentScope, SegmentType, Tenant, UpdateTenantError, UpdateTenantResponse,
+    GetCollectionsError, GetSegmentsError, ListAttachedFunctionsError, ListDatabasesError,
+    ListDatabasesResponse, Segment, SegmentFlushInfo, SegmentScope, SegmentType, SegmentUuid,
+    Tenant, UpdateTenantError, UpdateTenantResponse,
 };
-use chroma_types::{GetCollectionsError, SegmentUuid};
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use thiserror::Error;
 
+use super::sysdb::json_to_prost_value;
 use super::sysdb::FlushCompactionError;
 use super::sysdb::GetLastCompactionTimeError;
 use crate::sysdb::VERSION_FILE_S3_PREFIX;
-use crate::GetCollectionsOptions;
+use crate::{DatabaseOrTopology, GetCollectionsOptions};
 use chroma_storage::PutOptions;
+
+#[derive(Error, Debug)]
+#[error("MCMR not supported: {0}")]
+struct McmrNotSupportedError(String);
+
+impl ChromaError for McmrNotSupportedError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
 use chroma_types::chroma_proto::CollectionInfoImmutable;
 use chroma_types::chroma_proto::CollectionSegmentInfo;
@@ -27,6 +41,7 @@ use chroma_types::ListCollectionVersionsError;
 use chrono;
 use derivative::Derivative;
 use prost::Message;
+use serde_json::Value as JsonValue;
 
 #[derive(Clone, Debug)]
 pub struct TestSysDb {
@@ -42,6 +57,7 @@ struct Inner {
     tenant_resource_names: HashMap<String, String>,
     collection_to_version_file: HashMap<CollectionUuid, CollectionVersionFile>,
     soft_deleted_collections: HashSet<CollectionUuid>,
+    tasks: HashMap<chroma_types::AttachedFunctionUuid, chroma_types::AttachedFunction>,
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
@@ -58,6 +74,7 @@ impl TestSysDb {
                 tenant_resource_names: HashMap::new(),
                 collection_to_version_file: HashMap::new(),
                 soft_deleted_collections: HashSet::new(),
+                tasks: HashMap::new(),
                 storage: None,
                 mock_time: 0,
             })),
@@ -111,12 +128,20 @@ impl TestSysDb {
     fn filter_collections(
         collection: &Collection,
         collection_id: Option<CollectionUuid>,
+        collection_ids: Option<&Vec<CollectionUuid>>,
         name: Option<String>,
         tenant: Option<String>,
         database: Option<String>,
     ) -> bool {
+        // Filter by collection_id (singular) if provided
         if collection_id.is_some() && collection_id.unwrap() != collection.collection_id {
             return false;
+        }
+        // Filter by collection_ids (plural) if provided
+        if let Some(ids) = collection_ids {
+            if !ids.contains(&collection.collection_id) {
+                return false;
+            }
         }
         if name.is_some() && name.unwrap() != collection.name {
             return false;
@@ -158,14 +183,24 @@ impl TestSysDb {
     ) -> Result<Vec<Collection>, GetCollectionsError> {
         let GetCollectionsOptions {
             collection_id,
-            collection_ids: _,
+            collection_ids,
             include_soft_deleted: _,
             name,
             tenant,
-            database,
+            database_or_topology,
             limit: _,
             offset: _,
         } = options;
+
+        let database_string = match database_or_topology {
+            Some(DatabaseOrTopology::Database(db)) => Some(db.into_string()),
+            Some(DatabaseOrTopology::Topology(topology)) => {
+                return Err(GetCollectionsError::Internal(Box::new(
+                    McmrNotSupportedError(topology.to_string()),
+                )));
+            }
+            None => None,
+        };
 
         let inner = self.inner.lock();
         let mut collections = Vec::new();
@@ -173,9 +208,10 @@ impl TestSysDb {
             if !TestSysDb::filter_collections(
                 collection,
                 collection_id,
+                collection_ids.as_ref(),
                 name.clone(),
                 tenant.clone(),
-                database.clone(),
+                database_string.clone(),
             ) {
                 continue;
             }
@@ -275,6 +311,7 @@ impl TestSysDb {
             tenants.push(Tenant {
                 id: tenant_id,
                 last_compaction_time,
+                resource_name: None,
             });
         }
         Ok(tenants)
@@ -469,6 +506,17 @@ impl TestSysDb {
                 return Err(FlushCompactionError::CollectionNotFound);
             }
             let collection = collection.unwrap();
+
+            // Check for stale version (optimistic concurrency control)
+            if collection.version > collection_version {
+                return Err(FlushCompactionError::FailedToFlushCompaction(
+                    tonic::Status::failed_precondition(format!(
+                        "Collection version is stale: expected {}, but collection is at version {}",
+                        collection_version, collection.version
+                    )),
+                ));
+            }
+
             let mut collection = collection.clone();
             collection.log_position = log_position;
             new_collection_version = collection_version + 1;
@@ -611,6 +659,20 @@ impl TestSysDb {
         Ok(10)
     }
 
+    pub(crate) async fn list_attached_functions(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<Vec<chroma_types::chroma_proto::AttachedFunction>, ListAttachedFunctionsError> {
+        let inner = self.inner.lock();
+        let functions = inner
+            .tasks
+            .values()
+            .filter(|af| af.input_collection_id == collection_id)
+            .map(attached_function_to_proto)
+            .collect();
+        Ok(functions)
+    }
+
     pub(crate) async fn batch_get_collection_version_file_paths(
         &self,
         collection_ids: Vec<CollectionUuid>,
@@ -663,10 +725,55 @@ impl TestSysDb {
         Ok(UpdateTenantResponse {})
     }
 
-    pub(crate) async fn peek_schedule_by_collection_id(
-        &mut self,
-        _collection_ids: &[CollectionUuid],
-    ) -> Result<Vec<chroma_types::ScheduleEntry>, crate::sysdb::PeekScheduleError> {
-        Ok(vec![])
+    /// Increment the compaction failure count for a collection.
+    pub fn increment_compaction_failure_count(&mut self, collection_id: CollectionUuid) {
+        let mut inner = self.inner.lock();
+        if let Some(collection) = inner.collections.get_mut(&collection_id) {
+            collection.compaction_failure_count += 1;
+        }
     }
+}
+
+fn attached_function_to_proto(
+    attached_function: &chroma_types::AttachedFunction,
+) -> chroma_types::chroma_proto::AttachedFunction {
+    chroma_types::chroma_proto::AttachedFunction {
+        id: attached_function.id.0.to_string(),
+        name: attached_function.name.clone(),
+        function_name: attached_function.function_id.to_string(),
+        input_collection_id: attached_function.input_collection_id.0.to_string(),
+        output_collection_name: attached_function.output_collection_name.clone(),
+        output_collection_id: attached_function
+            .output_collection_id
+            .as_ref()
+            .map(|id| id.0.to_string()),
+        params: parse_params(attached_function.params.as_deref()),
+        completion_offset: attached_function.completion_offset,
+        min_records_for_invocation: attached_function.min_records_for_invocation,
+        tenant_id: attached_function.tenant_id.clone(),
+        database_id: attached_function.database_id.clone(),
+        created_at: system_time_to_micros(attached_function.created_at),
+        updated_at: system_time_to_micros(attached_function.updated_at),
+        function_id: attached_function.function_id.to_string(),
+    }
+}
+
+fn parse_params(params: Option<&str>) -> Option<prost_types::Struct> {
+    let json = params?;
+    let value: JsonValue = serde_json::from_str(json).ok()?;
+    match value {
+        JsonValue::Object(map) => Some(prost_types::Struct {
+            fields: map
+                .into_iter()
+                .map(|(k, v)| (k, json_to_prost_value(v)))
+                .collect(),
+        }),
+        _ => None,
+    }
+}
+
+fn system_time_to_micros(time: SystemTime) -> u64 {
+    time.duration_since(UNIX_EPOCH)
+        .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+        .as_micros() as u64
 }

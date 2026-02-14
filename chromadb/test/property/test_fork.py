@@ -7,8 +7,10 @@ import logging
 import pytest
 
 from chromadb.api.models.Collection import Collection
-from chromadb.test.conftest import reset, skip_if_not_cluster
-from chromadb.test.utils.wait_for_version_increase import wait_for_version_increase
+from chromadb.test.conftest import (
+    reset,
+    skip_if_not_cluster,
+)
 from hypothesis.stateful import (
     Bundle,
     RuleBasedStateMachine,

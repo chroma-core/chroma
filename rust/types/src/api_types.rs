@@ -7,25 +7,37 @@ use crate::operator::KnnBatchResult;
 use crate::operator::KnnProjectionRecord;
 use crate::operator::ProjectionRecord;
 use crate::operator::SearchResult;
+use crate::operators_generated::{
+    FUNCTION_RECORD_COUNTER_ID, FUNCTION_RECORD_COUNTER_NAME, FUNCTION_STATISTICS_ID,
+    FUNCTION_STATISTICS_NAME,
+};
 use crate::plan::PlanToProtoError;
+use crate::plan::ReadLevel;
 use crate::plan::SearchPayload;
 use crate::validators::{
     validate_metadata_vec, validate_name, validate_non_empty_collection_update_metadata,
     validate_optional_metadata, validate_schema, validate_update_metadata_vec,
 };
+use crate::AttachedFunction;
+use crate::AttachedFunctionUuid;
 use crate::Collection;
 use crate::CollectionConfigurationToInternalConfigurationError;
 use crate::CollectionConversionError;
 use crate::CollectionUuid;
+use crate::DatabaseName;
 use crate::DistributedSpannParametersFromSegmentError;
+use crate::EmbeddingsPayload;
 use crate::HnswParametersFromSegmentError;
-use crate::InternalSchema;
 use crate::Metadata;
+use crate::RawWhereFields;
+use crate::Schema;
 use crate::SchemaError;
 use crate::SegmentConversionError;
 use crate::SegmentScopeConversionError;
+use crate::UpdateEmbeddingsPayload;
 use crate::UpdateMetadata;
 use crate::Where;
+use crate::WhereValidationError;
 use chroma_error::ChromaValidationError;
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::Deserialize;
@@ -33,7 +45,6 @@ use serde::Serialize;
 use std::time::SystemTimeError;
 use thiserror::Error;
 use tonic::Status;
-use utoipa::ToSchema;
 use uuid::Uuid;
 use validator::Validate;
 use validator::ValidationError;
@@ -144,7 +155,8 @@ impl ChromaError for BatchGetCollectionSoftDeleteStatusError {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ResetResponse {}
 
 #[derive(Debug, Error)]
@@ -167,13 +179,15 @@ impl ChromaError for ResetError {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ChecklistResponse {
     pub max_batch_size: u32,
     pub supports_base64_encoding: bool,
 }
 
-#[derive(Debug, Error, ToSchema)]
+#[derive(Debug, Error)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum HeartbeatError {
     #[error("system time error: {0}")]
     CouldNotGetTime(String),
@@ -192,7 +206,8 @@ impl ChromaError for HeartbeatError {
 }
 
 #[non_exhaustive]
-#[derive(Serialize, Validate, Deserialize, ToSchema)]
+#[derive(Serialize, Validate, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateTenantRequest {
     #[validate(length(min = 3))]
     pub name: String,
@@ -206,7 +221,8 @@ impl CreateTenantRequest {
     }
 }
 
-#[derive(Serialize, Deserialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateTenantResponse {}
 
 #[derive(Debug, Error)]
@@ -227,7 +243,8 @@ impl ChromaError for CreateTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetTenantRequest {
     pub name: String,
 }
@@ -240,7 +257,8 @@ impl GetTenantRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetTenantResponse {
     pub name: String,
@@ -279,7 +297,8 @@ impl ChromaError for GetTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateTenantRequest {
     pub tenant_id: String,
     pub resource_name: String,
@@ -299,7 +318,8 @@ impl UpdateTenantRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateTenantResponse {}
 
@@ -328,18 +348,18 @@ impl ChromaError for UpdateTenantError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateDatabaseRequest {
     pub database_id: Uuid,
     pub tenant_id: String,
-    #[validate(length(min = 3))]
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CreateDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let database_id = Uuid::new_v4();
         let request = Self {
@@ -352,7 +372,25 @@ impl CreateDatabaseRequest {
     }
 }
 
-#[derive(ToSchema, Serialize)]
+#[derive(Error, Debug)]
+pub enum ClientResolutionError {
+    #[error("Not supported")]
+    McmrNotSupported,
+    #[error("Database not found")]
+    DatabaseNotFound,
+}
+
+impl ChromaError for ClientResolutionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ClientResolutionError::McmrNotSupported => ErrorCodes::InvalidArgument,
+            ClientResolutionError::DatabaseNotFound => ErrorCodes::NotFound,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateDatabaseResponse {}
 
 #[derive(Error, Debug)]
@@ -361,6 +399,8 @@ pub enum CreateDatabaseError {
     AlreadyExists(String),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for CreateDatabaseError {
@@ -368,11 +408,13 @@ impl ChromaError for CreateDatabaseError {
         match self {
             CreateDatabaseError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
             CreateDatabaseError::Internal(status) => status.code(),
+            CreateDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
 
-#[derive(Serialize, Deserialize, Debug, ToSchema, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct Database {
     pub id: Uuid,
@@ -402,8 +444,19 @@ impl Database {
     }
 }
 
+impl From<Database> for crate::chroma_proto::Database {
+    fn from(d: Database) -> Self {
+        crate::chroma_proto::Database {
+            id: d.id.to_string(),
+            name: d.name,
+            tenant: d.tenant,
+        }
+    }
+}
+
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListDatabasesRequest {
     pub tenant_id: String,
     pub limit: Option<u32>,
@@ -446,16 +499,17 @@ impl ChromaError for ListDatabasesError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, ToSchema, Serialize)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetDatabaseRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl GetDatabaseRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -476,6 +530,8 @@ pub enum GetDatabaseError {
     InvalidID(String),
     #[error("Database [{0}] not found. Are you sure it exists?")]
     NotFound(String),
+    #[error("Client resolution error: {0}")]
+    ClientResolutionError(#[from] ClientResolutionError),
 }
 
 impl ChromaError for GetDatabaseError {
@@ -484,12 +540,14 @@ impl ChromaError for GetDatabaseError {
             GetDatabaseError::Internal(err) => err.code(),
             GetDatabaseError::InvalidID(_) => ErrorCodes::InvalidArgument,
             GetDatabaseError::NotFound(_) => ErrorCodes::NotFound,
+            GetDatabaseError::ClientResolutionError(e) => e.code(),
         }
     }
 }
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteDatabaseRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -509,7 +567,8 @@ impl DeleteDatabaseRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteDatabaseResponse {}
 
 #[derive(Debug, Error)]
@@ -547,10 +606,11 @@ impl ChromaError for FinishDatabaseDeletionError {
 }
 
 #[non_exhaustive]
-#[derive(Validate, Debug, Serialize, ToSchema)]
+#[derive(Validate, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ListCollectionsRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     pub limit: Option<u32>,
     pub offset: u32,
 }
@@ -558,7 +618,7 @@ pub struct ListCollectionsRequest {
 impl ListCollectionsRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         limit: Option<u32>,
         offset: u32,
     ) -> Result<Self, ChromaValidationError> {
@@ -576,16 +636,17 @@ impl ListCollectionsRequest {
 pub type ListCollectionsResponse = Vec<Collection>;
 
 #[non_exhaustive]
-#[derive(Validate, Serialize, ToSchema)]
+#[derive(Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CountCollectionsRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
 }
 
 impl CountCollectionsRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
@@ -599,17 +660,18 @@ impl CountCollectionsRequest {
 pub type CountCollectionsResponse = u32;
 
 #[non_exhaustive]
-#[derive(Validate, Clone, Serialize, ToSchema)]
+#[derive(Validate, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     pub collection_name: String,
 }
 
 impl GetCollectionRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         collection_name: String,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -645,28 +707,29 @@ impl ChromaError for GetCollectionError {
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Validate, Serialize, ToSchema)]
+#[derive(Clone, Debug, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct CreateCollectionRequest {
     pub tenant_id: String,
-    pub database_name: String,
+    pub database_name: DatabaseName,
     #[validate(custom(function = "validate_name"))]
     pub name: String,
     #[validate(custom(function = "validate_optional_metadata"))]
     pub metadata: Option<Metadata>,
     pub configuration: Option<InternalCollectionConfiguration>,
     #[validate(custom(function = "validate_schema"))]
-    pub schema: Option<InternalSchema>,
+    pub schema: Option<Schema>,
     pub get_or_create: bool,
 }
 
 impl CreateCollectionRequest {
     pub fn try_new(
         tenant_id: String,
-        database_name: String,
+        database_name: DatabaseName,
         name: String,
         metadata: Option<Metadata>,
         configuration: Option<InternalCollectionConfiguration>,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
         get_or_create: bool,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
@@ -702,7 +765,7 @@ pub enum CreateCollectionError {
     #[error("Could not deserialize configuration: {0}")]
     Configuration(serde_json::Error),
     #[error("Could not serialize schema: {0}")]
-    Schema(#[from] SchemaError),
+    Schema(#[source] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("The operation was aborted, {0}")]
@@ -714,7 +777,7 @@ pub enum CreateCollectionError {
     #[error("Failed to parse db id")]
     DatabaseIdParseError,
     #[error("Failed to reconcile schema: {0}")]
-    InvalidSchema(String),
+    InvalidSchema(#[source] SchemaError),
 }
 
 impl ChromaError for CreateCollectionError {
@@ -732,7 +795,7 @@ impl ChromaError for CreateCollectionError {
             CreateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
             CreateCollectionError::HnswNotSupported => ErrorCodes::InvalidArgument,
             CreateCollectionError::DatabaseIdParseError => ErrorCodes::Internal,
-            CreateCollectionError::InvalidSchema(_) => ErrorCodes::InvalidArgument,
+            CreateCollectionError::InvalidSchema(e) => e.code(),
             CreateCollectionError::Schema(e) => e.code(),
         }
     }
@@ -754,35 +817,43 @@ impl ChromaError for CountCollectionsError {
 
 #[derive(Debug, Error)]
 pub enum GetCollectionsError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not deserialize configuration")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(#[source] serde_json::Error),
     #[error("Could not deserialize collection ID")]
     CollectionId(#[from] uuid::Error),
     #[error("Could not deserialize database ID")]
     DatabaseId,
+    #[error("Could not deserialize schema")]
+    Schema(#[source] serde_json::Error),
 }
 
 impl ChromaError for GetCollectionsError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionsError::InvalidSchema(e) => e.code(),
             GetCollectionsError::Internal(err) => err.code(),
             GetCollectionsError::Configuration(_) => ErrorCodes::Internal,
             GetCollectionsError::CollectionId(_) => ErrorCodes::Internal,
             GetCollectionsError::DatabaseId => ErrorCodes::Internal,
+            GetCollectionsError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ChromaResourceName {
     pub tenant_resource_name: String,
     pub database_name: String,
     pub collection_name: String,
 }
 #[non_exhaustive]
-#[derive(Clone, Serialize, ToSchema)]
+#[derive(Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetCollectionByCrnRequest {
     pub parsed_crn: ChromaResourceName,
 }
@@ -819,6 +890,8 @@ pub type GetCollectionByCrnResponse = Collection;
 
 #[derive(Debug, Error)]
 pub enum GetCollectionByCrnError {
+    #[error("Failed to reconcile schema: {0}")]
+    InvalidSchema(#[from] SchemaError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Collection [{0}] does not exist")]
@@ -828,21 +901,25 @@ pub enum GetCollectionByCrnError {
 impl ChromaError for GetCollectionByCrnError {
     fn code(&self) -> ErrorCodes {
         match self {
+            GetCollectionByCrnError::InvalidSchema(e) => e.code(),
             GetCollectionByCrnError::Internal(err) => err.code(),
             GetCollectionByCrnError::NotFound(_) => ErrorCodes::NotFound,
         }
     }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, ToSchema)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum CollectionMetadataUpdate {
     ResetMetadata,
     UpdateMetadata(UpdateMetadata),
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Debug, Serialize, ToSchema)]
+#[derive(Clone, Validate, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRequest {
+    pub database_name: Option<DatabaseName>,
     pub collection_id: CollectionUuid,
     #[validate(custom(function = "validate_name"))]
     pub new_name: Option<String>,
@@ -853,12 +930,14 @@ pub struct UpdateCollectionRequest {
 
 impl UpdateCollectionRequest {
     pub fn try_new(
+        database_name: Option<DatabaseName>,
         collection_id: CollectionUuid,
         new_name: Option<String>,
         new_metadata: Option<CollectionMetadataUpdate>,
         new_configuration: Option<InternalUpdateCollectionConfiguration>,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
+            database_name,
             collection_id,
             new_name,
             new_metadata,
@@ -869,7 +948,8 @@ impl UpdateCollectionRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -879,13 +959,15 @@ pub enum UpdateCollectionError {
     #[error("Metadata reset unsupported")]
     MetadataResetUnsupported,
     #[error("Could not serialize configuration")]
-    Configuration(#[from] serde_json::Error),
+    Configuration(#[source] serde_json::Error),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
     #[error("Could not parse config: {0}")]
     InvalidConfig(#[from] CollectionConfigurationToInternalConfigurationError),
     #[error("SPANN is still in development. Not allowed to created spann indexes")]
     SpannNotImplemented,
+    #[error("Could not serialize schema: {0}")]
+    Schema(#[source] serde_json::Error),
 }
 
 impl ChromaError for UpdateCollectionError {
@@ -897,12 +979,14 @@ impl ChromaError for UpdateCollectionError {
             UpdateCollectionError::Internal(err) => err.code(),
             UpdateCollectionError::InvalidConfig(_) => ErrorCodes::InvalidArgument,
             UpdateCollectionError::SpannNotImplemented => ErrorCodes::InvalidArgument,
+            UpdateCollectionError::Schema(_) => ErrorCodes::Internal,
         }
     }
 }
 
 #[non_exhaustive]
-#[derive(Clone, Validate, Serialize, ToSchema)]
+#[derive(Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -925,7 +1009,8 @@ impl DeleteCollectionRequest {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionResponse {}
 
 #[derive(Error, Debug)]
@@ -951,8 +1036,44 @@ impl ChromaError for DeleteCollectionError {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct IndexStatusResponse {
+    pub op_indexing_progress: f32,
+    pub num_unindexed_ops: u64,
+    pub num_indexed_ops: u64,
+    pub total_ops: u64,
+}
+
+#[derive(Error, Debug)]
+pub enum IndexStatusError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl From<GetCollectionError> for IndexStatusError {
+    fn from(err: GetCollectionError) -> Self {
+        match err {
+            GetCollectionError::NotFound(msg) => IndexStatusError::NotFound(msg),
+            other => IndexStatusError::Internal(Box::new(other)),
+        }
+    }
+}
+
+impl ChromaError for IndexStatusError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            IndexStatusError::NotFound(_) => ErrorCodes::NotFound,
+            IndexStatusError::Internal(err) => err.code(),
+        }
+    }
+}
+
 #[non_exhaustive]
-#[derive(Clone, Validate, Serialize, ToSchema)]
+#[derive(Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct ForkCollectionRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -996,6 +1117,8 @@ pub enum ForkCollectionError {
     DuplicateSegment,
     #[error("Missing field: [{0}]")]
     Field(String),
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
     #[error("Collection forking is unsupported for local chroma")]
     Local,
     #[error(transparent)]
@@ -1016,6 +1139,7 @@ impl ChromaError for ForkCollectionError {
             ForkCollectionError::CollectionConversionError(e) => e.code(),
             ForkCollectionError::DuplicateSegment => ErrorCodes::Internal,
             ForkCollectionError::Field(_) => ErrorCodes::FailedPrecondition,
+            ForkCollectionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
             ForkCollectionError::Local => ErrorCodes::Unimplemented,
             ForkCollectionError::Internal(e) => e.code(),
             ForkCollectionError::SegmentConversionError(e) => e.code(),
@@ -1040,6 +1164,26 @@ impl ChromaError for CountForksError {
             CountForksError::NotFound(_) => ErrorCodes::NotFound,
             CountForksError::Internal(chroma_error) => chroma_error.code(),
             CountForksError::Local => ErrorCodes::Unimplemented,
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ListAttachedFunctionsError {
+    #[error("Collection [{0}] does not exist")]
+    NotFound(String),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+    #[error("List attached functions is not implemented")]
+    NotImplemented,
+}
+
+impl ChromaError for ListAttachedFunctionsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            ListAttachedFunctionsError::NotFound(_) => ErrorCodes::NotFound,
+            ListAttachedFunctionsError::Internal(chroma_error) => chroma_error.code(),
+            ListAttachedFunctionsError::NotImplemented => ErrorCodes::Unimplemented,
         }
     }
 }
@@ -1086,8 +1230,44 @@ pub const CHROMA_URI_KEY: &str = "chroma:uri";
 
 ////////////////////////// AddCollectionRecords //////////////////////////
 
+/// Payload for adding records to a collection.
+///
+/// Records are added in batches. All arrays must have the same length, with each index
+/// representing a single record. For example, `ids[0]`, `embeddings[0]`, `documents[0]`, etc.
+/// all belong to the same record.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AddCollectionRecordsPayload {
+    /// Unique identifiers for each record.
+    pub ids: Vec<String>,
+    /// Embeddings for each record. Can contain the raw f32 arrays or base64 encoded strings.
+    pub embeddings: EmbeddingsPayload,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<Metadata>>>,
+}
+
+impl AddCollectionRecordsPayload {
+    pub fn new(
+        ids: Vec<String>,
+        embeddings: Vec<Vec<f32>>,
+        documents: Option<Vec<Option<String>>>,
+        uris: Option<Vec<Option<String>>>,
+        metadatas: Option<Vec<Option<Metadata>>>,
+    ) -> Self {
+        Self {
+            ids,
+            embeddings: EmbeddingsPayload::JsonArrays(embeddings),
+            documents,
+            uris,
+            metadatas,
+        }
+    }
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1126,6 +1306,16 @@ impl AddCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> AddCollectionRecordsPayload {
+        AddCollectionRecordsPayload {
+            ids: self.ids,
+            embeddings: EmbeddingsPayload::JsonArrays(self.embeddings),
+            documents: self.documents,
+            uris: self.uris,
+            metadatas: self.metadatas,
+        }
+    }
 }
 
 fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
@@ -1136,7 +1326,8 @@ fn validate_embeddings(embeddings: &[Vec<f32>]) -> Result<(), ValidationError> {
     Ok(())
 }
 
-#[derive(Serialize, ToSchema, Default, Deserialize)]
+#[derive(Serialize, Default, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct AddCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1145,6 +1336,8 @@ pub enum AddCollectionRecordsError {
     Collection(#[from] GetCollectionError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1154,6 +1347,7 @@ impl ChromaError for AddCollectionRecordsError {
         match self {
             AddCollectionRecordsError::Collection(err) => err.code(),
             AddCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            AddCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             AddCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1161,8 +1355,25 @@ impl ChromaError for AddCollectionRecordsError {
 
 ////////////////////////// UpdateCollectionRecords //////////////////////////
 
+/// Payload for updating existing records in a collection.
+///
+/// Records are added in batches. All arrays must have the same length, with each index
+/// representing a single record. For example, `ids[0]`, `embeddings[0]`, `documents[0]`, etc.
+/// all belong to the same record.
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpdateCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    /// Updated embeddings for each record. Can contain the raw f32 arrays or base64 encoded strings.
+    pub embeddings: Option<UpdateEmbeddingsPayload>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1200,15 +1411,28 @@ impl UpdateCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> UpdateCollectionRecordsPayload {
+        UpdateCollectionRecordsPayload {
+            ids: self.ids,
+            embeddings: self.embeddings.map(UpdateEmbeddingsPayload::JsonArrays),
+            documents: self.documents,
+            uris: self.uris,
+            metadatas: self.metadatas,
+        }
+    }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpdateCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpdateCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1217,6 +1441,7 @@ impl ChromaError for UpdateCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpdateCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpdateCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpdateCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1224,8 +1449,26 @@ impl ChromaError for UpdateCollectionRecordsError {
 
 ////////////////////////// UpsertCollectionRecords //////////////////////////
 
+/// Payload for upserting records in a collection.
+///
+/// Upsert creates records if they don't exist, or updates them if they do.
+/// Records are added in batches. All arrays must have the same length, with each index
+/// representing a single record. For example, `ids[0]`, `embeddings[0]`, `documents[0]`, etc.
+/// all belong to the same record.
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct UpsertCollectionRecordsPayload {
+    pub ids: Vec<String>,
+    /// Embeddings for each record. Can contain the raw f32 arrays or base64 encoded strings.
+    pub embeddings: EmbeddingsPayload,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<UpdateMetadata>>>,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1264,15 +1507,28 @@ impl UpsertCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> UpsertCollectionRecordsPayload {
+        UpsertCollectionRecordsPayload {
+            ids: self.ids.clone(),
+            embeddings: EmbeddingsPayload::JsonArrays(self.embeddings.clone()),
+            documents: self.documents.clone(),
+            uris: self.uris.clone(),
+            metadatas: self.metadatas.clone(),
+        }
+    }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct UpsertCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
 pub enum UpsertCollectionRecordsError {
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Other(#[from] Box<dyn ChromaError>),
 }
@@ -1281,6 +1537,7 @@ impl ChromaError for UpsertCollectionRecordsError {
     fn code(&self) -> ErrorCodes {
         match self {
             UpsertCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            UpsertCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             UpsertCollectionRecordsError::Other(err) => err.code(),
         }
     }
@@ -1288,8 +1545,21 @@ impl ChromaError for UpsertCollectionRecordsError {
 
 ////////////////////////// DeleteCollectionRecords //////////////////////////
 
+/// Payload for deleting records from a collection.
+///
+/// Records can be deleted by their IDs or by a metadata filter. At least one of `ids` or `where`
+/// must be provided.
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct DeleteCollectionRecordsPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1324,9 +1594,22 @@ impl DeleteCollectionRecordsRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> Result<DeleteCollectionRecordsPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(DeleteCollectionRecordsPayload {
+            ids: self.ids.clone(),
+            where_fields,
+        })
+    }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsResponse {}
 
 #[derive(Error, Debug)]
@@ -1335,6 +1618,8 @@ pub enum DeleteCollectionRecordsError {
     Get(#[from] ExecutorError),
     #[error("Backoff and retry")]
     Backoff,
+    #[error("Invalid database name")]
+    InvalidDatabaseName,
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
@@ -1344,6 +1629,7 @@ impl ChromaError for DeleteCollectionRecordsError {
         match self {
             DeleteCollectionRecordsError::Get(err) => err.code(),
             DeleteCollectionRecordsError::Backoff => ErrorCodes::ResourceExhausted,
+            DeleteCollectionRecordsError::InvalidDatabaseName => ErrorCodes::InvalidArgument,
             DeleteCollectionRecordsError::Internal(err) => err.code(),
         }
     }
@@ -1361,7 +1647,9 @@ impl ChromaError for IncludeParsingError {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize, ToSchema)]
+/// Use this enum to specify which fields should be returned when retrieving records.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Include {
     #[serde(rename = "distances")]
     Distance,
@@ -1390,7 +1678,8 @@ impl TryFrom<&str> for Include {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct IncludeList(pub Vec<Include>);
 
@@ -1466,10 +1755,35 @@ impl CountRequest {
 
 pub type CountResponse = u32;
 
+//////////////////////// Payload Err ////////////////////
+
+#[derive(Debug, thiserror::Error)]
+pub enum WhereError {
+    #[error("serialization: {0}")]
+    Serialization(#[from] serde_json::Error),
+    #[error("validation: {0}")]
+    Validation(#[from] WhereValidationError),
+}
+
 ////////////////////////// Get //////////////////////////
 
+/// Records can be retrieved by their IDs or by a metadata filter. At least one of `ids` or `where`
+/// must be provided. Use `include` to specify which fields to return in the response.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub limit: Option<u32>,
+    pub offset: Option<u32>,
+    #[serde(default = "IncludeList::default_get")]
+    pub include: IncludeList,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct GetRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1506,17 +1820,35 @@ impl GetRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> Result<GetRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(GetRequestPayload {
+            ids: self.ids,
+            where_fields,
+            limit: self.limit,
+            offset: Some(self.offset),
+            include: self.include,
+        })
+    }
 }
 
-#[derive(Clone, Deserialize, Serialize, Debug, ToSchema, Default)]
+/// All arrays have the same length, with each index representing a single record.
+/// Only fields specified in the request's `include` parameter are populated.
+#[derive(Clone, Deserialize, Serialize, Debug, Default)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct GetResponse {
     pub ids: Vec<String>,
     pub embeddings: Option<Vec<Vec<f32>>>,
     pub documents: Option<Vec<Option<String>>>,
     pub uris: Option<Vec<Option<String>>>,
-    // TODO(hammadb): Add metadata & include to the response
     pub metadatas: Option<Vec<Option<Metadata>>>,
+    /// List of fields that were included in this response.
     pub include: Vec<Include>,
 }
 
@@ -1637,8 +1969,21 @@ impl From<(GetResult, IncludeList)> for GetResponse {
 
 ////////////////////////// Query //////////////////////////
 
+#[derive(Deserialize, Debug, Clone, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct QueryRequestPayload {
+    pub ids: Option<Vec<String>>,
+    #[serde(flatten)]
+    pub where_fields: RawWhereFields,
+    pub query_embeddings: Vec<Vec<f32>>,
+    pub n_results: Option<u32>,
+    #[serde(default = "IncludeList::default_query")]
+    pub include: IncludeList,
+}
+
 #[non_exhaustive]
-#[derive(Debug, Clone, Validate, Serialize, ToSchema)]
+#[derive(Debug, Clone, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct QueryRequest {
     pub tenant_id: String,
     pub database_name: String,
@@ -1675,9 +2020,25 @@ impl QueryRequest {
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> Result<QueryRequestPayload, WhereError> {
+        let where_fields = if let Some(r#where) = self.r#where.as_ref() {
+            RawWhereFields::from_json_str(Some(&serde_json::to_string(r#where)?), None)?
+        } else {
+            RawWhereFields::default()
+        };
+        Ok(QueryRequestPayload {
+            ids: self.ids,
+            where_fields,
+            query_embeddings: self.embeddings,
+            n_results: Some(self.n_results),
+            include: self.include,
+        })
+    }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct QueryResponse {
     pub ids: Vec<Vec<String>>,
@@ -1845,13 +2206,26 @@ impl From<(KnnBatchResult, IncludeList)> for QueryResponse {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct SearchRequestPayload {
+    pub searches: Vec<SearchPayload>,
+    /// Specifies whether to include unindexed data in the search results.
+    #[serde(default)]
+    pub read_level: ReadLevel,
+}
+
 #[non_exhaustive]
-#[derive(Clone, Debug, Serialize, ToSchema, Validate)]
+#[derive(Clone, Debug, Serialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    #[validate(nested)]
     pub searches: Vec<SearchPayload>,
+    /// Specifies the read level for consistency vs performance tradeoffs.
+    pub read_level: ReadLevel,
 }
 
 impl SearchRequest {
@@ -1860,19 +2234,29 @@ impl SearchRequest {
         database_name: String,
         collection_id: CollectionUuid,
         searches: Vec<SearchPayload>,
+        read_level: ReadLevel,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
             searches,
+            read_level,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
+
+    pub fn into_payload(self) -> SearchRequestPayload {
+        SearchRequestPayload {
+            searches: self.searches,
+            read_level: self.read_level,
+        }
+    }
 }
 
-#[derive(Clone, Deserialize, Serialize, ToSchema, Debug)]
+#[derive(Clone, Deserialize, Serialize, Debug)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchResponse {
     pub ids: Vec<Vec<String>>,
     pub documents: Vec<Option<Vec<Option<String>>>>,
@@ -1971,7 +2355,8 @@ impl ChromaError for QueryError {
     }
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct HealthCheckResponse {
     pub is_executor_ready: bool,
     pub is_log_client_ready: bool,
@@ -2022,15 +2407,16 @@ impl ChromaError for ExecutorError {
     }
 }
 
-////////////////////////// Task Operations //////////////////////////
+//////////////////////////  Attached Function Operations //////////////////////////
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Deserialize, Serialize, Validate, ToSchema)]
-pub struct CreateTaskRequest {
+#[derive(Clone, Debug, Deserialize, Serialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachFunctionRequest {
     #[validate(length(min = 1))]
-    pub task_name: String,
-    pub operator_name: String,
-    pub output_collection_name: String,
+    pub name: String,
+    pub function_id: String,
+    pub output_collection: String,
     #[serde(default = "default_empty_json_object")]
     pub params: serde_json::Value,
 }
@@ -2039,17 +2425,17 @@ fn default_empty_json_object() -> serde_json::Value {
     serde_json::json!({})
 }
 
-impl CreateTaskRequest {
+impl AttachFunctionRequest {
     pub fn try_new(
-        task_name: String,
-        operator_name: String,
-        output_collection_name: String,
+        name: String,
+        function_id: String,
+        output_collection: String,
         params: serde_json::Value,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
-            task_name,
-            operator_name,
-            output_collection_name,
+            name,
+            function_id,
+            output_collection,
             params,
         };
         request.validate().map_err(ChromaValidationError::from)?;
@@ -2057,67 +2443,174 @@ impl CreateTaskRequest {
     }
 }
 
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct CreateTaskResponse {
-    pub success: bool,
-    pub task_id: String,
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachedFunctionInfo {
+    /// Unique identifier for the attached function.
+    pub id: String,
+    /// Human-readable name for the attached function instance.
+    pub name: String,
+    /// Name of the function (e.g., "record_counter", "statistics").
+    pub function_name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachFunctionResponse {
+    pub attached_function: AttachedFunctionInfo,
+    /// True if newly created, false if already existed (idempotent request).
+    pub created: bool,
+}
+
+/// API response struct for attached function with function_name instead of function_id
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct AttachedFunctionApiResponse {
+    /// Unique identifier for the attached function
+    pub id: AttachedFunctionUuid,
+    /// Human-readable name for the attached function instance
+    pub name: String,
+    /// Name of the function (e.g., "record_counter", "statistics")
+    pub function_name: String,
+    /// Source collection that triggers the attached function
+    pub input_collection_id: CollectionUuid,
+    /// Name of target collection where attached function output is stored
+    #[serde(rename = "output_collection")]
+    pub output_collection_name: String,
+    /// ID of the output collection (lazily filled in after creation)
+    pub output_collection_id: Option<CollectionUuid>,
+    /// Optional JSON parameters for the function
+    pub params: Option<String>,
+    /// Tenant name this attached function belongs to
+    pub tenant_id: String,
+    /// Database name this attached function belongs to
+    pub database_id: String,
+    /// Completion offset: the WAL position up to which the attached function has processed records
+    pub completion_offset: u64,
+    /// Minimum number of new records required before the attached function runs again
+    pub min_records_for_invocation: u64,
+}
+
+impl AttachedFunctionApiResponse {
+    /// Convert an AttachedFunction to the API response format, mapping function_id UUID to function_name
+    pub fn from_attached_function(af: AttachedFunction) -> Result<Self, GetAttachedFunctionError> {
+        let function_name = match af.function_id {
+            id if id == FUNCTION_RECORD_COUNTER_ID => FUNCTION_RECORD_COUNTER_NAME.to_string(),
+            id if id == FUNCTION_STATISTICS_ID => FUNCTION_STATISTICS_NAME.to_string(),
+            _ => {
+                return Err(GetAttachedFunctionError::UnknownFunctionId(af.function_id));
+            }
+        };
+
+        Ok(Self {
+            id: af.id,
+            name: af.name,
+            function_name,
+            input_collection_id: af.input_collection_id,
+            output_collection_name: af.output_collection_name,
+            output_collection_id: af.output_collection_id,
+            params: af.params,
+            tenant_id: af.tenant_id,
+            database_id: af.database_id,
+            completion_offset: af.completion_offset,
+            min_records_for_invocation: af.min_records_for_invocation,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct GetAttachedFunctionResponse {
+    pub attached_function: AttachedFunctionApiResponse,
 }
 
 #[derive(Error, Debug)]
-pub enum AddTaskError {
-    #[error("Task with name [{0}] already exists")]
+pub enum AttachFunctionError {
+    #[error("{0}")]
     AlreadyExists(String),
+    #[error("{0}")]
+    CollectionAlreadyHasFunction(String),
+    #[error("Failed to get collection and segments")]
+    GetCollectionError(#[from] GetCollectionError),
     #[error("Input collection [{0}] does not exist")]
     InputCollectionNotFound(String),
     #[error("Output collection [{0}] already exists")]
     OutputCollectionExists(String),
+    #[error("{0}")]
+    InvalidArgument(String),
+    #[error("{0}")]
+    FunctionNotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
+    #[error(transparent)]
+    FinishCreate(#[from] crate::FinishCreateAttachedFunctionError),
     #[error(transparent)]
     Internal(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for AddTaskError {
+impl ChromaError for AttachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            AddTaskError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
-            AddTaskError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
-            AddTaskError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
-            AddTaskError::Validation(err) => err.code(),
-            AddTaskError::Internal(err) => err.code(),
+            AttachFunctionError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::CollectionAlreadyHasFunction(_) => ErrorCodes::FailedPrecondition,
+            AttachFunctionError::GetCollectionError(err) => err.code(),
+            AttachFunctionError::InputCollectionNotFound(_) => ErrorCodes::NotFound,
+            AttachFunctionError::OutputCollectionExists(_) => ErrorCodes::AlreadyExists,
+            AttachFunctionError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            AttachFunctionError::FunctionNotFound(_) => ErrorCodes::NotFound,
+            AttachFunctionError::Validation(err) => err.code(),
+            AttachFunctionError::FinishCreate(err) => err.code(),
+            AttachFunctionError::Internal(err) => err.code(),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum GetAttachedFunctionError {
+    #[error("Attached Function not found")]
+    NotFound(String),
+    #[error("Unknown function ID [{0}]. Function may not be registered in the system.")]
+    UnknownFunctionId(Uuid),
+    #[error(transparent)]
+    Internal(#[from] Box<dyn ChromaError>),
+}
+
+impl ChromaError for GetAttachedFunctionError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GetAttachedFunctionError::NotFound(_) => ErrorCodes::NotFound,
+            GetAttachedFunctionError::UnknownFunctionId(_) => ErrorCodes::Internal,
+            GetAttachedFunctionError::Internal(err) => err.code(),
         }
     }
 }
 
 #[non_exhaustive]
-#[derive(Clone, Debug, Deserialize, Validate, Serialize, ToSchema)]
-pub struct RemoveTaskRequest {
-    #[validate(length(min = 1))]
-    pub task_name: String,
-    /// Whether to delete the output collection as well
+#[derive(Clone, Debug, Deserialize, Validate, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct DetachFunctionRequest {
+    /// Whether to delete the output collection as well when detaching the function.
     #[serde(default)]
     pub delete_output: bool,
 }
 
-impl RemoveTaskRequest {
-    pub fn try_new(task_name: String, delete_output: bool) -> Result<Self, ChromaValidationError> {
-        let request = Self {
-            task_name,
-            delete_output,
-        };
+impl DetachFunctionRequest {
+    pub fn try_new(delete_output: bool) -> Result<Self, ChromaValidationError> {
+        let request = Self { delete_output };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
     }
 }
 
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct RemoveTaskResponse {
+#[derive(Clone, Debug, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+pub struct DetachFunctionResponse {
     pub success: bool,
 }
 
 #[derive(Error, Debug)]
-pub enum RemoveTaskError {
-    #[error("Task with name [{0}] does not exist")]
+pub enum DetachFunctionError {
+    #[error(" Attached Function with ID [{0}] does not exist")]
     NotFound(String),
     #[error(transparent)]
     Validation(#[from] ChromaValidationError),
@@ -2125,12 +2618,12 @@ pub enum RemoveTaskError {
     Internal(#[from] Box<dyn ChromaError>),
 }
 
-impl ChromaError for RemoveTaskError {
+impl ChromaError for DetachFunctionError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RemoveTaskError::NotFound(_) => ErrorCodes::NotFound,
-            RemoveTaskError::Validation(err) => err.code(),
-            RemoveTaskError::Internal(err) => err.code(),
+            DetachFunctionError::NotFound(_) => ErrorCodes::NotFound,
+            DetachFunctionError::Validation(err) => err.code(),
+            DetachFunctionError::Internal(err) => err.code(),
         }
     }
 }
@@ -2143,8 +2636,10 @@ mod test {
 
     #[test]
     fn test_create_database_min_length() {
-        let request = CreateDatabaseRequest::try_new("default_tenant".to_string(), "a".to_string());
-        assert!(request.is_err());
+        // DatabaseName requires at least 3 characters
+        assert!(DatabaseName::new("a").is_none());
+        assert!(DatabaseName::new("ab").is_none());
+        assert!(DatabaseName::new("abc").is_some());
     }
 
     #[test]
@@ -2159,7 +2654,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            MetadataValue::SparseVector(SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2])),
+            MetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = AddCollectionRecordsRequest::try_new(
@@ -2183,10 +2680,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
+            UpdateMetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = UpdateCollectionRecordsRequest::try_new(
@@ -2210,10 +2706,9 @@ mod test {
         // Add unsorted sparse vector - should fail validation
         metadata.insert(
             "sparse".to_string(),
-            UpdateMetadataValue::SparseVector(SparseVector::new(
-                vec![3, 1, 2],
-                vec![0.3, 0.1, 0.2],
-            )),
+            UpdateMetadataValue::SparseVector(
+                SparseVector::new(vec![3, 1, 2], vec![0.3, 0.1, 0.2]).unwrap(),
+            ),
         );
 
         let result = UpsertCollectionRecordsRequest::try_new(

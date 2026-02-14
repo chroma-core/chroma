@@ -1,0 +1,330 @@
+---
+title: Agentic Memory
+description: Persist agent context across runs for better performance and personalization.
+---
+
+We've seen how tool calling and iterative searches over a Chroma collection can build context for an agent. While this works well for individual runs, agents start fresh each time-repeating expensive computations, re-learning user preferences, and rediscovering effective strategies they've already found.
+
+Agentic memory solves this by persisting data from agent runs that can be leveraged in the future. This reduces cost on LLM interactions, personalizes user experience, and improves agent performance over time.
+
+## Memory Records
+
+Context engineering is both an art and a science. Your memory schema will ultimately depend on your application's needs. However, in practice, three categories lend themselves well to most use cases:
+
+### Semantic Memory
+
+**Facts** about users, processes, or domain knowledge that inform future interactions:
+* User preferences: "Prefers concise responses"
+* Context: "Works in marketing, needs quarterly reports"
+* Domain facts: "Company fiscal year starts in April"
+
+Storing facts eliminates clarification steps. If a user mentioned they work in marketing last week, the agent shouldn't ask or search for this information again.
+
+### Procedural Memory
+
+Patterns and **instructions** that guide tool selection and execution:
+* "If a user asks about sales data, query the sales_summary table first"
+* "For date ranges, always confirm timezone before querying"
+* "Use the PDF parser for files from the legal department"
+
+Procedural memories help the agent learn how to accomplish tasks more effectively, and specifically how to choose the correct tools for each task.
+
+### Episodic Memory
+
+**Artifacts** and **results** from previous runs that can be reused or referenced:
+* Successful query plans
+* Expensive computation results
+* Search results and their relevance scores
+* Previous tool call sequences that worked well
+
+## Memory in an Agentic Harness
+
+Agentic memory integrates naturally with the plan-execute-evaluate architecture we discussed in the [agentic search guide](./agentic-search).
+
+During the planning phase, retrieve memories that will help the agent construct better plans, like examples of successful plans for similar queries and facts about the user or process.
+
+During the execution phase, retrieve memories that guide tool usage:
+* Procedural instructions for tool selection
+* Parameter patterns that worked before
+* Known edge cases to handle
+
+During the evaluation phase, the agent examines the query plan and its execution, and can **write** new memories to persist:
+* Did the plan succeed? What made it work?
+* What new facts did we learn?
+* Should we update existing procedural knowledge?
+
+## Implementation
+
+The best way to implement a memory store for an agent is simply to dedicate a Chroma collection for memory records. This gives us out-of-the-box search functionality that we can leverage - metadata filtering for types of memories, advanced search over the store, and versioning with collection forking.
+
+We can establish a simple interface for interacting with this Chroma collection:
+
+<CodeGroup>
+```python Python
+from abc import ABC, abstractmethod
+
+class Memory(ABC):
+    # Retrieve memories for each phase of the agent harness
+
+    @abstractmethod
+    async def for_planning(self, query: str) -> list[MemoryRecord]:
+        pass
+
+    @abstractmethod
+    async def for_execution(self, context: Context) -> list[MemoryRecord]:
+        pass
+
+    @abstractmethod
+    async def for_evaluation(self, context: Context) -> list[MemoryRecord]:
+        pass
+
+    # Extract and store new memories
+
+    @abstractmethod
+    async def extract_from_run(self, context: Context) -> None:
+        pass
+
+    # Expose memory as agent tools
+
+    def get_tools(self) -> list[Tool]:
+        pass
+```
+
+```typescript TypeScript
+interface Memory {
+    // Retrieve memories for each phase
+    forPlanning(query: string): Promise<MemoryRecord[]>
+    forExecution(context: Context): Promise<MemoryRecord[]>
+    forEvaluation(context: Context): Promise<MemoryRecord[]>
+
+    // Extract and store new memories
+    extractFromRun(context: Context): Promise<void>
+
+    // Expose memory as agent tools
+    getTools(): Tool[]
+}
+```
+</CodeGroup>
+
+With `MemoryRecord`s:
+
+<CodeGroup>
+```python Python
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
+
+@dataclass
+class MemoryRecord:
+    id: str
+    content: str
+    type: Literal["semantic", "procedural", "episodic"]
+    phase: Literal["planning", "execution", "evaluation"]
+    created: datetime
+    last_accessed: datetime
+    access_count: int
+```
+
+```typescript TypeScript
+interface MemoryRecord {
+    id: string
+    content: string
+    type: 'semantic' | 'procedural' | 'episodic'
+    phase: 'planning' | 'execution' | 'evaluation'
+    created: Date
+    lastAccessed: Date
+    accessCount: number
+}
+```
+</CodeGroup>
+
+Then we can write the methods for retrieving memories for different phases of our agent harness. For example, in the planning phase, we get a user query. We can search our memory collection against it, and add the results to the planner's prompts. We limit the search to semantic memory records (facts), or episodic records (artifacts) that pertain to the planning phase, like successful previous plans for similar queries.
+
+<CodeGroup>
+```python Python
+async def for_planning(self, query: str) -> list[MemoryRecord]:
+    records = self.collection.query(
+        query_texts=[query],
+        where={
+            "$or": [
+                {"type": "semantic"},
+                {"type": "episodic", "phase": "planning"}
+            ]
+        },
+        n_results=5
+    )
+
+    return [
+        MemoryRecord(
+            id=id,
+            content=records["documents"][0][i],
+            type=records["metadatas"][0][i]["type"],
+            phase=records["metadatas"][0][i]["phase"],
+            created=datetime.fromisoformat(records["metadatas"][0][i]["created"]),
+            last_accessed=datetime.fromisoformat(records["metadatas"][0][i]["last_accessed"]),
+            access_count=int(records["metadatas"][0][i]["access_count"]),
+        )
+        for i, id in records["ids"][0]
+    ]
+```
+
+```typescript TypeScript
+async forPlanning(query: string): Promise<MemoryRecord[]> {
+    const records = await this.collection.query({
+        queryTexts: [query],
+        where: {
+            $or: [
+                { type: 'semantic' },
+                { type: 'episodic', phase: 'planning' }
+            ]
+        },
+        nResults: 5
+    });
+
+    return records.rows()[0].map((record) => ({
+        id: record.id,
+        content: record.document,
+        type: record.metadata.type,
+        phase: record.metadata.phase,
+        created: new Date(record.metadata.created),
+        lastAccessed: new Date(record.metadata.lastAccessed),
+        accessCount: record.metadata.accessCount
+    }));
+}
+```
+</CodeGroup>
+
+## Memory Writing Strategies
+
+How you write memories should be guided by how the agent will access them. A well-designed writing strategy ensures memories remain useful, accurate, and retrievable over time.
+
+### Extraction Timing
+
+**End-of-run** extraction processes the entire conversation after completion. This gives full context for deciding what's worth remembering, but delays availability until the run finishes.
+
+**Real-time** extraction writes memories as the conversation progresses. This makes memories immediately available for the current run, but risks storing information that later turns out to be incorrect or irrelevant.
+
+**Async** extraction queues memory writing as a background job. This keeps the agent responsive but introduces complexity around consistency-the agent might not have access to memories from very recent runs.
+
+In practice, a hybrid approach often works best: extract high-confidence facts in real-time, and defer nuanced evaluation to end-of-run processing. You can also save memories identified in one step in the agent's context, so they are available for downstream or long-running parallel steps.
+
+### Selectivity
+
+Not everything is worth remembering. Storing too much creates noise that degrades retrieval quality. Consider:
+* Signal strength: How confident is the agent that this information is correct? User-stated facts ("I work in marketing") are higher signal than inferences ("they seem to prefer detailed responses").
+* Reuse potential: Will this information be useful in future runs? A user's timezone is broadly applicable; the specific query they ran last Tuesday probably isn't.
+* Redundancy: Does this duplicate existing memories? Adding "user works in marketing" when you already have "user is a marketing manager" creates clutter without value.
+
+* A useful heuristic: if the agent would need to ask about this information again in a future run, it's worth storing.
+
+### Classification
+
+Tag memories at write time to enable filtered retrieval. Key dimensions include:
+* **Type**: Is this a fact (semantic), an instruction (procedural), or a past result (episodic)?
+* **Phase relevance**: When should this memory surface-during planning, execution, or evaluation?
+* **Scope**: Is this user-specific, or does it apply globally across all users?
+* **Confidence**: How certain is the agent about this memory's accuracy?
+* **Source**: Did this come from the user directly, from a tool result, or from agent inference?
+
+Classification decisions made at write time shape retrieval quality. It's easier to filter by metadata than to rely solely on semantic similarity.
+
+### Conflicts
+
+New information sometimes contradicts existing memories. Your strategy might:
+* **Override**: Replace the old memory with new information. Simple, but loses historical context.
+* **Version**: Keep both memories with timestamps, surfacing the most recent.
+* **Merge**: Combine old and new into a single updated memory. Requires careful prompting to avoid losing important nuance.
+* **Flag for review**: Mark conflicting memories for human review before resolution.
+* **Fork**: Taking advantage of Chroma's [collection forking](../../cloud/features/collection-forking), create a branch of the memory collection with the new information, keeping the original intact. This is particularly useful when you're uncertain which version will perform better - so you can run both branches and measure outcomes. Forking also enables rollback if new memories degrade agent performance, and can support A/B testing different memory strategies across user segments.
+
+The right approach depends on your domain. User preferences might safely override ("actually, I prefer concise responses now"), while factual corrections might warrant versioning for auditability.
+
+### Decay and Relevance
+
+Memories don't stay useful forever. Consider tracking:
+* **Access patterns**: Memories that are frequently retrieved are proving their value. Memories never accessed may be candidates for removal.
+* **Recency**: Recently created or accessed memories are more likely to be relevant than stale ones.
+* **Time-sensitivity**: Some memories have natural expiration. "User is preparing for Q3 review" becomes irrelevant after Q3 ends.
+
+## Example: An Inbox Processing Agent
+
+In the [Chroma Cookbooks](https://github.com/chroma-core/chroma-cookbooks/tree/master/agentic-memory) repo, we feature a simple example using agentic memory. The project includes an inbox-processing agent, which fetches unread emails from a user's inbox and processes each one by user-defined rules. If the agent does not know how to process a given email, it will prompt the user for instructions. These instructions are then extracted from the run to be persisted in the agent's memory collection as procedural memory records, which can be used in future runs.
+
+The project is accompanied by a dataset of mock emails on Chroma Cloud. You can mark an "email" as "unread" by setting a record's `unread` metadata field to `true`.
+
+The project includes an `InboxService` interface, which includes the actions the agent can take on a user's inbox. It includes an implementation for interacting with the mock dataset on Chroma Cloud. You can extend the functionality of the agent by providing your own implementation for a real email provider.
+
+The project uses the same generic agentic harness we introduced for the [agentic search](./agentic-search) project. This time, the harness is configured with:
+* A planner that simply fetches unread emails, and creates a plan step for processing each one.
+* Data shapes and prompts to support the inbox-processing functionality.
+* An input-handler to get email-processing instructions from the user.
+* A memory implementation that exposes search tools over the memory collection, and memory extraction logic for persisting user-defined rules.
+
+
+<Steps>
+
+<Step>
+[Log in](https://trychroma.com/login) to your Chroma Cloud account. If you don't have one yet, you can [sign up](https://trychroma.com/signup). You will get free credits that should be more than enough for running this project.
+</Step>
+
+<Step>
+Use the "Create Database" button on the top right of the Chroma Cloud dashboard, and name your DB `agentic-memory` (or any name of your choice). If you're a first-time user, you will be greeted with the "Create Database" modal after creating your account.
+</Step>
+
+<Step>
+Choose the "Load sample dataset" option, and then choose the "Personal Inbox" dataset. This will copy the data into a collection in your own Chroma DB.
+</Step>
+
+<Step>
+Once your collection loads, choose the "Settings" tab. At the bottom of the page, choose the `.env` tab. Create an API key, and copy the environment variables you will need for running the project: `CHROMA_API_KEY`, `CHROMA_TENANT`, and `CHROMA_DATABASE`.
+</Step>
+
+<Step>
+Clone the [Chroma Cookbooks](https://github.com/chroma-core/chroma-cookbooks) repo:
+
+```terminal
+git clone https://github.com/chroma-core/chroma-cookbooks.git
+```
+</Step>
+
+<Step>
+Navigate to the `agentic-memory` directory, and create a `.env` file at its root with the values you obtained in the previous step:
+
+```terminal
+cd chroma-cookbooks/agentic-memory
+touch .env
+```
+</Step>
+
+<Step>
+To run this project, you will also need an [OpenAI API key](https://platform.openai.com/api-keys). Set it in your `.env` file:
+
+```text
+CHROMA_API_KEY=<YOUR CHROMA API KEY>
+CHROMA_TENANT=<YOUR CHROMA TENANT>
+CHROMA_DATABASE=agentic-memory
+OPENAI_API_KEY=<YOUR OPENAI API KEY>
+```
+</Step>
+
+<Step>
+This project uses [pnpm](https://pnpm.io/installation) workspaces. In the root directory, install the dependencies:
+
+```terminal
+pnpm install
+```
+</Step>
+
+</Steps>
+
+The project includes a CLI interface that lets you interact with the inbox-processing agent. You can run it in development mode to get started. From the root directory you can run
+
+```terminal
+pnpm cli:dev
+```
+
+The dataset is configured with two unread emails. Let the agent process them by providing rules. For example:
+* Archive all GitHub notifications
+* Label all emails from dad with the "family" label.
+
+Then, go to your Chroma Cloud collection and see the results on the processed records. You will also be able to see the memory collection created by the agent, with the extracted rules from the first run. Set more similar emails as unread, and run the agent again to see agentic memory in action.

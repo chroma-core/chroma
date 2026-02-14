@@ -19,9 +19,10 @@ use chroma_types::{
         literal_expr::{LiteralExpr, NgramLiteralProvider},
         ChromaRegex, ChromaRegexError,
     },
-    BooleanOperator, Chunk, CompositeExpression, DataRecord, DocumentExpression, DocumentOperator,
-    LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression, MetadataSetValue,
-    MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap, Where,
+    BooleanOperator, Chunk, CompositeExpression, ContainsOperator, DataRecord, DocumentExpression,
+    DocumentOperator, LogRecord, MaterializedLogOperation, MetadataComparison, MetadataExpression,
+    MetadataSetValue, MetadataValue, PrimitiveOperator, Segment, SetOperator, SignedRoaringBitmap,
+    Where,
 };
 use futures::future::try_join_all;
 use roaring::RoaringBitmap;
@@ -71,6 +72,8 @@ pub enum FilterError {
     RecordReader(#[from] RecordSegmentReaderCreationError),
     #[error("Error parsing regular expression: {0}")]
     Regex(#[from] ChromaRegexError),
+    #[error("Unsupported comparison type: {0}")]
+    UnsupportedComparisonType(MetadataComparison),
 }
 
 impl ChromaError for FilterError {
@@ -82,6 +85,7 @@ impl ChromaError for FilterError {
             FilterError::Record(e) => e.code(),
             FilterError::RecordReader(e) => e.code(),
             FilterError::Regex(_) => ErrorCodes::InvalidArgument,
+            FilterError::UnsupportedComparisonType(_) => ErrorCodes::InvalidArgument,
         }
     }
 }
@@ -125,13 +129,53 @@ impl<'me> MetadataLogReader<'me> {
                 let log = log.hydrate(record_segment_reader.as_ref()).await?;
                 user_id_to_offset_id.insert(log.get_user_id(), log.get_offset_id());
                 let log_metadata = log.merged_metadata();
-                for (key, val) in log_metadata.into_iter() {
-                    compact_metadata
-                        .entry(key)
-                        .or_default()
-                        .entry(val)
-                        .or_default()
-                        .insert(log.get_offset_id());
+                for (key, val) in log_metadata {
+                    if matches!(val, MetadataValue::SparseVector(_)) {
+                        continue;
+                    }
+                    // Explode array values into individual scalar entries so
+                    // that equality-based contains queries work against the
+                    // in-memory index, mirroring the blockfile exploded index.
+                    // Scalars pass through directly.
+                    let values = compact_metadata.entry(key).or_default();
+                    let offset_id = log.get_offset_id();
+                    match val {
+                        MetadataValue::BoolArray(arr) => {
+                            for v in arr {
+                                values
+                                    .entry(MetadataValue::Bool(v))
+                                    .or_default()
+                                    .insert(offset_id);
+                            }
+                        }
+                        MetadataValue::IntArray(arr) => {
+                            for v in arr {
+                                values
+                                    .entry(MetadataValue::Int(v))
+                                    .or_default()
+                                    .insert(offset_id);
+                            }
+                        }
+                        MetadataValue::FloatArray(arr) => {
+                            for v in arr {
+                                values
+                                    .entry(MetadataValue::Float(v))
+                                    .or_default()
+                                    .insert(offset_id);
+                            }
+                        }
+                        MetadataValue::StringArray(arr) => {
+                            for v in arr {
+                                values
+                                    .entry(MetadataValue::Str(v))
+                                    .or_default()
+                                    .insert(offset_id);
+                            }
+                        }
+                        scalar => {
+                            values.entry(scalar).or_default().insert(offset_id);
+                        }
+                    }
                 }
                 if let Some(doc) = log.merged_document_ref() {
                     document.insert(log.get_offset_id(), doc);
@@ -206,6 +250,7 @@ impl MetadataProvider<'_> {
                 if let Some(reader) = metadata_segment_reader.full_text_index_reader.as_ref() {
                     Ok(reader
                         .search(query)
+                        .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document contains"))
                         .await
                         .map_err(MetadataIndexError::FullTextError)?)
                 } else {
@@ -238,6 +283,7 @@ impl MetadataProvider<'_> {
                     let literal_expr = LiteralExpr::from(chroma_regex.hir().clone());
                     let approximate_matching_offset_ids = fti_reader
                         .match_literal_expression(&literal_expr)
+                        .instrument(tracing::trace_span!(parent: Span::current(), "Filter by document regex"))
                         .await
                         .map_err(MetadataIndexError::from)?;
                     let is_exact_match = chroma_regex.properties().look_set().is_empty()
@@ -277,15 +323,15 @@ impl MetadataProvider<'_> {
                             }
                             // Perform range scan of all documents
                             candidate_offsets => {
-                                for (offset, record) in rec_reader.get_all_data().await? {
+                                for (offset, record) in rec_reader.get_all_data().instrument(tracing::trace_span!(parent: Span::current(), "Get all data")).await? {
                                     if (candidate_offsets.is_none()
-                                        || candidate_offsets
-                                            .as_ref()
-                                            .is_some_and(|offsets| offsets.contains(offset)))
-                                        && record.document.is_some_and(|doc| regex.is_match(doc))
-                                    {
-                                        exact_matching_offset_ids.insert(offset);
-                                    }
+                                            || candidate_offsets
+                                                .as_ref()
+                                                .is_some_and(|offsets| offsets.contains(offset)))
+                                            && record.document.is_some_and(|doc| regex.is_match(doc))
+                                        {
+                                            exact_matching_offset_ids.insert(offset);
+                                        }
                                 }
                             }
                         }
@@ -343,34 +389,48 @@ impl MetadataProvider<'_> {
                         &s.as_str().into(),
                     ),
                     MetadataValue::SparseVector(_) => {
-                        unimplemented!("Comparison with sparse vector is not supported")
+                        return Err(FilterError::UnsupportedComparisonType(
+                            MetadataComparison::Primitive(op.clone(), val.clone()),
+                        ))
+                    }
+                    MetadataValue::BoolArray(_)
+                    | MetadataValue::IntArray(_)
+                    | MetadataValue::FloatArray(_)
+                    | MetadataValue::StringArray(_) => {
+                        return Err(FilterError::UnsupportedComparisonType(
+                            MetadataComparison::Primitive(op.clone(), val.clone()),
+                        ));
                     }
                 };
                 if let Some(reader) = metadata_index_reader {
-                    match op {
-                        PrimitiveOperator::Equal => {
-                            if key == "#id" {
-                                if let KeyWrapper::String(user_id) = kw {
-                                    return Ok(match record_segment_reader {
-                                        Some(reader) => reader
-                                            .get_offset_id_for_user_id(user_id)
-                                            .await?
-                                            .iter()
-                                            .collect(),
-                                        None => RoaringBitmap::new(),
-                                    });
+                    async {
+                        match op {
+                            PrimitiveOperator::Equal => {
+                                if key == "#id" {
+                                    if let KeyWrapper::String(user_id) = kw {
+                                        return Ok(match record_segment_reader {
+                                            Some(reader) => reader
+                                                .get_offset_id_for_user_id(user_id)
+                                                .await?
+                                                .iter()
+                                                .collect(),
+                                            None => RoaringBitmap::new(),
+                                        });
+                                    }
                                 }
+                                Ok(reader.get(key, kw).await?)
                             }
-                            Ok(reader.get(key, kw).await?)
+                            PrimitiveOperator::GreaterThan => Ok(reader.gt(key, kw).await?),
+                            PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
+                            PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
+                            PrimitiveOperator::LessThanOrEqual => Ok(reader.lte(key, kw).await?),
+                            PrimitiveOperator::NotEqual => unreachable!(
+                                "Inequality filter should be handled above the metadata provider level"
+                            ),
                         }
-                        PrimitiveOperator::GreaterThan => Ok(reader.gt(key, kw).await?),
-                        PrimitiveOperator::GreaterThanOrEqual => Ok(reader.gte(key, kw).await?),
-                        PrimitiveOperator::LessThan => Ok(reader.lt(key, kw).await?),
-                        PrimitiveOperator::LessThanOrEqual => Ok(reader.lte(key, kw).await?),
-                        PrimitiveOperator::NotEqual => unreachable!(
-                            "Inequality filter should be handled above the metadata provider level"
-                        ),
                     }
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Filter by metadata"))
+                    .await
                 } else {
                     Ok(RoaringBitmap::new())
                 }
@@ -472,6 +532,18 @@ impl<'me> RoaringMetadataFilter<'me> for MetadataExpression {
                         .fold(SignedRoaringBitmap::full(), BitAnd::bitand),
                 }
             }
+            // Array contains: because arrays are stored exploded in the index
+            // (each element indexed individually), a "contains" check is simply
+            // an equality lookup on the scalar value.
+            MetadataComparison::ArrayContains(contains_operator, metadata_value) => {
+                let bitmap = metadata_provider
+                    .filter_by_metadata(&self.key, metadata_value, &PrimitiveOperator::Equal)
+                    .await?;
+                match contains_operator {
+                    ContainsOperator::Contains => SignedRoaringBitmap::Include(bitmap),
+                    ContainsOperator::NotContains => SignedRoaringBitmap::Exclude(bitmap),
+                }
+            }
         };
         Ok(result)
     }
@@ -539,6 +611,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             &input.record_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
@@ -554,6 +627,9 @@ impl Operator<FilterInput, FilterOutput> for Filter {
                 .await?;
         let metadata_log_reader =
             MetadataLogReader::create(&materialized_logs, &record_segment_reader)
+                .instrument(
+                    tracing::trace_span!(parent: Span::current(), "Create metadata log reader"),
+                )
                 .await
                 .map_err(FilterError::LogMaterializer)?;
 
@@ -572,6 +648,7 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             &input.metadata_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create metadata segment reader"))
         .await?;
         let compact_metadata_provider =
             MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
@@ -615,7 +692,13 @@ impl Operator<FilterInput, FilterOutput> for Filter {
 
         // Filter the offset ids in the log if the where clause is provided
         let log_offset_ids = if let Some(clause) = self.where_clause.as_ref() {
-            clause.eval(&log_metadata_provider).await? & user_allowed_log_offset_ids
+            clause
+                .eval(&log_metadata_provider)
+                .instrument(
+                    tracing::trace_span!(parent: Span::current(), "Evaluate where clause on logs"),
+                )
+                .await?
+                & user_allowed_log_offset_ids
         } else {
             user_allowed_log_offset_ids
         };
@@ -623,7 +706,10 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         // Filter the offset ids in the metadata segment if the where clause is provided
         // This always exclude all offsets that is present in the materialized log
         let compact_offset_ids = if let Some(clause) = self.where_clause.as_ref() {
-            clause.eval(&compact_metadata_provider).await?
+            clause
+                .eval(&compact_metadata_provider)
+                .instrument(tracing::trace_span!(parent: Span::current(), "Evaluate where clause on compact"))
+                .await?
                 & user_allowed_compact_offset_ids
                 & SignedRoaringBitmap::Exclude(metadata_log_reader.updated_offset_ids)
         } else {
@@ -650,7 +736,9 @@ mod tests {
         provider::BlockfileProvider,
     };
     use chroma_cache::new_cache_for_test;
-    use chroma_log::test::{add_delete_generator, int_as_id, LoadFromGenerator, LogGenerator};
+    use chroma_log::test::{
+        add_delete_generator, int_as_id, random_embedding, LoadFromGenerator, LogGenerator,
+    };
     use chroma_segment::{
         blockfile_metadata::{MetadataSegmentReader, MetadataSegmentWriter},
         blockfile_record::{
@@ -663,9 +751,10 @@ mod tests {
     use chroma_system::Operator;
     use chroma_types::{
         operator::Filter, BooleanOperator, Chunk, CollectionUuid, CompositeExpression,
-        DatabaseUuid, DocumentExpression, LogRecord, MetadataComparison, MetadataExpression,
-        MetadataSetValue, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
-        SegmentUuid, SetOperator, SignedRoaringBitmap, Where,
+        ContainsOperator, DatabaseUuid, DocumentExpression, LogRecord, MetadataComparison,
+        MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
+        PrimitiveOperator, SegmentUuid, SetOperator, SignedRoaringBitmap, UpdateMetadataValue,
+        Where,
     };
 
     use crate::execution::operators::filter::{MetadataLogReader, MetadataProvider};
@@ -1260,6 +1349,7 @@ mod tests {
                 &database_id,
                 &record_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1268,6 +1358,7 @@ mod tests {
                 &database_id,
                 &metadata_segment,
                 &blockfile_provider,
+                None,
             )
             .await
             .expect("Error creating segment writer");
@@ -1390,6 +1481,7 @@ mod tests {
             &database_id,
             &record_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1398,6 +1490,7 @@ mod tests {
             &database_id,
             &metadata_segment,
             &blockfile_provider,
+            None,
         )
         .await
         .expect("Error creating segment writer");
@@ -1522,5 +1615,243 @@ mod tests {
                 .unwrap(),
             SignedRoaringBitmap::Include(_)
         ),);
+    }
+
+    /// Regression test for the array-explosion path in MetadataLogReader.
+    ///
+    /// Records with array metadata (e.g. `tags: ["a", "b"]`) must be
+    /// "exploded" into per-element scalar entries in the in-memory log
+    /// index, mirroring the blockfile index.  Both `$contains` and plain
+    /// `$eq` queries against a scalar element should return the same
+    /// bitmaps regardless of whether the data lives in logs or compacted
+    /// blockfiles.
+    #[tokio::test]
+    async fn test_array_metadata_contains_log_vs_compact() {
+        let mut test_segment = TestDistributedSegment::new().await;
+
+        // --- Phase 1: compact 4 records with string-array metadata ---
+        let compact_records: Vec<LogRecord> = vec![
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "arr_1".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["a".into(), "b".into()]),
+                    )])),
+                    document: Some("doc1".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "arr_2".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["b".into(), "c".into()]),
+                    )])),
+                    document: Some("doc2".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 3,
+                record: OperationRecord {
+                    id: "arr_3".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["a".into(), "c".into()]),
+                    )])),
+                    document: Some("doc3".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 4,
+                record: OperationRecord {
+                    id: "arr_4".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["d".into()]),
+                    )])),
+                    document: Some("doc4".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+        ];
+
+        Box::pin(test_segment.compact_log(Chunk::new(compact_records.into()), 1)).await;
+        // After compaction, offset_ids 1-4 live in the blockfile index.
+
+        // --- Phase 2: create 3 *uncompacted* log records with array metadata ---
+        let log_records: Vec<LogRecord> = vec![
+            LogRecord {
+                log_offset: 5,
+                record: OperationRecord {
+                    id: "arr_5".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["a".into(), "b".into()]),
+                    )])),
+                    document: Some("doc5".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 6,
+                record: OperationRecord {
+                    id: "arr_6".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["c".into()]),
+                    )])),
+                    document: Some("doc6".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+            LogRecord {
+                log_offset: 7,
+                record: OperationRecord {
+                    id: "arr_7".to_string(),
+                    embedding: Some(random_embedding(128)),
+                    encoding: None,
+                    metadata: Some(HashMap::from([(
+                        "tags".to_string(),
+                        UpdateMetadataValue::StringArray(vec!["a".into(), "d".into()]),
+                    )])),
+                    document: Some("doc7".to_string()),
+                    operation: Operation::Add,
+                },
+            },
+        ];
+
+        let filter_input = FilterInput {
+            logs: Chunk::new(log_records.into()),
+            blockfile_provider: test_segment.blockfile_provider.clone(),
+            metadata_segment: test_segment.metadata_segment.clone(),
+            record_segment: test_segment.record_segment.clone(),
+        };
+
+        // --- $contains "a" ---
+        let filter_contains_a = Filter {
+            query_ids: None,
+            where_clause: Some(Where::Metadata(MetadataExpression {
+                key: "tags".to_string(),
+                comparison: MetadataComparison::ArrayContains(
+                    ContainsOperator::Contains,
+                    MetadataValue::Str("a".to_string()),
+                ),
+            })),
+        };
+
+        let output = filter_contains_a
+            .run(&filter_input)
+            .await
+            .expect("$contains filter should not fail");
+
+        // Log: arr_5 (offset 5) and arr_7 (offset 7) contain "a"
+        assert_eq!(
+            output.log_offset_ids,
+            SignedRoaringBitmap::Include([5_u32, 7].iter().collect())
+        );
+        // Compact: arr_1 (offset 1) and arr_3 (offset 3) contain "a"
+        assert_eq!(
+            output.compact_offset_ids,
+            SignedRoaringBitmap::Include([1_u32, 3].iter().collect())
+        );
+
+        // --- $eq "a" must agree with $contains "a" (both use the exploded index) ---
+        let filter_eq_a = Filter {
+            query_ids: None,
+            where_clause: Some(Where::Metadata(MetadataExpression {
+                key: "tags".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::Equal,
+                    MetadataValue::Str("a".to_string()),
+                ),
+            })),
+        };
+
+        let eq_output = filter_eq_a
+            .run(&filter_input)
+            .await
+            .expect("$eq filter should not fail");
+
+        assert_eq!(
+            output.log_offset_ids, eq_output.log_offset_ids,
+            "$eq and $contains should return identical log bitmaps"
+        );
+        assert_eq!(
+            output.compact_offset_ids, eq_output.compact_offset_ids,
+            "$eq and $contains should return identical compact bitmaps"
+        );
+
+        // --- $contains "b" ---
+        let filter_contains_b = Filter {
+            query_ids: None,
+            where_clause: Some(Where::Metadata(MetadataExpression {
+                key: "tags".to_string(),
+                comparison: MetadataComparison::ArrayContains(
+                    ContainsOperator::Contains,
+                    MetadataValue::Str("b".to_string()),
+                ),
+            })),
+        };
+
+        let output_b = filter_contains_b
+            .run(&filter_input)
+            .await
+            .expect("$contains 'b' filter should not fail");
+
+        // Log: only arr_5 (offset 5) contains "b"
+        assert_eq!(
+            output_b.log_offset_ids,
+            SignedRoaringBitmap::Include([5_u32].iter().collect())
+        );
+        // Compact: arr_1 (offset 1) and arr_2 (offset 2) contain "b"
+        assert_eq!(
+            output_b.compact_offset_ids,
+            SignedRoaringBitmap::Include([1_u32, 2].iter().collect())
+        );
+
+        // --- $not_contains "a" ---
+        let filter_not_contains_a = Filter {
+            query_ids: None,
+            where_clause: Some(Where::Metadata(MetadataExpression {
+                key: "tags".to_string(),
+                comparison: MetadataComparison::ArrayContains(
+                    ContainsOperator::NotContains,
+                    MetadataValue::Str("a".to_string()),
+                ),
+            })),
+        };
+
+        let output_nc = filter_not_contains_a
+            .run(&filter_input)
+            .await
+            .expect("$not_contains filter should not fail");
+
+        // $not_contains "a" excludes records whose tags contain "a"
+        assert_eq!(
+            output_nc.log_offset_ids,
+            SignedRoaringBitmap::Exclude([5_u32, 7].iter().collect())
+        );
+        assert_eq!(
+            output_nc.compact_offset_ids,
+            SignedRoaringBitmap::Exclude([1_u32, 3].iter().collect())
+        );
     }
 }

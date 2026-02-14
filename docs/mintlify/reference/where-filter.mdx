@@ -1,0 +1,165 @@
+---
+title: Where Filters
+description: "Reference guide for where filter JSON syntax used in Chroma queries and searches."
+---
+
+Where filters allow you to filter records by metadata values and document content when querying or searching Chroma collections. Each SDK provides a DSL to build these filters, but they all compile to a JSON format that you can also construct directly.
+
+For example, SDK code like this:
+
+<CodeGroup>
+```python Python
+from chromadb import K
+
+where_filter = K("category").eq("science") & K("year").gte(2020)
+```
+
+```typescript TypeScript
+import { K } from 'chromadb';
+
+const whereFilter = K("category").eq("science")
+  .and(K("year").gte(2020));
+```
+
+```rust Rust
+use chroma_types::{Where, MetadataExpression, MetadataComparison,
+                   PrimitiveOperator, MetadataValue};
+
+let where_filter =
+    Where::Metadata(MetadataExpression {
+        key: "category".to_string(),
+        comparison: MetadataComparison::Primitive(
+            PrimitiveOperator::Equal,
+            MetadataValue::Str("science".to_string()),
+        ),
+    }) & Where::Metadata(MetadataExpression {
+        key: "year".to_string(),
+        comparison: MetadataComparison::Primitive(
+            PrimitiveOperator::GreaterThanOrEqual,
+            MetadataValue::Int(2020),
+        ),
+    });
+```
+</CodeGroup>
+
+Gets compiled to this JSON:
+
+```json
+{
+  "$and": [
+    {"category": {"$eq": "science"}},
+    {"year": {"$gte": 2020}}
+  ]
+}
+```
+
+This reference describes the rules of the JSON format. You can construct this JSON directly, which is useful when building filters programmatically or in environments without SDK access. See the SDK references to learn more about the DSL.
+
+## JSON Format
+
+### Basic Structure
+
+A single filter is constructed as an object with a single key in it:
+
+**Metadata filter:**
+```json
+{
+  "field_name": {
+    "$operator": "value"
+  }
+}
+```
+
+**Document filter:**
+```json
+{
+  "#document": {
+    "$operator": "pattern"
+  }
+}
+```
+
+**Logical operator:**
+
+These filters can be combined using `$and` and `$or`:
+
+```json
+{
+  "$and": [/* array of filters */]
+}
+```
+```json
+{
+  "$or": [/* array of filters */]
+}
+```
+
+## Operators
+
+### Scalar Comparison Operators
+
+| Operator | Description | Valid Types | Example |
+|----------|-------------|-------------|---------|
+| `$eq` | Equal to | string, int, float, boolean | `{"status": {"$eq": "active"}}` |
+| `$ne` | Not equal to | string, int, float, boolean | `{"count": {"$ne": 0}}` |
+| `$gt` | Greater than | int, float | `{"price": {"$gt": 100}}` |
+| `$gte` | Greater than or equal | int, float | `{"rating": {"$gte": 4.5}}` |
+| `$lt` | Less than | int, float | `{"stock": {"$lt": 10}}` |
+| `$lte` | Less than or equal | int, float | `{"discount": {"$lte": 0.25}}` |
+
+### Set Operators
+
+These operators check if a metadata value is in (or not in) a provided list. The list must contain values of the same type.
+
+| Operator | Description | Valid List Types | Example |
+|----------|-------------|------------------|---------|
+| `$in` | Value is in list | string[], int[], float[], boolean[] | `{"category": {"$in": ["tech", "ai"]}}` |
+| `$nin` | Value is not in list | string[], int[], float[], boolean[] | `{"status": {"$nin": ["draft", "deleted"]}}` |
+
+`$in` and `$nin` require arrays of the same type (all strings, all ints, all floats, or all booleans).
+
+### Metadata Array Operators
+
+These operators check if an array metadata field contains (or does not contain) a specific scalar value. The metadata field must be an array type (string[], int[], float[], or boolean[]).
+
+| Operator | Description | Valid Types | Example |
+|----------|-------------|-------------|---------|
+| `$contains` | Array contains element | string[], int[], float[], boolean[] | `{"tags": {"$contains": "tech"}}` |
+| `$not_contains` | Array does not contain element | string[], int[], float[], boolean[] | `{"tags": {"$not_contains": "deleted"}}` |
+
+<Callout>
+**Important:** `$contains` and `$not_contains` have different meanings depending on context:
+- On metadata fields (e.g., `{"tags": {"$contains": "tech"}}`): Checks if the array metadata field contains the value
+- On `#document` (e.g., `{"#document": {"$contains": "text"}}`): Checks if the document text contains the substring
+</Callout>
+
+### Document Operators
+
+| Operator | Description | Valid On | Example |
+|----------|-------------|----------|---------|
+| `$contains` | Document contains substring | `#document` | `{"#document": {"$contains": "machine learning"}}` |
+| `$not_contains` | Document does not contain substring | `#document` | `{"#document": {"$not_contains": "draft"}}` |
+| `$regex` | Document matches regex pattern | `#document` | `{"#document": {"$regex": "quantum\\s+\\w+"}}` |
+| `$not_regex` | Document does not match regex pattern | `#document` | `{"#document": {"$not_regex": "^draft"}}` |
+
+### Logical Operators
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `$and` | All conditions must match | `{"$and": [{"status": "active"}, {"year": {"$gte": 2020}}]}` |
+| `$or` | Any condition can match | `{"$or": [{"category": "tech"}, {"category": "science"}]}` |
+
+## Rules
+
+1. **Shorthand equality**: Direct value assignment is equivalent to `$eq`:
+   ```json
+   {"status": "active"}
+   ```
+   is equivalent to:
+   ```json
+   {"status": {"$eq": "active"}}
+   ```
+
+2. **Single field per object**: Each filter object can contain only one field or one logical operator (`$and`/`$or`).
+
+3. **Single operator per field**: For field dictionaries, only one operator is allowed per field.

@@ -9,11 +9,10 @@
 // streaming from s3.
 
 use super::config::{S3CredentialsConfig, StorageConfig};
-use super::stream::ByteStreamItem;
-use super::stream::S3ByteStream;
+use super::metrics::StorageMetrics;
 use super::StorageConfigError;
 use super::{DeleteOptions, PutOptions};
-use crate::{ETag, GetOptions, StorageError};
+use crate::{ETag, GetOptions, PutMode, S3ObjectMetadata, StorageError};
 use async_trait::async_trait;
 use aws_config::retry::RetryConfig;
 use aws_config::timeout::TimeoutConfigBuilder;
@@ -34,9 +33,7 @@ use chroma_tracing::util::Stopwatch;
 use futures::future::BoxFuture;
 use futures::stream;
 use futures::FutureExt;
-use futures::Stream;
 use futures::StreamExt;
-use opentelemetry::metrics::{Counter, Histogram};
 use rand::Rng;
 use std::clone::Clone;
 use std::ops::Range;
@@ -49,109 +46,6 @@ use tracing::Instrument;
 pub struct DeletedObjects {
     pub deleted: Vec<String>,
     pub errors: Vec<StorageError>,
-}
-#[derive(Clone)]
-pub struct StorageMetrics {
-    s3_get_count: Counter<u64>,
-    s3_put_count: Counter<u64>,
-    s3_delete_count: Counter<u64>,
-    s3_delete_many_count: Counter<u64>,
-    s3_get_latency_ms: Histogram<u64>,
-    s3_put_latency_ms: Histogram<u64>,
-    s3_put_bytes: Histogram<u64>,
-    s3_put_bytes_slow: Histogram<u64>,
-    s3_multipart_upload_parts: Histogram<u64>,
-    s3_upload_part_bytes: Histogram<u64>,
-    s3_put_error_count: Counter<u64>,
-    s3_copy_count: Counter<u64>,
-    s3_copy_latency_ms: Histogram<u64>,
-    s3_rename_count: Counter<u64>,
-    s3_rename_latency_ms: Histogram<u64>,
-    s3_list_count: Counter<u64>,
-    s3_list_latency_ms: Histogram<u64>,
-}
-
-impl Default for StorageMetrics {
-    fn default() -> Self {
-        Self {
-            s3_get_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_get_count")
-                .with_description("Number of S3 get operations")
-                .build(),
-            s3_put_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_put_count")
-                .with_description("Number of S3 put operations")
-                .build(),
-            s3_delete_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_delete_count")
-                .with_description("Number of S3 delete operations")
-                .build(),
-            s3_delete_many_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_delete_many_count")
-                .with_description("Number of S3 delete many operations")
-                .build(),
-            s3_get_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_get_latency_ms")
-                .with_description("Latency of S3 get operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_put_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_put_latency_ms")
-                .with_description("Latency of S3 put operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_put_bytes: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_put_bytes")
-                .with_description("Bytes written per S3 put operation")
-                .with_unit("bytes")
-                .build(),
-            s3_put_bytes_slow: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_put_bytes_slow")
-                .with_description("Bytes written per S3 put operation that took more than 1 second")
-                .with_unit("bytes")
-                .build(),
-            s3_multipart_upload_parts: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_multipart_upload_parts")
-                .with_description("Number of parts in multipart uploads")
-                .build(),
-            s3_upload_part_bytes: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_upload_part_bytes")
-                .with_description("Bytes per upload part in multipart uploads")
-                .with_unit("bytes")
-                .build(),
-            s3_put_error_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_put_error_count")
-                .with_description("Number of failed S3 put operations")
-                .build(),
-            s3_copy_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_copy_count")
-                .with_description("Number of S3 copy operations")
-                .build(),
-            s3_copy_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_copy_latency_ms")
-                .with_description("Latency of S3 copy operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_rename_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_rename_count")
-                .with_description("Number of S3 rename operations")
-                .build(),
-            s3_rename_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_rename_latency_ms")
-                .with_description("Latency of S3 rename operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-            s3_list_count: opentelemetry::global::meter("chroma.storage")
-                .u64_counter("s3_list_count")
-                .with_description("Number of S3 list operations")
-                .build(),
-            s3_list_latency_ms: opentelemetry::global::meter("chroma.storage")
-                .u64_histogram("s3_list_latency_ms")
-                .with_description("Latency of S3 list operations in milliseconds")
-                .with_unit("ms")
-                .build(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -218,6 +112,58 @@ impl S3Storage {
     }
 
     #[allow(clippy::type_complexity)]
+    /// Convert a GetObject SDK error into a StorageError.
+    fn get_object_error_to_storage_error(
+        &self,
+        key: &str,
+        e: SdkError<aws_sdk_s3::operation::get_object::GetObjectError>,
+    ) -> StorageError {
+        match e {
+            SdkError::ServiceError(err) => {
+                let inner = err.into_err();
+                match &inner {
+                    aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
+                        StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        }
+                    }
+                    aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(msg) => {
+                        tracing::error!("invalid object state: {}", msg);
+                        StorageError::Generic {
+                            source: Arc::new(inner),
+                        }
+                    }
+                    _ => match inner.code() {
+                        Some("SlowDown") => StorageError::Backoff,
+                        Some("AccessDenied") => {
+                            tracing::error!(
+                                bucket = %self.bucket,
+                                key = %key,
+                                error_code = "AccessDenied",
+                                error_message = %inner,
+                                "S3 access denied error"
+                            );
+                            StorageError::PermissionDenied {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            }
+                        }
+                        _ => {
+                            tracing::error!("error: {}", inner.to_string());
+                            StorageError::Generic {
+                                source: Arc::new(inner),
+                            }
+                        }
+                    },
+                }
+            }
+            _ => StorageError::Generic {
+                source: Arc::new(e),
+            },
+        }
+    }
+
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
         let res = self
             .client
@@ -234,85 +180,6 @@ impl S3Storage {
                     Err(StorageError::Generic {
                         source: Arc::new(inner),
                     })
-                }
-                _ => Err(StorageError::Generic {
-                    source: Arc::new(e),
-                }),
-            },
-        }
-    }
-
-    #[allow(clippy::type_complexity)]
-    async fn get_stream_and_e_tag(
-        &self,
-        key: &str,
-    ) -> Result<
-        (
-            Box<dyn Stream<Item = ByteStreamItem> + Unpin + Send>,
-            Option<ETag>,
-        ),
-        StorageError,
-    > {
-        let res = self
-            .client
-            .get_object()
-            .bucket(self.bucket.clone())
-            .key(key)
-            .send()
-            .instrument(tracing::trace_span!("cold S3 get"))
-            .await;
-        match res {
-            Ok(res) => {
-                let byte_stream = res.body;
-                Ok((
-                    Box::new(S3ByteStream::new(byte_stream)),
-                    res.e_tag.map(ETag),
-                ))
-            }
-            Err(e) => match e {
-                SdkError::ServiceError(err) => {
-                    let inner = err.into_err();
-                    match &inner {
-                        aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
-                            Err(StorageError::NotFound {
-                                path: key.to_string(),
-                                source: Arc::new(inner),
-                            })
-                        }
-                        aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(
-                            msg,
-                        ) => {
-                            tracing::error!("invalid object state: {}", msg);
-                            Err(StorageError::Generic {
-                                source: Arc::new(inner),
-                            })
-                        }
-                        _ => {
-                            match inner.code() {
-                                Some("SlowDown") => Err(StorageError::Backoff),
-                                Some("AccessDenied") => {
-                                    // Log all the details we need for debugging
-                                    tracing::error!(
-                                        bucket = %self.bucket,
-                                        key = %key,
-                                        error_code = "AccessDenied",
-                                        error_message = %inner,
-                                        "S3 access denied error"
-                                    );
-                                    Err(StorageError::PermissionDenied {
-                                        path: key.to_string(),
-                                        source: Arc::new(inner),
-                                    })
-                                }
-                                _ => {
-                                    tracing::error!("error: {}", inner.to_string());
-                                    Err(StorageError::Generic {
-                                        source: Arc::new(inner),
-                                    })
-                                }
-                            }
-                        }
-                    }
                 }
                 _ => Err(StorageError::Generic {
                     source: Arc::new(e),
@@ -371,51 +238,15 @@ impl S3Storage {
         key: String,
         range_str: String,
     ) -> Result<GetObjectOutput, StorageError> {
-        let res = self
-            .client
+        self.client
             .get_object()
             .bucket(self.bucket.clone())
             .key(&key)
             .range(range_str)
             .send()
             .instrument(tracing::trace_span!("cold S3 get"))
-            .await;
-        match res {
-            Ok(output) => Ok(output),
-            Err(e) => {
-                tracing::error!("Error fetching range: {:?}", e);
-                match e {
-                    SdkError::ServiceError(err) => {
-                        let inner = err.into_err();
-                        match &inner {
-                            aws_sdk_s3::operation::get_object::GetObjectError::NoSuchKey(_) => {
-                                Err(StorageError::NotFound {
-                                    path: key.to_string(),
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            aws_sdk_s3::operation::get_object::GetObjectError::InvalidObjectState(_) => {
-                                Err(StorageError::Generic {
-                                    source: Arc::new(inner),
-                                })
-                            }
-                            _ => {
-                                if inner.code() == Some("SlowDown") {
-                                    Err(StorageError::Backoff)
-                                } else {
-                                    Err(StorageError::Generic {
-                                        source: Arc::new(inner),
-                                    })
-                                }
-                            }
-                        }
-                    }
-                    _ => Err(StorageError::Generic {
-                        source: Arc::new(e),
-                    }),
-                }
-            }
-        }
+            .await
+            .map_err(|e| self.get_object_error_to_storage_error(&key, e))
     }
 
     #[tracing::instrument(skip(self), level = "trace")]
@@ -480,6 +311,8 @@ impl S3Storage {
     }
 
     /// Perform a strongly consistent get and return the e_tag.
+    /// This method preallocates the buffer based on content_length to avoid
+    /// repeated reallocations during streaming.
     #[tracing::instrument(skip(self), level = "trace")]
     pub async fn get_with_e_tag(
         &self,
@@ -491,29 +324,90 @@ impl S3Storage {
             &[],
             chroma_tracing::util::StopWatchUnit::Millis,
         );
-        let (mut stream, e_tag) = self.get_stream_and_e_tag(key).await?;
-        let buf = async {
-            let mut buf: Vec<u8> = Vec::new();
-            while let Some(res) = stream.next().await {
-                match res {
-                    Ok(chunk) => {
-                        buf.extend(chunk);
-                    }
-                    Err(e) => {
-                        tracing::error!("Error reading from S3: {}", e);
-                        return Err(e);
+
+        let res = self
+            .client
+            .get_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .instrument(tracing::trace_span!("cold S3 get"))
+            .await;
+
+        let output = res.map_err(|e| self.get_object_error_to_storage_error(key, e))?;
+
+        let e_tag = output.e_tag.map(ETag);
+        // We can trust this to be non-negative - https://github.com/awslabs/aws-sdk-rust/discussions/916
+        let content_length = output.content_length.unwrap_or(0) as usize;
+
+        if content_length == 0 {
+            return Ok((Arc::new(Vec::new()), e_tag));
+        }
+
+        let mut buf = vec![0u8; content_length];
+        let mut reader = output.body.into_async_read();
+
+        reader.read_exact(&mut buf).await.map_err(|e| {
+            tracing::error!("Error reading from S3: {}", e);
+            StorageError::Generic {
+                source: Arc::new(e),
+            }
+        })?;
+
+        Ok((Arc::new(buf), e_tag))
+    }
+
+    /// Get object metadata without downloading the content.
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn head_object(&self, key: &str) -> Result<S3ObjectMetadata, StorageError> {
+        let head_res = self
+            .client
+            .head_object()
+            .bucket(self.bucket.clone())
+            .key(key)
+            .send()
+            .await;
+
+        match head_res {
+            Ok(res) => {
+                let last_modified = res.last_modified.map(|dt| {
+                    std::time::UNIX_EPOCH
+                        + Duration::new(dt.secs().try_into().unwrap_or(0), dt.subsec_nanos())
+                });
+                Ok(S3ObjectMetadata {
+                    object_key: key.to_string(),
+                    etag: res.e_tag.map(ETag),
+                    content_length: res.content_length.unwrap_or(0),
+                    content_type: res.content_type,
+                    last_modified,
+                })
+            }
+            Err(e) => match e {
+                SdkError::ServiceError(err) => {
+                    let inner = err.into_err();
+                    if inner.is_not_found() {
+                        Err(StorageError::NotFound {
+                            path: key.to_string(),
+                            source: Arc::new(inner),
+                        })
+                    } else {
+                        let code = inner.code().map(|code| code.to_string());
+                        match code.as_deref() {
+                            Some("SlowDown") => Err(StorageError::Backoff),
+                            Some("AccessDenied") => Err(StorageError::PermissionDenied {
+                                path: key.to_string(),
+                                source: Arc::new(inner),
+                            }),
+                            _ => Err(StorageError::Generic {
+                                source: Arc::new(inner),
+                            }),
+                        }
                     }
                 }
-            }
-            Ok(Some(buf))
-        }
-        .await?;
-        match buf {
-            Some(buf) => Ok((Arc::new(buf), e_tag)),
-            None => {
-                // Buffer is empty. Nothing interesting to do.
-                Ok((Arc::new(vec![]), None))
-            }
+                _ => Err(StorageError::Generic {
+                    source: Arc::new(e),
+                }),
+            },
         }
     }
 
@@ -652,14 +546,10 @@ impl S3Storage {
             .bucket(&self.bucket)
             .key(key)
             .body(create_bytestream_fn(0..total_size_bytes).await?);
-        let req = match options.if_not_exists {
-            true => req.if_none_match('*'),
-            false => req,
-        };
-
-        let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag.0),
-            None => req,
+        let req = match options.mode {
+            PutMode::IfMatch(etag) => req.if_match(etag.0),
+            PutMode::IfNotExist => req.if_none_match('*'),
+            PutMode::Upsert => req,
         };
 
         let resp = req.send().await.map_err(|err| {
@@ -791,15 +681,10 @@ impl S3Storage {
                     .build(),
             )
             .upload_id(upload_id);
-
-        let complete_req = match options.if_not_exists {
-            true => complete_req.if_none_match('*'),
-            false => complete_req,
-        };
-
-        let complete_req = match options.if_match {
-            Some(e_tag) => complete_req.if_match(e_tag.0),
-            None => complete_req,
+        let complete_req = match options.mode {
+            PutMode::IfMatch(etag) => complete_req.if_match(etag.0),
+            PutMode::IfNotExist => complete_req.if_none_match('*'),
+            PutMode::Upsert => complete_req,
         };
 
         let resp = complete_req
@@ -853,11 +738,6 @@ impl S3Storage {
         self.metrics.s3_delete_count.add(1, &[]);
 
         let req = self.client.delete_object().bucket(&self.bucket).key(key);
-
-        let req = match options.if_match {
-            Some(e_tag) => req.if_match(e_tag.0),
-            None => req,
-        };
 
         match req.send().await {
             Ok(_) => {
@@ -1040,6 +920,10 @@ impl S3Storage {
         }
         Ok(paths)
     }
+
+    pub fn bucket(&self) -> Option<&str> {
+        Some(&self.bucket)
+    }
 }
 
 #[async_trait]
@@ -1110,6 +994,36 @@ impl Configurable<StorageConfig> for S3Storage {
                             .retry_config(retry_config)
                             .build();
                         aws_sdk_s3::Client::new(&config)
+                    }
+                    super::config::S3CredentialsConfig::Explicit {
+                        access_key_id,
+                        secret_access_key,
+                        session_token,
+                        custom_endpoint,
+                        region,
+                    } => {
+                        let cred = aws_sdk_s3::config::Credentials::new(
+                            access_key_id,
+                            secret_access_key,
+                            session_token.clone(),
+                            None,
+                            "explicit-credentials",
+                        );
+
+                        let mut config_builder = aws_sdk_s3::config::Builder::new()
+                            .credentials_provider(cred)
+                            .behavior_version_latest()
+                            .region(aws_sdk_s3::config::Region::new(region.clone()))
+                            .timeout_config(timeout_config)
+                            .stalled_stream_protection(stalled_config)
+                            .retry_config(retry_config);
+
+                        if let Some(url) = custom_endpoint {
+                            config_builder =
+                                config_builder.endpoint_url(url).force_path_style(true);
+                        }
+
+                        aws_sdk_s3::Client::from_conf(config_builder.build())
                     }
                 };
                 let storage = S3Storage::new(
@@ -1378,11 +1292,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1392,11 +1302,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap_err();
@@ -1418,11 +1324,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1434,11 +1336,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: false,
-                    if_match: e_tag,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfMatch(e_tag.unwrap())),
             )
             .await
             .unwrap();
@@ -1452,11 +1350,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1466,11 +1360,7 @@ mod tests {
                 "test",
                 0,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                PutOptions {
-                    if_not_exists: false,
-                    if_match: Some(ETag("e_tag".to_string())),
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfMatch(ETag("e_tag".to_string()))),
             )
             .await
             .unwrap_err();
@@ -1491,11 +1381,14 @@ mod tests {
 
     #[test]
     fn test_put_options_default() {
-        let default = PutOptions::default();
-
-        assert!(!default.if_not_exists);
-        assert_eq!(default.if_match, None);
-        assert_eq!(default.priority, StorageRequestPriority::P0);
+        assert_eq!(
+            PutOptions::default(),
+            PutOptions {
+                cmek: None,
+                mode: PutMode::Upsert,
+                priority: StorageRequestPriority::P0
+            }
+        );
     }
 
     #[tokio::test]
@@ -1506,11 +1399,7 @@ mod tests {
                 "test/00",
                 9,
                 |_| Box::pin(ready(Ok(ByteStream::from(Bytes::from("ABC123XYZ"))))) as _,
-                PutOptions {
-                    if_not_exists: true,
-                    if_match: None,
-                    priority: StorageRequestPriority::P0,
-                },
+                PutOptions::default().with_mode(PutMode::IfNotExist),
             )
             .await
             .unwrap();
@@ -1531,11 +1420,7 @@ mod tests {
                     &format!("test/{:02x}", i),
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                    PutOptions {
-                        if_not_exists: true,
-                        if_match: None,
-                        priority: StorageRequestPriority::P0,
-                    },
+                    PutOptions::default().with_mode(PutMode::IfNotExist),
                 )
                 .await
                 .unwrap();
@@ -1563,11 +1448,7 @@ mod tests {
                     &key,
                     0,
                     |_| Box::pin(ready(Ok(ByteStream::from(Bytes::new())))) as _,
-                    PutOptions {
-                        if_not_exists: true,
-                        if_match: None,
-                        priority: StorageRequestPriority::P0,
-                    },
+                    PutOptions::default().with_mode(PutMode::IfNotExist),
                 )
                 .await
                 .unwrap();
@@ -1660,6 +1541,151 @@ mod tests {
                 // This is expected - the head operation will fail on nonexistent file
             }
             other => panic!("Expected Generic error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_object() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let test_data = "test data for head object";
+        let key = "test-head-object";
+
+        storage
+            .put_bytes(key, test_data.as_bytes().to_vec(), PutOptions::default())
+            .await
+            .unwrap();
+
+        let metadata = storage.head_object(key).await.unwrap();
+
+        assert_eq!(metadata.object_key, key);
+        assert_eq!(metadata.content_length, test_data.len() as i64);
+        assert!(metadata.etag.is_some(), "etag should be present");
+        assert!(
+            metadata.last_modified.is_some(),
+            "last_modified should be present"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_head_object_not_found() {
+        let storage = setup_with_bucket(1024 * 1024 * 8, 1024 * 1024 * 8).await;
+
+        let result = storage.head_object("nonexistent-key").await;
+
+        assert!(
+            result.is_err(),
+            "head_object should return error for non-existent key"
+        );
+        match result.unwrap_err() {
+            StorageError::NotFound { path, .. } => {
+                assert_eq!(path, "nonexistent-key");
+            }
+            other => panic!("Expected NotFound error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_explicit_credentials() {
+        use chroma_config::Configurable;
+
+        let config = StorageConfig::S3(crate::config::S3StorageConfig {
+            bucket: "test-explicit-creds".to_string(),
+            credentials: S3CredentialsConfig::Explicit {
+                access_key_id: "minio".to_string(),
+                secret_access_key: "minio123".to_string(),
+                session_token: None,
+                custom_endpoint: Some("http://127.0.0.1:9000".to_string()),
+                region: "us-east-1".to_string(),
+            },
+            ..Default::default()
+        });
+
+        let storage =
+            S3Storage::try_from_config(&config, &chroma_config::registry::Registry::default())
+                .await
+                .unwrap();
+
+        assert_eq!(storage.bucket, "test-explicit-creds");
+        storage.create_bucket().await.unwrap();
+
+        // Verify we can actually use the storage
+        let test_data = "test with explicit credentials";
+        storage
+            .put_bytes(
+                "explicit-test-key",
+                test_data.as_bytes().to_vec(),
+                PutOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let result = storage
+            .get("explicit-test-key", GetOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(result.as_ref(), test_data.as_bytes());
+    }
+
+    #[test]
+    fn test_explicit_credentials_config_deserialization() {
+        let json = r#"{
+            "Explicit": {
+                "access_key_id": "test-access-key",
+                "secret_access_key": "test-secret-key",
+                "session_token": "test-session-token",
+                "custom_endpoint": "http://localhost:9000",
+                "region": "us-east-1"
+            }
+        }"#;
+
+        let config: S3CredentialsConfig = serde_json::from_str(json).unwrap();
+
+        match config {
+            S3CredentialsConfig::Explicit {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                custom_endpoint,
+                region,
+            } => {
+                assert_eq!(access_key_id, "test-access-key");
+                assert_eq!(secret_access_key, "test-secret-key");
+                assert_eq!(session_token, Some("test-session-token".to_string()));
+                assert_eq!(custom_endpoint, Some("http://localhost:9000".to_string()));
+                assert_eq!(region, "us-east-1");
+            }
+            _ => panic!("Expected Explicit variant"),
+        }
+    }
+
+    #[test]
+    fn test_explicit_credentials_config_deserialization_minimal() {
+        let json = r#"{
+            "Explicit": {
+                "access_key_id": "test-access-key",
+                "secret_access_key": "test-secret-key",
+                "region": "us-west-2"
+            }
+        }"#;
+
+        let config: S3CredentialsConfig = serde_json::from_str(json).unwrap();
+
+        match config {
+            S3CredentialsConfig::Explicit {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                custom_endpoint,
+                region,
+            } => {
+                assert_eq!(access_key_id, "test-access-key");
+                assert_eq!(secret_access_key, "test-secret-key");
+                assert_eq!(session_token, None);
+                assert_eq!(custom_endpoint, None);
+                assert_eq!(region, "us-west-2");
+            }
+            _ => panic!("Expected Explicit variant"),
         }
     }
 }

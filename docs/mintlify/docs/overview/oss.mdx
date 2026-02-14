@@ -1,0 +1,114 @@
+---
+title: "Open Source"
+description: "Chroma is the open-source AI application database. Contribute to the project or learn about telemetry and privacy."
+---
+import { Callout } from '/snippets/callout.mdx';
+
+**Chroma is the open-source AI application database**. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
+
+## Contributing
+
+We welcome all contributions, bug reports, bug fixes, documentation improvements, enhancements, and ideas.
+
+### Getting Started
+
+Here are some helpful links to get you started with contributing to Chroma
+
+- The Chroma codebase is hosted on [Github](https://github.com/chroma-core/chroma)
+- Issues are tracked on [Github Issues](https://github.com/chroma-core/chroma/issues). Please report any issues you find there making sure to fill out the correct [form for the type of issue you are reporting](https://github.com/chroma-core/chroma/issues/new/choose).
+- In order to run Chroma locally you can follow the [Development Instructions](https://github.com/chroma-core/chroma/blob/main/DEVELOP.md).
+- If you want to contribute and aren't sure where to get started you can search for issues with the [Good first issue](https://github.com/chroma-core/chroma/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) tag.
+- The Chroma documentation (including this page!) is hosted on [Github](https://github.com/chroma-core/chroma/tree/main/docs) as well. If you find any issues with the documentation please report them on the Github Issues page for [the documentation](https://github.com/chroma-core/chroma/issues).
+
+### Contributing Code and Ideas
+
+#### Feature Requests
+
+Feature requests and proposals for large changes to Chroma should be submitted using [GitHub Issues](https://github.com/chroma-core/chroma/issues). If you want to suggest a new feature or a major change, please open an issue and select the relevant template. This allows the core Chroma team and the community to discuss and provide feedback directly in the issue. For smaller changes like bug fixes or documentation updates, you can submit an issue or open a pull request as usual.
+
+Once proposed, the issue will be reviewed by the Chroma team and its status will be tracked in GitHub. We use labels and issue states to indicate the progress of the proposal—for example, whether it is under review, accepted, being implemented, or closed. For more information, see our GitHub Issues page and contribution guidelines.
+
+You can join our [Discord](https://discord.gg/MMeYNTmh3x) and chat with us in the [#feature-ideas](https://discord.com/channels/1073293645303795742/1131592310786887700) channel. We are always happy to discuss new ideas and features with the community.
+
+#### Pull Requests
+
+In order to submit a change to Chroma please submit a [Pull Request](https://github.com/chroma-core/chroma/compare) against Chroma or the documentation. The pull request will be reviewed by the Chroma team and if approved, will be merged into the repository. We will do our best to review pull requests in a timely manner but please be patient as we are a small team. We will work to integrate your proposed changes as quickly as possible if they align with the goals of the project. We ask that you label your pull request with a title prefix that indicates the type of change you are proposing. The following prefixes are used:
+
+```text
+ENH: Enhancement, new functionality
+BUG: Bug fix
+DOC: Additions/updates to documentation
+TST: Additions/updates to tests
+BLD: Updates to the build process/scripts
+PERF: Performance improvement
+TYP: Type annotations
+CLN: Code cleanup
+CHORE: Maintenance and other tasks that do not modify source or test files
+```
+
+## Roadmap
+
+You can track our progress on the Chroma project on the [changelog](https://www.trychroma.com/changelog).
+
+Chroma is built and maintained by a small core team, so we are intentional about
+where we invest engineering effort. Chroma has two deployment modes—distributed
+Chroma and single-node local Chroma—which currently rely on different storage
+subsystems. The database is and will always remain open-source (Apache 2.0), and
+our cloud offering simply runs the same open-source distributed system.
+
+Today, the majority of our engineering effort is focused on distributed Chroma
+and the cloud offering. As a result, local Chroma may temporarily lack some
+features or behaviors available in the distributed system. Restoring and
+maintaining 100% feature and API parity remains an active goal, and unifying the
+underlying storage systems is a key part of that work.
+
+## Telemetry
+
+Chroma contains a telemetry feature that collects **anonymous** usage information.
+
+### Why?
+
+We use this information to help us understand how Chroma is used, to help us prioritize work on new features and bug fixes, and to help us improve Chroma's performance and stability.
+
+### Opting out
+
+If you prefer to opt out of telemetry, you can do this in two ways.
+
+#### In Client Code
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+Set `anonymized_telemetry` to `False` in your client's settings:
+
+```python
+from chromadb.config import Settings
+client = chromadb.Client(Settings(anonymized_telemetry=False))
+# or if using PersistentClient
+client = chromadb.PersistentClient(path="/path/to/save/to", settings=Settings(anonymized_telemetry=False))
+```
+
+</Tab>
+
+<Tab title="TypeScript" icon="js">
+
+Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
+
+</Tab>
+
+<Tab title="Rust" icon="rust">
+
+Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
+
+</Tab>
+</Tabs>
+
+#### In Chroma's Backend Server Using Environment Variables
+
+Set `ANONYMIZED_TELEMETRY` to `False` in your shell or server environment.
+
+If you are running Chroma on your local computer with `docker-compose` you can set this value in an `.env` file placed in the same directory as the `docker-compose.yml` file:
+
+```text
+ANONYMIZED_TELEMETRY=False
+```

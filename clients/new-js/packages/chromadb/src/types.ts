@@ -1,4 +1,9 @@
-import { GetUserIdentityResponse, Include, SparseVector } from "./api";
+import {
+  GetUserIdentityResponse,
+  Include,
+  IndexStatusResponse,
+  SparseVector,
+} from "./api";
 
 /**
  * User identity information including tenant and database access.
@@ -6,26 +11,60 @@ import { GetUserIdentityResponse, Include, SparseVector } from "./api";
 export type UserIdentity = GetUserIdentityResponse;
 
 /**
+ * Read level controls whether queries read from the write-ahead log (WAL).
+ *
+ * - INDEX_AND_WAL: Read from both the compacted index and the WAL.
+ *   All committed writes will be visible. This is the default.
+ * - INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+ *   Recent writes that haven't been compacted may not be visible, but queries are faster.
+ */
+export const ReadLevel = {
+  INDEX_AND_WAL: "index_and_wal",
+  INDEX_ONLY: "index_only",
+} as const;
+
+export type ReadLevel = (typeof ReadLevel)[keyof typeof ReadLevel];
+
+/**
  * Re-export SparseVector type for external use
  */
 export type { SparseVector };
 
 /**
+ * Scalar metadata values that can be stored in arrays.
+ */
+export type MetadataScalar = boolean | number | string;
+
+/**
  * Metadata that can be associated with a collection.
- * Values must be boolean, number, or string types.
+ * Values can be boolean, number, string, SparseVector, typed arrays, or null.
  */
 export type CollectionMetadata = Record<
   string,
-  boolean | number | string | SparseVector | null
+  | boolean
+  | number
+  | string
+  | SparseVector
+  | boolean[]
+  | number[]
+  | string[]
+  | null
 >;
 
 /**
  * Metadata that can be associated with individual records.
- * Values must be boolean, number, or string types.
+ * Values can be boolean, number, string, SparseVector, typed arrays, or null.
  */
 export type Metadata = Record<
   string,
-  boolean | number | string | SparseVector | null
+  | boolean
+  | number
+  | string
+  | SparseVector
+  | boolean[]
+  | number[]
+  | string[]
+  | null
 >;
 
 /**
@@ -86,6 +125,8 @@ type WhereOperator = "$gt" | "$gte" | "$lt" | "$lte" | "$ne" | "$eq";
 
 type InclusionExclusionOperator = "$in" | "$nin";
 
+type ArrayContainsOperator = "$contains" | "$not_contains";
+
 type OperatorExpression =
   | { $gt: LiteralValue }
   | { $gte: LiteralValue }
@@ -96,7 +137,9 @@ type OperatorExpression =
   | { $and: LiteralValue }
   | { $or: LiteralValue }
   | { $in: LiteralValue[] }
-  | { $nin: LiteralValue[] };
+  | { $nin: LiteralValue[] }
+  | { $contains: LiteralValue }
+  | { $not_contains: LiteralValue };
 
 /**
  * Where clause for filtering records based on metadata.
@@ -310,3 +353,8 @@ export class QueryResult<TMeta extends Metadata = Metadata> {
     return queries;
   }
 }
+
+/**
+ * Re-export IndexStatusResponse type for external use
+ */
+export type IndexingStatus = IndexStatusResponse;

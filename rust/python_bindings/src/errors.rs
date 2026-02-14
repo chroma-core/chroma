@@ -60,3 +60,13 @@ impl ChromaError for WrappedUuidError {
         ErrorCodes::InvalidArgument
     }
 }
+
+#[derive(Error, Debug)]
+#[error("{0}")]
+pub(crate) struct InvalidDatabaseNameError(pub String);
+
+impl ChromaError for InvalidDatabaseNameError {
+    fn code(&self) -> ErrorCodes {
+        ErrorCodes::InvalidArgument
+    }
+}

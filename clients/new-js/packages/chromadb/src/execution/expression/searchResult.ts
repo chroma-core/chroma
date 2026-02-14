@@ -20,7 +20,9 @@ const normalizePayloadArray = <T>(
   if (payload.length === count) {
     return payload.map((item) => (item ? item.slice() : null));
   }
-  const result: Array<T[] | null> = payload.map((item) => (item ? item.slice() : null));
+  const result: Array<T[] | null> = payload.map((item) =>
+    item ? item.slice() : null,
+  );
   while (result.length < count) {
     result.push(null);
   }
@@ -40,7 +42,10 @@ export class SearchResult {
     const payloadCount = this.ids.length;
     this.documents = normalizePayloadArray(response.documents, payloadCount);
     this.embeddings = normalizePayloadArray(response.embeddings, payloadCount);
-    const rawMetadatas = normalizePayloadArray(response.metadatas, payloadCount);
+    const rawMetadatas = normalizePayloadArray(
+      response.metadatas,
+      payloadCount,
+    );
     this.metadatas = rawMetadatas.map((payload) => {
       if (!payload) {
         return null;
@@ -54,7 +59,11 @@ export class SearchResult {
   public rows(): SearchResultRow[][] {
     const results: SearchResultRow[][] = [];
 
-    for (let payloadIndex = 0; payloadIndex < this.ids.length; payloadIndex += 1) {
+    for (
+      let payloadIndex = 0;
+      payloadIndex < this.ids.length;
+      payloadIndex += 1
+    ) {
       const ids = this.ids[payloadIndex];
       const docPayload = this.documents[payloadIndex] ?? [];
       const embedPayload = this.embeddings[payloadIndex] ?? [];

@@ -14,28 +14,53 @@
       "description": "Parameter api_key_env_var for the jina embedding function"
     },
     "task": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter task for the jina embedding function"
     },
     "late_chunking": {
-      "type": "boolean",
+      "type": [
+        "boolean",
+        "null"
+      ],
       "description": "Parameter late_chunking for the jina embedding function"
     },
     "truncate": {
-      "type": "boolean",
+      "type": [
+        "boolean",
+        "null"
+      ],
       "description": "Parameter truncate for the jina embedding function"
     },
     "dimensions": {
-      "type": "integer",
+      "type": [
+        "integer",
+        "null"
+      ],
       "description": "Parameter dimensions for the jina embedding function"
     },
     "embedding_type": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "description": "Parameter embedding_type for the jina embedding function"
     },
     "normalized": {
-      "type": "boolean",
+      "type": [
+        "boolean",
+        "null"
+      ],
       "description": "Parameter normalized for the jina embedding function"
+    },
+    "query_config": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Parameter query_config for the jina embedding function"
     }
   },
   "required": [

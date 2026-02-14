@@ -1,14 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-/// The type of memberlist provider to use
-/// # Options
-/// - CustomResource: Use a custom resource to get the memberlist
-pub(crate) enum MemberlistProviderType {
-    #[default]
-    CustomResource,
-}
-
 /// The configuration for the memberlist provider.
 /// # Options
 /// - CustomResource: Use a custom resource to get the memberlist

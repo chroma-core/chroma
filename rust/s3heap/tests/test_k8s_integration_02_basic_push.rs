@@ -90,7 +90,7 @@ async fn test_k8s_integration_02_push_with_no_schedule() {
     )
     .await
     .unwrap();
-    writer.push(&[schedule2.clone()]).await.unwrap();
+    writer.push(std::slice::from_ref(&schedule2)).await.unwrap();
 
     // Verify only one bucket was created
     verify_bucket_count(

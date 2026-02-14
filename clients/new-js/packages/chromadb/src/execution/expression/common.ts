@@ -1,6 +1,8 @@
 export type IterableInput<T> = Iterable<T> | ArrayLike<T>;
 
-export const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+export const isPlainObject = (
+  value: unknown,
+): value is Record<string, unknown> => {
   if (typeof value !== "object" || value === null) {
     return false;
   }

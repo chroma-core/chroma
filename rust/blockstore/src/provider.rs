@@ -25,6 +25,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum BlockfileProvider {
     HashMapBlockfileProvider(MemoryBlockfileProvider),
     ArrowBlockfileProvider(ArrowBlockfileProvider),
@@ -134,6 +135,16 @@ impl BlockfileProvider {
                 .prefetch(id, prefix_path)
                 .await
                 .map_err(|e| Box::new(e) as _),
+        }
+    }
+
+    /// Close the provider, flushing any in-memory cache entries to disk.
+    pub async fn close(&self) -> Result<(), Box<dyn ChromaError>> {
+        match self {
+            BlockfileProvider::HashMapBlockfileProvider(_) => Ok(()),
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                provider.close().await.map_err(|e| e.boxed())
+            }
         }
     }
 }

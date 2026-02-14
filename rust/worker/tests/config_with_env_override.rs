@@ -159,7 +159,6 @@ fn test_config_with_env_override() {
             "#,
         );
         let config = RootConfig::load();
-        assert_eq!(config.query_service.my_member_id, "query-service-0");
         assert_eq!(config.query_service.my_port, 50051);
         assert_eq!(config.query_service.jemalloc_pprof_server_port, Some(6060));
         assert_eq!(

@@ -1,7 +1,7 @@
 # s3heap-service
 
-The s3heap-service integrates with the task manager to trigger tasks at no faster than a particular
-cadence, with reasonable guarantees that writing data will cause a task to run.
+The s3heap-service integrates with the function manager to trigger functions at no faster than a
+particular cadence, with reasonable guarantees that writing data will cause a function to run.
 
 This document refines the design of the heap-tender and heap service until it can be implemented
 safely.
@@ -23,13 +23,19 @@ That gives this chart
 | In heap | In sysdb, should be scheduled |
 | In heap | In sysdb, waiting for writes |
 
+And then one must take into account whether there's a function template.
+
 More abstractly, view it like this:
 
-|                     | On Heap    | Not On Heap |
-|---------------------|------------|-------------|
-| Not in sysdb        | A_1        | A_2         |
-| In sysdb, scheduled | B_1        | B_2         |
-| In sysdb, waiting   | C_1        | C_2         |
+                         |                     | On Heap    | Not On Heap |
+-------------------------|---------------------|------------|-------------|
+Has no function template | Not in sysdb        | A_1        | A_2         |
+                         | In sysdb, scheduled | B_1        | B_2         |
+                         | In sysdb, waiting   | C_1        | C_2         |
+-------------------------|---------------------|------------|-------------|
+Has function template    | Not in sysdb        | D_1        | D_2         |
+                         | In sysdb, scheduled | E_1        | E_2         |
+                         | In sysdb, waiting   | F_1        | F_2         |
 
 When viewed like this, we can establish rules for state transitions in our system.  Each operation
 operates on either the sysdb or the heap, never both because there is no transactionality between S3
@@ -38,26 +44,48 @@ another column within the same row.
 
 ## State space diagram
 
-                     From
-|     |      | A_1  | A_2  | B_1  | B_2  | C_1  | C_2  |
-|-----|------|------|------|------|------|------|------|
-|     | A_1  | -    | IMP1 | YES1 | X    | YES1 | X    |
-|     | A_2  | GC1  | -    | X    | GC2  | X    | YES1 |
-| To  | B_1  | IMP2 | X    |-     | NEW2 | YES3 | X    |
-|     | B_2  | X    | NEW1 | IMP3 | -    | X    | YES3 |
-|     | C_1  | IMP2 | X    | YES2 | X    | -    | IMP4 |
-|     | C_2  | X    | NO1  | X    | YES2 | IMP3 | -    |
+Note that there are six base cases.  Reasoning through all 36 cases and getting them right will be
+difficult.  Instead, we aim to exploit symmetry:  If there is a function template and something is
+in sysdb, it is as if there is no function template.  As before, we can mark as trivially impossible
+anything that changes along two axes simultaneously.  Anything listed as INVX is invariant X and is
+prohibited by the invariant.
 
-- GC1:  Item gets a perpetual "is-done" from the sysdb and transitions to A_2.
-- GC2:  Garbage collection.
-- NEW1:  Create a new task in the sysdb.
-- NEW2:  Finish the new operation by priming the task and putting it on the heap.
-- YES1:  Task gets deleted from sysdb.
-- YES2:  This implies that we move from scheduled to waiting while the task is on heap.  This happens when a job completes and reads all data from the log.
-- YES3:  There was a write, the heap needed to schedule, so it picked a time and updated sysdb.
-- NO1:  This implies that the state transitioned from being not-in-sysdb to in-sysdb.   A new task will always run straight away, so it should not be put into waiting state.
-- IMP1:  The item is not on heap or in the database.  First transition is to B_2 or C_2.
-- IMP2:  Task UUIDs are not re-used.  Starting from A_1 implies the task was created and then put on the heap and subsequently removed from sysdb.  There should be no means by which it reappears in the sysdb.  Therefore this path is impossible.
-- IMP3:  We never take something off the heap until the sysdb is updated to reflect the job being done.  Therefore we don't take this transition.
-- IMP4:  We don't add something to the heap until it has been scheduled.
-- X:  Impossible.
+                     From
+|     |      | A_1  | A_2  | B_1  | B_2  | C_1  | C_2  | D_1  | D_2  | E_1  | E_2  | F_1  | F_2  |
+|-----|------|------|------|------|------|------|------|------|------|------|------|------|------|
+|     | A_1  | -    | INV2 | DEL1 | X    | DEL1 | X    | TT2  | X    | X    | X    | X    | X    |
+|     | A_2  | STOP | -    | X    | GC   | X    | DEL1 | X    | TT2  | X    | X    | X    | X    |
+| To  | B_1  | INV1 | X    | -    | R1   | R1   | X    | X    | X    | T2   | X    | X    | X    |
+|     | B_2  | X    | ADD1 | INV4 | -    | X    | WT1  | X    | X    | X    | T2   | X    | X    |
+|     | C_1  | INV1 | X    | DO1  | X    | -    | INV4 | X    | X    | X    | X    | T2   | X    |
+|     | C_2  | X    | INV3 | X    | DO2  | INV4 | -    | X    | X    | X    | X    | X    | T2   |
+|     |------|------|------|------|------|------|------|------|------|------|------|------|------|
+|     | D_1  | TT1  | X    | X    | X    | X    | X    | -    | INV2 | INV6 | X    | INV6 | X    |
+|     | D_2  | X    | TT1  | X    | X    | X    | X    | INV5 | -    | X    | INV6 | X    | INV6 |
+|     | E_1  | X    | X    | TT1  | X    | X    | X    | X    | X    | -    | R1   | WT1  | X    |
+|     | E_2  | X    | X    | X    | TT1  | X    | X    | X    | TT3  | INV4 | -    | X    | WT1  |
+|     | F_1  | X    | X    | X    | X    | TT1  | X    | TT3  | X    | DO1  | X    | -    | X    |
+|     | F_2  | X    | X    | X    | X    | X    | TT1  | X    | HOLE2| X    | DO2  | INV4 | -    |
+
+- -:  Identity function.  Always permitted.
+- X:  The transition hops rows, columns, or column families in the 2x6 table.
+- STOP:  Transition to the quiescent state.
+- TT1:  Add function template.
+- TT2:  Task template deleted.
+- TT3:  Task template instantiated.
+- ADD1:  Attach function.
+- DEL1:  Delete function.
+- DO1:  The function ran once and now is waiting for more log records.
+- DO2:  Same as DO1, but technically not possible to happen.
+- WT1:  Write triggered-state change.
+- GC:  Garbage collection kicks in.
+- INV1:  Task UUIDs are not reused.  Therefore the function lifetime has the progression not used -> used -> never used again.
+- INV2:  A function will only be added to the heap after it has been witnessed to exist as a template or sysdb entry.  By INV1 if it is on heap and no longer witnessed it will never be used again.  Therefore it cannot resurrect to add to the heap.
+- INV3:  A function is always added in a non-waiting state.  This is necessary to guarantee that functions don't get dropped.  It is either existing and on the heap or quiescent and waiting for additional writes.  The latter should never be the starting condition.
+- INV4:  A two-phase commit with the heap makes it possible to transition the schedule to keep the function scheduled, commit the heap change, and then commit the change to sysdb.  Therefore the signal will never leave the heap as long as the sysdb has a scheduled function.
+- INV5:  By INV2 the function template was witnessed in sysdb before the function was added to the heap.  By INV1, this means the function was deleted.  An impossibility arises.
+- INV6:  A function cannot be deleted if it descends a template.
+- R1:  Corollary to INV4:  On start, any outstanding 2PC is reconciled and converged to push the function to the heap.
+
+Holes to overcomb/Unsurities:
+- HOLE2:  What would compel a process to instantiate a function template if not in heap?

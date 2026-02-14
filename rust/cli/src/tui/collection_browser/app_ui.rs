@@ -108,7 +108,7 @@ impl AppUI {
         frame.render_widget(app_block, frame.area());
     }
 
-    fn title(&self, frame: &mut Frame, app_state: &mut AppState) -> Line {
+    fn title(&self, frame: &mut Frame, app_state: &mut AppState) -> Line<'_> {
         let content = match app_state.screen {
             Screen::Main => {
                 let visible_rows = frame.area().height.saturating_sub(8) as usize;
@@ -126,7 +126,7 @@ impl AppUI {
         Line::from(Span::styled(title, Style::default().bold()))
     }
 
-    fn instructions(&self, app_state: &mut AppState) -> Line {
+    fn instructions(&self, app_state: &mut AppState) -> Line<'_> {
         let padding = " ";
         let spacing = "  ";
 

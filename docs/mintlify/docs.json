@@ -1,0 +1,490 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "aspen",
+  "name": "Chroma Docs",
+  "colors": {
+    "primary": "#ff6446",
+    "light": "#3b82f6",
+    "dark": "#3b82f6"
+  },
+  "appearance": {
+    "default": "system"
+  },
+  "fonts": {
+    "family": "Inter"
+  },
+  "favicon": "/images/favicon.svg",
+  "thumbnails": {
+    "background": "/images/og-bg.png"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Docs",
+        "icon": "book",
+        "pages": [
+          {
+            "group": "Overview",
+            "pages": [
+              "docs/overview/getting-started",
+              "docs/overview/architecture",
+              "docs/overview/oss",
+              "docs/overview/migration",
+              "docs/overview/troubleshooting"
+            ]
+          },
+          {
+            "group": "Run Chroma",
+            "pages": [
+              "docs/run-chroma/clients",
+              "docs/run-chroma/client-server"
+            ]
+          },
+          {
+            "group": "Collections",
+            "pages": [
+              "docs/collections/manage-collections",
+              "docs/collections/add-data",
+              "docs/collections/update-data",
+              "docs/collections/delete-data",
+              "docs/collections/configure"
+            ]
+          },
+          {
+            "group": "Querying Collections",
+            "pages": [
+              "docs/querying-collections/query-and-get",
+              "docs/querying-collections/metadata-filtering",
+              "docs/querying-collections/full-text-search"
+            ]
+          },
+          {
+            "group": "Embeddings",
+            "pages": [
+              "docs/embeddings/embedding-functions",
+              "docs/embeddings/multimodal"
+            ]
+          },
+          {
+            "group": "CLI",
+            "pages": [
+              "docs/cli/install",
+              "docs/cli/browse",
+              "docs/cli/copy",
+              "docs/cli/db",
+              "docs/cli/sample-apps",
+              "docs/cli/login",
+              "docs/cli/profile",
+              "docs/cli/run",
+              "docs/cli/update",
+              "docs/cli/vacuum"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chroma Cloud",
+        "icon": "cloud",
+        "pages": [
+          "cloud/getting-started",
+          "cloud/pricing",
+          "cloud/quotas-limits",
+          {
+            "group": "Features",
+            "pages": [
+              "cloud/features/collection-forking"
+            ]
+          },
+          {
+            "group": "Schema",
+            "pages": [
+              "cloud/schema/overview",
+              "cloud/schema/schema-basics",
+              "cloud/schema/sparse-vector-search",
+              "cloud/schema/index-reference"
+            ]
+          },
+          {
+            "group": "Search API",
+            "pages": [
+              "cloud/search-api/overview",
+              "cloud/search-api/search-basics",
+              "cloud/search-api/filtering",
+              "cloud/search-api/ranking",
+              "cloud/search-api/group-by",
+              "cloud/search-api/hybrid-search",
+              "cloud/search-api/pagination-selection",
+              "cloud/search-api/batch-operations",
+              "cloud/search-api/examples",
+              "cloud/search-api/migration"
+            ]
+          },
+          {
+            "group": "Sync",
+            "pages": [
+              "cloud/sync/overview",
+              "cloud/sync/github",
+              "cloud/sync/web"
+            ]
+          },
+          {
+            "group": "Package Search",
+            "pages": [
+              "cloud/package-search/mcp",
+              "cloud/package-search/registry"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "icon": "map",
+        "pages": [
+          {
+            "group": "Build",
+            "pages": [
+              "guides/build/building-with-ai",
+              "guides/build/intro-to-retrieval",
+              "guides/build/look-at-your-data",
+              "guides/build/chunking",
+              "guides/build/agentic-search",
+              "guides/build/agentic-memory"
+            ]
+          },
+          {
+            "group": "Deploy",
+            "pages": [
+              "guides/deploy/client-server-mode",
+              "guides/deploy/python-thin-client",
+              "guides/deploy/performance",
+              "guides/deploy/observability",
+              "guides/deploy/docker",
+              "guides/deploy/aws",
+              "guides/deploy/azure",
+              "guides/deploy/gcp"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Integrations",
+        "icon": "code-merge",
+        "pages": [
+          "integrations/chroma-integrations",
+          {
+            "group": "Dense Embedding Models",
+            "pages": [
+              "integrations/embedding-models/openai",
+              "integrations/embedding-models/cohere",
+              "integrations/embedding-models/google-gemini",
+              "integrations/embedding-models/hugging-face",
+              "integrations/embedding-models/hugging-face-server",
+              "integrations/embedding-models/instructor",
+              "integrations/embedding-models/jina-ai",
+              "integrations/embedding-models/mistral",
+              "integrations/embedding-models/morph",
+              "integrations/embedding-models/nomic",
+              "integrations/embedding-models/ollama",
+              "integrations/embedding-models/open-clip",
+              "integrations/embedding-models/roboflow",
+              "integrations/embedding-models/sentence-transformer",
+              "integrations/embedding-models/text2vec",
+              "integrations/embedding-models/together-ai",
+              "integrations/embedding-models/voyageai",
+              "integrations/embedding-models/cloudflare-workers-ai",
+              "integrations/embedding-models/amazon-bedrock",
+              "integrations/embedding-models/baseten",
+              "integrations/embedding-models/chroma-cloud-qwen"
+            ]
+          },
+          {
+            "group": "Sparse Embedding Models",
+            "pages": [
+              "integrations/embedding-models/chroma-bm25",
+              "integrations/embedding-models/chroma-cloud-splade",
+              "integrations/embedding-models/hugging-face"
+            ]
+          },
+          {
+            "group": "Frameworks",
+            "pages": [
+              "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/braintrust",
+              "integrations/frameworks/contextual-ai",
+              "integrations/frameworks/deepeval",
+              "integrations/frameworks/haystack",
+              "integrations/frameworks/langchain",
+              "integrations/frameworks/llamaindex",
+              "integrations/frameworks/mem0",
+              "integrations/frameworks/openlit",
+              "integrations/frameworks/openllmetry",
+              "integrations/frameworks/streamlit",
+              "integrations/frameworks/voltagent"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Reference",
+        "icon": "code",
+        "pages": [
+          "reference/overview",
+          {
+            "group": "SDKs",
+            "pages": [
+              {
+                "group": "Python",
+                "pages": [
+                  "reference/python/client",
+                  "reference/python/collection",
+                  "reference/python/embedding-functions",
+                  "reference/python/search",
+                  "reference/python/schema",
+                  "reference/python/where-filter"
+                ]
+              },
+              {
+                "group": "TypeScript",
+                "pages": [
+                  "reference/typescript/client",
+                  "reference/typescript/collection",
+                  "reference/typescript/embedding-functions",
+                  "reference/typescript/search",
+                  "reference/typescript/schema",
+                  "reference/typescript/where-filter"
+                ]
+              },
+              "reference/rust"
+            ]
+          },
+          {
+            "group": "Beta SDKs",
+            "pages": [
+              "reference/kotlin",
+              "reference/swift"
+            ]
+          },
+          {
+            "group": "APIs",
+            "pages": [
+              {
+                "group": "Chroma Core API",
+                "openapi": {
+                  "source": "openapi.json",
+                  "directory": "/reference/chroma-api"
+                },
+                "pages": [
+                  {
+                    "group": "Tenant",
+                    "pages": [
+                      "POST /api/v2/tenants",
+                      "GET /api/v2/tenants/{tenant_name}",
+                      "PATCH /api/v2/tenants/{tenant_name}"
+                    ]
+                  },
+                  {
+                    "group": "Database",
+                    "pages": [
+                      "GET /api/v2/tenants/{tenant}/databases",
+                      "POST /api/v2/tenants/{tenant}/databases",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}",
+                      "DELETE /api/v2/tenants/{tenant}/databases/{database}"
+                    ]
+                  },
+                  {
+                    "group": "Collection",
+                    "pages": [
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections_count",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                      "PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                      "DELETE /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}"
+                    ]
+                  },
+                  {
+                    "group": "Record",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert"
+                    ]
+                  },
+                  {
+                    "group": "System",
+                    "pages": [
+                      "GET /api/v2/healthcheck",
+                      "GET /api/v2/heartbeat",
+                      "GET /api/v2/pre-flight-checks",
+                      "GET /api/v2/version"
+                    ]
+                  },
+                  {
+                    "group": "Authentication",
+                    "pages": [
+                      "GET /api/v2/auth/identity"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Chroma Cloud API",
+                "openapi": {
+                  "source": "openapi.json",
+                  "directory": "api-reference"
+                },
+                "pages": [
+                  {
+                    "group": "Collection",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork"
+                    ]
+                  },
+                  {
+                    "group": "Function",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Chroma Sync API",
+                "openapi": {
+                  "source": "sync.openapi.json",
+                  "directory": "reference/sync-api"
+                }
+              }
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "reference/where-filter"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "api": {
+    "examples": {
+      "languages": [
+        "curl",
+        "terminal",
+        "python",
+        "typescript",
+        "rust"
+      ]
+    }
+  },
+  "logo": {
+    "light": "/images/light-logo.svg",
+    "dark": "/images/dark-logo.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "icon": "github",
+        "label": "26k",
+        "href": "https://github.com/chroma-core/chroma"
+      },
+      {
+        "icon": "discord",
+        "label": "11k",
+        "href": "https://discord.gg/dSHcBEMSk7"
+      },
+      {
+        "label": "25k",
+        "icon": "x-twitter",
+        "href": "https://x.com/trychroma"
+      }
+    ],
+    "primary": {
+      "type": "button",
+      "label": "Dashboard",
+      "href": "https://trychroma.com/login"
+    }
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "grok",
+      "chatgpt",
+      "claude",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/chroma-core/chroma",
+      "x": "https://x.com/trychroma",
+      "discord": "https://discord.gg/MMeYNTmh3x",
+      "youtube": "https://youtube.com/@trychroma"
+    },
+    "links": [
+      {
+        "items": [
+          {
+            "label": "Enterprise",
+            "href": "https://trychroma.com/enterprise"
+          },
+          {
+            "label": "Pricing",
+            "href": "https://trychroma.com/pricing"
+          },
+          {
+            "label": "Changelog",
+            "href": "https://trychroma.com/changelog"
+          }
+        ]
+      }
+    ]
+  },
+  "integrations": {
+    "posthog": {
+      "apiKey": "phc_M1NrBVW8hgvKCGYxVtYusnbBvpVq9sKpE7FJMew9suK",
+      "sessionRecording": false
+    },
+    "gtm": {
+      "tagId": "GTM-T8MGS4GJ"
+    }
+  },
+  "redirects": [
+    {
+      "source": "/reference/chroma-reference",
+      "destination": "/reference/overview"
+    },
+    {
+      "source": "/reference/js/:slug*",
+      "destination": "/reference/typescript/"
+    },
+    {
+      "source": "/reference/python",
+      "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/python/index",
+      "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/typescript",
+      "destination": "/reference/typescript/client"
+    },
+    {
+      "source": "/reference/typescript/index",
+      "destination": "/reference/typescript/client"
+    }
+  ]
+}

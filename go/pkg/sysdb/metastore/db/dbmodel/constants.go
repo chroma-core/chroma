@@ -1,35 +1,58 @@
 package dbmodel
 
-import "github.com/google/uuid"
+import (
+	"fmt"
 
-// operator IDs that are pre-populated in the database.
+	"github.com/google/uuid"
+)
+
+// Constants for pre-populated functions.
+// These UUIDs must match what's in the database migrations.
 //
-// IMPORTANT: These constants must stay in sync with:
-// 1. Database migrations that insert operators (go/pkg/sysdb/metastore/db/migrations/*.sql)
-// 2. Rust constants (rust/types/src/operators.rs)
-//
-// When adding a new operator:
-// 1. Create a migration to INSERT the operator with a UUID
-// 2. Add the UUID constant here
+// When adding a new function:
+// 1. Add a migration to populate the functions table with the new function
+// 2. Add the UUID constant below (must match migration)
 // 3. Add the name constant below
-// 4. Add matching constants to rust/types/src/operators.rs
+// 4. Add matching constants to rust/types/src/functions.rs
 var (
-	// OperatorRecordCounter is the UUID for the built-in record_counter operator
-	// Must match: migration 20250930122132.sql and rust/types/src/operators.rs::OPERATOR_RECORD_COUNTER_ID
-	OperatorRecordCounter = uuid.MustParse("ccf2e3ba-633e-43ba-9394-46b0c54c61e3")
+	// FunctionRecordCounter is the UUID for the built-in record_counter function
+	// Must match: migration 20251023154800.sql and rust/types/src/functions.rs::FUNCTION_RECORD_COUNTER_ID
+	FunctionRecordCounter = uuid.MustParse("ccf2e3ba-633e-43ba-9394-46b0c54c61e3")
+
+	// FunctionStatistics is the UUID for the built-in statistics function
+	// Must match: migration 20251029223300.sql and rust/types/src/functions.rs::FUNCTION_STATISTICS_ID
+	FunctionStatistics = uuid.MustParse("304b58ad-a5cb-41dc-b88f-36dd3bf1d401")
 )
 
-// OperatorNames contains the names of pre-populated operators.
-// Must stay in sync with database and Rust constants.
+// Function names - must stay in sync with database and Rust constants.
 const (
-	// OperatorNameRecordCounter must match rust/types/src/operators.rs::OPERATOR_RECORD_COUNTER_NAME
-	OperatorNameRecordCounter = "record_counter"
+	// FunctionNameRecordCounter must match rust/types/src/functions.rs::FUNCTION_RECORD_COUNTER_NAME
+	FunctionNameRecordCounter = "record_counter"
+
+	// FunctionNameStatistics must match rust/types/src/functions.rs::FUNCTION_STATISTICS_NAME
+	FunctionNameStatistics = "statistics"
 )
 
-// Operator metadata
+// functionIDToName maps function UUIDs to their names.
+// This avoids DB lookups for known built-in functions.
+var functionIDToName = map[uuid.UUID]string{
+	FunctionRecordCounter: FunctionNameRecordCounter,
+	FunctionStatistics:    FunctionNameStatistics,
+}
+
+// GetFunctionNameByID returns the function name for a given function ID.
+// Returns an error if the function ID is not a known built-in.
+func GetFunctionNameByID(id uuid.UUID) (string, error) {
+	if name, ok := functionIDToName[id]; ok {
+		return name, nil
+	}
+	return "", fmt.Errorf("unknown function ID: %s", id.String())
+}
+
+// Function metadata
 const (
-	// OperatorRecordCounterIsIncremental indicates record_counter is an incremental operator
-	OperatorRecordCounterIsIncremental = true
-	// OperatorRecordCounterReturnType is the JSON schema for record_counter's return type
-	OperatorRecordCounterReturnType = `{"type": "object", "properties": {"count": {"type": "integer", "description": "Number of records processed"}}}`
+	// FunctionRecordCounterIsIncremental indicates record_counter is an incremental function
+	FunctionRecordCounterIsIncremental = true
+	// FunctionRecordCounterReturnType is the JSON schema for record_counter's return type
+	FunctionRecordCounterReturnType = `{"type": "object", "properties": {"count": {"type": "integer", "description": "Number of records processed"}}}`
 )

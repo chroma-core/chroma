@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::{Chunk, CollectionUuid, LogRecord};
+use chroma_types::{Chunk, CollectionUuid, DatabaseName, LogRecord};
 use thiserror::Error;
 
 /// The `FetchLogOperator` fetches logs from the log service
@@ -35,6 +35,7 @@ pub struct FetchLogOperator {
     pub maximum_fetch_count: Option<u32>,
     pub collection_uuid: CollectionUuid,
     pub tenant: String,
+    pub database_name: DatabaseName,
 }
 
 type FetchLogInput = ();
@@ -78,7 +79,12 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
 
         let mut log_client = self.log_client.clone();
         let mut limit_offset = log_client
-            .scout_logs(&self.tenant, self.collection_uuid, self.start_log_offset_id)
+            .scout_logs(
+                &self.tenant,
+                self.database_name.clone(),
+                self.collection_uuid,
+                self.start_log_offset_id,
+            )
             .await
             .inspect_err(|err| {
                 tracing::error!("could not pull logs: {err:?}");
@@ -104,6 +110,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             .map(|(start, limit)| {
                 let mut log_client = log_client.clone();
                 let collection_uuid = self.collection_uuid;
+                let database_name = self.database_name.clone();
                 let num_records = (limit - start) as i32;
                 let start = start as i64;
                 let sema = Arc::clone(&sema);
@@ -112,6 +119,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                     log_client
                         .read(
                             &self.tenant,
+                            database_name,
                             collection_uuid,
                             start,
                             num_records,
@@ -179,6 +187,7 @@ mod tests {
             maximum_fetch_count: None,
             collection_uuid,
             tenant: "test-tenant".to_string(),
+            database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
         };
 
         let logs = fetch_log_operator
@@ -204,6 +213,7 @@ mod tests {
             maximum_fetch_count: Some(3),
             collection_uuid,
             tenant: "test-tenant".to_string(),
+            database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
         };
 
         let logs = fetch_log_operator

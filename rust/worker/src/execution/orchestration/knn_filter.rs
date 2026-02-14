@@ -12,8 +12,8 @@ use chroma_system::{
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    operator::Filter, CollectionAndSegments, HnswParametersFromSegmentError, SchemaError,
-    SegmentType,
+    operator::Filter, plan::ReadLevel, CollectionAndSegments, HnswParametersFromSegmentError,
+    SchemaError, SegmentType,
 };
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
@@ -31,6 +31,10 @@ use crate::execution::operators::{
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
+    quantized_spann_bruteforce::QuantizedSpannBruteforceError,
+    quantized_spann_center_search::QuantizedSpannCenterSearchError,
+    quantized_spann_load_center::QuantizedSpannLoadCenterError,
+    quantized_spann_load_cluster::QuantizedSpannLoadClusterError,
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
     spann_fetch_pl::SpannFetchPlError,
@@ -60,6 +64,14 @@ pub enum KnnError {
     NoCollectionDimension,
     #[error("Panic: {0}")]
     Panic(#[from] PanicError),
+    #[error("Error running quantized spann bruteforce operator: {0}")]
+    QuantizedSpannBruteforce(#[from] QuantizedSpannBruteforceError),
+    #[error("Error searching quantized spann centers: {0}")]
+    QuantizedSpannCenterSearch(#[from] QuantizedSpannCenterSearchError),
+    #[error("Error loading quantized spann center: {0}")]
+    QuantizedSpannLoadCenter(#[from] QuantizedSpannLoadCenterError),
+    #[error("Error loading quantized spann cluster: {0}")]
+    QuantizedSpannLoadCluster(#[from] QuantizedSpannLoadClusterError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
@@ -92,6 +104,10 @@ impl ChromaError for KnnError {
             KnnError::KnnProjection(e) => e.code(),
             KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             KnnError::Panic(_) => ErrorCodes::Aborted,
+            KnnError::QuantizedSpannBruteforce(e) => e.code(),
+            KnnError::QuantizedSpannCenterSearch(e) => e.code(),
+            KnnError::QuantizedSpannLoadCenter(e) => e.code(),
+            KnnError::QuantizedSpannLoadCluster(e) => e.code(),
             KnnError::Result(_) => ErrorCodes::Internal,
             KnnError::SpannBfPl(e) => e.code(),
             KnnError::SpannFetchPl(e) => e.code(),
@@ -178,6 +194,9 @@ pub struct KnnFilterOrchestrator {
     // Fetched logs
     fetched_logs: Option<FetchLogOutput>,
 
+    // Read level for consistency vs performance tradeoff
+    read_level: ReadLevel,
+
     // Pipelined operators
     filter: Filter,
 
@@ -186,6 +205,7 @@ pub struct KnnFilterOrchestrator {
 }
 
 impl KnnFilterOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         blockfile_provider: BlockfileProvider,
         dispatcher: ComponentHandle<Dispatcher>,
@@ -194,6 +214,7 @@ impl KnnFilterOrchestrator {
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
         filter: Filter,
+        read_level: ReadLevel,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -204,9 +225,28 @@ impl KnnFilterOrchestrator {
             collection_and_segments,
             fetch_log,
             fetched_logs: None,
+            read_level,
             filter,
             result_channel: None,
         }
+    }
+
+    fn create_filter_task(
+        &self,
+        logs: FetchLogOutput,
+        ctx: &ComponentContext<Self>,
+    ) -> TaskMessage {
+        wrap(
+            Box::new(self.filter.clone()),
+            FilterInput {
+                logs,
+                blockfile_provider: self.blockfile_provider.clone(),
+                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
+                record_segment: self.collection_and_segments.record_segment.clone(),
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        )
     }
 }
 
@@ -272,14 +312,28 @@ impl Orchestrator for KnnFilterOrchestrator {
         Span::current().add_link(prefetch_span.context().span().span_context().clone());
         tasks.push((prefetch_metadata_task, Some(prefetch_span)));
 
-        // Fetch log task.
-        let fetch_log_task = wrap(
-            Box::new(self.fetch_log.clone()),
-            (),
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
-        tasks.push((fetch_log_task, Some(Span::current())));
+        match self.read_level {
+            ReadLevel::IndexOnly => {
+                // For IndexOnly queries, skip log fetching and use empty logs
+                tracing::info!("Skipping log fetch for IndexOnly read level");
+                let empty_logs = FetchLogOutput::new(Vec::new().into());
+                self.fetched_logs = Some(empty_logs.clone());
+
+                // Immediately schedule the filter task with empty logs
+                let filter_task = self.create_filter_task(empty_logs, ctx);
+                tasks.push((filter_task, Some(Span::current())));
+            }
+            ReadLevel::IndexAndWal => {
+                // Fetch log task for full consistency.
+                let fetch_log_task = wrap(
+                    Box::new(self.fetch_log.clone()),
+                    (),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((fetch_log_task, Some(Span::current())));
+            }
+        }
 
         tasks
     }
@@ -326,17 +380,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for KnnFilterOrchestrato
 
         self.fetched_logs = Some(output.clone());
 
-        let task = wrap(
-            Box::new(self.filter.clone()),
-            FilterInput {
-                logs: output,
-                blockfile_provider: self.blockfile_provider.clone(),
-                metadata_segment: self.collection_and_segments.metadata_segment.clone(),
-                record_segment: self.collection_and_segments.record_segment.clone(),
-            },
-            ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
-        );
+        let task = self.create_filter_task(output, ctx);
         self.send(task, ctx, Some(Span::current())).await;
     }
 }
@@ -375,10 +419,18 @@ impl Handler<TaskResult<FilterOutput, FilterError>> for KnnFilterOrchestrator {
                 .ok_or_terminate(
                     self.collection_and_segments
                         .collection
-                        .config
-                        .get_hnsw_config_with_legacy_fallback(
-                            &self.collection_and_segments.vector_segment,
-                        ),
+                        .schema
+                        .as_ref()
+                        .ok_or(KnnError::InvalidSchema(SchemaError::InvalidSchema {
+                            reason: "Schema is None".to_string(),
+                        }))
+                        .and_then(|schema| {
+                            schema
+                                .get_internal_hnsw_config_with_legacy_fallback(
+                                    &self.collection_and_segments.vector_segment,
+                                )
+                                .map_err(KnnError::from)
+                        }),
                     ctx,
                 )
                 .await

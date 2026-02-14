@@ -55,7 +55,7 @@ pub async fn create_test_sparse_index(
         max_block_size_bytes,
     );
     let root_manager = RootManager::new(storage.clone(), Box::new(NopCache));
-    root_manager.flush::<&str>(&root_writer).await?;
+    root_manager.flush::<&str>(&root_writer, None).await?;
 
     Ok(root_id)
 }

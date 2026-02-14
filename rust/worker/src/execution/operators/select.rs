@@ -73,6 +73,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
             &input.record_segment,
             &input.blockfile_provider,
         ))
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
         .await
         {
             Ok(reader) => Ok(Some(reader)),
@@ -82,15 +83,23 @@ impl Operator<SelectInput, SelectOutput> for Select {
             Err(e) => Err(*e),
         }?;
 
-        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
-            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
-            .await?;
-
         let offset_id_set = input
             .records
             .iter()
             .map(|record| record.offset_id)
             .collect::<HashSet<_>>();
+
+        // Load data for offset ids
+        if let Some(reader) = &record_segment_reader {
+            reader
+                .load_id_to_data(offset_id_set.iter().cloned())
+                .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
+                .await;
+        }
+
+        let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
+            .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
+            .await?;
 
         // Create a hash map that maps an offset id to the corresponding log
         let offset_id_to_log_record = materialized_logs
@@ -190,9 +199,13 @@ impl Operator<SelectInput, SelectOutput> for Select {
             })
             .collect::<Vec<_>>();
 
-        Ok(SearchPayloadResult {
-            records: stream::iter(futures).buffered(32).try_collect().await?,
-        })
+        let records = stream::iter(futures)
+            .buffered(32)
+            .try_collect()
+            .instrument(tracing::trace_span!(parent: Span::current(), "Hydrate records", num_records = input.records.len()))
+            .await?;
+
+        Ok(SearchPayloadResult { records })
     }
 }
 

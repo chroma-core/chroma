@@ -1,0 +1,1640 @@
+//! Internal domain types for the SysDb service.
+//!
+//! These types provide a layer of indirection between the protobuf types
+//! and the backend implementations. This allows:
+//! - Changing the wire format without affecting backends
+//! - Backend-specific optimizations without affecting the API
+//! - Cleaner internal APIs that aren't tied to protobuf conventions
+
+use chroma_segment::version_file::VersionFileError;
+use chroma_types::{
+    chroma_proto, Collection, CollectionToProtoError, CollectionUuid, Database, DatabaseName,
+    DatabaseUuid, InternalCollectionConfiguration, Metadata, MetadataValue,
+    MetadataValueConversionError, Schema, Segment, SegmentConversionError, SegmentScope,
+    SegmentType, SegmentUuid, Tenant, TopologyName, UpdateCollectionConfiguration,
+};
+use prost_types::Timestamp;
+use uuid::Uuid;
+
+use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
+
+// DatabaseOrTopology enum for rust-sysdb
+// Note: This is intentionally duplicated from chroma-sysdb since these are separate crates
+// TODO: Consider moving shared types to a common location like chroma-types in the future
+#[derive(Debug, Clone)]
+pub enum DatabaseOrTopology {
+    Database(DatabaseName),
+    Topology(TopologyName),
+}
+
+use std::collections::HashMap;
+use std::num::TryFromIntError;
+
+use chroma_error::{ChromaError, ErrorCodes};
+use google_cloud_gax::grpc::Status as GrpcStatus;
+use google_cloud_gax::retry::TryAs;
+use google_cloud_spanner::session::SessionError;
+use google_cloud_spanner::{client::Error as SpannerClientError, row::Row};
+use thiserror::Error;
+use tonic::Status;
+
+// ============================================================================
+// Request Types (proto -> internal)
+// ============================================================================
+
+/// Validates that a string is a valid UUID.
+pub fn validate_uuid(id: &str) -> Result<Uuid, SysDbError> {
+    Uuid::parse_str(id).map_err(SysDbError::InvalidUuid)
+}
+
+/// Converts protobuf UpdateMetadata to internal Metadata type.
+fn convert_update_metadata_to_metadata(
+    update_metadata: chroma_proto::UpdateMetadata,
+) -> Result<Metadata, SysDbError> {
+    let mut metadata = Metadata::new();
+    for (key, value) in update_metadata.metadata {
+        if let Some(inner) = value.value {
+            let meta_value = match inner {
+                chroma_proto::update_metadata_value::Value::StringValue(s) => MetadataValue::Str(s),
+                chroma_proto::update_metadata_value::Value::IntValue(i) => MetadataValue::Int(i),
+                chroma_proto::update_metadata_value::Value::FloatValue(f) => {
+                    MetadataValue::Float(f)
+                }
+                chroma_proto::update_metadata_value::Value::BoolValue(b) => MetadataValue::Bool(b),
+                chroma_proto::update_metadata_value::Value::SparseVectorValue(_) => {
+                    // Sparse vectors are not supported in collection metadata
+                    return Err(SysDbError::InvalidArgument(
+                        "sparse vectors are not supported in collection metadata".to_string(),
+                    ));
+                }
+                chroma_proto::update_metadata_value::Value::BoolListValue(v) => {
+                    MetadataValue::BoolArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::IntListValue(v) => {
+                    MetadataValue::IntArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::DoubleListValue(v) => {
+                    MetadataValue::FloatArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::StringListValue(v) => {
+                    MetadataValue::StringArray(v.values)
+                }
+            };
+            metadata.insert(key, meta_value);
+        }
+        // If value is None, we skip it (don't include in metadata)
+    }
+    Ok(metadata)
+}
+
+/// Internal request for creating a tenant.
+#[derive(Debug, Clone)]
+pub struct CreateTenantRequest {
+    pub id: String,
+}
+
+impl TryFrom<chroma_proto::CreateTenantRequest> for CreateTenantRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateTenantRequest) -> Result<Self, Self::Error> {
+        Ok(Self { id: req.name })
+    }
+}
+
+/// Internal request for getting tenants.
+#[derive(Debug, Clone)]
+pub struct GetTenantsRequest {
+    pub ids: Vec<String>,
+}
+impl TryFrom<chroma_proto::GetTenantRequest> for GetTenantsRequest {
+    type Error = SysDbError;
+    fn try_from(req: chroma_proto::GetTenantRequest) -> Result<Self, Self::Error> {
+        Ok(Self {
+            ids: vec![req.name],
+        })
+    }
+}
+
+/// Internal request for creating a database.
+#[derive(Debug, Clone)]
+pub struct CreateDatabaseRequest {
+    pub id: Uuid,
+    pub name: DatabaseName,
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::CreateDatabaseRequest> for CreateDatabaseRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateDatabaseRequest) -> Result<Self, Self::Error> {
+        let name = DatabaseName::new(&req.name).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.name
+            ))
+        })?;
+        Ok(Self {
+            id: validate_uuid(&req.id)?,
+            name,
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal request for getting a database.
+#[derive(Debug, Clone)]
+pub struct GetDatabaseRequest {
+    pub name: DatabaseName,
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetDatabaseRequest) -> Result<Self, Self::Error> {
+        let name = DatabaseName::new(&req.name).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.name
+            ))
+        })?;
+        Ok(Self {
+            name,
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal request for listing databases.
+#[derive(Debug, Clone)]
+pub struct ListDatabasesRequest {
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::ListDatabasesRequest> for ListDatabasesRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::ListDatabasesRequest) -> Result<Self, Self::Error> {
+        // MCMR list_databases does not support limit/offset - pagination is handled client-side
+        if req.limit.is_some() || req.offset.unwrap_or(0) != 0 {
+            return Err(SysDbError::InvalidArgument(
+                "MCMR list_databases does not support limit or offset".to_string(),
+            ));
+        }
+        Ok(Self {
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal response for listing databases.
+pub type ListDatabasesResponse = Vec<Database>;
+
+/// Internal request for creating a collection.
+#[derive(Clone)]
+pub struct CreateCollectionRequest {
+    pub id: CollectionUuid,
+    pub name: String,
+    pub dimension: Option<u32>,
+    pub index_schema: Schema,
+    pub segments: Vec<Segment>,
+    pub metadata: Option<Metadata>,
+    pub get_or_create: bool,
+    pub tenant_id: String,
+    pub database_name: DatabaseName,
+}
+
+impl std::fmt::Debug for CreateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateCollectionRequest")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("tenant_id", &self.tenant_id)
+            .field("get_or_create", &self.get_or_create)
+            .field("database_name", &self.database_name)
+            .finish()
+    }
+}
+
+impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CreateCollectionRequest) -> Result<Self, Self::Error> {
+        // Validate schema_str is provided and parse as strongly-typed Schema
+        let schema_str = req
+            .schema_str
+            .ok_or_else(|| SysDbError::SchemaMissing("schema_str is required".to_string()))?;
+
+        let index_schema: Schema = serde_json::from_str(&schema_str)?;
+
+        // Convert and validate segments
+        let segments: Result<Vec<Segment>, _> =
+            req.segments.into_iter().map(Segment::try_from).collect();
+
+        let segments = segments.map_err(SysDbError::InvalidSegment)?;
+
+        // Validate exactly 3 segments
+        if segments.len() != 3 {
+            return Err(SysDbError::InvalidSegmentsCount);
+        }
+
+        // Convert metadata if provided, filtering out legacy "hnsw:" keys
+        let metadata = req
+            .metadata
+            .map(|proto_metadata| -> Result<Metadata, SysDbError> {
+                let mut metadata =
+                    Metadata::try_from(proto_metadata).map_err(SysDbError::InvalidMetadata)?;
+
+                // Filter out legacy metadata keys starting with "hnsw:"
+                metadata.retain(|key, _| !key.starts_with("hnsw:"));
+
+                Ok(metadata)
+            })
+            .transpose()?;
+
+        // Convert dimension from i32 to u32 (validate non-negative)
+        let dimension = req
+            .dimension
+            .map(|d| u32::try_from(d).map_err(SysDbError::InvalidDimension))
+            .transpose()?;
+
+        let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                req.database
+            ))
+        })?;
+
+        Ok(Self {
+            id: CollectionUuid(validate_uuid(&req.id)?),
+            name: req.name,
+            dimension,
+            index_schema,
+            segments,
+            metadata,
+            get_or_create: req.get_or_create.unwrap_or(false),
+            tenant_id: req.tenant,
+            database_name,
+        })
+    }
+}
+
+/// Filter for querying collections.
+///
+/// All fields are optional - use the builder methods to construct filters fluently.
+///
+/// # Examples
+///
+/// ```ignore
+/// // Get by IDs
+/// let filter = CollectionFilter::default().ids(vec![collection_id]);
+///
+/// // Get by name in a database
+/// let filter = CollectionFilter::default()
+///     .tenant_id("tenant-uuid")
+///     .database_name("my_db")
+///     .name("my_collection");
+///
+/// // List with pagination
+/// let filter = CollectionFilter::default()
+///     .tenant_id(tenant)
+///     .database_name(db)
+///     .limit(10)
+///     .offset(0);
+/// ```
+#[derive(Debug, Clone, Default)]
+pub struct CollectionFilter {
+    /// Filter by collection ID(s)
+    pub ids: Option<Vec<CollectionUuid>>,
+    /// Filter by collection name (within a database)
+    pub name: Option<String>,
+    /// Filter by tenant ID
+    pub tenant_id: Option<String>,
+    /// Filter by database name
+    pub database_name: Option<DatabaseName>,
+    /// Include soft-deleted collections (default: false)
+    pub include_soft_deleted: bool,
+    /// Maximum number of results to return
+    pub limit: Option<u32>,
+    /// Number of results to skip
+    pub offset: Option<u32>,
+    /// Filter by topology name
+    /// Technically the spanner layer should not be aware of this field
+    /// but it's needed here so that assign() can route properly.
+    pub topology_name: Option<String>,
+}
+
+impl CollectionFilter {
+    /// Filter by collection IDs
+    pub fn ids(mut self, ids: Vec<CollectionUuid>) -> Self {
+        self.ids = Some(ids);
+        self
+    }
+
+    /// Filter by collection name
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = Some(name.into());
+        self
+    }
+
+    /// Filter by tenant ID
+    pub fn tenant_id(mut self, tenant_id: impl Into<String>) -> Self {
+        self.tenant_id = Some(tenant_id.into());
+        self
+    }
+
+    /// Filter by database name
+    pub fn database_name(mut self, name: DatabaseName) -> Self {
+        self.database_name = Some(name);
+        self
+    }
+
+    /// Filter by topology name
+    pub fn topology_name(mut self, name: impl Into<String>) -> Self {
+        self.topology_name = Some(name.into());
+        self
+    }
+
+    /// Include soft-deleted collections
+    pub fn include_soft_deleted(mut self, include: bool) -> Self {
+        self.include_soft_deleted = include;
+        self
+    }
+
+    /// Set maximum number of results to return
+    pub fn limit(mut self, limit: u32) -> Self {
+        self.limit = Some(limit);
+        self
+    }
+
+    /// Set number of results to skip
+    pub fn offset(mut self, offset: u32) -> Self {
+        self.offset = Some(offset);
+        self
+    }
+}
+
+/// Internal request for getting collections.
+#[derive(Debug, Clone)]
+pub struct GetCollectionsRequest {
+    pub filter: CollectionFilter,
+}
+
+impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetCollectionsRequest) -> Result<Self, Self::Error> {
+        // Build filter from proto fields
+        let mut filter = CollectionFilter::default();
+
+        // Collect all IDs from both `id` and `ids_filter`
+        let mut all_ids: Vec<CollectionUuid> = Vec::new();
+
+        if let Some(id_str) = req.id {
+            let id = CollectionUuid(validate_uuid(&id_str)?);
+            all_ids.push(id);
+        }
+
+        if let Some(ids_filter) = req.ids_filter {
+            for id_str in ids_filter.ids {
+                let id = CollectionUuid(validate_uuid(&id_str)?);
+                all_ids.push(id);
+            }
+        }
+
+        if !all_ids.is_empty() {
+            filter = filter.ids(all_ids);
+        }
+
+        // Add optional fields if provided
+        if let Some(name) = req.name {
+            filter = filter.name(name);
+        }
+
+        if !req.tenant.is_empty() {
+            filter = filter.tenant_id(req.tenant);
+        }
+
+        // Handle database and topology_name fields - topology_name takes priority
+        let topology_name = if !req.topology_name.as_deref().unwrap_or("").is_empty() {
+            // Explicit topology_name takes priority
+            req.topology_name
+        } else if !req.database.is_empty() {
+            // Derive topology from database name if no explicit topology
+            DatabaseName::new(&req.database)
+                .ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "invalid database name: '{}'",
+                        req.database
+                    ))
+                })?
+                .topology()
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        // Handle database field
+        if !req.database.is_empty() {
+            let database_name = DatabaseName::new(&req.database).ok_or_else(|| {
+                SysDbError::InvalidArgument(format!(
+                    "database name must be at least 3 characters, got '{}'",
+                    req.database
+                ))
+            })?;
+            filter = filter.database_name(database_name);
+        }
+
+        // Add topology_name to filter if present
+        if let Some(topology_name) = topology_name {
+            filter = filter.topology_name(topology_name);
+        }
+
+        // Handle limit and offset
+        if let Some(limit) = req.limit {
+            let limit = u32::try_from(limit).map_err(|_| {
+                SysDbError::InvalidArgument(format!("limit must be non-negative, got {}", limit))
+            })?;
+            filter = filter.limit(limit);
+        }
+        if let Some(offset) = req.offset {
+            if offset < 0 {
+                return Err(SysDbError::InvalidArgument(format!(
+                    "offset must be non-negative, got {}",
+                    offset
+                )));
+            }
+            if offset > 0 {
+                if req.limit.is_none() {
+                    return Err(SysDbError::InvalidArgument(
+                        "offset requires limit to be specified".to_string(),
+                    ));
+                }
+                let offset = u32::try_from(offset).map_err(|_| {
+                    SysDbError::InvalidArgument(format!(
+                        "offset must be non-negative, got {}",
+                        offset
+                    ))
+                })?;
+                filter = filter.offset(offset);
+            }
+        }
+
+        // Handle include_soft_deleted
+        if let Some(include_soft_deleted) = req.include_soft_deleted {
+            filter = filter.include_soft_deleted(include_soft_deleted);
+        }
+
+        Ok(Self { filter })
+    }
+}
+
+/// Internal request for getting a collection with its segments.
+#[derive(Debug, Clone)]
+pub struct GetCollectionWithSegmentsRequest {
+    /// The database containing the collection (required for routing)
+    pub database_name: DatabaseName,
+    pub id: CollectionUuid,
+}
+
+impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWithSegmentsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::GetCollectionWithSegmentsRequest) -> Result<Self, Self::Error> {
+        // Parse database name from proto (required)
+        let database_str = req
+            .database
+            .ok_or_else(|| SysDbError::Internal("database is required".to_string()))?;
+        let database_name = DatabaseName::new(&database_str).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                database_str
+            ))
+        })?;
+
+        Ok(Self {
+            database_name,
+            id: CollectionUuid(validate_uuid(&req.id)?),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateCollectionCursor {
+    pub compaction_failure_count_increment: Option<u32>,
+}
+
+/// Internal request for updating a collection.
+#[derive(Clone)]
+pub struct UpdateCollectionRequest {
+    /// The database containing the collection (required for routing)
+    pub database_name: DatabaseName,
+    /// The collection ID to update
+    pub id: CollectionUuid,
+    /// New name (optional - None means don't change)
+    pub name: Option<String>,
+    /// New dimension (optional - None means don't change)
+    pub dimension: Option<u32>,
+    /// New metadata to set (optional - None means don't change, unless reset_metadata is true)
+    pub metadata: Option<Metadata>,
+    /// If true, delete all existing metadata (metadata field must be None)
+    pub reset_metadata: bool,
+    // New configuration to set (optional - None means don't change)
+    pub new_configuration: Option<UpdateCollectionConfiguration>,
+    // Cursor updates (optional - None means don't change)
+    pub cursor_updates: Option<UpdateCollectionCursor>,
+    /// If true, mark the collection as soft deleted (for delete_collection operation)
+    pub is_deleted: Option<bool>,
+}
+
+impl std::fmt::Debug for UpdateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateCollectionRequest")
+            .field("database_name", &self.database_name)
+            .field("id", &self.id)
+            .field("reset_metadata", &self.reset_metadata)
+            .field("name", &self.name)
+            .finish()
+    }
+}
+
+impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::UpdateCollectionRequest) -> Result<Self, Self::Error> {
+        let id = CollectionUuid(validate_uuid(&req.id)?);
+
+        // Parse database name from proto (required)
+        let database_str = req
+            .database
+            .ok_or_else(|| SysDbError::Internal("database is required".to_string()))?;
+        let database_name = DatabaseName::new(&database_str).ok_or_else(|| {
+            SysDbError::InvalidArgument(format!(
+                "database name must be at least 3 characters, got '{}'",
+                database_str
+            ))
+        })?;
+
+        // Handle the metadata_update oneof field
+        // Case 1: reset_metadata = true, metadata = None -> delete all metadata
+        // Case 2: reset_metadata = true, metadata = Some -> ERROR (invalid)
+        // Case 3: reset_metadata = false, metadata = Some -> replace metadata
+        // Case 4: reset_metadata = false, metadata = None -> no-op
+        let (metadata, reset_metadata) = match req.metadata_update {
+            Some(chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(true)) => {
+                (None, true)
+            }
+            Some(chroma_proto::update_collection_request::MetadataUpdate::ResetMetadata(false)) => {
+                (None, false)
+            }
+            Some(chroma_proto::update_collection_request::MetadataUpdate::Metadata(
+                update_metadata,
+            )) => {
+                // Convert UpdateMetadata to Metadata
+                let metadata = convert_update_metadata_to_metadata(update_metadata)?;
+                (Some(metadata), false)
+            }
+            None => (None, false),
+        };
+
+        let new_configuration: Option<UpdateCollectionConfiguration> = match req
+            .configuration_json_str
+        {
+            Some(configuration_json_str) => {
+                Some(serde_json::from_str(&configuration_json_str).map_err(|e| {
+                    SysDbError::InvalidArgument(format!("failed to parse new configuration: {}", e))
+                })?)
+            }
+            None => None,
+        };
+
+        Ok(Self {
+            database_name,
+            id,
+            name: req.name,
+            dimension: req.dimension.map(|dim| dim as u32),
+            metadata,
+            reset_metadata,
+            new_configuration,
+            cursor_updates: None,
+            is_deleted: None, // Not supported in proto UpdateCollectionRequest
+        })
+    }
+}
+
+/// Internal response for updating a collection.
+#[derive(Debug, Clone)]
+pub struct UpdateCollectionResponse {}
+
+impl TryFrom<UpdateCollectionResponse> for chroma_proto::UpdateCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
+        // The proto response is empty - it doesn't return the updated collection
+        Ok(chroma_proto::UpdateCollectionResponse {})
+    }
+}
+
+// For delete_collection, we reuse UpdateCollectionResponse
+use chroma_types::chroma_proto::DeleteCollectionResponse;
+
+impl TryFrom<UpdateCollectionResponse> for DeleteCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
+        // The proto response is empty
+        Ok(DeleteCollectionResponse {})
+    }
+}
+
+// ============================================================================
+// Assignable Trait Implementations
+// ============================================================================
+
+impl Assignable for CreateTenantRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        factory.get_all_backends()
+    }
+}
+
+impl Assignable for GetTenantsRequest {
+    type Output = Vec<Backend>;
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends
+        factory.get_all_backends()
+    }
+}
+
+impl Assignable for CreateDatabaseRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.name)
+    }
+}
+
+impl Assignable for GetDatabaseRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.name)
+    }
+}
+
+impl Assignable for ListDatabasesRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends with their topology names
+        factory.get_all_backends()
+    }
+}
+
+impl Assignable for CreateCollectionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
+    }
+}
+
+impl Assignable for GetCollectionsRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology name if available (explicit topology takes priority)
+        if let Some(ref topology_name) = self.filter.topology_name {
+            if let Ok(topology) = TopologyName::new(topology_name) {
+                return factory.backend_from_topo_name(&topology);
+            }
+        }
+        // Route by topology prefix in database name if available
+        if let Some(ref db_name) = self.filter.database_name {
+            return factory.backend_from_database_name(db_name);
+        }
+        // Fall back to default if no database filter
+        // TODO(Sanket): Make database name mandatory in the filter.
+        Backend::Spanner(factory.one_spanner().clone())
+    }
+}
+
+impl Assignable for GetCollectionWithSegmentsRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
+    }
+}
+
+impl Assignable for UpdateCollectionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Route by topology prefix in database name
+        factory.backend_from_database_name(&self.database_name)
+    }
+}
+
+// ============================================================================
+// Runnable Trait Implementations
+// ============================================================================
+
+#[async_trait::async_trait]
+impl Runnable for CreateTenantRequest {
+    type Response = CreateTenantResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.create_tenant(self.clone()).await?;
+        }
+        Ok(CreateTenantResponse {})
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetTenantsRequest {
+    type Response = GetTenantsResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut tenants = HashMap::new();
+        for backend in backends {
+            let result = backend.get_tenants(self.clone()).await?;
+            for tenant in result.tenants {
+                tenants.insert(tenant.id.clone(), tenant);
+            }
+        }
+        let tenants_vec = tenants.values().cloned().collect::<Vec<_>>();
+        Ok(GetTenantsResponse {
+            tenants: tenants_vec,
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CreateDatabaseRequest {
+    type Response = CreateDatabaseResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.create_database(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetDatabaseRequest {
+    type Response = GetDatabaseResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_database(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ListDatabasesRequest {
+    type Response = ListDatabasesResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut all_databases: Vec<Database> = Vec::new();
+
+        // Query each backend and collect all databases
+        for backend in backends {
+            let databases = backend.list_databases(&self.tenant_id).await?;
+            all_databases.extend(databases);
+        }
+
+        // Stable sort databases by topology prefix (the part before '+')
+        all_databases.sort_by(|a, b| {
+            let a_topo = DatabaseName::new(a.name.clone())
+                .map(|db| db.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string());
+            let b_topo = DatabaseName::new(b.name.clone())
+                .map(|db| db.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string());
+
+            a_topo.cmp(&b_topo)
+        });
+
+        Ok(all_databases)
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CreateCollectionRequest {
+    type Response = CreateCollectionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.create_collection(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetCollectionsRequest {
+    type Response = GetCollectionsResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_collections(self).await
+    }
+}
+
+impl Assignable for CountCollectionsRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Route by topology prefix in database name if available
+        if let Some(ref db_name) = self.database_name {
+            vec![factory.backend_from_database_name(db_name)]
+        } else {
+            // When no database filter, fan out to all backends to get total count
+            factory.get_all_backends()
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CountCollectionsRequest {
+    type Response = CountCollectionsResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut total = 0u64;
+
+        // Clone the request for each backend call
+        for backend in backends {
+            let count = backend.count_collections(self.clone()).await?.count;
+            total += count;
+        }
+
+        Ok(CountCollectionsResponse { count: total })
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for GetCollectionWithSegmentsRequest {
+    type Response = GetCollectionWithSegmentsResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.get_collection_with_segments(self).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for UpdateCollectionRequest {
+    type Response = UpdateCollectionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        backend.update_collection(self).await
+    }
+}
+
+// ============================================================================
+// Response Types (internal -> proto)
+// ============================================================================
+
+/// Internal response for creating a tenant.
+#[derive(Debug, Clone)]
+pub struct CreateTenantResponse {
+    // Empty - tenant creation returns no data
+}
+
+impl From<CreateTenantResponse> for chroma_proto::CreateTenantResponse {
+    fn from(_: CreateTenantResponse) -> Self {
+        chroma_proto::CreateTenantResponse {}
+    }
+}
+
+/// Internal response for getting tenants.
+#[derive(Debug, Clone)]
+pub struct GetTenantsResponse {
+    pub tenants: Vec<Tenant>,
+}
+
+impl TryFrom<GetTenantsResponse> for chroma_proto::GetTenantResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: GetTenantsResponse) -> Result<Self, Self::Error> {
+        let tenant = r
+            .tenants
+            .into_iter()
+            .next()
+            .ok_or_else(|| SysDbError::NotFound("No tenants found".to_string()))?;
+        Ok(chroma_proto::GetTenantResponse {
+            tenant: Some(tenant.into()),
+        })
+    }
+}
+
+/// Internal response for creating a database.
+#[derive(Debug, Clone)]
+pub struct CreateDatabaseResponse {
+    // Empty - database creation returns no data
+}
+
+impl From<CreateDatabaseResponse> for chroma_proto::CreateDatabaseResponse {
+    fn from(_: CreateDatabaseResponse) -> Self {
+        chroma_proto::CreateDatabaseResponse {}
+    }
+}
+
+/// Internal response for getting a database.
+#[derive(Debug, Clone)]
+pub struct GetDatabaseResponse {
+    pub database: Database,
+}
+
+impl From<GetDatabaseResponse> for chroma_proto::GetDatabaseResponse {
+    fn from(r: GetDatabaseResponse) -> Self {
+        chroma_proto::GetDatabaseResponse {
+            database: Some(r.database.into()),
+        }
+    }
+}
+
+pub struct SpannerRow {
+    pub row: Row,
+}
+
+pub struct SpannerRowRef<'a> {
+    pub row: &'a Row,
+}
+
+// ============================================================================
+// Row Conversion Implementations (DAO layer)
+// ============================================================================
+impl TryFrom<SpannerRow> for Database {
+    type Error = SysDbError;
+
+    fn try_from(wrapped_row: SpannerRow) -> Result<Self, Self::Error> {
+        let id: String = wrapped_row
+            .row
+            .column_by_name("id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let name: String = wrapped_row
+            .row
+            .column_by_name("name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let tenant: String = wrapped_row
+            .row
+            .column_by_name("tenant_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        Ok(Database {
+            id: Uuid::parse_str(&id).map_err(SysDbError::InvalidUuid)?,
+            name,
+            tenant,
+        })
+    }
+}
+
+impl TryFrom<SpannerRow> for Tenant {
+    type Error = SysDbError;
+
+    fn try_from(wrapped_row: SpannerRow) -> Result<Self, Self::Error> {
+        let id: String = wrapped_row
+            .row
+            .column_by_name("id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        let resource_name: Option<String> = wrapped_row
+            .row
+            .column_by_name("resource_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        let last_compaction_time: i64 = wrapped_row
+            .row
+            .column_by_name("last_compaction_time")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        Ok(Tenant {
+            id,
+            resource_name,
+            last_compaction_time,
+        })
+    }
+}
+
+pub struct SpannerRows {
+    pub rows: Vec<Row>,
+}
+
+// ============================================================================
+// Row Conversion Implementation (Spanner DAO layer)
+// ============================================================================
+
+/// Convert a vector of Spanner rows (from a JOIN query) into a Collection.
+///
+/// The rows are expected to come from a query that JOINs:
+/// - collections table
+/// - collection_metadata table (LEFT JOIN, may have multiple rows per metadata key)
+/// - collection_compaction_cursors table (LEFT JOIN, single row for a specific region)
+///
+/// Column names expected:
+/// - collection_id, name, dimension, database_id, database_name, tenant_id, updated_at
+/// - metadata_key, metadata_str_value, metadata_int_value, metadata_float_value, metadata_bool_value
+/// - last_compacted_offset, version, total_records_post_compaction, size_bytes_post_compaction,
+///   last_compaction_time_secs, version_file_name, index_schema
+impl TryFrom<SpannerRows> for Collection {
+    type Error = SysDbError;
+
+    fn try_from(rows: SpannerRows) -> Result<Self, Self::Error> {
+        if rows.rows.is_empty() {
+            return Err(SysDbError::NotFound("no rows returned".to_string()));
+        }
+
+        // Extract collection fields from the first row (same for all rows)
+        let first_row = &rows.rows[0];
+
+        let collection_id_str: String = first_row
+            .column_by_name("collection_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let name: String = first_row
+            .column_by_name("name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let dimension: Option<i64> = first_row
+            .column_by_name("dimension")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let database_id_str: String = first_row
+            .column_by_name("database_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let database_name: String = first_row
+            .column_by_name("database_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let tenant_id: String = first_row
+            .column_by_name("tenant_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Spanner returns TIMESTAMP as prost_types::Timestamp
+        let updated_at: Timestamp = first_row
+            .column_by_name("updated_at")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        let last_compacted_offset: Option<i64> = first_row
+            .column_by_name("last_compacted_offset")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let version: Option<i64> = first_row
+            .column_by_name("version")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let last_compaction_time_ts: Option<Timestamp> = first_row
+            .column_by_name("last_compaction_time_secs")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let version_file_name: Option<String> = first_row
+            .column_by_name("version_file_name")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let total_records_post_compaction: i64 = first_row
+            .column_by_name("total_records_post_compaction")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let size_bytes_post_compaction: i64 = first_row
+            .column_by_name("size_bytes_post_compaction")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let compaction_failure_count: i64 = first_row
+            .column_by_name("compaction_failure_count")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let schema_json: String = first_row
+            .column_by_name("index_schema")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Aggregate metadata from all rows
+        let mut collection_metadata = Metadata::new();
+        for row in &rows.rows {
+            // metadata_key may be NULL if there's no metadata (LEFT JOIN)
+            if let Ok(Some(key)) = row.column_by_name::<Option<String>>("metadata_key") {
+                let str_val: Option<String> = row
+                    .column_by_name("metadata_str_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let int_val: Option<i64> = row
+                    .column_by_name("metadata_int_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let float_val: Option<f64> = row
+                    .column_by_name("metadata_float_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                let bool_val: Option<bool> = row
+                    .column_by_name("metadata_bool_value")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+
+                if let Some(s) = str_val {
+                    collection_metadata.insert(key, MetadataValue::Str(s));
+                } else if let Some(i) = int_val {
+                    collection_metadata.insert(key, MetadataValue::Int(i));
+                } else if let Some(f) = float_val {
+                    collection_metadata.insert(key, MetadataValue::Float(f));
+                } else if let Some(b) = bool_val {
+                    collection_metadata.insert(key, MetadataValue::Bool(b));
+                }
+            }
+        }
+
+        // Parse schema JSON (index_schema is NOT NULL, so parsing should succeed)
+        let parsed_schema: Schema =
+            serde_json::from_str(&schema_json).map_err(SysDbError::InvalidSchemaJson)?;
+
+        // Convert prost_types::Timestamp to SystemTime
+        let updated_at_system_time = std::time::SystemTime::try_from(updated_at)
+            .map_err(|e| SysDbError::Internal(format!("invalid updated_at timestamp: {}", e)))?;
+
+        // Convert last_compaction_time from Timestamp to seconds
+        let last_compaction_time_secs_u64 = match last_compaction_time_ts {
+            Some(ts) => u64::try_from(ts.seconds).map_err(|_| {
+                SysDbError::Internal(format!(
+                    "last_compaction_time_secs must be non-negative, got {}",
+                    ts.seconds
+                ))
+            })?,
+            None => 0,
+        };
+
+        Ok(Collection {
+            collection_id: CollectionUuid(
+                Uuid::parse_str(&collection_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
+            name,
+            config: InternalCollectionConfiguration::default_hnsw(),
+            schema: Some(parsed_schema),
+            metadata: if collection_metadata.is_empty() {
+                None
+            } else {
+                Some(collection_metadata)
+            },
+            dimension: dimension.map(|d| d as i32),
+            tenant: tenant_id,
+            database: database_name,
+            log_position: last_compacted_offset.unwrap_or(0),
+            version: version.map(|v| v as i32).unwrap_or(0),
+            total_records_post_compaction: total_records_post_compaction as u64,
+            size_bytes_post_compaction: size_bytes_post_compaction as u64,
+            last_compaction_time_secs: last_compaction_time_secs_u64,
+            version_file_path: version_file_name,
+            root_collection_id: None,
+            lineage_file_path: None,
+            updated_at: updated_at_system_time,
+            database_id: DatabaseUuid(
+                Uuid::parse_str(&database_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
+            compaction_failure_count: compaction_failure_count as i32,
+        })
+    }
+}
+
+// Row Conversion Implementation (Spanner DAO layer)
+//
+// This implementation expects columns with `segment_` prefix, which is the convention
+// for JOIN queries where segment columns need to be aliased to avoid conflicts.
+//
+// Expected columns:
+// - segment_id: STRING - the segment UUID
+// - segment_type: STRING - the segment type URN
+// - segment_scope: STRING - the segment scope (VECTOR, METADATA, RECORD, SQLITE)
+// - segment_collection_id: STRING - the collection UUID this segment belongs to
+// - segment_file_paths: JSON (optional) - file paths as JSON object
+impl<'a> TryFrom<SpannerRowRef<'a>> for Segment {
+    type Error = SysDbError;
+
+    fn try_from(wrapped_row: SpannerRowRef<'a>) -> Result<Self, Self::Error> {
+        let row = wrapped_row.row;
+        let segment_id_str: String = row
+            .column_by_name("segment_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let segment_type_str: String = row
+            .column_by_name("segment_type")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let segment_scope_str: String = row
+            .column_by_name("segment_scope")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let segment_collection_id_str: String = row
+            .column_by_name("segment_collection_id")
+            .map_err(SysDbError::FailedToReadColumn)?;
+        let file_paths_json: Option<String> = row
+            .column_by_name("segment_file_paths")
+            .map_err(SysDbError::FailedToReadColumn)?;
+
+        // Parse segment type and scope
+        let segment_type =
+            SegmentType::try_from(segment_type_str.as_str()).map_err(SysDbError::InvalidSegment)?;
+        let segment_scope = SegmentScope::try_from(segment_scope_str.as_str())
+            .map_err(|e| SysDbError::InvalidArgument(e.to_string()))?;
+
+        // Parse file_paths JSON
+        let file_path: HashMap<String, Vec<String>> = match file_paths_json {
+            Some(json) => serde_json::from_str(&json).map_err(|e| {
+                SysDbError::Internal(format!("failed to parse segment file_paths JSON: {}", e))
+            })?,
+            None => HashMap::new(),
+        };
+
+        Ok(Segment {
+            id: SegmentUuid(Uuid::parse_str(&segment_id_str).map_err(SysDbError::InvalidUuid)?),
+            r#type: segment_type,
+            scope: segment_scope,
+            collection: CollectionUuid(
+                Uuid::parse_str(&segment_collection_id_str).map_err(SysDbError::InvalidUuid)?,
+            ),
+            metadata: None, // Segment metadata not stored in collection_segments table
+            file_path,
+        })
+    }
+}
+
+/// Unified error type for all SysDb operations.
+///
+/// Backends convert their internal errors into this type, allowing the server
+/// layer to handle errors uniformly regardless of which backend is being used.
+#[derive(Debug, Error)]
+pub enum SysDbError {
+    /// Wraps Spanner-specific errors
+    #[error("Spanner error: {0}")]
+    Spanner(#[from] SpannerClientError),
+
+    /// Resource not found (tenant, database, collection, etc.)
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    /// Resource already exists (duplicate tenant name, etc.)
+    #[error("Already exists: {0}")]
+    AlreadyExists(String),
+
+    /// Invalid argument provided
+    #[error("Invalid argument: {0}")]
+    InvalidArgument(String),
+
+    /// Internal/unexpected error
+    #[error("Internal error: {0}")]
+    Internal(String),
+
+    /// Invalid UUID
+    #[error("Invalid UUID: {0}")]
+    InvalidUuid(#[from] uuid::Error),
+
+    /// Failed to read column
+    #[error("Failed to read column: {0}")]
+    FailedToReadColumn(#[source] google_cloud_spanner::row::Error),
+
+    /// Schema missing
+    #[error("Schema missing: {0}")]
+    SchemaMissing(String),
+
+    /// Schema must be valid JSON
+    #[error("Schema must be valid JSON: {0}")]
+    InvalidSchemaJson(#[from] serde_json::Error),
+
+    /// Invalid segment
+    #[error("Invalid segment: {0}")]
+    InvalidSegment(#[from] SegmentConversionError),
+
+    /// Segments must be exactly 3
+    #[error("Segments must be exactly 3")]
+    InvalidSegmentsCount,
+
+    /// Invalid metadata
+    #[error("Invalid metadata: {0}")]
+    InvalidMetadata(#[from] MetadataValueConversionError),
+
+    /// Dimension must be non-negative
+    #[error("Failed to convert i32 dim to u32: {0}")]
+    InvalidDimension(#[from] TryFromIntError),
+
+    /// Failed to convert collection to proto
+    #[error("Failed to convert collection to proto: {0}")]
+    CollectionToProtoError(#[from] CollectionToProtoError),
+
+    /// Schema error
+    #[error("Schema error: {0}")]
+    Schema(#[from] chroma_types::SchemaError),
+
+    /// Collection version is stale - compaction version is older than current version
+    #[error("Collection version is stale: current version is {current_version}, but compaction attempted with version {compaction_version}")]
+    CollectionVersionStale {
+        current_version: i32,
+        compaction_version: i32,
+    },
+
+    #[error(
+        "Collection entry is stale - one of version, version_file_name, or log_position is stale"
+    )]
+    CollectionEntryIsStale,
+
+    #[error("Versionfile error: {0}")]
+    VersionFile(#[from] VersionFileError),
+}
+
+impl ChromaError for SysDbError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            SysDbError::Spanner(_) => ErrorCodes::Internal,
+            SysDbError::NotFound(_) => ErrorCodes::NotFound,
+            SysDbError::AlreadyExists(_) => ErrorCodes::AlreadyExists,
+            SysDbError::InvalidArgument(_) => ErrorCodes::InvalidArgument,
+            SysDbError::Internal(_) => ErrorCodes::Internal,
+            SysDbError::InvalidUuid(_) => ErrorCodes::InvalidArgument,
+            SysDbError::FailedToReadColumn(_) => ErrorCodes::Internal,
+            SysDbError::SchemaMissing(_) => ErrorCodes::Internal,
+            SysDbError::InvalidSchemaJson(_) => ErrorCodes::Internal,
+            SysDbError::InvalidSegment(e) => e.code(),
+            SysDbError::InvalidSegmentsCount => ErrorCodes::Internal,
+            SysDbError::InvalidMetadata(e) => e.code(),
+            SysDbError::InvalidDimension(_) => ErrorCodes::Internal,
+            SysDbError::CollectionToProtoError(e) => e.code(),
+            SysDbError::Schema(e) => e.code(),
+            SysDbError::CollectionVersionStale { .. } => ErrorCodes::Internal,
+            SysDbError::CollectionEntryIsStale => ErrorCodes::Internal,
+            SysDbError::VersionFile(_) => ErrorCodes::Internal,
+        }
+    }
+}
+
+impl From<SysDbError> for Status {
+    fn from(e: SysDbError) -> Status {
+        Status::new(e.code().into(), e.to_string())
+    }
+}
+
+impl From<GrpcStatus> for SysDbError {
+    fn from(status: GrpcStatus) -> Self {
+        // Convert GrpcStatus to SpannerClientError
+        SysDbError::Spanner(SpannerClientError::from(status))
+    }
+}
+
+impl From<SessionError> for SysDbError {
+    fn from(err: SessionError) -> Self {
+        // Convert SessionError to SpannerClientError
+        SysDbError::Spanner(SpannerClientError::from(err))
+    }
+}
+
+impl TryAs<GrpcStatus> for SysDbError {
+    fn try_as(&self) -> Option<&GrpcStatus> {
+        match self {
+            // For Spanner errors, delegate to SpannerClientError's TryAs implementation
+            // This allows Spanner to retry on abortable errors (e.g., transaction conflicts)
+            SysDbError::Spanner(err) => err.try_as(),
+            // Domain errors don't contain a GrpcStatus, so we return None.
+            // This means Spanner won't retry these errors, which is correct
+            // for domain errors like NotFound, AlreadyExists, etc.
+            _ => None,
+        }
+    }
+}
+
+/// Internal response for creating a collection.
+#[derive(Debug, Clone)]
+pub struct CreateCollectionResponse {
+    pub collection: Collection,
+    pub created: bool,
+}
+
+impl TryFrom<CreateCollectionResponse> for chroma_proto::CreateCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: CreateCollectionResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::CreateCollectionResponse {
+            collection: Some(r.collection.try_into()?),
+            created: r.created,
+        })
+    }
+}
+
+/// Internal response for getting collections.
+#[derive(Debug, Clone)]
+pub struct GetCollectionsResponse {
+    pub collections: Vec<Collection>,
+}
+
+impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: GetCollectionsResponse) -> Result<Self, Self::Error> {
+        let collections: Result<Vec<_>, _> =
+            r.collections.into_iter().map(|c| c.try_into()).collect();
+        Ok(chroma_proto::GetCollectionsResponse {
+            collections: collections?,
+        })
+    }
+}
+
+/// Internal request for counting collections.
+#[derive(Debug, Clone)]
+pub struct CountCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: Option<DatabaseName>,
+}
+
+impl TryFrom<chroma_proto::CountCollectionsRequest> for CountCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CountCollectionsRequest) -> Result<Self, Self::Error> {
+        let database_name = match req.database {
+            Some(db_str) if !db_str.is_empty() => {
+                let db_name = DatabaseName::new(&db_str).ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "database name must be at least 3 characters, got '{}'",
+                        db_str
+                    ))
+                })?;
+                Some(db_name)
+            }
+            _ => None,
+        };
+
+        Ok(Self {
+            tenant_id: req.tenant,
+            database_name,
+        })
+    }
+}
+
+/// Internal response for counting collections.
+#[derive(Debug, Clone)]
+pub struct CountCollectionsResponse {
+    pub count: u64,
+}
+
+impl From<CountCollectionsResponse> for chroma_proto::CountCollectionsResponse {
+    fn from(r: CountCollectionsResponse) -> Self {
+        chroma_proto::CountCollectionsResponse { count: r.count }
+    }
+}
+
+/// Internal response for getting a collection with its segments.
+#[derive(Debug, Clone)]
+pub struct GetCollectionWithSegmentsResponse {
+    pub collection: Collection,
+    pub segments: Vec<Segment>,
+}
+
+impl TryFrom<GetCollectionWithSegmentsResponse>
+    for chroma_proto::GetCollectionWithSegmentsResponse
+{
+    type Error = SysDbError;
+
+    fn try_from(r: GetCollectionWithSegmentsResponse) -> Result<Self, Self::Error> {
+        // Segment -> chroma_proto::Segment is infallible (From, not TryFrom)
+        let segments: Vec<chroma_proto::Segment> = r.segments.into_iter().map(Into::into).collect();
+        Ok(chroma_proto::GetCollectionWithSegmentsResponse {
+            collection: Some(r.collection.try_into()?),
+            segments,
+        })
+    }
+}
+
+/// Internal request for updating tenant's last compaction time.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantRequest {
+    pub tenant_id: String,
+    pub last_compaction_time: i64,
+}
+
+/// Internal response for updating tenant's last compaction time.
+#[derive(Debug, Clone)]
+pub struct UpdateTenantResponse {}
+
+/// Internal request for resetting the database state.
+#[derive(Debug, Clone)]
+pub struct ResetStateRequest {}
+
+/// Internal response for resetting the database state.
+#[derive(Debug, Clone)]
+pub struct ResetStateResponse {}
+
+// ============================================================================
+// Assignable Trait Implementations
+// ============================================================================
+
+impl Assignable for ResetStateRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends for reset
+        factory.get_all_backends()
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ResetStateRequest {
+    type Response = ResetStateResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.reset().await?;
+        }
+        Ok(ResetStateResponse {})
+    }
+}
+
+impl TryFrom<ResetStateResponse> for chroma_proto::ResetStateResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: ResetStateResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::ResetStateResponse {})
+    }
+}
+
+/// Internal request for updating segments after compaction.
+#[derive(Debug, Clone)]
+pub struct UpdateSegmentRequest {
+    pub collection_id: CollectionUuid,
+    pub flush_segment_compactions: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
+}
+
+/// Internal response for updating segments after compaction.
+#[derive(Debug, Clone)]
+pub struct UpdateSegmentResponse {}
+
+/// Internal request for flushing collection compaction.
+#[derive(Debug, Clone)]
+pub struct FlushCompactionRequest {
+    pub collection_id: CollectionUuid,
+    pub database_name: String,
+    pub tenant_id: String,
+    pub log_position: i64,
+    pub current_collection_version: i32,
+    pub flush_segment_compaction_infos: Vec<chroma_types::chroma_proto::FlushSegmentCompactionInfo>,
+    pub total_records_post_compaction: u64,
+    pub size_bytes_post_compaction: u64,
+    pub schema_str: Option<String>,
+
+    pub new_version_file: chroma_types::chroma_proto::CollectionVersionFile,
+    pub version_file_path: String,
+    pub old_version_file_path: String,
+    pub new_version: i32,
+}
+
+// Note: TryFrom removed since FlushCompactionRequest now requires version file data
+// that is created in the server layer, not from the protobuf request
+
+/// Internal response for flushing collection compaction.
+#[derive(Debug, Clone)]
+pub struct FlushCompactionResponse {
+    pub collection_id: String,
+    pub collection_version: i32,
+    pub last_compaction_time: i64,
+}
+
+impl TryFrom<FlushCompactionResponse> for chroma_proto::FlushCollectionCompactionResponse {
+    type Error = SysDbError;
+
+    fn try_from(r: FlushCompactionResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::FlushCollectionCompactionResponse {
+            collection_id: r.collection_id,
+            collection_version: r.collection_version,
+            last_compaction_time: r.last_compaction_time,
+        })
+    }
+}
+
+impl TryFrom<chroma_proto::FlushCollectionCompactionRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        request: chroma_proto::FlushCollectionCompactionRequest,
+    ) -> Result<Self, Self::Error> {
+        let collection_id = CollectionUuid(validate_uuid(&request.collection_id)?);
+        let database_name =
+            DatabaseName::new(request.database_name.ok_or_else(|| {
+                SysDbError::InvalidArgument("database_name is required".to_string())
+            })?)
+            .ok_or_else(|| {
+                SysDbError::InvalidArgument(
+                    "database name must be at least 3 characters".to_string(),
+                )
+            })?;
+        let filter = CollectionFilter::default()
+            .ids(vec![collection_id])
+            .database_name(database_name);
+        Ok(GetCollectionsRequest { filter })
+    }
+}
+
+impl Assignable for FlushCompactionRequest {
+    type Output = Backend;
+
+    fn assign(&self, factory: &BackendFactory) -> Backend {
+        // Single collection operation - no database context available, use default
+        Backend::Spanner(factory.one_spanner().clone())
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for FlushCompactionRequest {
+    type Response = FlushCompactionResponse;
+    type Input = Backend;
+
+    async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
+        match backend {
+            Backend::Spanner(s) => s.flush_collection_compaction(self).await,
+        }
+    }
+}

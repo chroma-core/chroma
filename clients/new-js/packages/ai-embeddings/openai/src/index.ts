@@ -58,9 +58,11 @@ export class OpenAIEmbeddingFunction implements EmbeddingFunction {
     this.dimensions = dimensions;
     this.apiBase = apiBase;
 
-    let clientConfig: ClientOptions = { apiKey, organization: this.organizationId };
-    if (this.apiBase) clientConfig.baseURL = this.apiBase;
-    this.client = new OpenAI(clientConfig);
+    this.client = new OpenAI({
+      apiKey,
+      organization: this.organizationId,
+      ...(this.apiBase && { baseURL: this.apiBase }),
+    });
   }
 
   public async generate(texts: string[]): Promise<number[][]> {

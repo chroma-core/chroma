@@ -5,8 +5,12 @@ import {
   UpdateCollectionConfiguration,
 } from "../src";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
-import { EmbeddingFunction, EmbeddingFunctionSpace } from "../src/embedding-function";
+import {
+  EmbeddingFunction,
+  EmbeddingFunctionSpace,
+} from "../src/embedding-function";
 import { CollectionMetadata } from "../src/types";
+import { Schema, VectorIndexConfig } from "../src/schema";
 
 class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
   private _dim: number;
@@ -30,7 +34,7 @@ class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
   buildFromConfig(config: Record<string, any>): EmbeddingFunction {
     return new DefaultSpaceCustomEmbeddingFunction(
       config.model_name,
-      config.dim
+      config.dim,
     );
   }
 
@@ -63,7 +67,7 @@ class DefaultSpaceCustomEmbeddingFunction implements EmbeddingFunction {
   static buildFromConfig(config: Record<string, any>): EmbeddingFunction {
     return new DefaultSpaceCustomEmbeddingFunction(
       config.model_name,
-      config.dim
+      config.dim,
     );
   }
 }
@@ -288,7 +292,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_cosine",
-        3
+        3,
       ),
     });
 
@@ -311,7 +315,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_l2",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_l2",
-        3
+        3,
       ),
     });
 
@@ -334,7 +338,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_ip",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_ip",
-        3
+        3,
       ),
     });
 
@@ -357,7 +361,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_anything",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
     });
 
@@ -380,7 +384,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_valid_config",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
       configuration: { hnsw: { space: "l2" } },
     });
@@ -405,7 +409,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_invalid_config",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_cosine",
-        3
+        3,
       ),
       configuration: { hnsw: { space: "l2" } },
     });
@@ -429,7 +433,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_metadata",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
       metadata,
     });
@@ -456,7 +460,7 @@ describe("default space functionality", () => {
       name: "test_default_space_custom_embedding_function_with_invalid_metadata",
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_cosine",
-        3
+        3,
       ),
       metadata,
     });
@@ -481,7 +485,7 @@ describe("default space functionality", () => {
       configuration: { hnsw: { space: "ip" } },
       embeddingFunction: new DefaultSpaceCustomEmbeddingFunction(
         "i_want_anything",
-        3
+        3,
       ),
       metadata,
     });
@@ -515,5 +519,121 @@ describe("default space functionality", () => {
     const hnswConfig = collection.configuration?.hnsw;
     expect(hnswConfig).toBeDefined();
     expect(hnswConfig?.space).toBe("l2");
+  });
+});
+
+describe("embedding function null vs undefined handling", () => {
+  const client = new ChromaClient({
+    path: process.env.DEFAULT_CHROMA_INSTANCE_URL,
+  });
+
+  beforeEach(async () => {
+    await client.reset();
+  });
+
+  test("it should use default embedding function when embeddingFunction is undefined", async () => {
+    const collection = await client.createCollection({
+      name: "test_undefined_embedding_function",
+      embeddingFunction: undefined,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    if (ef?.type === "known") {
+      expect(ef.name).toBe("default");
+    }
+  });
+
+  test("it should NOT use default embedding function when embeddingFunction is explicitly null", async () => {
+    const collection = await client.createCollection({
+      name: "test_null_embedding_function",
+      embeddingFunction: null,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeNull();
+  });
+
+  test("it should NOT use default embedding function when schema has embedding function", async () => {
+    const schema = new Schema();
+    const mockEf = new DefaultSpaceCustomEmbeddingFunction("i_want_cosine", 3);
+    schema.createIndex(new VectorIndexConfig({ embeddingFunction: mockEf }));
+
+    const collection = await client.createCollection({
+      name: "test_schema_embedding_function",
+      schema,
+      embeddingFunction: undefined,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    // Should use schema embedding function, not default
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    expect(ef?.name).toBe("default_space_custom_ef");
+  });
+
+  test("it should NOT use default embedding function when schema has null embedding function", async () => {
+    const schema = new Schema();
+    schema.createIndex(new VectorIndexConfig({ embeddingFunction: null }));
+
+    const collection = await client.createCollection({
+      name: "test_schema_null_embedding_function",
+      schema,
+      embeddingFunction: undefined,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    // Schema has null, so should NOT use default (null means explicitly no embedding function)
+    expect(ef?.type).toBe("legacy");
+  });
+
+  test("it should NOT use default when embeddingFunction is null", async () => {
+    const schema = new Schema();
+    schema.createIndex(new VectorIndexConfig());
+
+    const collection = await client.createCollection({
+      name: "test_null_with_schema_undefined",
+      schema,
+      embeddingFunction: null,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef?.type).toBe("legacy");
+  });
+
+  test("it should error if both schema and embedding function are provided", async () => {
+    const schema = new Schema();
+    const providedEf = new DefaultSpaceCustomEmbeddingFunction("i_want_l2", 5);
+
+    try {
+      const collection = await client.createCollection({
+        name: "test_provided_over_schema",
+        schema,
+        embeddingFunction: providedEf,
+      });
+    } catch (error) {
+      expect(error).toBeDefined();
+    }
+  });
+  test("it should use provided embedding function if no schema", async () => {
+    const providedEf = new DefaultSpaceCustomEmbeddingFunction("i_want_l2", 5);
+
+    const collection = await client.createCollection({
+      name: "test_provided_over_schema",
+      embeddingFunction: providedEf,
+    });
+
+    expect(collection).toBeDefined();
+    const ef = (collection.configuration as any)?.embedding_function;
+    expect(ef).toBeDefined();
+    expect(ef?.type).toBe("known");
+    expect(ef?.name).toBe("default_space_custom_ef");
+    expect(ef?.config).toEqual({ model_name: "i_want_l2", dim: 5 });
   });
 });

@@ -17,7 +17,8 @@ proto:
 		--plugin protoc-gen-go-grpc="$(PROTOC_GEN_GO_GRPC_BIN_PATH)" \
 		../idl/chromadb/proto/chroma.proto \
 		../idl/chromadb/proto/coordinator.proto \
-		../idl/chromadb/proto/logservice.proto
+		../idl/chromadb/proto/logservice.proto \
+		../idl/chromadb/proto/heapservice.proto
 	@mv pkg/proto/coordinatorpb/chromadb/proto/logservice*.go pkg/proto/logservicepb/
 	@mv pkg/proto/coordinatorpb/chromadb/proto/*.go pkg/proto/coordinatorpb/
 	@rm -rf pkg/proto/coordinatorpb/chromadb

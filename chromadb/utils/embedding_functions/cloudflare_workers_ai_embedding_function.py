@@ -53,12 +53,19 @@ class CloudflareWorkersAIEmbeddingFunction(EmbeddingFunction[Documents]):
             )
         self.model_name = model_name
         self.account_id = account_id
-        self.api_key_env_var = api_key_env_var
-        self.api_key = api_key or os.getenv(api_key_env_var)
+
+        if os.getenv("CLOUDFLARE_API_KEY") is not None:
+            self.api_key_env_var = "CLOUDFLARE_API_KEY"
+        else:
+            self.api_key_env_var = api_key_env_var
+
+        self.api_key = api_key or os.getenv(self.api_key_env_var)
         self.gateway_id = gateway_id
 
         if not self.api_key:
-            raise ValueError(f"The {api_key_env_var} environment variable is not set.")
+            raise ValueError(
+                f"The {self.api_key_env_var} environment variable is not set."
+            )
 
         if self.gateway_id:
             self._api_url = f"{GATEWAY_BASE_URL}/{self.account_id}/{self.gateway_id}/workers-ai/{self.model_name}"

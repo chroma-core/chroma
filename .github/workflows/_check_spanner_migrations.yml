@@ -1,0 +1,27 @@
+name: Check Spanner migrations
+
+on:
+  workflow_call:
+
+jobs:
+  check-migrations:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    env:
+      CARGO_TERM_COLOR: always
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Generate migration sum
+        run: cargo run --bin spanner_migration -- generate-sum --root rust/spanner-migrations
+      - name: Check for uncommitted changes
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "::error::Repository is dirty after generating migration sum. Please run 'cargo run --bin spanner_migration -- generate-sum --root rust/spanner-migrations' and commit the changes."
+            git status
+            git diff
+            exit 1
+          fi

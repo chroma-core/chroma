@@ -4,10 +4,10 @@ target "rust-log-service" {
   tags = [ "rust-log-service:ci" ]
 }
 
-target "heap-tender-service" {
+target "rust-sysdb-service" {
   dockerfile = "rust/Dockerfile"
-  target = "heap_tender_service"
-  tags = [ "heap-tender-service:ci" ]
+  target = "sysdb_service"
+  tags = [ "rust-sysdb-service:ci" ]
 }
 
 target "sysdb" {
@@ -20,6 +20,12 @@ target "sysdb-migration" {
   dockerfile = "go/Dockerfile.migration"
   target = "sysdb-migration"
   tags = [ "sysdb-migration:ci" ]
+}
+
+target "rust-sysdb-migration" {
+  dockerfile = "rust/Dockerfile"
+  target = "rust-sysdb-migration"
+  tags = [ "rust-sysdb-migration:ci" ]
 }
 
 target "rust-frontend-service" {
@@ -56,9 +62,10 @@ target "load-service" {
 group "default" {
   targets = [
     "rust-log-service",
-    "heap-tender-service",
+    "rust-sysdb-service",
     "sysdb",
     "sysdb-migration",
+    "rust-sysdb-migration",
     "rust-frontend-service",
     "query-service",
     "compactor-service",

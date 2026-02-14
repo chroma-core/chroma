@@ -1,7 +1,7 @@
-use crate::{HnswIndexConfigError, PersistentIndex};
+use crate::HnswIndexConfigError;
 
 use super::config::HnswProviderConfig;
-use super::{HnswIndex, HnswIndexConfig, Index, IndexConfig, IndexUuid};
+use super::{HnswIndex, HnswIndexConfig, IndexConfig, IndexUuid};
 use crate::hnsw::WrappedHnswError;
 
 use async_trait::async_trait;
@@ -14,7 +14,7 @@ use chroma_error::ChromaError;
 use chroma_error::ErrorCodes;
 use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, PutOptions, Storage};
-use chroma_types::CollectionUuid;
+use chroma_types::{Cmek, CollectionUuid};
 use futures::TryFutureExt;
 use parking_lot::RwLock;
 use std::fmt::Debug;
@@ -60,7 +60,7 @@ pub struct HnswIndexProvider {
     // TODO(tanujnay112): This feature flag is a temporary measure to gate
     // the hnsw loading from memory feature. Remove this after that feature
     // stabilizes.
-    use_direct_hnsw: bool,
+    pub use_direct_hnsw: bool,
 }
 
 pub struct HnswIndexFlusher {
@@ -68,6 +68,7 @@ pub struct HnswIndexFlusher {
     pub prefix_path: String,
     pub index_id: IndexUuid,
     pub hnsw_index: HnswIndexRef,
+    pub cmek: Option<Cmek>,
 }
 
 #[derive(Clone)]
@@ -215,15 +216,34 @@ impl HnswIndexProvider {
                 // If you are super unlucky you could run into a taken UUID here.
                 // But if that happened we have even bigger issues downstream.
                 let index = if self.use_direct_hnsw {
+                    // Load the HNSW index on a blocking thread to avoid blocking the tokio runtime
+                    // since this is a CPU-intensive operation.
+                    // NOTE(hammadb): This is a simple measure to avoid blocking the tokio runtime.
+                    // Ideally this would occur via our Component Runtime. We can revisit this as its
+                    // a larger refactor.
+                    let hnsw_data_clone = hnsw_data.clone();
+                    let index_config_clone = index_config.clone();
+                    let span = Span::current();
+                    let hnsw_index = tokio::task::spawn_blocking(move || {
+                        let _guard = span.enter();
+                        HnswIndex::load_from_hnsw_data(
+                            hnsw_data_clone.as_ref(),
+                            &index_config_clone,
+                            ef_search,
+                            new_id,
+                        )
+                    })
+                    .await
+                    .map_err(|e| {
+                        HnswIndexProviderForkError::IndexLoadTaskError(format!(
+                            "HNSW index load task failed: {}",
+                            e
+                        ))
+                    })?
+                    .map_err(|e| Box::new(HnswIndexProviderForkError::IndexLoadError(e)))?;
                     HnswIndexRef {
                         inner: Arc::new(RwLock::new(DistributedHnswInner {
-                            hnsw_index: HnswIndex::load_from_hnsw_data(
-                                hnsw_data.as_ref(),
-                                &index_config,
-                                ef_search,
-                                new_id,
-                            )
-                            .map_err(|e| Box::new(HnswIndexProviderForkError::IndexLoadError(e)))?,
+                            hnsw_index,
                             prefix_path: prefix_path.to_string(),
                         })),
                     }
@@ -342,8 +362,7 @@ impl HnswIndexProvider {
             .map(|s| Self::format_key(prefix_path, source_id, s))
             .collect();
         let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
-        let s3_fetch_span =
-            tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index");
+        let s3_fetch_span = tracing::trace_span!(parent: Span::current(), "Read hnsw files from s3 into index", index_id = %source_id, prefix_path = %prefix_path);
         let result = self
             .storage
             .fetch_batch(
@@ -470,17 +489,30 @@ impl HnswIndexProvider {
                     Some(index) => Ok(index.clone()),
                     None => {
                         let index = if self.use_direct_hnsw {
+                            let hnsw_data_clone = hnsw_data.clone();
+                            let index_config_clone = index_config.clone();
+                            let id_copy = *id;
+                            let span = Span::current();
+                            let hnsw_index = tokio::task::spawn_blocking(move || {
+                                let _guard = span.enter();
+                                HnswIndex::load_from_hnsw_data(
+                                    hnsw_data_clone.as_ref(),
+                                    &index_config_clone,
+                                    ef_search,
+                                    id_copy,
+                                )
+                            })
+                            .await
+                            .map_err(|e| {
+                                HnswIndexProviderOpenError::IndexLoadTaskError(format!(
+                                    "HNSW index load task failed: {}",
+                                    e
+                                ))
+                            })?
+                            .map_err(|e| Box::new(HnswIndexProviderOpenError::IndexLoadError(e)))?;
                             HnswIndexRef {
                                 inner: Arc::new(RwLock::new(DistributedHnswInner {
-                                    hnsw_index: HnswIndex::load_from_hnsw_data(
-                                        hnsw_data.as_ref(),
-                                        &index_config,
-                                        ef_search,
-                                        *id,
-                                    )
-                                    .map_err(|e| {
-                                        Box::new(HnswIndexProviderOpenError::IndexLoadError(e))
-                                    })?,
+                                    hnsw_index,
                                     prefix_path: prefix_path.to_string(),
                                 })),
                             }
@@ -590,6 +622,12 @@ impl HnswIndexProvider {
     }
 
     pub fn commit(&self, index: HnswIndexRef) -> Result<(), Box<dyn ChromaError>> {
+        if self.use_direct_hnsw {
+            // If we are using direct HNSW, we don't need to commit since we're going off the in-memory index.
+            // Each preceding write will have already made changes to the in-memory index.
+            return Ok(());
+        }
+
         match index.inner.write().hnsw_index.save() {
             Ok(_) => {}
             Err(e) => {
@@ -605,6 +643,7 @@ impl HnswIndexProvider {
         prefix_path: &str,
         index_uuid: &IndexUuid,
         hnsw_index: &HnswIndexRef,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<HnswIndexProviderFlushError>> {
         let hnsw_data = hnsw_index
             .inner
@@ -619,33 +658,37 @@ impl HnswIndexProvider {
             hnsw_data.link_list_buffer(),
         ];
 
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+
         let upload_futures = FILES
             .iter()
             .zip(buffers)
             .map(|(file, buffer)| {
                 let key = Self::format_key(prefix_path, index_uuid, file);
                 let storage = &self.storage;
+                let file = *file; // Copy for the closure
+                let options = options.clone();
                 async move {
-                    let res = storage
-                        .put_bytes(
-                            &key,
-                            buffer.to_vec(),
-                            PutOptions::with_priority(StorageRequestPriority::P0),
-                        )
-                        .await;
-                    match res {
-                        Ok(_) => {
-                            tracing::info!("Flushed hnsw index file: {}", file);
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to flush hnsw index file: {}", e);
-                        }
-                    }
+                    storage
+                        .put_bytes(&key, buffer.to_vec(), options)
+                        .await
+                        .map(|k| {
+                            tracing::info!("Flushed hnsw index file: {} with etag: {:?}", file, k);
+                        })
+                        .map_err(|e| {
+                            tracing::error!("Failed to flush hnsw index file {}: {}", file, e);
+                            e
+                        })
                 }
             })
             .collect::<Vec<_>>();
 
-        futures::future::join_all(upload_futures).await;
+        futures::future::try_join_all(upload_futures)
+            .await
+            .map_err(|e| Box::new(HnswIndexProviderFlushError::StoragePutError(e)))?;
         Ok(())
     }
 
@@ -654,11 +697,20 @@ impl HnswIndexProvider {
         prefix_path: &str,
         id: &IndexUuid,
         hnsw_index: &HnswIndexRef,
+        cmek: Option<Cmek>,
     ) -> Result<(), Box<HnswIndexProviderFlushError>> {
         if self.use_direct_hnsw {
-            return self.flush_from_memory(prefix_path, id, hnsw_index).await;
+            return self
+                .flush_from_memory(prefix_path, id, hnsw_index, cmek)
+                .await;
         }
         let index_storage_path = self.temporary_storage_path.join(id.to_string());
+
+        let mut options = PutOptions::default().with_priority(StorageRequestPriority::P0);
+        if let Some(cmek) = cmek {
+            options = options.with_cmek(cmek);
+        }
+
         for file in FILES.iter() {
             let file_path = index_storage_path.join(file);
             // fsync the file to ensure all writes are flushed to disk
@@ -673,11 +725,7 @@ impl HnswIndexProvider {
             let key = Self::format_key(prefix_path, id, file);
             let res = self
                 .storage
-                .put_file(
-                    &key,
-                    file_path.to_str().unwrap(),
-                    PutOptions::with_priority(StorageRequestPriority::P0),
-                )
+                .put_file(&key, file_path.to_str().unwrap(), options.clone())
                 .await;
             match res {
                 Ok(_) => {
@@ -740,6 +788,8 @@ pub enum HnswIndexProviderOpenError {
     PathToStringError(PathBuf),
     #[error("Failed to cleanup files")]
     CleanupError(#[from] tokio::io::Error),
+    #[error("Index load task failed: {0}")]
+    IndexLoadTaskError(String),
 }
 
 impl ChromaError for HnswIndexProviderOpenError {
@@ -749,6 +799,7 @@ impl ChromaError for HnswIndexProviderOpenError {
             HnswIndexProviderOpenError::IndexLoadError(e) => e.code(),
             HnswIndexProviderOpenError::PathToStringError(_) => ErrorCodes::InvalidArgument,
             HnswIndexProviderOpenError::CleanupError(_) => ErrorCodes::Internal,
+            HnswIndexProviderOpenError::IndexLoadTaskError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -761,6 +812,8 @@ pub enum HnswIndexProviderForkError {
     IndexLoadError(#[from] Box<dyn ChromaError>),
     #[error("Path: {0} could not be converted to string")]
     PathToStringError(PathBuf),
+    #[error("Index load task failed: {0}")]
+    IndexLoadTaskError(String),
 }
 
 impl ChromaError for HnswIndexProviderForkError {
@@ -769,6 +822,7 @@ impl ChromaError for HnswIndexProviderForkError {
             HnswIndexProviderForkError::FileError(_) => ErrorCodes::Internal,
             HnswIndexProviderForkError::IndexLoadError(e) => e.code(),
             HnswIndexProviderForkError::PathToStringError(_) => ErrorCodes::InvalidArgument,
+            HnswIndexProviderForkError::IndexLoadTaskError(_) => ErrorCodes::Internal,
         }
     }
 }
@@ -786,6 +840,9 @@ impl From<HnswIndexProviderOpenError> for HnswIndexProviderForkError {
             HnswIndexProviderOpenError::CleanupError(e) => {
                 // CleanupError doesn't have a direct equivalent in ForkError, wrap it as IndexLoadError
                 HnswIndexProviderForkError::IndexLoadError(Box::new(e))
+            }
+            HnswIndexProviderOpenError::IndexLoadTaskError(msg) => {
+                HnswIndexProviderForkError::IndexLoadTaskError(msg)
             }
         }
     }
@@ -905,7 +962,7 @@ mod tests {
         let created_index_id = created_index.inner.read().hnsw_index.id;
         provider.commit(created_index.clone()).unwrap();
         provider
-            .flush(prefix_path, &created_index_id, &created_index)
+            .flush(prefix_path, &created_index_id, &created_index, None)
             .await
             .unwrap();
 
@@ -964,7 +1021,7 @@ mod tests {
             .commit(created_index.clone())
             .expect("Expected to commit");
         provider
-            .flush(prefix_path, &created_index_id, &created_index)
+            .flush(prefix_path, &created_index_id, &created_index, None)
             .await
             .expect("Expected to flush");
         // clear the cache.
@@ -1005,6 +1062,85 @@ mod tests {
                 );
             } else {
                 panic!("Expected hnsw purge to be successful")
+            }
+        }
+    }
+
+    #[tokio::test]
+    #[cfg(unix)] // This test only works on Unix-like systems
+    async fn test_flush_from_memory_propagates_errors() {
+        use std::fs::Permissions;
+        use std::os::unix::fs::PermissionsExt;
+
+        let storage_dir = tempfile::tempdir().unwrap().path().to_path_buf();
+        let hnsw_tmp_path = storage_dir.join("hnsw");
+
+        // Create the directories needed
+        tokio::fs::create_dir_all(&hnsw_tmp_path).await.unwrap();
+
+        let storage = Storage::Local(LocalStorage::new(storage_dir.to_str().unwrap()));
+        let cache = new_non_persistent_cache_for_test();
+        // use_direct_hnsw = true to test the flush_from_memory path
+        let provider = HnswIndexProvider::new(storage, hnsw_tmp_path, cache, 16, true);
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        let dimensionality = 2;
+        let distance_function = DistanceFunction::Euclidean;
+        let default_hnsw_params = InternalHnswConfiguration::default();
+        let prefix_path = "test";
+
+        let created_index = provider
+            .create(
+                &collection_id,
+                default_hnsw_params.max_neighbors,
+                default_hnsw_params.ef_construction,
+                default_hnsw_params.ef_search,
+                dimensionality,
+                distance_function,
+                prefix_path,
+            )
+            .await
+            .unwrap();
+
+        let created_index_id = created_index.inner.read().hnsw_index.id;
+
+        // Create the prefix directory structure but make it read-only
+        // This ensures directory creation succeeds but file writing fails
+        let prefix_dir = storage_dir.join(prefix_path);
+        let hnsw_dir = prefix_dir.join("hnsw");
+        let index_dir = hnsw_dir.join(created_index_id.to_string());
+        tokio::fs::create_dir_all(&index_dir).await.unwrap();
+
+        // Make the final index directory read-only so file writes will fail
+        std::fs::set_permissions(&index_dir, Permissions::from_mode(0o444))
+            .expect("Failed to change permissions");
+
+        // Attempt to flush - this should fail because we can't write files to read-only directory
+        let result = provider
+            .flush_from_memory(prefix_path, &created_index_id, &created_index, None)
+            .await;
+
+        // Restore permissions for cleanup (do this before assertions in case they panic)
+        std::fs::set_permissions(&index_dir, Permissions::from_mode(0o755))
+            .expect("Failed to restore permissions");
+
+        // Verify that the error is propagated and not silently dropped
+        assert!(
+            result.is_err(),
+            "Expected flush to fail with permission error, but got: {:?}",
+            result
+        );
+
+        // Verify it's the correct error type
+        match result.unwrap_err().as_ref() {
+            HnswIndexProviderFlushError::StoragePutError(_) => {
+                // This is the expected error - success!
+            }
+            other => {
+                panic!(
+                    "Expected StoragePutError but got different error type: {:?}",
+                    other
+                );
             }
         }
     }

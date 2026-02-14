@@ -7,7 +7,7 @@ edition = "2021"
 path = "src/lib.rs"
 
 [dependencies]
-murmur3 = "0.5.2"
+murmur3 = { workspace = true }
 
 async-trait = { workspace = true }
 serde = { workspace = true }

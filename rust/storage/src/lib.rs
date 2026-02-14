@@ -9,13 +9,18 @@ use chroma_error::{ChromaError, ErrorCodes};
 pub mod admissioncontrolleds3;
 pub mod config;
 pub mod local;
+pub mod metrics;
+pub mod object_storage;
 pub mod s3;
-pub mod stream;
+use chroma_types::Cmek;
 use local::LocalStorage;
 use tempfile::TempDir;
 use thiserror::Error;
 
-pub use s3::{s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name};
+pub use config::{S3CredentialsConfig, S3StorageConfig};
+pub use s3::{
+    s3_client_for_test_with_new_bucket, s3_config_for_localhost_with_bucket_name, S3Storage,
+};
 
 /// A StorageError captures all kinds of errors that can come from storage.
 //
@@ -173,7 +178,7 @@ impl ChromaError for StorageError {
             StorageError::PermissionDenied { .. } => ErrorCodes::PermissionDenied,
             StorageError::Unauthenticated { .. } => ErrorCodes::Unauthenticated,
             StorageError::UnknownConfigurationKey { .. } => ErrorCodes::InvalidArgument,
-            StorageError::Backoff { .. } => ErrorCodes::ResourceExhausted,
+            StorageError::Backoff => ErrorCodes::ResourceExhausted,
             StorageError::CallbackError { .. } => ErrorCodes::Internal,
         }
     }
@@ -193,8 +198,6 @@ pub enum PathError {
     },
 }
 
-// END BORROWED CODE
-
 #[derive(Error, Debug)]
 pub enum StorageConfigError {
     #[error("Invalid storage config")]
@@ -207,6 +210,7 @@ pub enum StorageConfigError {
 #[allow(clippy::large_enum_variant)]
 pub enum Storage {
     S3(s3::S3Storage),
+    Object(object_storage::ObjectStorage),
     Local(local::LocalStorage),
     AdmissionControlledS3(admissioncontrolleds3::AdmissionControlledS3Storage),
 }
@@ -215,6 +219,7 @@ impl std::fmt::Debug for Storage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Storage::S3(_) => f.debug_tuple("S3").finish(),
+            Storage::Object(_) => f.debug_tuple("Object").finish(),
             Storage::Local(_) => f.debug_tuple("Local").finish(),
             Storage::AdmissionControlledS3(_) => f.debug_tuple("AdmissionControlledS3").finish(),
         }
@@ -235,7 +240,8 @@ impl Storage {
     pub fn bucket_name(&self) -> Option<&str> {
         match self {
             Storage::S3(s3) => Some(&s3.bucket),
-            Storage::AdmissionControlledS3(ac_s3) => Some(&ac_s3.storage.bucket),
+            Storage::Object(obj) => Some(&obj.bucket),
+            Storage::AdmissionControlledS3(ac_s3) => Some(ac_s3.storage.bucket_name()),
             Storage::Local(_) => None,
         }
     }
@@ -243,6 +249,10 @@ impl Storage {
     pub async fn get(&self, key: &str, options: GetOptions) -> Result<Arc<Vec<u8>>, StorageError> {
         match self {
             Storage::S3(s3) => s3.get(key, options).await,
+            Storage::Object(obj) => obj
+                .get(key, options)
+                .await
+                .map(|(bytes, _)| Vec::from(bytes).into()),
             Storage::Local(local) => local.get(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage.get(key, options).await
@@ -266,6 +276,11 @@ impl Storage {
                 let res = s3.get_with_e_tag(key).await?;
                 let fetch_result = fetch_fn(Ok(res.0)).await?;
                 Ok((fetch_result, res.1))
+            }
+            Storage::Object(obj) => {
+                let (bytes, etag) = obj.get(key, options).await?;
+                let fetch_result = fetch_fn(Ok(Vec::from(bytes).into())).await?;
+                Ok((fetch_result, Some(etag)))
             }
             Storage::Local(local) => {
                 let res = local.get_with_e_tag(key).await?;
@@ -318,6 +333,7 @@ impl Storage {
     {
         match self {
             Storage::S3(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
+            Storage::Object(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
             Storage::Local(_) => self.fetch_batch_generic(keys, options, fetch_fn).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
@@ -334,6 +350,10 @@ impl Storage {
     ) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         match self {
             Storage::S3(s3) => s3.get_with_e_tag(key).await,
+            Storage::Object(obj) => {
+                let (bytes, etag) = obj.get(key, options).await?;
+                Ok((Vec::from(bytes).into(), Some(etag)))
+            }
             Storage::Local(local) => local.get_with_e_tag(key).await,
             Storage::AdmissionControlledS3(admission_controlled_storage) => {
                 admission_controlled_storage
@@ -350,6 +370,7 @@ impl Storage {
     pub async fn confirm_same(&self, key: &str, e_tag: &ETag) -> Result<bool, StorageError> {
         match self {
             Storage::S3(s3) => s3.confirm_same(key, e_tag).await,
+            Storage::Object(obj) => obj.confirm_same(key, e_tag).await,
             Storage::Local(local) => local.confirm_same(key, e_tag).await,
             Storage::AdmissionControlledS3(as3) => as3.confirm_same(key, e_tag).await,
         }
@@ -363,6 +384,7 @@ impl Storage {
     ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::S3(s3) => s3.put_file(key, path, options).await,
+            Storage::Object(obj) => obj.put_file(key, path, options).await.map(Some),
             Storage::Local(local) => local.put_file(key, path, options).await,
             Storage::AdmissionControlledS3(as3) => as3.put_file(key, path, options).await,
         }
@@ -376,22 +398,17 @@ impl Storage {
     ) -> Result<Option<ETag>, StorageError> {
         match self {
             Storage::S3(s3) => s3.put_bytes(key, bytes, options).await,
+            Storage::Object(obj) => obj.put(key, bytes.into(), options).await.map(Some),
             Storage::Local(local) => local.put_bytes(key, &bytes, options).await,
-            Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes, options).await,
+            Storage::AdmissionControlledS3(as3) => as3.put_bytes(key, bytes.into(), options).await,
         }
     }
 
     pub async fn delete(&self, key: &str, options: DeleteOptions) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.delete(key, options).await,
-            Storage::Local(local) => {
-                if options.if_match.is_some() {
-                    return Err(StorageError::Message {
-                        message: "if match not supported for object store backend".to_string(),
-                    });
-                }
-                local.delete(key).await
-            }
+            Storage::Object(obj) => obj.delete(key).await,
+            Storage::Local(local) => local.delete(key).await,
             Storage::AdmissionControlledS3(ac) => ac.delete(key, options).await,
         }
     }
@@ -402,6 +419,7 @@ impl Storage {
     ) -> Result<crate::s3::DeletedObjects, StorageError> {
         match self {
             Storage::S3(s3) => s3.delete_many(keys).await,
+            Storage::Object(obj) => obj.delete_many(keys).await,
             Storage::Local(local) => local.delete_many(keys).await,
             Storage::AdmissionControlledS3(ac) => ac.delete_many(keys).await,
         }
@@ -410,6 +428,7 @@ impl Storage {
     pub async fn rename(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.rename(src_key, dst_key).await,
+            Storage::Object(obj) => obj.rename(src_key, dst_key).await,
             Storage::Local(local) => local.rename(src_key, dst_key).await,
             Storage::AdmissionControlledS3(_) => Err(StorageError::NotImplemented),
         }
@@ -418,6 +437,7 @@ impl Storage {
     pub async fn copy(&self, src_key: &str, dst_key: &str) -> Result<(), StorageError> {
         match self {
             Storage::S3(s3) => s3.copy(src_key, dst_key).await,
+            Storage::Object(obj) => obj.copy(src_key, dst_key).await,
             Storage::Local(local) => local.copy(src_key, dst_key).await,
             Storage::AdmissionControlledS3(ac) => ac.copy(src_key, dst_key).await,
         }
@@ -431,7 +451,17 @@ impl Storage {
         match self {
             Storage::Local(local) => local.list_prefix(prefix).await,
             Storage::S3(s3) => s3.list_prefix(prefix).await,
+            Storage::Object(obj) => obj.list_prefix(prefix).await,
             Storage::AdmissionControlledS3(acs3) => acs3.list_prefix(prefix, options).await,
+        }
+    }
+
+    pub fn bucket(&self) -> Option<&str> {
+        match self {
+            Storage::Local(_) => None,
+            Storage::S3(s3) => s3.bucket(),
+            Storage::Object(obj) => obj.bucket(),
+            Storage::AdmissionControlledS3(acs3) => acs3.storage.bucket(),
         }
     }
 }
@@ -445,6 +475,9 @@ impl Configurable<StorageConfig> for Storage {
         match &config {
             StorageConfig::S3(_) => Ok(Storage::S3(
                 s3::S3Storage::try_from_config(config, registry).await?,
+            )),
+            StorageConfig::Object(_) => Ok(Storage::Object(
+                object_storage::ObjectStorage::try_from_config(config, registry).await?,
             )),
             StorageConfig::Local(_) => Ok(Storage::Local(
                 local::LocalStorage::try_from_config(config, registry).await?,
@@ -469,10 +502,18 @@ pub fn test_storage() -> (TempDir, Storage) {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub enum PutMode {
+    IfMatch(ETag),
+    IfNotExist,
+    #[default]
+    Upsert,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PutOptions {
-    if_not_exists: bool,
-    if_match: Option<ETag>,
+    mode: PutMode,
     priority: StorageRequestPriority,
+    cmek: Option<Cmek>,
 }
 
 #[derive(Error, Debug)]
@@ -482,36 +523,19 @@ pub enum PutOptionsCreateError {
 }
 
 impl PutOptions {
-    pub fn if_not_exists(priority: StorageRequestPriority) -> Self {
-        // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(true, None, priority).unwrap()
+    pub fn with_cmek(mut self, cmek: Cmek) -> Self {
+        self.cmek = Some(cmek);
+        self
     }
 
-    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
-        // SAFETY(rescrv):  This is always safe because of a unit test.
-        Self::new(false, Some(e_tag.clone()), priority).unwrap()
+    pub fn with_mode(mut self, mode: PutMode) -> Self {
+        self.mode = mode;
+        self
     }
 
-    pub fn with_priority(priority: StorageRequestPriority) -> Self {
-        Self {
-            priority,
-            ..Default::default()
-        }
-    }
-
-    pub fn new(
-        if_not_exists: bool,
-        if_match: Option<ETag>,
-        priority: StorageRequestPriority,
-    ) -> Result<PutOptions, PutOptionsCreateError> {
-        if if_not_exists && if_match.is_some() {
-            return Err(PutOptionsCreateError::IfNotExistsAndIfMatchEnabled);
-        }
-        Ok(PutOptions {
-            if_not_exists,
-            if_match,
-            priority,
-        })
+    pub fn with_priority(mut self, priority: StorageRequestPriority) -> Self {
+        self.priority = priority;
+        self
     }
 }
 
@@ -546,39 +570,24 @@ impl GetOptions {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct DeleteOptions {
-    if_match: Option<ETag>,
     priority: StorageRequestPriority,
 }
 
 impl DeleteOptions {
-    pub fn if_matches(e_tag: &ETag, priority: StorageRequestPriority) -> Self {
-        Self::new(Some(e_tag.clone()), priority)
-    }
-
-    pub fn with_priority(priority: StorageRequestPriority) -> Self {
-        Self {
-            priority,
-            ..Default::default()
-        }
-    }
-
-    fn new(if_match: Option<ETag>, priority: StorageRequestPriority) -> DeleteOptions {
-        DeleteOptions { if_match, priority }
+    pub fn new(priority: StorageRequestPriority) -> DeleteOptions {
+        DeleteOptions { priority }
     }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ETag(pub String);
 
-/////////////////////////////////////////////// tests //////////////////////////////////////////////
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn put_options_ctors() {
-        let _x = PutOptions::if_not_exists(StorageRequestPriority::P0);
-        let _x = PutOptions::if_matches(&ETag("123".to_string()), StorageRequestPriority::P0);
-    }
+/// Metadata about an S3 object returned by `head_object()`.
+#[derive(Clone, Debug)]
+pub struct S3ObjectMetadata {
+    pub object_key: String,
+    pub etag: Option<ETag>,
+    pub content_length: i64,
+    pub content_type: Option<String>,
+    pub last_modified: Option<std::time::SystemTime>,
 }

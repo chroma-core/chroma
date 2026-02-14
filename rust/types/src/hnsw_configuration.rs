@@ -1,9 +1,8 @@
-use crate::Metadata;
+use crate::{HnswIndexConfig, Metadata};
 use chroma_error::{ChromaError, ErrorCodes};
 use serde::{Deserialize, Serialize};
 use std::num::NonZero;
 use thiserror::Error;
-use utoipa::ToSchema;
 use validator::Validate;
 
 #[derive(Debug, Error)]
@@ -28,7 +27,8 @@ impl ChromaError for HnswParametersFromSegmentError {
     }
 }
 
-#[derive(Default, Debug, PartialEq, Serialize, Deserialize, Clone, ToSchema)]
+#[derive(Default, Debug, PartialEq, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Space {
     #[default]
     #[serde(rename = "l2")]
@@ -73,7 +73,8 @@ pub fn default_space() -> Space {
     Space::L2
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 pub struct InternalHnswConfiguration {
     #[serde(default = "default_space")]
@@ -104,7 +105,44 @@ impl Default for InternalHnswConfiguration {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
+impl From<(Option<&Space>, Option<&HnswIndexConfig>)> for InternalHnswConfiguration {
+    fn from((space, config): (Option<&Space>, Option<&HnswIndexConfig>)) -> Self {
+        let mut internal = InternalHnswConfiguration::default();
+
+        if let Some(space) = space {
+            internal.space = space.clone();
+        }
+
+        if let Some(config) = config {
+            if let Some(ef_construction) = config.ef_construction {
+                internal.ef_construction = ef_construction;
+            }
+            if let Some(max_neighbors) = config.max_neighbors {
+                internal.max_neighbors = max_neighbors;
+            }
+            if let Some(ef_search) = config.ef_search {
+                internal.ef_search = ef_search;
+            }
+            if let Some(num_threads) = config.num_threads {
+                internal.num_threads = num_threads;
+            }
+            if let Some(batch_size) = config.batch_size {
+                internal.batch_size = batch_size;
+            }
+            if let Some(sync_threshold) = config.sync_threshold {
+                internal.sync_threshold = sync_threshold;
+            }
+            if let Some(resize_factor) = config.resize_factor {
+                internal.resize_factor = resize_factor;
+            }
+        }
+
+        internal
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct HnswConfiguration {
@@ -210,7 +248,8 @@ impl InternalHnswConfiguration {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Validate, ToSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, Validate)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[serde(deny_unknown_fields)]
 #[cfg_attr(feature = "pyo3", pyo3::pyclass)]
 pub struct UpdateHnswConfiguration {

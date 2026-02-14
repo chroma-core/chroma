@@ -67,6 +67,23 @@ func (s *databaseDb) GetDatabases(tenantID string, databaseName string) ([]*dbmo
 	return databases, nil
 }
 
+func (s *databaseDb) GetByID(databaseID string) (*dbmodel.Database, error) {
+	var database dbmodel.Database
+	query := s.db.Table("databases").
+		Select("databases.id, databases.name, databases.tenant_id").
+		Where("databases.id = ?", databaseID).
+		Where("databases.is_deleted = ?", false)
+
+	if err := query.First(&database).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		log.Error("GetByID", zap.Error(err))
+		return nil, err
+	}
+	return &database, nil
+}
+
 func (s *databaseDb) Insert(database *dbmodel.Database) error {
 	err := s.db.Create(database).Error
 	if err != nil {

@@ -8,9 +8,9 @@ use chroma_types::chroma_proto::{
 #[tokio::main]
 async fn main() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 3 && args.len() != 4 {
+    if args.len() != 4 && args.len() != 5 {
         eprintln!(
-            "USAGE: chroma-log-service-purge-cache-entry HOST TYPE COLLECTION_UUID [FRAGMENT_PATH]"
+            "USAGE: chroma-log-service-purge-cache-entry HOST DATABASE_NAME TYPE COLLECTION_UUID [FRAGMENT_PATH]"
         );
         std::process::exit(13);
     }
@@ -19,39 +19,43 @@ async fn main() {
         .connect()
         .await
         .expect("could not connect to log service");
-    let req = match args[1].as_str() {
+    let database_name = args[1].clone();
+    let req = match args[2].as_str() {
         "cursor" => {
-            if args.len() != 3 {
+            if args.len() != 4 {
                 eprintln!("purge cache entry takes no fragment path");
                 std::process::exit(13);
             }
             PurgeFromCacheRequest {
-                entry_to_evict: Some(EntryToEvict::CursorForCollectionId(args[2].clone())),
+                entry_to_evict: Some(EntryToEvict::CursorForCollectionId(args[3].clone())),
+                database_name,
             }
         }
         "manifest" => {
-            if args.len() != 3 {
+            if args.len() != 4 {
                 eprintln!("purge cache entry takes no fragment path");
                 std::process::exit(13);
             }
             PurgeFromCacheRequest {
-                entry_to_evict: Some(EntryToEvict::ManifestForCollectionId(args[2].clone())),
+                entry_to_evict: Some(EntryToEvict::ManifestForCollectionId(args[3].clone())),
+                database_name,
             }
         }
         "fragment" => {
-            if args.len() != 4 {
+            if args.len() != 5 {
                 eprintln!("purge cache entry takes a fragment path");
                 std::process::exit(13);
             }
             PurgeFromCacheRequest {
                 entry_to_evict: Some(EntryToEvict::Fragment(FragmentToEvict {
-                    collection_id: args[2].clone(),
-                    fragment_path: args[3].clone(),
+                    collection_id: args[3].clone(),
+                    fragment_path: args[4].clone(),
                 })),
+                database_name,
             }
         }
         _ => {
-            eprintln!("unknown type: {}", args[1]);
+            eprintln!("unknown type: {}", args[2]);
             std::process::exit(13);
         }
     };

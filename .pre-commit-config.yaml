@@ -4,9 +4,10 @@ repos:
     rev: v4.6.0
     hooks:
       - id: trailing-whitespace
+        exclude: ".*\\.gen\\.ts$"
       - id: mixed-line-ending
       - id: end-of-file-fixer
-        exclude: "go/migrations"
+        exclude: "go/migrations|.*\\.gen\\.ts$"
       - id: requirements-txt-fixer
       - id: check-yaml
         args: ["--allow-multiple-documents"]
@@ -59,7 +60,7 @@ repos:
     rev: "v3.1.0"
     hooks:
       - id: prettier
-        files: "^clients/js/.+"
-        exclude: "^clients/js/src/generated/.+"
+        files: "^clients/(js|new-js)/.+"
+        exclude: "^clients/(js|new-js)/src/generated/.+|.*\\.gen\\.ts$"
         additional_dependencies:
           - prettier@2.8.7

@@ -53,19 +53,19 @@ def test_repair_collection_log_offset(
     found = False
     now = time.time()
     while time.time() - now < 240:
-        request = InspectLogStateRequest(collection_id=str(collection.id))
+        request = InspectLogStateRequest(database_name=str(client.database), collection_id=str(collection.id))
         response = log_service_stub.InspectLogState(request, timeout=60)
         if '''LogPosition { offset: 1001 }''' in response.debug:
             found = True
             break
     assert found
 
-    request = UpdateCollectionLogOffsetRequest (collection_id=str(collection.id), log_offset=1)
+    request = UpdateCollectionLogOffsetRequest(database_name=str(client.database), collection_id=str(collection.id), log_offset=1)
     response = log_service_stub.RollbackCollectionLogOffset(request, timeout=60)
 
     now = time.time()
     while time.time() - now < 240:
-        request = InspectLogStateRequest(collection_id=str(collection.id))
+        request = InspectLogStateRequest(database_name=str(client.database), collection_id=str(collection.id))
         response = log_service_stub.InspectLogState(request, timeout=60)
         if '''LogPosition { offset: 1001 }''' in response.debug:
             return

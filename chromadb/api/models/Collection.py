@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any
+from typing import TYPE_CHECKING, Optional, Union, List, cast, Dict, Any, Tuple
 
 from chromadb.api.models.CollectionCommon import CollectionCommon
 from chromadb.api.types import (
@@ -7,6 +7,7 @@ from chromadb.api.types import (
     Embedding,
     PyEmbedding,
     Include,
+    IndexingStatus,
     Metadata,
     Document,
     Image,
@@ -16,15 +17,20 @@ from chromadb.api.types import (
     QueryResult,
     ID,
     OneOrMany,
+    ReadLevel,
     WhereDocument,
     SearchResult,
     maybe_cast_one_to_many,
 )
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
 from chromadb.execution.expression.plan import Search
-from typing import cast, List
 
 import logging
+
+from chromadb.api.functions import Function
+
+if TYPE_CHECKING:
+    from chromadb.api.models.AttachedFunction import AttachedFunction
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +40,24 @@ if TYPE_CHECKING:
 
 class Collection(CollectionCommon["ServerAPI"]):
     def count(self) -> int:
-        """The total number of embeddings added to the database
+        """Return the number of records in the collection."""
+        return self._client._count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    def get_indexing_status(self) -> IndexingStatus:
+        """Get the indexing status of this collection.
 
         Returns:
-            int: The total number of embeddings added to the database
-
+            IndexingStatus: An object containing:
+                - num_indexed_ops: Number of user operations that have been indexed
+                - num_unindexed_ops: Number of user operations pending indexing
+                - total_ops: Total number of user operations in collection
+                - op_indexing_progress: Proportion of user operations that have been indexed as a float between 0 and 1
         """
-        return self._client._count(
+        return self._client._get_indexing_status(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
@@ -60,25 +77,21 @@ class Collection(CollectionCommon["ServerAPI"]):
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
-        """Add embeddings to the data store.
-        Args:
-            ids: The ids of the embeddings you wish to add
-            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
-            metadatas: The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
-            documents: The documents to associate with the embeddings. Optional.
-            images: The images to associate with the embeddings. Optional.
-            uris: The uris of the images to associate with the embeddings. Optional.
+        """Add records to the collection.
 
-        Returns:
-            None
+        Args:
+            ids: Record IDs to add.
+            embeddings: Embeddings to add. If None, embeddings are computed.
+            metadatas: Optional metadata for each record.
+            documents: Optional documents for each record.
+            images: Optional images for each record.
+            uris: Optional URIs for loading images.
 
         Raises:
-            ValueError: If you don't provide either embeddings or documents
-            ValueError: If the length of ids, embeddings, metadatas, or documents don't match
-            ValueError: If you don't provide an embedding function and don't provide embeddings
-            ValueError: If you provide both embeddings and documents
-            ValueError: If you provide an id that already exists
-
+            ValueError: If embeddings and documents are both missing.
+            ValueError: If embeddings and documents are both provided.
+            ValueError: If lengths of provided fields do not match.
+            ValueError: If an ID already exists.
         """
 
         add_request = self._validate_and_prepare_add_request(
@@ -110,20 +123,21 @@ class Collection(CollectionCommon["ServerAPI"]):
         where_document: Optional[WhereDocument] = None,
         include: Include = ["metadatas", "documents"],
     ) -> GetResult:
-        """Get embeddings and their associate data from the data store. If no ids or where filter is provided returns
-        all embeddings up to limit starting at offset.
+        """Retrieve records from the collection.
+
+        If no filters are provided, returns records up to ``limit`` starting at
+        ``offset``.
 
         Args:
-            ids: The ids of the embeddings to get. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
-            limit: The number of documents to return. Optional.
-            offset: The offset to start returning results from. Useful for paging results with limit. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
-            include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`. Ids are always included. Defaults to `["metadatas", "documents"]`. Optional.
+            ids: If provided, only return records with these IDs.
+            where: A Where filter used to filter based on metadata values.
+            limit: Maximum number of results to return.
+            offset: Number of results to skip before returning.
+            where_document: A WhereDocument filter used to filter based on K.DOCUMENT.
+            include: Fields to include in results. Can contain "embeddings", "metadatas", "documents", "uris". Defaults to "metadatas" and "documents".
 
         Returns:
-            GetResult: A GetResult object containing the results.
-
+            GetResult: Retrieved records and requested fields as a GetResult object.
         """
         get_request = self._validate_and_prepare_get_request(
             ids=ids,
@@ -148,13 +162,13 @@ class Collection(CollectionCommon["ServerAPI"]):
         )
 
     def peek(self, limit: int = 10) -> GetResult:
-        """Get the first few results in the database up to limit
+        """Return the first ``limit`` records from the collection.
 
         Args:
-            limit: The number of results to return.
+            limit: Maximum number of records to return.
 
         Returns:
-            GetResult: A GetResult object containing the results.
+            GetResult: Retrieved records and requested fields.
         """
         return self._transform_peek_response(
             self._client._peek(
@@ -186,28 +200,42 @@ class Collection(CollectionCommon["ServerAPI"]):
             "distances",
         ],
     ) -> QueryResult:
-        """Get the n_results nearest neighbor embeddings for provided query_embeddings or query_texts.
+        """Query for the K nearest neighbor records in the collection.
+
+        This is a batch query API. Multiple queries can be performed at once
+        by providing multiple embeddings, texts, or images.
+
+        >>> query_1 = [0.1, 0.2, 0.3]
+        >>> query_2 = [0.4, 0.5, 0.6]
+        >>> results = collection.query(
+        >>>     query_embeddings=[query_1, query_2],
+        >>>     n_results=10,
+        >>> )
+
+        If query_texts, query_images, or query_uris are provided, the collection's
+        embedding function will be used to create embeddings before querying
+        the API.
+
+        The `ids`, `where`, `where_document`, and `include` parameters are applied
+        to all queries.
 
         Args:
-            query_embeddings: The embeddings to get the closes neighbors of. Optional.
-            query_texts: The document texts to get the closes neighbors of. Optional.
-            query_images: The images to get the closes neighbors of. Optional.
-            query_uris: The URIs to be used with data loader. Optional.
-            ids: A subset of ids to search within. Optional.
-            n_results: The number of neighbors to return for each query_embedding or query_texts. Optional.
-            where: A Where type dict used to filter results by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
-            where_document: A WhereDocument type dict used to filter by the documents. E.g. `{"$contains": "hello"}`. Optional.
-            include: A list of what to include in the results. Can contain `"embeddings"`, `"metadatas"`, `"documents"`, `"distances"`. Ids are always included. Defaults to `["metadatas", "documents", "distances"]`. Optional.
+            query_embeddings: Raw embeddings to query for.
+            query_texts: Documents to embed and query against.
+            query_images: Images to embed and query against.
+            query_uris: URIs to be loaded and embedded.
+            ids: Optional subset of IDs to search within.
+            n_results: Number of neighbors to return per query.
+            where: Metadata filter.
+            where_document: Document content filter.
+            include: Fields to include in results. Can contain "embeddings", "metadatas", "documents", "uris", "distances". Defaults to "metadatas", "documents", "distances".
 
         Returns:
-            QueryResult: A QueryResult object containing the results.
+            QueryResult: Nearest neighbor results.
 
         Raises:
-            ValueError: If you don't provide either query_embeddings, query_texts, or query_images
-            ValueError: If you provide both query_embeddings and query_texts
-            ValueError: If you provide both query_embeddings and query_images
-            ValueError: If you provide both query_texts and query_images
-
+            ValueError: If no query input is provided.
+            ValueError: If multiple query input types are provided.
         """
 
         query_request = self._validate_and_prepare_query_request(
@@ -244,14 +272,12 @@ class Collection(CollectionCommon["ServerAPI"]):
         metadata: Optional[CollectionMetadata] = None,
         configuration: Optional[UpdateCollectionConfiguration] = None,
     ) -> None:
-        """Modify the collection name or metadata
+        """Update collection name, metadata, or configuration.
 
         Args:
-            name: The updated name for the collection. Optional.
-            metadata: The updated metadata for the collection. Optional.
-
-        Returns:
-            None
+            name: New collection name.
+            metadata: New metadata for the collection.
+            configuration: New configuration for the collection.
         """
 
         self._validate_modify_request(metadata)
@@ -299,9 +325,10 @@ class Collection(CollectionCommon["ServerAPI"]):
     def search(
         self,
         searches: OneOrMany[Search],
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> SearchResult:
         """Perform hybrid search on the collection.
-        This is an experimental API that only works for Hosted Chroma for now.
+        This is an experimental API that only works for distributed and hosted Chroma for now.
 
         Args:
             searches: A single Search object or a list of Search objects, each containing:
@@ -309,6 +336,11 @@ class Collection(CollectionCommon["ServerAPI"]):
                 - rank: Ranking expression for hybrid search (defaults to Val(0.0))
                 - limit: Limit configuration for pagination (defaults to no limit)
                 - select: Select configuration for keys to return (defaults to empty)
+            read_level: Controls whether to read from the write-ahead log (WAL):
+                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
+                  All committed writes will be visible.
+                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+                  Faster, but recent writes that haven't been compacted may not be visible.
 
         Returns:
             SearchResult: Column-major format response with:
@@ -356,17 +388,27 @@ class Collection(CollectionCommon["ServerAPI"]):
                 Search().where(K("type") == "paper").rank(Knn(query=[0.3, 0.4]))
             ]
             results = collection.search(searches)
+
+            # Skip WAL for faster queries (may miss recent uncommitted writes)
+            from chromadb.api.types import ReadLevel
+            result = collection.search(search, read_level=ReadLevel.INDEX_ONLY)
         """
         # Convert single search to list for consistent handling
         searches_list = maybe_cast_one_to_many(searches)
         if searches_list is None:
             searches_list = []
 
+        # Embed any string queries in Knn objects
+        embedded_searches = [
+            self._embed_search_string_queries(search) for search in searches_list
+        ]
+
         return self._client._search(
             collection_id=self.id,
-            searches=cast(List[Search], searches_list),
+            searches=cast(List[Search], embedded_searches),
             tenant=self.tenant,
             database=self.database,
+            read_level=read_level,
         )
 
     def update(
@@ -383,16 +425,27 @@ class Collection(CollectionCommon["ServerAPI"]):
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
-        """Update the embeddings, metadatas or documents for provided ids.
+        """Update existing records by ID.
+
+        Records are provided in columnar format. If provided, the `embeddings`, `metadatas`, `documents`, and `uris` lists must be the same length.
+        Entries in each list correspond to the same record.
+
+        >>> ids = ["id1", "id2", "id3"]
+        >>> embeddings = [[0.1, 0.2, 0.3], [0.4, 0.5, 0.6], [0.7, 0.8, 0.9]]
+        >>> metadatas = [{"key": "value"}, {"key": "value"}, {"key": "value"}]
+        >>> documents = ["document1", "document2", "document3"]
+        >>> uris = ["uri1", "uri2", "uri3"]
+        >>> collection.update(ids, embeddings, metadatas, documents, uris)
+
+        If `embeddings` are not provided, the embeddings will be computed based on `documents` using the collection's embedding function.
 
         Args:
-            ids: The ids of the embeddings to update
-            embeddings: The embeddings to update. If None, embeddings will be computed based on the documents or images using the embedding_function set for the Collection. Optional.
-            metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
-            documents: The documents to associate with the embeddings. Optional.
-            images: The images to associate with the embeddings. Optional.
-        Returns:
-            None
+            ids: Record IDs to update.
+            embeddings: Updated embeddings. If None, embeddings are computed.
+            metadatas: Updated metadata.
+            documents: Updated documents.
+            images: Updated images.
+            uris: Updated URIs for loading images.
         """
         update_request = self._validate_and_prepare_update_request(
             ids=ids,
@@ -428,16 +481,15 @@ class Collection(CollectionCommon["ServerAPI"]):
         images: Optional[OneOrMany[Image]] = None,
         uris: Optional[OneOrMany[URI]] = None,
     ) -> None:
-        """Update the embeddings, metadatas or documents for provided ids, or create them if they don't exist.
+        """Create or update records by ID.
 
         Args:
-            ids: The ids of the embeddings to update
-            embeddings: The embeddings to add. If None, embeddings will be computed based on the documents using the embedding_function set for the Collection. Optional.
-            metadatas:  The metadata to associate with the embeddings. When querying, you can filter on this metadata. Optional.
-            documents: The documents to associate with the embeddings. Optional.
-
-        Returns:
-            None
+            ids: Record IDs to upsert.
+            embeddings: Embeddings to add or update. If None, embeddings are computed.
+            metadatas: Metadata to add or update.
+            documents: Documents to add or update.
+            images: Images to add or update.
+            uris: URIs for loading images.
         """
         upsert_request = self._validate_and_prepare_upsert_request(
             ids=ids,
@@ -465,18 +517,17 @@ class Collection(CollectionCommon["ServerAPI"]):
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
     ) -> None:
-        """Delete the embeddings based on ids and/or a where filter
+        """Delete records by ID or filters.
+
+        All documents that match the `ids` or `where` and `where_document` filters will be deleted.
 
         Args:
-            ids: The ids of the embeddings to delete
-            where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}]}}`. Optional.
-            where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
-
-        Returns:
-            None
+            ids: Record IDs to delete.
+            where: Metadata filter.
+            where_document: Document content filter.
 
         Raises:
-            ValueError: If you don't provide either ids, where, or where_document
+            ValueError: If no IDs or filters are provided.
         """
         delete_request = self._validate_and_prepare_delete_request(
             ids, where, where_document
@@ -491,63 +542,88 @@ class Collection(CollectionCommon["ServerAPI"]):
             database=self.database,
         )
 
-    def create_task(
+    def attach_function(
         self,
-        task_name: str,
-        operator_name: str,
-        output_collection_name: str,
+        function: Function,
+        name: str,
+        output_collection: str,
         params: Optional[Dict[str, Any]] = None,
-    ) -> tuple[bool, str]:
-        """Create a recurring task that processes this collection.
+    ) -> Tuple["AttachedFunction", bool]:
+        """Attach a function to this collection.
 
         Args:
-            task_name: Unique name for this task instance
-            operator_name: Built-in operator name (e.g., "record_counter")
-            output_collection_name: Name of the collection where task output will be stored
-            params: Optional dictionary with operator-specific parameters
+            function: A Function enum value (e.g., STATISTICS_FUNCTION, RECORD_COUNTER_FUNCTION)
+            name: Unique name for this attached function
+            output_collection: Name of the collection where function output will be stored
+            params: Optional dictionary with function-specific parameters
 
         Returns:
-            tuple: (success: bool, task_id: str)
+            Tuple of (AttachedFunction, created) where created is True if newly created,
+            False if already existed (idempotent request)
 
         Example:
-            >>> success, task_id = collection.create_task(
-            ...     task_name="count_docs",
-            ...     operator_name="record_counter",
-            ...     output_collection_name="doc_counts",
-            ...     params={"threshold": 100}
+            >>> from chromadb.api.functions import STATISTICS_FUNCTION
+            >>> attached_fn = collection.attach_function(
+            ...     function=STATISTICS_FUNCTION,
+            ...     name="mycoll_stats_fn",
+            ...     output_collection="mycoll_stats",
             ... )
+            >>> if created:
+            ...     print("New function attached")
+            ... else:
+            ...     print("Function already existed")
         """
-        return self._client.create_task(
-            task_name=task_name,
-            operator_name=operator_name,
+        function_id = function.value if isinstance(function, Function) else function
+        return self._client.attach_function(
+            function_id=function_id,
+            name=name,
             input_collection_id=self.id,
-            output_collection_name=output_collection_name,
+            output_collection=output_collection,
             params=params,
             tenant=self.tenant,
             database=self.database,
         )
 
-    def remove_task(
-        self,
-        task_name: str,
-        delete_output: bool = False,
-    ) -> bool:
-        """Delete a task and prevent any further runs.
+    def get_attached_function(self, name: str) -> "AttachedFunction":
+        """Get an attached function by name for this collection.
 
         Args:
-            task_name: Name of the task to remove
-            delete_output: Whether to also delete the output collection. Defaults to False.
+            name: Name of the attached function
+
+        Returns:
+            AttachedFunction: The attached function object
+
+        Raises:
+            NotFoundError: If the attached function doesn't exist
+        """
+        return self._client.get_attached_function(
+            name=name,
+            input_collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
+    def detach_function(
+        self,
+        name: str,
+        delete_output_collection: bool = False,
+    ) -> bool:
+        """Detach a function from this collection.
+
+        Args:
+            name: The name of the attached function
+            delete_output_collection: Whether to also delete the output collection. Defaults to False.
 
         Returns:
             bool: True if successful
 
         Example:
-            >>> success = collection.remove_task("count_docs", delete_output=True)
+            >>> success = collection.detach_function("my_function", delete_output_collection=True)
         """
-        return self._client.remove_task(
-            task_name=task_name,
+        return self._client.detach_function(
+            name=name,
             input_collection_id=self.id,
-            delete_output=delete_output,
+            delete_output=delete_output_collection,
             tenant=self.tenant,
             database=self.database,
         )

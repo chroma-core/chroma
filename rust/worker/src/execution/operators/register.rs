@@ -4,10 +4,12 @@ use chroma_log::Log;
 use chroma_sysdb::FlushCompactionError;
 use chroma_sysdb::SysDb;
 use chroma_system::Operator;
-use chroma_types::InternalSchema;
-use chroma_types::{CollectionUuid, FlushCompactionResponse, SegmentFlushInfo};
+use chroma_types::Schema;
+use chroma_types::{CollectionUuid, DatabaseName, FlushCompactionResponse, SegmentFlushInfo};
 use std::sync::Arc;
 use thiserror::Error;
+
+use crate::execution::operators::finish_attached_function::FinishAttachedFunctionError;
 
 /// The register  operator is responsible for flushing compaction data to the sysdb
 /// as well as updating the log offset in the log service.
@@ -39,6 +41,7 @@ impl RegisterOperator {
 /// * `log` - The log client.
 pub struct RegisterInput {
     tenant: String,
+    database_name: DatabaseName,
     collection_id: CollectionUuid,
     log_position: i64,
     collection_version: i32,
@@ -47,7 +50,7 @@ pub struct RegisterInput {
     collection_logical_size_bytes: u64,
     sysdb: SysDb,
     log: Log,
-    schema: Option<InternalSchema>,
+    schema: Option<Schema>,
 }
 
 impl RegisterInput {
@@ -55,6 +58,7 @@ impl RegisterInput {
     /// Create a new flush sysdb input.
     pub fn new(
         tenant: String,
+        database_name: DatabaseName,
         collection_id: CollectionUuid,
         log_position: i64,
         collection_version: i32,
@@ -63,10 +67,11 @@ impl RegisterInput {
         collection_logical_size_bytes: u64,
         sysdb: SysDb,
         log: Log,
-        schema: Option<InternalSchema>,
+        schema: Option<Schema>,
     ) -> Self {
         RegisterInput {
             tenant,
+            database_name,
             collection_id,
             log_position,
             collection_version,
@@ -91,23 +96,27 @@ pub struct RegisterOutput {
 #[derive(Error, Debug)]
 pub enum RegisterError {
     #[error("Flush compaction error: {0}")]
-    FlushCompactionError(#[from] FlushCompactionError),
+    FlushCompaction(#[from] FlushCompactionError),
     #[error("Update log offset error: {0}")]
-    UpdateLogOffsetError(#[from] Box<dyn ChromaError>),
+    UpdateLogOffset(#[from] Box<dyn ChromaError>),
+    #[error("Finish attached function error: {0}")]
+    FinishAttachedFunction(#[from] FinishAttachedFunctionError),
 }
 
 impl ChromaError for RegisterError {
     fn code(&self) -> ErrorCodes {
         match self {
-            RegisterError::FlushCompactionError(e) => e.code(),
-            RegisterError::UpdateLogOffsetError(e) => e.code(),
+            RegisterError::FlushCompaction(e) => e.code(),
+            RegisterError::UpdateLogOffset(e) => e.code(),
+            RegisterError::FinishAttachedFunction(e) => e.code(),
         }
     }
 
     fn should_trace_error(&self) -> bool {
         match self {
-            RegisterError::FlushCompactionError(e) => e.should_trace_error(),
-            RegisterError::UpdateLogOffsetError(e) => e.should_trace_error(),
+            RegisterError::FlushCompaction(e) => e.should_trace_error(),
+            RegisterError::UpdateLogOffset(e) => e.should_trace_error(),
+            RegisterError::FinishAttachedFunction(e) => e.should_trace_error(),
         }
     }
 }
@@ -126,6 +135,7 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         let result = sysdb
             .flush_compaction(
                 input.tenant.clone(),
+                input.database_name.clone(),
                 input.collection_id,
                 input.log_position,
                 input.collection_version,
@@ -141,18 +151,23 @@ impl Operator<RegisterInput, RegisterOutput> for RegisterOperator {
         // the we may lose data in compaction.
         let sysdb_registration_result = match result {
             Ok(response) => response,
-            Err(error) => return Err(RegisterError::FlushCompactionError(error)),
+            Err(error) => return Err(RegisterError::FlushCompaction(error)),
         };
 
         let result = log
-            .update_collection_log_offset(&input.tenant, input.collection_id, input.log_position)
+            .update_collection_log_offset(
+                &input.tenant,
+                input.database_name.clone(),
+                input.collection_id,
+                input.log_position,
+            )
             .await;
 
         match result {
             Ok(_) => Ok(RegisterOutput {
                 _sysdb_registration_result: sysdb_registration_result,
             }),
-            Err(error) => Err(RegisterError::UpdateLogOffsetError(error)),
+            Err(error) => Err(RegisterError::UpdateLogOffset(error)),
         }
     }
 }
@@ -261,6 +276,7 @@ mod tests {
         let operator = RegisterOperator::new();
         let input = RegisterInput::new(
             tenant_1.clone(),
+            chroma_types::DatabaseName::new("database_1").unwrap(),
             collection_uuid_1,
             log_position,
             collection_version,

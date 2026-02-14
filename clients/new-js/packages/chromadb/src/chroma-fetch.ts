@@ -1,10 +1,12 @@
 import {
   ChromaClientError,
   ChromaConnectionError,
+  ChromaError,
   ChromaForbiddenError,
   ChromaNotFoundError,
   ChromaQuotaExceededError,
   ChromaRateLimitError,
+  ChromaServerError,
   ChromaUnauthorizedError,
   ChromaUniqueError,
 } from "./errors";
@@ -16,6 +18,17 @@ const offlineError = (error: any): boolean => {
         error.message?.includes("Failed to fetch") ||
         error.message?.includes("ENOTFOUND")),
   );
+};
+
+const getErrorMessage = async (response: Response): Promise<string> => {
+  try {
+    const body = await response.clone().json();
+    return (
+      body.message || body.error || `${response.status}: ${response.statusText}`
+    );
+  } catch {
+    return `${response.status}: ${response.statusText}`;
+  }
 };
 
 export const chromaFetch: typeof fetch = async (input, init) => {
@@ -60,21 +73,32 @@ export const chromaFetch: typeof fetch = async (input, init) => {
     case 409:
       throw new ChromaUniqueError("The resource already exists");
     case 422:
-      const body = await response.json();
-      if (
-        body &&
-        body.message &&
-        (body.message.startsWith("Quota exceeded") ||
-          body.message.startsWith("Billing limit exceeded"))
-      ) {
-        throw new ChromaQuotaExceededError(body?.message);
+      try {
+        const body = await response.json();
+        if (
+          body &&
+          body.message &&
+          (body.message.startsWith("Quota exceeded") ||
+            body.message.startsWith("Billing limit exceeded"))
+        ) {
+          throw new ChromaQuotaExceededError(body?.message);
+        }
+        throw new ChromaClientError(body?.message || "Unprocessable Entity");
+      } catch (error) {
+        if (
+          error instanceof ChromaQuotaExceededError ||
+          error instanceof ChromaClientError
+        ) {
+          throw error;
+        }
+        throw new ChromaClientError(
+          `Unprocessable Entity: ${response.statusText}`,
+        );
       }
-      break;
     case 429:
       throw new ChromaRateLimitError("Rate limit exceeded");
   }
 
-  throw new ChromaConnectionError(
-    `Unable to connect to the chromadb server (status: ${response.status}). Please try again later.`,
-  );
+  const errorMessage = await getErrorMessage(response);
+  throw new ChromaServerError(errorMessage);
 };

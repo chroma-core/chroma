@@ -6,6 +6,7 @@ use std::{
 use chroma_blockstore::BlockfileReader;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::SignedRoaringBitmap;
+use futures::future::join;
 use thiserror::Error;
 
 use crate::sparse::types::{encode_u32, DIMENSION_PREFIX};
@@ -81,6 +82,24 @@ impl<'me> SparseReader<'me> {
         }
     }
 
+    pub async fn load_block_maxes(
+        &'me self,
+        encoded_dimension_ids: impl Iterator<Item = &'me str>,
+    ) {
+        self.max_reader
+            .load_blocks_for_prefixes(encoded_dimension_ids.chain([DIMENSION_PREFIX]))
+            .await
+    }
+
+    pub async fn load_offset_values(
+        &'me self,
+        encoded_dimension_ids: impl Iterator<Item = &'me str>,
+    ) {
+        self.offset_value_reader
+            .load_blocks_for_prefixes(encoded_dimension_ids)
+            .await
+    }
+
     pub async fn get_dimension_max(&self) -> Result<HashMap<u32, f32>, SparseReaderError> {
         Ok(self
             .max_reader
@@ -100,7 +119,7 @@ impl<'me> SparseReader<'me> {
             .await? as u32)
     }
 
-    pub async fn get_blocks(
+    pub async fn get_block_maxes(
         &'me self,
         encoded_dimension_id: &'me str,
     ) -> Result<impl Iterator<Item = (u32, f32)> + 'me, SparseReaderError> {
@@ -127,6 +146,21 @@ impl<'me> SparseReader<'me> {
             .into_iter()
             .map(|(dimension_id, query)| (dimension_id, encode_u32(dimension_id), query))
             .collect::<Vec<_>>();
+
+        join(
+            self.load_block_maxes(
+                collected_query
+                    .iter()
+                    .map(|(_, encoded_dimension_id, _)| encoded_dimension_id.as_str()),
+            ),
+            self.load_offset_values(
+                collected_query
+                    .iter()
+                    .map(|(_, encoded_dimension_id, _)| encoded_dimension_id.as_str()),
+            ),
+        )
+        .await;
+
         let dimension_count = collected_query.len();
         let all_dimension_max = self.get_dimension_max().await?;
 
@@ -149,7 +183,7 @@ impl<'me> SparseReader<'me> {
                 body_index: bodies.len() as u32,
             };
 
-            let mut block_iterator = self.get_blocks(encoded_dimension_id).await?;
+            let mut block_iterator = self.get_block_maxes(encoded_dimension_id).await?;
             let Some((block_next_offset, block_max)) = block_iterator
                 .by_ref()
                 .find(|&(block_next_offset, _)| offset < block_next_offset)

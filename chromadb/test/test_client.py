@@ -1,10 +1,11 @@
 import asyncio
-from typing import Any, Callable, Generator, cast
-from unittest.mock import patch
+from typing import Any, Callable, Generator, cast, Dict, Tuple
+from unittest.mock import MagicMock, patch
 import chromadb
-from chromadb.config import Settings
+from chromadb.config import Settings, System
 from chromadb.api import ClientAPI
 import chromadb.server.fastapi
+from chromadb.api.fastapi import FastAPI
 import pytest
 import tempfile
 import os
@@ -110,3 +111,43 @@ def test_http_client_with_inconsistent_port_settings(
             str(e)
             == "Chroma server http port provided in settings[8001] is different to the one provided in HttpClient: [8002]"
         )
+
+
+def make_sync_client_factory() -> Tuple[Callable[..., Any], Dict[str, Any]]:
+    captured: Dict[str, Any] = {}
+
+    # takes any positional args to match httpx.Client
+    def factory(*_: Any, **kwargs: Any) -> Any:
+        captured.update(kwargs)
+        session = MagicMock()
+        session.headers = {}
+        return session
+
+    return factory, captured
+
+
+def test_fastapi_uses_http_limits_from_settings() -> None:
+    settings = Settings(
+        chroma_api_impl="chromadb.api.fastapi.FastAPI",
+        chroma_server_host="localhost",
+        chroma_server_http_port=9000,
+        chroma_server_ssl_verify=True,
+        chroma_http_keepalive_secs=12.5,
+        chroma_http_max_connections=64,
+        chroma_http_max_keepalive_connections=16,
+    )
+    system = System(settings)
+
+    factory, captured = make_sync_client_factory()
+
+    with patch.object(FastAPI, "require", side_effect=[MagicMock(), MagicMock()]):
+        with patch("chromadb.api.fastapi.httpx.Client", side_effect=factory):
+            api = FastAPI(system)
+
+    api.stop()
+    limits = captured["limits"]
+    assert limits.keepalive_expiry == 12.5
+    assert limits.max_connections == 64
+    assert limits.max_keepalive_connections == 16
+    assert captured["timeout"] is None
+    assert captured["verify"] is True

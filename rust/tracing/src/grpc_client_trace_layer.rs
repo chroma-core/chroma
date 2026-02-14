@@ -5,7 +5,7 @@ use std::{
     pin::Pin,
     task::{Context, Poll},
 };
-use tonic::{body::BoxBody, transport::Error, Code};
+use tonic::{body::Body, transport::Error, Code};
 use tower::{Layer, Service};
 use tracing::{field::Empty, info_span, Instrument, Span};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -32,7 +32,7 @@ pub struct GrpcClientTraceService<S> {
 
 impl<S, ReqBody> Service<http::Request<ReqBody>> for GrpcClientTraceService<S>
 where
-    S: Service<http::Request<ReqBody>, Response = http::Response<BoxBody>, Error = Error>
+    S: Service<http::Request<ReqBody>, Response = http::Response<Body>, Error = Error>
         + Clone
         + Send
         + 'static,

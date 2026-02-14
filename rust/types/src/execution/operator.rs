@@ -1,16 +1,19 @@
-use serde::{de::Error, Deserialize, Deserializer, Serialize};
+use serde::{de::Error, ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;
 use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
-    hash::Hash,
+    fmt,
+    hash::{Hash, Hasher},
+    ops::{Add, Div, Mul, Neg, Sub},
 };
 use thiserror::Error;
-use utoipa::ToSchema;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
-    Metadata, ScalarEncoding, SparseVector, Where,
+    ContainsOperator, DocumentExpression, DocumentOperator, Metadata, MetadataComparison,
+    MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, ScalarEncoding,
+    SetOperator, SparseVector, Where,
 };
 
 use super::error::QueryConversionError;
@@ -115,17 +118,103 @@ pub struct FetchLog {
     pub start_log_offset_id: u32,
 }
 
-/// The `Filter` operator filters the collection with specified criteria
+/// Filter the search results.
 ///
-/// # Parameters
-/// - `query_ids`: The user provided ids, which specifies the domain of the filter if provided
-/// - `where_clause`: The predicate on individual record
-#[derive(Clone, Debug, Default, Serialize)]
+/// Combines document ID filtering with metadata and document content predicates.
+/// For the Search API, use `where_clause` with Key expressions.
+///
+/// # Fields
+///
+/// * `query_ids` - Optional list of document IDs to filter (legacy, prefer Where expressions)
+/// * `where_clause` - Predicate on document metadata, content, or IDs
+///
+/// # Examples
+///
+/// ## Simple metadata filter
+///
+/// ```
+/// use chroma_types::operator::{Filter, Key};
+///
+/// let filter = Filter {
+///     query_ids: None,
+///     where_clause: Some(Key::field("status").eq("published")),
+/// };
+/// ```
+///
+/// ## Combined filters
+///
+/// ```
+/// use chroma_types::operator::{Filter, Key};
+///
+/// let filter = Filter {
+///     query_ids: None,
+///     where_clause: Some(
+///         Key::field("status").eq("published")
+///             & Key::field("year").gte(2020)
+///             & Key::field("category").is_in(vec!["tech", "science"])
+///     ),
+/// };
+/// ```
+///
+/// ## Document content filter
+///
+/// ```
+/// use chroma_types::operator::{Filter, Key};
+///
+/// let filter = Filter {
+///     query_ids: None,
+///     where_clause: Some(Key::Document.contains("machine learning")),
+/// };
+/// ```
+#[derive(Clone, Debug, Default)]
 pub struct Filter {
-    #[serde(default)]
     pub query_ids: Option<Vec<String>>,
-    #[serde(default)]
     pub where_clause: Option<Where>,
+}
+
+impl Serialize for Filter {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // For the search API, serialize directly as the where clause (or empty object if None)
+        // If query_ids are present, they should be combined with the where_clause as Key::ID.is_in([...])
+
+        match (&self.query_ids, &self.where_clause) {
+            (None, None) => {
+                // No filter at all - serialize empty object
+                let map = serializer.serialize_map(Some(0))?;
+                map.end()
+            }
+            (None, Some(where_clause)) => {
+                // Only where clause - serialize it directly
+                where_clause.serialize(serializer)
+            }
+            (Some(ids), None) => {
+                // Only query_ids - create Where clause: Key::ID.is_in(ids)
+                let id_where = Where::Metadata(MetadataExpression {
+                    key: "#id".to_string(),
+                    comparison: MetadataComparison::Set(
+                        SetOperator::In,
+                        MetadataSetValue::Str(ids.clone()),
+                    ),
+                });
+                id_where.serialize(serializer)
+            }
+            (Some(ids), Some(where_clause)) => {
+                // Both present - combine with AND: Key::ID.is_in(ids) & where_clause
+                let id_where = Where::Metadata(MetadataExpression {
+                    key: "#id".to_string(),
+                    comparison: MetadataComparison::Set(
+                        SetOperator::In,
+                        MetadataSetValue::Str(ids.clone()),
+                    ),
+                });
+                let combined = Where::conjunction(vec![id_where, where_clause.clone()]);
+                combined.serialize(serializer)
+            }
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for Filter {
@@ -248,11 +337,38 @@ impl TryFrom<KnnBatch> for chroma_proto::KnnOperator {
     }
 }
 
-/// The `Limit` operator selects a range or records sorted by their offset ids
+/// Pagination control for search results.
 ///
-/// # Parameters
-/// - `skip`: The number of records to skip in the beginning
-/// - `fetch`: The number of records to fetch after `skip`
+/// Controls how many results to return and how many to skip for pagination.
+///
+/// # Fields
+///
+/// * `offset` - Number of results to skip (default: 0)
+/// * `limit` - Maximum results to return (None = no limit)
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::Limit;
+///
+/// // First page: results 0-9
+/// let limit = Limit {
+///     offset: 0,
+///     limit: Some(10),
+/// };
+///
+/// // Second page: results 10-19
+/// let limit = Limit {
+///     offset: 10,
+///     limit: Some(10),
+/// };
+///
+/// // No limit: all results
+/// let limit = Limit {
+///     offset: 0,
+///     limit: None,
+/// };
+/// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Limit {
     #[serde(default)]
@@ -280,7 +396,7 @@ impl From<Limit> for chroma_proto::LimitOperator {
 }
 
 /// The `RecordDistance` represents a measure of embedding (identified by `offset_id`) with respect to query embedding
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct RecordMeasure {
     pub offset_id: u32,
     pub measure: f32,
@@ -294,9 +410,17 @@ impl PartialEq for RecordMeasure {
 
 impl Eq for RecordMeasure {}
 
+impl Hash for RecordMeasure {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.offset_id.hash(state);
+    }
+}
+
 impl Ord for RecordMeasure {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.measure.total_cmp(&other.measure)
+        self.measure
+            .total_cmp(&other.measure)
+            .then_with(|| self.offset_id.cmp(&other.offset_id))
     }
 }
 
@@ -326,7 +450,7 @@ pub struct Merge {
 }
 
 impl Merge {
-    pub fn merge<M: Eq + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
+    pub fn merge<M: Clone + Eq + Hash + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
         let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
         let mut max_heap = batch_iters
@@ -335,6 +459,7 @@ impl Merge {
             .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
+        let mut seen = HashSet::with_capacity(self.k as usize);
         let mut fusion = Vec::with_capacity(self.k as usize);
         while let Some((m, idx)) = max_heap.pop() {
             if self.k <= fusion.len() as u32 {
@@ -343,7 +468,7 @@ impl Merge {
             if let Some(next_m) = batch_iters[idx].next() {
                 max_heap.push((next_m, idx));
             }
-            if fusion.last().is_some_and(|tail| tail == &m) {
+            if !seen.insert(m.clone()) {
                 continue;
             }
             fusion.push(m);
@@ -658,6 +783,69 @@ impl TryFrom<KnnBatchResult> for chroma_proto::KnnBatchResult {
     }
 }
 
+/// A query vector for KNN search.
+///
+/// Supports both dense and sparse vector formats.
+///
+/// # Variants
+///
+/// ## Dense
+///
+/// Standard dense embeddings as a vector of floats.
+///
+/// ```
+/// use chroma_types::operator::QueryVector;
+///
+/// let dense = QueryVector::Dense(vec![0.1, 0.2, 0.3, 0.4]);
+/// ```
+///
+/// ## Sparse
+///
+/// Sparse vectors with explicit indices and values.
+///
+/// ```
+/// use chroma_types::operator::QueryVector;
+/// use chroma_types::SparseVector;
+///
+/// let sparse = QueryVector::Sparse(SparseVector::new(
+///     vec![0, 5, 10, 50],      // indices
+///     vec![0.5, 0.3, 0.8, 0.2], // values
+/// ).unwrap());
+/// ```
+///
+/// # Examples
+///
+/// ## Dense vector in KNN
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let rank = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 100,
+///     default: None,
+///     return_rank: false,
+/// };
+/// ```
+///
+/// ## Sparse vector in KNN
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+/// use chroma_types::SparseVector;
+///
+/// let rank = RankExpr::Knn {
+///     query: QueryVector::Sparse(SparseVector::new(
+///         vec![1, 5, 10],
+///         vec![0.5, 0.3, 0.8],
+///     ).unwrap()),
+///     key: Key::field("sparse_embedding"),
+///     limit: 100,
+///     default: None,
+///     return_rank: false,
+/// };
+/// ```
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum QueryVector {
@@ -675,7 +863,9 @@ impl TryFrom<chroma_proto::QueryVector> for QueryVector {
                 Ok(QueryVector::Dense(dense.try_into().map(|(v, _)| v)?))
             }
             chroma_proto::query_vector::Vector::Sparse(sparse) => {
-                Ok(QueryVector::Sparse(sparse.into()))
+                Ok(QueryVector::Sparse(sparse.try_into().map_err(|_| {
+                    QueryConversionError::validation("sparse vector length mismatch")
+                })?))
             }
         }
     }
@@ -701,13 +891,55 @@ impl TryFrom<QueryVector> for chroma_proto::QueryVector {
     }
 }
 
+impl From<Vec<f32>> for QueryVector {
+    fn from(vec: Vec<f32>) -> Self {
+        QueryVector::Dense(vec)
+    }
+}
+
+impl From<SparseVector> for QueryVector {
+    fn from(sparse: SparseVector) -> Self {
+        QueryVector::Sparse(sparse)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct KnnQuery {
     pub query: QueryVector,
-    pub key: String,
+    pub key: Key,
     pub limit: u32,
 }
 
+/// Wrapper for ranking expressions in search queries.
+///
+/// Contains an optional ranking expression. When None, results are returned in
+/// natural storage order without scoring.
+///
+/// # Fields
+///
+/// * `expr` - The ranking expression (None = no ranking)
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{Rank, RankExpr, QueryVector, Key};
+///
+/// // With ranking
+/// let rank = Rank {
+///     expr: Some(RankExpr::Knn {
+///         query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///         key: Key::Embedding,
+///         limit: 100,
+///         default: None,
+///         return_rank: false,
+///     }),
+/// };
+///
+/// // No ranking (natural order)
+/// let rank = Rank {
+///     expr: None,
+/// };
+/// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(transparent)]
 pub struct Rank {
@@ -743,6 +975,168 @@ impl TryFrom<Rank> for chroma_proto::RankOperator {
     }
 }
 
+/// A ranking expression for scoring and ordering search results.
+///
+/// Ranking expressions determine which documents appear in results and their order.
+/// Lower scores indicate better matches (distance-based scoring).
+///
+/// # Variants
+///
+/// ## Knn - K-Nearest Neighbor Search
+///
+/// The primary ranking method for vector similarity search.
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let rank = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 100,        // Consider top 100 candidates
+///     default: None,     // No default score for missing documents
+///     return_rank: false, // Return distances, not rank positions
+/// };
+/// ```
+///
+/// ## Value - Constant
+///
+/// Represents a constant score.
+///
+/// ```
+/// use chroma_types::operator::RankExpr;
+///
+/// let rank = RankExpr::Value(0.5);
+/// ```
+///
+/// ## Arithmetic Operations
+///
+/// Combine ranking expressions using standard operators (+, -, *, /).
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let knn1 = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 100,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// let knn2 = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.2, 0.3, 0.4]),
+///     key: Key::field("other_embedding"),
+///     limit: 100,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// // Weighted combination: 70% knn1 + 30% knn2
+/// let combined = knn1 * 0.7 + knn2 * 0.3;
+///
+/// // Normalized
+/// let normalized = combined / 2.0;
+/// ```
+///
+/// ## Mathematical Functions
+///
+/// Apply mathematical transformations to scores.
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let knn = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 100,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// // Exponential - amplifies differences
+/// let amplified = knn.clone().exp();
+///
+/// // Logarithm - compresses range (add constant to avoid log(0))
+/// let compressed = (knn.clone() + 1.0).log();
+///
+/// // Absolute value
+/// let absolute = knn.clone().abs();
+///
+/// // Min/Max - clamping
+/// let clamped = knn.min(1.0).max(0.0);
+/// ```
+///
+/// # Examples
+///
+/// ## Basic vector search
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let rank = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 100,
+///     default: None,
+///     return_rank: false,
+/// };
+/// ```
+///
+/// ## Hybrid search with weighted combination
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key};
+///
+/// let dense = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 200,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// let sparse = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]), // Use sparse in practice
+///     key: Key::field("sparse_embedding"),
+///     limit: 200,
+///     default: None,
+///     return_rank: false,
+/// };
+///
+/// // 70% semantic + 30% keyword
+/// let hybrid = dense * 0.7 + sparse * 0.3;
+/// ```
+///
+/// ## Reciprocal Rank Fusion (RRF)
+///
+/// Use the `rrf()` function for combining rankings with different score scales.
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key, rrf};
+///
+/// let dense = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 200,
+///     default: None,
+///     return_rank: true, // RRF requires rank positions
+/// };
+///
+/// let sparse = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::field("sparse_embedding"),
+///     limit: 200,
+///     default: None,
+///     return_rank: true, // RRF requires rank positions
+/// };
+///
+/// let rrf_rank = rrf(
+///     vec![dense, sparse],
+///     Some(60),           // k parameter (smoothing)
+///     Some(vec![0.7, 0.3]), // weights
+///     false,              // normalize weights
+/// ).unwrap();
+/// ```
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum RankExpr {
     #[serde(rename = "$abs")]
@@ -758,7 +1152,7 @@ pub enum RankExpr {
     Knn {
         query: QueryVector,
         #[serde(default = "RankExpr::default_knn_key")]
-        key: String,
+        key: Key,
         #[serde(default = "RankExpr::default_knn_limit")]
         limit: u32,
         #[serde(default)]
@@ -786,12 +1180,12 @@ pub enum RankExpr {
 }
 
 impl RankExpr {
-    pub fn default_knn_key() -> String {
-        "#embedding".to_string()
+    pub fn default_knn_key() -> Key {
+        Key::Embedding
     }
 
     pub fn default_knn_limit() -> u32 {
-        128
+        16
     }
 
     pub fn knn_queries(&self) -> Vec<KnnQuery> {
@@ -822,6 +1216,329 @@ impl RankExpr {
             }],
         }
     }
+
+    /// Applies exponential transformation: e^rank.
+    ///
+    /// Amplifies differences between scores.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let knn = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// let amplified = knn.exp();
+    /// ```
+    pub fn exp(self) -> Self {
+        RankExpr::Exponentiation(Box::new(self))
+    }
+
+    /// Applies natural logarithm transformation: ln(rank).
+    ///
+    /// Compresses the score range. Add a constant to avoid log(0).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let knn = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// // Add constant to avoid log(0)
+    /// let compressed = (knn + 1.0).log();
+    /// ```
+    pub fn log(self) -> Self {
+        RankExpr::Logarithm(Box::new(self))
+    }
+
+    /// Takes absolute value of the ranking expression.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let knn1 = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// let knn2 = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.2, 0.3, 0.4]),
+    ///     key: Key::field("other"),
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// // Absolute difference
+    /// let diff = (knn1 - knn2).abs();
+    /// ```
+    pub fn abs(self) -> Self {
+        RankExpr::Absolute(Box::new(self))
+    }
+
+    /// Returns maximum of this expression and another.
+    ///
+    /// Can be chained to clamp scores to a maximum value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let knn = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// // Clamp to maximum of 1.0
+    /// let clamped = knn.clone().max(1.0);
+    ///
+    /// // Clamp to range [0.0, 1.0]
+    /// let range_clamped = knn.min(0.0).max(1.0);
+    /// ```
+    pub fn max(self, other: impl Into<RankExpr>) -> Self {
+        let other = other.into();
+
+        match self {
+            RankExpr::Maximum(mut exprs) => match other {
+                RankExpr::Maximum(other_exprs) => {
+                    exprs.extend(other_exprs);
+                    RankExpr::Maximum(exprs)
+                }
+                _ => {
+                    exprs.push(other);
+                    RankExpr::Maximum(exprs)
+                }
+            },
+            _ => match other {
+                RankExpr::Maximum(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Maximum(exprs)
+                }
+                _ => RankExpr::Maximum(vec![self, other]),
+            },
+        }
+    }
+
+    /// Returns minimum of this expression and another.
+    ///
+    /// Can be chained to clamp scores to a minimum value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::{RankExpr, QueryVector, Key};
+    ///
+    /// let knn = RankExpr::Knn {
+    ///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+    ///     key: Key::Embedding,
+    ///     limit: 100,
+    ///     default: None,
+    ///     return_rank: false,
+    /// };
+    ///
+    /// // Clamp to minimum of 0.0 (ensure non-negative)
+    /// let clamped = knn.clone().min(0.0);
+    ///
+    /// // Clamp to range [0.0, 1.0]
+    /// let range_clamped = knn.min(0.0).max(1.0);
+    /// ```
+    pub fn min(self, other: impl Into<RankExpr>) -> Self {
+        let other = other.into();
+
+        match self {
+            RankExpr::Minimum(mut exprs) => match other {
+                RankExpr::Minimum(other_exprs) => {
+                    exprs.extend(other_exprs);
+                    RankExpr::Minimum(exprs)
+                }
+                _ => {
+                    exprs.push(other);
+                    RankExpr::Minimum(exprs)
+                }
+            },
+            _ => match other {
+                RankExpr::Minimum(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Minimum(exprs)
+                }
+                _ => RankExpr::Minimum(vec![self, other]),
+            },
+        }
+    }
+}
+
+impl Add for RankExpr {
+    type Output = RankExpr;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        match self {
+            RankExpr::Summation(mut exprs) => match rhs {
+                RankExpr::Summation(rhs_exprs) => {
+                    exprs.extend(rhs_exprs);
+                    RankExpr::Summation(exprs)
+                }
+                _ => {
+                    exprs.push(rhs);
+                    RankExpr::Summation(exprs)
+                }
+            },
+            _ => match rhs {
+                RankExpr::Summation(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Summation(exprs)
+                }
+                _ => RankExpr::Summation(vec![self, rhs]),
+            },
+        }
+    }
+}
+
+impl Add<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn add(self, rhs: f32) -> Self::Output {
+        self + RankExpr::Value(rhs)
+    }
+}
+
+impl Add<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn add(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) + rhs
+    }
+}
+
+impl Sub for RankExpr {
+    type Output = RankExpr;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        RankExpr::Subtraction {
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Sub<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn sub(self, rhs: f32) -> Self::Output {
+        self - RankExpr::Value(rhs)
+    }
+}
+
+impl Sub<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn sub(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) - rhs
+    }
+}
+
+impl Mul for RankExpr {
+    type Output = RankExpr;
+
+    fn mul(self, rhs: Self) -> Self::Output {
+        match self {
+            RankExpr::Multiplication(mut exprs) => match rhs {
+                RankExpr::Multiplication(rhs_exprs) => {
+                    exprs.extend(rhs_exprs);
+                    RankExpr::Multiplication(exprs)
+                }
+                _ => {
+                    exprs.push(rhs);
+                    RankExpr::Multiplication(exprs)
+                }
+            },
+            _ => match rhs {
+                RankExpr::Multiplication(mut exprs) => {
+                    exprs.insert(0, self);
+                    RankExpr::Multiplication(exprs)
+                }
+                _ => RankExpr::Multiplication(vec![self, rhs]),
+            },
+        }
+    }
+}
+
+impl Mul<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn mul(self, rhs: f32) -> Self::Output {
+        self * RankExpr::Value(rhs)
+    }
+}
+
+impl Mul<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn mul(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) * rhs
+    }
+}
+
+impl Div for RankExpr {
+    type Output = RankExpr;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        RankExpr::Division {
+            left: Box::new(self),
+            right: Box::new(rhs),
+        }
+    }
+}
+
+impl Div<f32> for RankExpr {
+    type Output = RankExpr;
+
+    fn div(self, rhs: f32) -> Self::Output {
+        self / RankExpr::Value(rhs)
+    }
+}
+
+impl Div<RankExpr> for f32 {
+    type Output = RankExpr;
+
+    fn div(self, rhs: RankExpr) -> Self::Output {
+        RankExpr::Value(self) / rhs
+    }
+}
+
+impl Neg for RankExpr {
+    type Output = RankExpr;
+
+    fn neg(self) -> Self::Output {
+        RankExpr::Value(-1.0) * self
+    }
+}
+
+impl From<f32> for RankExpr {
+    fn from(v: f32) -> Self {
+        RankExpr::Value(v)
+    }
 }
 
 impl TryFrom<chroma_proto::RankExpr> for RankExpr {
@@ -850,7 +1567,7 @@ impl TryFrom<chroma_proto::RankExpr> for RankExpr {
                     .try_into()?;
                 Ok(RankExpr::Knn {
                     query,
-                    key: knn.key,
+                    key: Key::from(knn.key),
                     limit: knn.limit,
                     default: knn.default,
                     return_rank: knn.return_rank,
@@ -930,7 +1647,7 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
                 return_rank,
             } => chroma_proto::rank_expr::Rank::Knn(chroma_proto::rank_expr::Knn {
                 query: Some(query.try_into()?),
-                key,
+                key: key.to_string(),
                 limit,
                 default,
                 return_rank,
@@ -989,7 +1706,72 @@ impl TryFrom<RankExpr> for chroma_proto::RankExpr {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ToSchema)]
+/// Represents a field key in search queries.
+///
+/// Used for both selecting fields to return and building filter expressions.
+/// Predefined keys access special fields, while custom keys access metadata.
+///
+/// # Predefined Keys
+///
+/// - `Key::Document` - Document text content (`#document`)
+/// - `Key::Embedding` - Vector embeddings (`#embedding`)
+/// - `Key::Metadata` - All metadata fields (`#metadata`)
+/// - `Key::Score` - Search scores (`#score`)
+///
+/// # Custom Keys
+///
+/// Use `Key::field()` or `Key::from()` to reference metadata fields:
+///
+/// ```
+/// use chroma_types::operator::Key;
+///
+/// let key = Key::field("author");
+/// let key = Key::from("title");
+/// ```
+///
+/// # Examples
+///
+/// ## Building filters
+///
+/// ```
+/// use chroma_types::operator::Key;
+///
+/// // Equality
+/// let filter = Key::field("status").eq("published");
+///
+/// // Comparisons
+/// let filter = Key::field("year").gte(2020);
+/// let filter = Key::field("score").lt(0.9);
+///
+/// // Set operations
+/// let filter = Key::field("category").is_in(vec!["tech", "science"]);
+/// let filter = Key::field("status").not_in(vec!["deleted", "archived"]);
+///
+/// // Document content
+/// let filter = Key::Document.contains("machine learning");
+/// let filter = Key::Document.regex(r"\bAPI\b");
+///
+/// // Combining filters
+/// let filter = Key::field("status").eq("published")
+///     & Key::field("year").gte(2020);
+/// ```
+///
+/// ## Selecting fields
+///
+/// ```
+/// use chroma_types::plan::SearchPayload;
+/// use chroma_types::operator::Key;
+///
+/// let search = SearchPayload::default()
+///     .select([
+///         Key::Document,
+///         Key::Score,
+///         Key::field("title"),
+///         Key::field("author"),
+///     ]);
+/// ```
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub enum Key {
     // Predefined keys
     Document,
@@ -1020,17 +1802,412 @@ impl<'de> Deserialize<'de> for Key {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        Ok(match s.as_str() {
+        Ok(Key::from(s))
+    }
+}
+
+impl fmt::Display for Key {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Key::Document => write!(f, "#document"),
+            Key::Embedding => write!(f, "#embedding"),
+            Key::Metadata => write!(f, "#metadata"),
+            Key::Score => write!(f, "#score"),
+            Key::MetadataField(field) => write!(f, "{}", field),
+        }
+    }
+}
+
+impl From<&str> for Key {
+    fn from(s: &str) -> Self {
+        match s {
             "#document" => Key::Document,
             "#embedding" => Key::Embedding,
             "#metadata" => Key::Metadata,
             "#score" => Key::Score,
             // Any other string is treated as a metadata field key
             field => Key::MetadataField(field.to_string()),
+        }
+    }
+}
+
+impl From<String> for Key {
+    fn from(s: String) -> Self {
+        Key::from(s.as_str())
+    }
+}
+
+impl Key {
+    /// Creates a Key for a custom metadata field.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let status = Key::field("status");
+    /// let year = Key::field("year");
+    /// let author = Key::field("author");
+    /// ```
+    pub fn field(name: impl Into<String>) -> Self {
+        Key::MetadataField(name.into())
+    }
+
+    /// Creates an equality filter: `field == value`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// // String equality
+    /// let filter = Key::field("status").eq("published");
+    ///
+    /// // Numeric equality
+    /// let filter = Key::field("count").eq(42);
+    ///
+    /// // Boolean equality
+    /// let filter = Key::field("featured").eq(true);
+    /// ```
+    pub fn eq<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::Equal, value.into()),
+        })
+    }
+
+    /// Creates an inequality filter: `field != value`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("status").ne("deleted");
+    /// let filter = Key::field("count").ne(0);
+    /// ```
+    pub fn ne<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::NotEqual, value.into()),
+        })
+    }
+
+    /// Creates a greater-than filter: `field > value` (numeric only).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("score").gt(0.5);
+    /// let filter = Key::field("year").gt(2020);
+    /// ```
+    pub fn gt<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::GreaterThan, value.into()),
+        })
+    }
+
+    /// Creates a greater-than-or-equal filter: `field >= value` (numeric only).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("score").gte(0.5);
+    /// let filter = Key::field("year").gte(2020);
+    /// ```
+    pub fn gte<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::GreaterThanOrEqual,
+                value.into(),
+            ),
+        })
+    }
+
+    /// Creates a less-than filter: `field < value` (numeric only).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("score").lt(0.9);
+    /// let filter = Key::field("year").lt(2025);
+    /// ```
+    pub fn lt<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(PrimitiveOperator::LessThan, value.into()),
+        })
+    }
+
+    /// Creates a less-than-or-equal filter: `field <= value` (numeric only).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("score").lte(0.9);
+    /// let filter = Key::field("year").lte(2024);
+    /// ```
+    pub fn lte<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::LessThanOrEqual,
+                value.into(),
+            ),
+        })
+    }
+
+    /// Creates a set membership filter: `field IN values`.
+    ///
+    /// Accepts any iterator (Vec, array, slice, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// // With Vec
+    /// let filter = Key::field("year").is_in(vec![2023, 2024, 2025]);
+    ///
+    /// // With array
+    /// let filter = Key::field("category").is_in(["tech", "science", "math"]);
+    ///
+    /// // With owned strings
+    /// let categories = vec!["tech".to_string(), "science".to_string()];
+    /// let filter = Key::field("category").is_in(categories);
+    /// ```
+    pub fn is_in<I, T>(self, values: I) -> Where
+    where
+        I: IntoIterator<Item = T>,
+        Vec<T>: Into<MetadataSetValue>,
+    {
+        let vec: Vec<T> = values.into_iter().collect();
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Set(SetOperator::In, vec.into()),
+        })
+    }
+
+    /// Creates a set exclusion filter: `field NOT IN values`.
+    ///
+    /// Accepts any iterator (Vec, array, slice, etc.).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// // Exclude deleted and archived
+    /// let filter = Key::field("status").not_in(vec!["deleted", "archived"]);
+    ///
+    /// // Exclude specific years
+    /// let filter = Key::field("year").not_in(vec![2019, 2020]);
+    /// ```
+    pub fn not_in<I, T>(self, values: I) -> Where
+    where
+        I: IntoIterator<Item = T>,
+        Vec<T>: Into<MetadataSetValue>,
+    {
+        let vec: Vec<T> = values.into_iter().collect();
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::Set(SetOperator::NotIn, vec.into()),
+        })
+    }
+
+    /// Creates a document substring filter (case-sensitive).
+    ///
+    /// Only valid on `Key::Document`. Pattern must have at least 3 literal
+    /// characters for accurate results.
+    ///
+    /// For metadata array contains, use [`contains_value`](Key::contains_value).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::Document.contains("machine learning");
+    /// let filter = Key::Document.contains("API");
+    /// ```
+    pub fn contains<S: Into<String>>(self, text: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: text.into(),
+        })
+    }
+
+    /// Creates a negative document substring filter (case-sensitive).
+    ///
+    /// Only valid on `Key::Document`.
+    ///
+    /// For metadata array not-contains, use
+    /// [`not_contains_value`](Key::not_contains_value).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::Document.not_contains("deprecated");
+    /// let filter = Key::Document.not_contains("beta");
+    /// ```
+    pub fn not_contains<S: Into<String>>(self, text: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::NotContains,
+            pattern: text.into(),
+        })
+    }
+
+    /// Checks whether a metadata array field contains the given scalar value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("tags").contains_value("action");
+    /// let filter = Key::field("scores").contains_value(42);
+    /// let filter = Key::field("ratings").contains_value(4.5);
+    /// let filter = Key::field("flags").contains_value(true);
+    /// ```
+    pub fn contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::ArrayContains(ContainsOperator::Contains, value.into()),
+        })
+    }
+
+    /// Checks that a metadata array field does **not** contain the given scalar
+    /// value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("tags").not_contains_value("draft");
+    /// let filter = Key::field("scores").not_contains_value(0);
+    /// ```
+    pub fn not_contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::NotContains,
+                value.into(),
+            ),
+        })
+    }
+
+    /// Creates a regex filter (case-sensitive, document content only).
+    ///
+    /// Note: Currently only works with `Key::Document`. Pattern must have at least
+    /// 3 literal characters for accurate results.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// // Match whole word "API"
+    /// let filter = Key::Document.regex(r"\bAPI\b");
+    ///
+    /// // Match version pattern
+    /// let filter = Key::Document.regex(r"v\d+\.\d+\.\d+");
+    /// ```
+    pub fn regex<S: Into<String>>(self, pattern: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Regex,
+            pattern: pattern.into(),
+        })
+    }
+
+    /// Creates a negative regex filter (case-sensitive, document content only).
+    ///
+    /// Note: Currently only works with `Key::Document`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// // Exclude beta versions
+    /// let filter = Key::Document.not_regex(r"beta");
+    ///
+    /// // Exclude test documents
+    /// let filter = Key::Document.not_regex(r"\btest\b");
+    /// ```
+    pub fn not_regex<S: Into<String>>(self, pattern: S) -> Where {
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::NotRegex,
+            pattern: pattern.into(),
         })
     }
 }
 
+/// Field selection for search results.
+///
+/// Specifies which fields to include in the results. IDs are always included.
+///
+/// # Fields
+///
+/// * `keys` - Set of keys to include in results
+///
+/// # Available Keys
+///
+/// * `Key::Document` - Document text content
+/// * `Key::Embedding` - Vector embeddings
+/// * `Key::Metadata` - All metadata fields
+/// * `Key::Score` - Search scores
+/// * `Key::field("name")` - Specific metadata field
+///
+/// # Performance
+///
+/// Selecting fewer fields improves performance by reducing data transfer:
+/// - Minimal: IDs only (default, fastest)
+/// - Moderate: Scores + specific metadata fields
+/// - Heavy: Documents + embeddings (larger payloads)
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{Select, Key};
+/// use std::collections::HashSet;
+///
+/// // Select predefined fields
+/// let select = Select {
+///     keys: [Key::Document, Key::Score].into_iter().collect(),
+/// };
+///
+/// // Select specific metadata fields
+/// let select = Select {
+///     keys: [
+///         Key::field("title"),
+///         Key::field("author"),
+///         Key::Score,
+///     ].into_iter().collect(),
+/// };
+///
+/// // Select everything
+/// let select = Select {
+///     keys: [
+///         Key::Document,
+///         Key::Embedding,
+///         Key::Metadata,
+///         Key::Score,
+///     ].into_iter().collect(),
+/// };
+/// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct Select {
     #[serde(default)]
@@ -1075,7 +2252,218 @@ impl TryFrom<Select> for chroma_proto::SelectOperator {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, ToSchema)]
+/// Aggregation function applied within each group.
+///
+/// Determines which records to keep from each group and their ordering.
+///
+/// # Variants
+///
+/// * `MinK` - Returns k records with minimum values (ascending order).
+///   Use with `Key::Score` to get best matches (lower score = better in Chroma).
+/// * `MaxK` - Returns k records with maximum values (descending order).
+///
+/// # Multi-level Ordering
+///
+/// The `keys` field supports multi-level ordering. Records are sorted by
+/// the first key, then by the second key for ties, and so on.
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{Aggregate, Key};
+///
+/// // Best 3 by score per group
+/// let agg = Aggregate::MinK {
+///     keys: vec![Key::Score],
+///     k: 3,
+/// };
+///
+/// // Best 3 by score, then by date for ties
+/// let agg = Aggregate::MinK {
+///     keys: vec![Key::Score, Key::field("date")],
+///     k: 3,
+/// };
+///
+/// // Top 5 by recency (highest date first)
+/// let agg = Aggregate::MaxK {
+///     keys: vec![Key::field("date")],
+///     k: 5,
+/// };
+/// ```
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub enum Aggregate {
+    /// Returns k records with minimum values (ascending order)
+    #[serde(rename = "$min_k")]
+    MinK {
+        /// Keys for multi-level ordering
+        keys: Vec<Key>,
+        /// Number of records to return per group
+        k: u32,
+    },
+    /// Returns k records with maximum values (descending order)
+    #[serde(rename = "$max_k")]
+    MaxK {
+        /// Keys for multi-level ordering
+        keys: Vec<Key>,
+        /// Number of records to return per group
+        k: u32,
+    },
+}
+
+/// Groups results by metadata keys and aggregates within each group.
+///
+/// Results are grouped by the specified metadata keys (like SQL GROUP BY),
+/// then aggregated within each group using MinK or MaxK ordering.
+/// The final output is flattened and sorted by score.
+///
+/// # Fields
+///
+/// * `keys` - Metadata keys to group by (composite grouping)
+/// * `aggregate` - Aggregation function to apply within each group
+///
+/// # Behavior
+///
+/// * Missing metadata keys are treated as Null (forming their own group)
+/// * Empty groups are omitted from results
+/// * Final output is flattened (group structure not preserved)
+/// * Results are sorted by score after aggregation
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{GroupBy, Aggregate, Key};
+///
+/// // Top 3 documents per category
+/// let group_by = GroupBy {
+///     keys: vec![Key::field("category")],
+///     aggregate: Some(Aggregate::MinK {
+///         keys: vec![Key::Score],
+///         k: 3,
+///     }),
+/// };
+///
+/// // Top 2 per (category, author) combination
+/// let group_by = GroupBy {
+///     keys: vec![Key::field("category"), Key::field("author")],
+///     aggregate: Some(Aggregate::MinK {
+///         keys: vec![Key::Score, Key::field("date")],
+///         k: 2,
+///     }),
+/// };
+/// ```
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct GroupBy {
+    /// Metadata keys to group by
+    #[serde(default)]
+    pub keys: Vec<Key>,
+    /// Aggregation to apply within each group (required when keys is non-empty)
+    #[serde(default)]
+    pub aggregate: Option<Aggregate>,
+}
+
+impl TryFrom<chroma_proto::Aggregate> for Aggregate {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::Aggregate) -> Result<Self, Self::Error> {
+        match value
+            .aggregate
+            .ok_or(QueryConversionError::field("aggregate"))?
+        {
+            chroma_proto::aggregate::Aggregate::MinK(min_k) => {
+                let keys = min_k.keys.into_iter().map(Key::from).collect();
+                Ok(Aggregate::MinK { keys, k: min_k.k })
+            }
+            chroma_proto::aggregate::Aggregate::MaxK(max_k) => {
+                let keys = max_k.keys.into_iter().map(Key::from).collect();
+                Ok(Aggregate::MaxK { keys, k: max_k.k })
+            }
+        }
+    }
+}
+
+impl From<Aggregate> for chroma_proto::Aggregate {
+    fn from(value: Aggregate) -> Self {
+        let aggregate = match value {
+            Aggregate::MinK { keys, k } => {
+                chroma_proto::aggregate::Aggregate::MinK(chroma_proto::aggregate::MinK {
+                    keys: keys.into_iter().map(|k| k.to_string()).collect(),
+                    k,
+                })
+            }
+            Aggregate::MaxK { keys, k } => {
+                chroma_proto::aggregate::Aggregate::MaxK(chroma_proto::aggregate::MaxK {
+                    keys: keys.into_iter().map(|k| k.to_string()).collect(),
+                    k,
+                })
+            }
+        };
+
+        chroma_proto::Aggregate {
+            aggregate: Some(aggregate),
+        }
+    }
+}
+
+impl TryFrom<chroma_proto::GroupByOperator> for GroupBy {
+    type Error = QueryConversionError;
+
+    fn try_from(value: chroma_proto::GroupByOperator) -> Result<Self, Self::Error> {
+        let keys = value.keys.into_iter().map(Key::from).collect();
+        let aggregate = value.aggregate.map(TryInto::try_into).transpose()?;
+
+        Ok(Self { keys, aggregate })
+    }
+}
+
+impl TryFrom<GroupBy> for chroma_proto::GroupByOperator {
+    type Error = QueryConversionError;
+
+    fn try_from(value: GroupBy) -> Result<Self, Self::Error> {
+        let keys = value.keys.into_iter().map(|k| k.to_string()).collect();
+        let aggregate = value.aggregate.map(Into::into);
+
+        Ok(Self { keys, aggregate })
+    }
+}
+
+/// A single search result record.
+///
+/// Contains the document ID and optionally document content, embeddings, metadata,
+/// and search score based on what was selected in the search query.
+///
+/// # Fields
+///
+/// * `id` - Document ID (always present)
+/// * `document` - Document text content (if selected)
+/// * `embedding` - Vector embedding (if selected)
+/// * `metadata` - Document metadata (if selected)
+/// * `score` - Search score (present when ranking is used, lower = better match)
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::SearchRecord;
+///
+/// fn process_results(records: Vec<SearchRecord>) {
+///     for record in records {
+///         println!("ID: {}", record.id);
+///
+///         if let Some(score) = record.score {
+///             println!("  Score: {:.3}", score);
+///         }
+///
+///         if let Some(doc) = record.document {
+///             println!("  Document: {}", doc);
+///         }
+///
+///         if let Some(meta) = record.metadata {
+///             println!("  Metadata: {:?}", meta);
+///         }
+///     }
+/// }
+/// ```
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct SearchRecord {
     pub id: String,
     pub document: Option<String>,
@@ -1125,6 +2513,27 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
     }
 }
 
+/// Results for a single search payload.
+///
+/// Contains all matching records for one search query.
+///
+/// # Fields
+///
+/// * `records` - Vector of search records, ordered by score (ascending)
+///
+/// # Examples
+///
+/// ```
+/// use chroma_types::operator::{SearchPayloadResult, SearchRecord};
+///
+/// fn process_search_result(result: SearchPayloadResult) {
+///     println!("Found {} results", result.records.len());
+///
+///     for (i, record) in result.records.iter().enumerate() {
+///         println!("{}. {} (score: {:?})", i + 1, record.id, record.score);
+///     }
+/// }
+/// ```
 #[derive(Clone, Debug, Default)]
 pub struct SearchPayloadResult {
     pub records: Vec<SearchRecord>,
@@ -1158,6 +2567,48 @@ impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
     }
 }
 
+/// Results from a batch search operation.
+///
+/// Contains results for each search payload in the batch, maintaining the same order
+/// as the input searches.
+///
+/// # Fields
+///
+/// * `results` - Results for each search payload (indexed by search position)
+/// * `pulled_log_bytes` - Total bytes pulled from log (for internal metrics)
+///
+/// # Examples
+///
+/// ## Single search
+///
+/// ```
+/// use chroma_types::operator::SearchResult;
+///
+/// fn process_single_search(result: SearchResult) {
+///     // Single search, so results[0] contains our records
+///     let records = &result.results[0].records;
+///
+///     for record in records {
+///         println!("{}: score={:?}", record.id, record.score);
+///     }
+/// }
+/// ```
+///
+/// ## Batch search
+///
+/// ```
+/// use chroma_types::operator::SearchResult;
+///
+/// fn process_batch_search(result: SearchResult) {
+///     // Multiple searches in batch
+///     for (i, search_result) in result.results.iter().enumerate() {
+///         println!("\nSearch {}:", i + 1);
+///         for record in &search_result.records {
+///             println!("  {}: score={:?}", record.id, record.score);
+///         }
+///     }
+/// }
+/// ```
 #[derive(Clone, Debug)]
 pub struct SearchResult {
     pub results: Vec<SearchPayloadResult>,
@@ -1224,9 +2675,230 @@ impl TryFrom<SearchResult> for chroma_proto::SearchResult {
     }
 }
 
+/// Reciprocal Rank Fusion (RRF) - combines multiple ranking strategies.
+///
+/// RRF is ideal for hybrid search where you want to merge results from different
+/// ranking methods (e.g., dense and sparse embeddings) with different score scales.
+/// It uses rank positions instead of raw scores, making it scale-agnostic.
+///
+/// # Formula
+///
+/// ```text
+/// score = -Σ(weight_i / (k + rank_i))
+/// ```
+///
+/// Where:
+/// - `weight_i` = weight for ranking i (default: 1.0)
+/// - `rank_i` = rank position from ranking i (0, 1, 2...)
+/// - `k` = smoothing parameter (default: 60)
+///
+/// Score is negative because Chroma uses ascending order (lower = better).
+///
+/// # Arguments
+///
+/// * `ranks` - List of ranking expressions (must have `return_rank=true`)
+/// * `k` - Smoothing parameter (None = 60). Higher values reduce emphasis on top ranks.
+/// * `weights` - Weight for each ranking (None = all 1.0)
+/// * `normalize` - If true, normalize weights to sum to 1.0
+///
+/// # Returns
+///
+/// A combined RankExpr or an error if:
+/// - `ranks` is empty
+/// - `weights` length doesn't match `ranks` length
+/// - `weights` sum to zero when normalizing
+///
+/// # Examples
+///
+/// ## Basic RRF with default parameters
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key, rrf};
+///
+/// let dense = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::Embedding,
+///     limit: 200,
+///     default: None,
+///     return_rank: true, // Required for RRF
+/// };
+///
+/// let sparse = RankExpr::Knn {
+///     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+///     key: Key::field("sparse_embedding"),
+///     limit: 200,
+///     default: None,
+///     return_rank: true, // Required for RRF
+/// };
+///
+/// // Equal weights, k=60 (defaults)
+/// let combined = rrf(vec![dense, sparse], None, None, false).unwrap();
+/// ```
+///
+/// ## RRF with custom weights
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key, rrf};
+///
+/// # let dense = RankExpr::Knn {
+/// #     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+/// #     key: Key::Embedding,
+/// #     limit: 200,
+/// #     default: None,
+/// #     return_rank: true,
+/// # };
+/// # let sparse = RankExpr::Knn {
+/// #     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+/// #     key: Key::field("sparse_embedding"),
+/// #     limit: 200,
+/// #     default: None,
+/// #     return_rank: true,
+/// # };
+/// // 70% dense, 30% sparse
+/// let combined = rrf(
+///     vec![dense, sparse],
+///     Some(60),
+///     Some(vec![0.7, 0.3]),
+///     false,
+/// ).unwrap();
+/// ```
+///
+/// ## RRF with normalized weights
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key, rrf};
+///
+/// # let dense = RankExpr::Knn {
+/// #     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+/// #     key: Key::Embedding,
+/// #     limit: 200,
+/// #     default: None,
+/// #     return_rank: true,
+/// # };
+/// # let sparse = RankExpr::Knn {
+/// #     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+/// #     key: Key::field("sparse_embedding"),
+/// #     limit: 200,
+/// #     default: None,
+/// #     return_rank: true,
+/// # };
+/// // Weights [75, 25] normalized to [0.75, 0.25]
+/// let combined = rrf(
+///     vec![dense, sparse],
+///     Some(60),
+///     Some(vec![75.0, 25.0]),
+///     true, // normalize
+/// ).unwrap();
+/// ```
+///
+/// ## Adjusting the k parameter
+///
+/// ```
+/// use chroma_types::operator::{RankExpr, QueryVector, Key, rrf};
+///
+/// # let dense = RankExpr::Knn {
+/// #     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+/// #     key: Key::Embedding,
+/// #     limit: 200,
+/// #     default: None,
+/// #     return_rank: true,
+/// # };
+/// # let sparse = RankExpr::Knn {
+/// #     query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+/// #     key: Key::field("sparse_embedding"),
+/// #     limit: 200,
+/// #     default: None,
+/// #     return_rank: true,
+/// # };
+/// // Small k (10) = heavy emphasis on top ranks
+/// let top_heavy = rrf(vec![dense.clone(), sparse.clone()], Some(10), None, false).unwrap();
+///
+/// // Default k (60) = balanced
+/// let balanced = rrf(vec![dense.clone(), sparse.clone()], Some(60), None, false).unwrap();
+///
+/// // Large k (200) = more uniform weighting
+/// let uniform = rrf(vec![dense, sparse], Some(200), None, false).unwrap();
+/// ```
+pub fn rrf(
+    ranks: Vec<RankExpr>,
+    k: Option<u32>,
+    weights: Option<Vec<f32>>,
+    normalize: bool,
+) -> Result<RankExpr, QueryConversionError> {
+    let k = k.unwrap_or(60);
+
+    if ranks.is_empty() {
+        return Err(QueryConversionError::validation(
+            "RRF requires at least one rank expression",
+        ));
+    }
+
+    let weights = weights.unwrap_or_else(|| vec![1.0; ranks.len()]);
+
+    if weights.len() != ranks.len() {
+        return Err(QueryConversionError::validation(format!(
+            "RRF weights length ({}) must match ranks length ({})",
+            weights.len(),
+            ranks.len()
+        )));
+    }
+
+    let weights = if normalize {
+        let sum: f32 = weights.iter().sum();
+        if sum == 0.0 {
+            return Err(QueryConversionError::validation(
+                "RRF weights sum to zero, cannot normalize",
+            ));
+        }
+        weights.into_iter().map(|w| w / sum).collect()
+    } else {
+        weights
+    };
+
+    let terms: Vec<RankExpr> = weights
+        .into_iter()
+        .zip(ranks)
+        .map(|(w, rank)| RankExpr::Value(w) / (RankExpr::Value(k as f32) + rank))
+        .collect();
+
+    // Safe: ranks is validated as non-empty above, so terms cannot be empty.
+    // Using unwrap_or_else as defensive programming to avoid panic.
+    let sum = terms
+        .into_iter()
+        .reduce(|a, b| a + b)
+        .unwrap_or(RankExpr::Value(0.0));
+    Ok(-sum)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_key_from_string() {
+        // Test predefined keys
+        assert_eq!(Key::from("#document"), Key::Document);
+        assert_eq!(Key::from("#embedding"), Key::Embedding);
+        assert_eq!(Key::from("#metadata"), Key::Metadata);
+        assert_eq!(Key::from("#score"), Key::Score);
+
+        // Test metadata field keys
+        assert_eq!(
+            Key::from("custom_field"),
+            Key::MetadataField("custom_field".to_string())
+        );
+        assert_eq!(
+            Key::from("author"),
+            Key::MetadataField("author".to_string())
+        );
+
+        // Test String variant
+        assert_eq!(Key::from("#embedding".to_string()), Key::Embedding);
+        assert_eq!(
+            Key::from("year".to_string()),
+            Key::MetadataField("year".to_string())
+        );
+    }
 
     #[test]
     fn test_query_vector_dense_proto_conversion() {
@@ -1249,7 +2921,7 @@ mod tests {
 
     #[test]
     fn test_query_vector_sparse_proto_conversion() {
-        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]);
+        let sparse = SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]).unwrap();
         let query_vector = QueryVector::Sparse(sparse.clone());
 
         // Convert to proto
@@ -1535,7 +3207,8 @@ mod tests {
         assert_eq!(deserialized, dense);
 
         // Test sparse vector
-        let sparse = QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]));
+        let sparse =
+            QueryVector::Sparse(SparseVector::new(vec![0, 5, 10], vec![0.1, 0.5, 0.9]).unwrap());
         let json = serde_json::to_string(&sparse).unwrap();
         let deserialized: QueryVector = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized, sparse);
@@ -1734,7 +3407,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_custom_struct() {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
         struct Score {
             value: i32,
             id: String,
@@ -1895,5 +3568,187 @@ mod tests {
         let input = vec![vec![10i32, 0, -10, -20], vec![5, -5, -15], vec![15, -25]];
         let result = merge.merge(input);
         assert_eq!(result, vec![15, 10, 5, 0, -5]);
+    }
+
+    #[test]
+    fn test_merge_dedup_same_id_different_scores() {
+        use std::cmp::Reverse;
+
+        // Simulates quantized distance estimation: the same offset_id appears
+        // in multiple posting lists with different approximate distances.
+        // Merge should keep only the first (best-scored) occurrence per id.
+        let merge = Merge { k: 5 };
+
+        // Three posting lists with overlapping IDs and different estimated distances.
+        // Using Reverse<RecordMeasure> to match the real knn_merge call site:
+        // the heap acts as a min-heap on measure (smallest distance = best).
+        let input: Vec<Vec<Reverse<RecordMeasure>>> = vec![
+            vec![
+                Reverse(RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.10,
+                }),
+                Reverse(RecordMeasure {
+                    offset_id: 4,
+                    measure: 0.50,
+                }),
+                Reverse(RecordMeasure {
+                    offset_id: 5,
+                    measure: 0.70,
+                }),
+            ],
+            vec![
+                Reverse(RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.20,
+                }),
+                Reverse(RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.25,
+                }), // dup id=1, worse
+                Reverse(RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.60,
+                }),
+            ],
+            vec![
+                Reverse(RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.15,
+                }), // dup id=3, better than 0.60
+                Reverse(RecordMeasure {
+                    offset_id: 4,
+                    measure: 0.35,
+                }), // dup id=4, better than 0.50
+                Reverse(RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.80,
+                }), // dup id=2, worse
+            ],
+        ];
+
+        // Expected merge order (ascending distance via Reverse min-heap):
+        //   pop 0.10 id=1 → keep
+        //   pop 0.15 id=3 → keep
+        //   pop 0.20 id=2 → keep
+        //   pop 0.25 id=1 → dup, skip
+        //   pop 0.35 id=4 → keep
+        //   pop 0.50 id=4 → dup, skip
+        //   pop 0.60 id=3 → dup, skip
+        //   pop 0.70 id=5 → keep (5th unique)
+        let result: Vec<Reverse<RecordMeasure>> = merge.merge(input);
+        let ids: Vec<u32> = result.iter().map(|Reverse(r)| r.offset_id).collect();
+        let measures: Vec<f32> = result.iter().map(|Reverse(r)| r.measure).collect();
+
+        assert_eq!(ids, vec![1, 3, 2, 4, 5]);
+        assert_eq!(measures, vec![0.10, 0.15, 0.20, 0.35, 0.70]);
+    }
+
+    #[test]
+    fn test_aggregate_json_serialization() {
+        // Test MinK serialization
+        let min_k = Aggregate::MinK {
+            keys: vec![Key::Score, Key::field("date")],
+            k: 3,
+        };
+        let json = serde_json::to_value(&min_k).unwrap();
+        assert!(json.get("$min_k").is_some());
+        assert_eq!(json["$min_k"]["k"], 3);
+
+        // Test MinK deserialization
+        let min_k_json = serde_json::json!({
+            "$min_k": {
+                "keys": ["#score", "date"],
+                "k": 5
+            }
+        });
+        let deserialized: Aggregate = serde_json::from_value(min_k_json).unwrap();
+        match deserialized {
+            Aggregate::MinK { keys, k } => {
+                assert_eq!(k, 5);
+                assert_eq!(keys.len(), 2);
+                assert_eq!(keys[0], Key::Score);
+                assert_eq!(keys[1], Key::field("date"));
+            }
+            _ => panic!("Expected MinK"),
+        }
+
+        // Test MaxK serialization
+        let max_k = Aggregate::MaxK {
+            keys: vec![Key::field("timestamp")],
+            k: 10,
+        };
+        let json = serde_json::to_value(&max_k).unwrap();
+        assert!(json.get("$max_k").is_some());
+        assert_eq!(json["$max_k"]["k"], 10);
+
+        // Test MaxK deserialization
+        let max_k_json = serde_json::json!({
+            "$max_k": {
+                "keys": ["timestamp"],
+                "k": 2
+            }
+        });
+        let deserialized: Aggregate = serde_json::from_value(max_k_json).unwrap();
+        match deserialized {
+            Aggregate::MaxK { keys, k } => {
+                assert_eq!(k, 2);
+                assert_eq!(keys.len(), 1);
+                assert_eq!(keys[0], Key::field("timestamp"));
+            }
+            _ => panic!("Expected MaxK"),
+        }
+    }
+
+    #[test]
+    fn test_group_by_json_serialization() {
+        // Test GroupBy with MinK
+        let group_by = GroupBy {
+            keys: vec![Key::field("category"), Key::field("author")],
+            aggregate: Some(Aggregate::MinK {
+                keys: vec![Key::Score],
+                k: 3,
+            }),
+        };
+
+        let json = serde_json::to_value(&group_by).unwrap();
+        assert_eq!(json["keys"].as_array().unwrap().len(), 2);
+        assert!(json["aggregate"]["$min_k"].is_object());
+
+        // Test roundtrip
+        let deserialized: GroupBy = serde_json::from_value(json).unwrap();
+        assert_eq!(deserialized.keys.len(), 2);
+        assert_eq!(deserialized.keys[0], Key::field("category"));
+        assert_eq!(deserialized.keys[1], Key::field("author"));
+        assert!(deserialized.aggregate.is_some());
+
+        // Test empty GroupBy
+        let empty_group_by = GroupBy::default();
+        let json = serde_json::to_value(&empty_group_by).unwrap();
+        let deserialized: GroupBy = serde_json::from_value(json).unwrap();
+        assert!(deserialized.keys.is_empty());
+        assert!(deserialized.aggregate.is_none());
+
+        // Test deserialization from JSON
+        let json = serde_json::json!({
+            "keys": ["category"],
+            "aggregate": {
+                "$max_k": {
+                    "keys": ["#score", "priority"],
+                    "k": 5
+                }
+            }
+        });
+        let group_by: GroupBy = serde_json::from_value(json).unwrap();
+        assert_eq!(group_by.keys.len(), 1);
+        assert_eq!(group_by.keys[0], Key::field("category"));
+        match group_by.aggregate {
+            Some(Aggregate::MaxK { keys, k }) => {
+                assert_eq!(k, 5);
+                assert_eq!(keys.len(), 2);
+                assert_eq!(keys[0], Key::Score);
+            }
+            _ => panic!("Expected MaxK aggregate"),
+        }
     }
 }

@@ -5,18 +5,11 @@
 //! Snapshots are content-addressable and immutable, while manifests get overwritten.  For that
 //! reason, manifests embed the ETag for conditional writes while snapshots do not.
 
-use std::sync::Arc;
-use std::time::Duration;
-
-use chroma_storage::{
-    admissioncontrolleds3::StorageRequestPriority, ETag, GetOptions, PutOptions, Storage,
-    StorageError,
-};
 use setsum::Setsum;
 
 use crate::{
-    Error, Fragment, FragmentSeqNo, Garbage, LogPosition, LogWriterOptions, ScrubError,
-    ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentSeqNo, ThrottleOptions,
+    Error, Fragment, FragmentIdentifier, FragmentSeqNo, Garbage, LogPosition, ManifestWitness,
+    ScrubError, ScrubSuccess, SnapshotOptions, SnapshotPointerOrFragmentIdentifier,
 };
 
 /////////////////////////////////////////////// paths //////////////////////////////////////////////
@@ -47,10 +40,37 @@ pub fn snapshot_setsum(path: &str) -> Result<Setsum, Error> {
     Ok(setsum)
 }
 
+///////////////////////////////////////////// scrubbing /////////////////////////////////////////////
+
+/// Verify that all fragments have the same FragmentIdentifier variant (all SeqNo or all Uuid).
+fn scrub_fragment_identifier_uniformity(
+    manifest_name: &str,
+    fragments: &[Fragment],
+) -> Result<(), Box<ScrubError>> {
+    let Some(first_is_seq_no) = fragments.first().map(|s| s.seq_no.as_seq_no().is_some()) else {
+        return Ok(());
+    };
+    for frag in fragments.iter().skip(1) {
+        let is_seq_no = frag.seq_no.as_seq_no().is_some();
+        if is_seq_no != first_is_seq_no {
+            return Err(ScrubError::CorruptManifest {
+                manifest: manifest_name.to_string(),
+                what: format!(
+                    "contains mixed FragmentIdentifier variants: first is {} but found {}",
+                    if first_is_seq_no { "SeqNo" } else { "Uuid" },
+                    if is_seq_no { "SeqNo" } else { "Uuid" },
+                ),
+            }
+            .into());
+        }
+    }
+    Ok(())
+}
+
 ////////////////////////////////////////// SnapshotPointer /////////////////////////////////////////
 
 /// A SnapshotPointer is a pointer to a snapshot.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
 pub struct SnapshotPointer {
     #[serde(
         deserialize_with = "super::deserialize_setsum",
@@ -161,96 +181,12 @@ impl Snapshot {
                 path_setsum.hexdigest(),
             )}.into());
         }
+        scrub_fragment_identifier_uniformity(&self.path, &self.fragments)?;
         Ok(ScrubSuccess {
             calculated_setsum,
             bytes_read,
             short_read: false,
         })
-    }
-
-    #[tracing::instrument(skip(storage))]
-    pub async fn load(
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-        pointer: &SnapshotPointer,
-    ) -> Result<Option<Snapshot>, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        let mut retries = 0;
-        let path = format!("{}/{}", prefix, pointer.path_to_snapshot);
-        loop {
-            match storage
-                .get_with_e_tag(&path, GetOptions::new(StorageRequestPriority::P0))
-                .await
-                .map_err(Arc::new)
-            {
-                Ok((ref snapshot, _)) => {
-                    let snapshot: Snapshot = serde_json::from_slice(snapshot).map_err(|e| {
-                        Error::CorruptManifest(format!("could not decode JSON snapshot: {e:?}"))
-                    })?;
-                    return Ok(Some(snapshot));
-                }
-                Err(err) => match &*err {
-                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
-                    err => {
-                        let backoff = exp_backoff.next();
-                        tokio::time::sleep(backoff).await;
-                        if retries >= 3 {
-                            return Err(Error::StorageError(Arc::new(err.clone())));
-                        }
-                        retries += 1;
-                    }
-                },
-            }
-        }
-    }
-
-    #[tracing::instrument(skip(self, storage))]
-    pub async fn install(
-        &self,
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-    ) -> Result<SnapshotPointer, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        let mut retry_count = 0;
-        loop {
-            let path = format!("{}/{}", prefix, self.path);
-            let payload = serde_json::to_string(&self)
-                .map_err(|e| {
-                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
-                })?
-                .into_bytes();
-            let options = PutOptions::if_not_exists(StorageRequestPriority::P0);
-            match storage.put_bytes(&path, payload, options).await {
-                Ok(_) => {
-                    return Ok(self.to_pointer());
-                }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
-                    // NOTE(rescrv):  This is something of a lie.  We know that someone put the
-                    // file before us, and we know the setsum of the file is embedded in the path.
-                    // Because the setsum is only calculable if you have the file and we assume
-                    // non-malicious code, anyone who puts the same setsum as us has, in all
-                    // likelihood, put something referencing the same content as us.
-                    return Ok(self.to_pointer());
-                }
-                Err(e) => {
-                    tracing::error!("error uploading manifest: {e:?}");
-                    let backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
-                        return Err(Arc::new(e).into());
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-            retry_count += 1;
-        }
     }
 
     /// Return the the next address to insert into the log.
@@ -331,7 +267,7 @@ pub struct Manifest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_offset: Option<LogPosition>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub initial_seq_no: Option<FragmentSeqNo>,
+    pub initial_seq_no: Option<FragmentIdentifier>,
 }
 
 impl Manifest {
@@ -418,7 +354,7 @@ impl Manifest {
                         .iter()
                         .map(|f| f.seq_no)
                         .max()
-                        .unwrap_or(FragmentSeqNo(0))
+                        .unwrap_or(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(0)))
                         != fragment.seq_no
                 {
                     setsum += fragment.setsum;
@@ -487,7 +423,8 @@ impl Manifest {
     /// Once upon a time there was more parallelism in wal3 and this was a more interesting.  Now
     /// it mostly returns true unless internal invariants are violated.
     pub fn can_apply_fragment(&self, fragment: &Fragment) -> bool {
-        Some(fragment.seq_no) == self.next_fragment_seq_no()
+        (Some(fragment.seq_no) == self.next_fragment_seq_no()
+            || matches!(fragment.seq_no, FragmentIdentifier::Uuid(_)))
             && fragment.start.offset() < fragment.limit.offset()
     }
 
@@ -658,6 +595,7 @@ impl Manifest {
                 .into());
             }
         }
+        scrub_fragment_identifier_uniformity(&format!("{:?}", self), &self.fragments)?;
         // TODO(rescrv):  Check the sequence numbers for sequentiality.
         Ok(ScrubSuccess {
             calculated_setsum,
@@ -667,186 +605,11 @@ impl Manifest {
     }
 
     /// The next sequence number to generate, or None if the log has exhausted them.
-    pub fn next_fragment_seq_no(&self) -> Option<FragmentSeqNo> {
+    pub fn next_fragment_seq_no(&self) -> Option<FragmentIdentifier> {
         if let Some(max_seq_no) = self.fragments.iter().map(|f| f.seq_no).max() {
-            if max_seq_no + 1 > max_seq_no {
-                Some(max_seq_no + 1)
-            } else {
-                None
-            }
+            max_seq_no.successor()
         } else {
-            Some(self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN))
-        }
-    }
-
-    /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage))]
-    pub async fn initialize(
-        options: &LogWriterOptions,
-        storage: &Storage,
-        prefix: &str,
-        writer: &str,
-    ) -> Result<(), Error> {
-        let writer = writer.to_string();
-        let initial = Manifest {
-            writer,
-            setsum: Setsum::default(),
-            collected: Setsum::default(),
-            acc_bytes: 0,
-            snapshots: vec![],
-            fragments: vec![],
-            initial_offset: None,
-            initial_seq_no: None,
-        };
-        Self::initialize_from_manifest(options, storage, prefix, initial).await
-    }
-
-    /// Initialize the log with an empty manifest.
-    #[tracing::instrument(skip(storage))]
-    pub async fn initialize_from_manifest(
-        _: &LogWriterOptions,
-        storage: &Storage,
-        prefix: &str,
-        initial: Manifest,
-    ) -> Result<(), Error> {
-        let payload = serde_json::to_string(&initial)
-            .map_err(|e| Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}")))?
-            .into_bytes();
-        storage
-            .put_bytes(
-                &manifest_path(prefix),
-                payload,
-                PutOptions::if_not_exists(StorageRequestPriority::P0),
-            )
-            .await
-            .map_err(Arc::new)?;
-        Ok(())
-    }
-
-    /// Validate the e_tag against the manifest on object storage.
-    pub async fn head(
-        _: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-        e_tag: &ETag,
-    ) -> Result<bool, Error> {
-        let path = manifest_path(prefix);
-        Ok(storage.confirm_same(&path, e_tag).await.map_err(Arc::new)?)
-    }
-
-    /// Load the latest manifest from object storage.
-    pub async fn load(
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-    ) -> Result<Option<(Manifest, ETag)>, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        let mut retries = 0;
-        let path = manifest_path(prefix);
-        loop {
-            match storage
-                .get_with_e_tag(
-                    &path,
-                    GetOptions::new(StorageRequestPriority::P0).with_strong_consistency(),
-                )
-                .await
-                .map_err(Arc::new)
-            {
-                Ok((ref manifest, e_tag)) => {
-                    let Some(e_tag) = e_tag else {
-                        return Err(Error::CorruptManifest(format!(
-                            "no ETag for manifest at {}",
-                            path
-                        )));
-                    };
-                    let manifest: Manifest = serde_json::from_slice(manifest).map_err(|e| {
-                        Error::CorruptManifest(format!("could not decode JSON manifest: {e:?}"))
-                    })?;
-                    return Ok(Some((manifest, e_tag)));
-                }
-                Err(err) => match &*err {
-                    StorageError::NotFound { path: _, source: _ } => return Ok(None),
-                    err => {
-                        let backoff = exp_backoff.next();
-                        tokio::time::sleep(backoff).await;
-                        if retries >= 3 {
-                            return Err(Error::StorageError(Arc::new(err.clone())));
-                        }
-                        retries += 1;
-                    }
-                },
-            }
-        }
-    }
-
-    /// Install a manifest to object storage.
-    #[tracing::instrument(skip(self, storage, new))]
-    pub async fn install(
-        &self,
-        options: &ThrottleOptions,
-        storage: &Storage,
-        prefix: &str,
-        current: Option<&ETag>,
-        new: &Manifest,
-    ) -> Result<ETag, Error> {
-        let exp_backoff = crate::backoff::ExponentialBackoff::new(
-            options.throughput as f64,
-            options.headroom as f64,
-        );
-        tracing::info!(
-            "installing manifest at {} {:?} {:?}",
-            prefix,
-            new.next_write_timestamp(),
-            current,
-        );
-        let mut retry_count = 0;
-        loop {
-            let payload = serde_json::to_string(&new)
-                .map_err(|e| {
-                    Error::CorruptManifest(format!("could not encode JSON manifest: {e:?}"))
-                })?
-                .into_bytes();
-            let options = if let Some(e_tag) = current {
-                PutOptions::if_matches(e_tag, StorageRequestPriority::P0)
-            } else {
-                PutOptions::if_not_exists(StorageRequestPriority::P0)
-            };
-            match storage
-                .put_bytes(&manifest_path(prefix), payload, options)
-                .await
-            {
-                Ok(Some(e_tag)) => {
-                    return Ok(e_tag);
-                }
-                Ok(None) => {
-                    // NOTE(rescrv):  This is something of a lie.  We know that we put the log, but
-                    // without an e_tag we cannot do anything.  The log contention backoff protocol
-                    // cares for this case, rather than having to error-handle it separately
-                    // because it "crashes" the log and reinitializes.
-                    return Err(Error::LogContentionFailure);
-                }
-                Err(StorageError::Precondition { path: _, source: _ }) => {
-                    // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
-                    // comment in the Error enum for why this makes sense.
-                    return Err(Error::LogContentionDurable);
-                }
-                Err(e) => {
-                    tracing::error!("error uploading manifest: {e:?}");
-                    let backoff = exp_backoff.next();
-                    if backoff > Duration::from_secs(60) || retry_count >= 3 {
-                        // NOTE(rescrv):  This is "durable" because it's a manifest failure.  See the
-                        // comment in the Error enum for why this makes sense.  By returning
-                        // "durable" rather than the underlying error we force an end-to-end
-                        // recovery.
-                        return Err(Error::LogContentionDurable);
-                    }
-                    tokio::time::sleep(backoff).await;
-                }
-            }
-            retry_count += 1;
+            Some(self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN))
         }
     }
 
@@ -855,10 +618,14 @@ impl Manifest {
     pub fn apply_garbage(&self, garbage: Garbage) -> Result<Option<Self>, Error> {
         if garbage.is_empty() {
             return Err(Error::GarbageCollectionPrecondition(
-                SnapshotPointerOrFragmentSeqNo::Stringy("cannot apply empty garbage".to_string()),
+                SnapshotPointerOrFragmentIdentifier::Stringy(
+                    "cannot apply empty garbage".to_string(),
+                ),
             ));
         }
-        if garbage.fragments_to_drop_limit <= self.initial_seq_no.unwrap_or(FragmentSeqNo::BEGIN)
+        if !garbage.fragments_are_uuids
+            && FragmentIdentifier::from(garbage.fragments_to_drop_limit)
+                <= self.initial_seq_no.unwrap_or(FragmentIdentifier::BEGIN)
             && !garbage
                 .snapshots_to_drop
                 .iter()
@@ -874,7 +641,7 @@ impl Manifest {
                 garbage.fragments_to_drop_start, garbage.fragments_to_drop_limit
             )));
         }
-        if garbage.fragments_to_drop_limit == FragmentSeqNo(0) {
+        if garbage.fragments_to_drop_limit == FragmentSeqNo::ZERO && !garbage.fragments_are_uuids {
             return Ok(None);
         }
         let mut new = self.clone();
@@ -887,15 +654,27 @@ impl Manifest {
             }
         }
         // TODO(rescrv):  When Step stabilizes, revisit this ugliness.
-        for seq_no in garbage.fragments_to_drop_start.0..garbage.fragments_to_drop_limit.0 {
-            if let Some(index) = new
-                .fragments
-                .iter()
-                .position(|f| f.seq_no == FragmentSeqNo(seq_no))
-            {
+        let start = garbage.fragments_to_drop_start.as_u64();
+        let limit = garbage.fragments_to_drop_limit.as_u64();
+        for seq_no in start..limit {
+            if let Some(index) = new.fragments.iter().position(|f| {
+                f.seq_no == FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(seq_no))
+            }) {
                 setsum_to_discard += new.fragments[index].setsum;
                 new.fragments.remove(index);
             }
+        }
+        if garbage.fragments_are_uuids {
+            let mut acc = Setsum::default();
+            new.fragments.retain(|frag| {
+                if frag.limit <= garbage.first_to_keep {
+                    acc += frag.setsum;
+                    false
+                } else {
+                    true
+                }
+            });
+            setsum_to_discard += acc;
         }
         let mut root_setsum = Setsum::default();
         if let Some(snap) = garbage.snapshot_for_root.as_ref() {
@@ -906,7 +685,7 @@ impl Manifest {
         }
         if setsum_to_discard - root_setsum != garbage.setsum_to_discard {
             return Err(Error::GarbageCollectionPrecondition(
-                SnapshotPointerOrFragmentSeqNo::Stringy(format!(
+                SnapshotPointerOrFragmentIdentifier::Stringy(format!(
                     "Setsum mismatch: {} != {}",
                     setsum_to_discard.hexdigest(),
                     garbage.setsum_to_discard.hexdigest()
@@ -915,7 +694,11 @@ impl Manifest {
         }
         new.collected += garbage.setsum_to_discard;
         new.initial_offset = Some(garbage.first_to_keep);
-        new.initial_seq_no = Some(garbage.fragments_to_drop_limit);
+        // Only update initial_seq_no for SeqNo-based logs. UUID-based logs don't use sequential
+        // numbering, so setting initial_seq_no to SeqNo(0) would mix identifier types.
+        if !garbage.fragments_are_uuids {
+            new.initial_seq_no = Some(FragmentIdentifier::from(garbage.fragments_to_drop_limit));
+        }
         new.scrub()?;
 
         // Sanity check that new manifest contains valid range of logs
@@ -936,19 +719,22 @@ impl Manifest {
     }
 }
 
-////////////////////////////////////////// ManifestAndETag /////////////////////////////////////////
+////////////////////////////////////////// ManifestAndWitness /////////////////////////////////////////
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct ManifestAndETag {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ManifestAndWitness {
     pub manifest: Manifest,
-    pub e_tag: ETag,
+    pub witness: ManifestWitness,
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
 
 #[cfg(test)]
 mod tests {
+    use chroma_storage::ETag;
+
     use super::*;
+    use crate::FragmentUuid;
 
     #[test]
     fn paths() {
@@ -964,7 +750,7 @@ mod tests {
     fn fragment_contains_position() {
         let fragment = Fragment {
             path: "path".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(42),
             num_bytes: 4100,
@@ -981,7 +767,7 @@ mod tests {
     fn manifest_contains_position() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 4100,
@@ -989,7 +775,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentSeqNo(2),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 4100,
@@ -1017,7 +803,7 @@ mod tests {
     fn manifest_scrub_setsum() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 4100,
@@ -1028,7 +814,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentSeqNo(2),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 4100,
@@ -1071,7 +857,7 @@ mod tests {
     fn apply_fragment() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 41,
@@ -1082,7 +868,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentSeqNo(2),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 42,
@@ -1119,7 +905,7 @@ mod tests {
                 fragments: vec![
                     Fragment {
                         path: "path1".to_string(),
-                        seq_no: FragmentSeqNo(1),
+                        seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
                         start: LogPosition::from_offset(1),
                         limit: LogPosition::from_offset(22),
                         num_bytes: 41,
@@ -1130,7 +916,7 @@ mod tests {
                     },
                     Fragment {
                         path: "path2".to_string(),
-                        seq_no: FragmentSeqNo(2),
+                        seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
                         start: LogPosition::from_offset(22),
                         limit: LogPosition::from_offset(42),
                         num_bytes: 42,
@@ -1151,7 +937,7 @@ mod tests {
     fn apply_fragment_with_snapshots() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(1),
             limit: LogPosition::from_offset(22),
             num_bytes: 41,
@@ -1162,7 +948,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentSeqNo(2),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
             start: LogPosition::from_offset(22),
             limit: LogPosition::from_offset(42),
             num_bytes: 42,
@@ -1173,7 +959,7 @@ mod tests {
         };
         let fragment3 = Fragment {
             path: "path3".to_string(),
-            seq_no: FragmentSeqNo(3),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3)),
             start: LogPosition::from_offset(42),
             limit: LogPosition::from_offset(84),
             num_bytes: 100,
@@ -1236,19 +1022,25 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10))),
         };
         assert_eq!(
             manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)))
+        );
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)))
+        );
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(10),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1262,7 +1054,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10))),
         };
         assert_eq!(
             manifest_with_fragment.next_write_timestamp(),
@@ -1274,7 +1066,7 @@ mod tests {
         );
         assert_eq!(
             manifest_with_fragment.next_fragment_seq_no(),
-            Some(FragmentSeqNo(11)),
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(11))),
         );
     }
 
@@ -1288,18 +1080,21 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10))),
         };
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
         assert_eq!(
             manifest.next_write_timestamp(),
             LogPosition::from_offset(100)
         );
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(10)));
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)))
+        );
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(10),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1313,7 +1108,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(10)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10))),
         };
         assert_eq!(
             manifest_with_fragment.oldest_timestamp(),
@@ -1321,7 +1116,7 @@ mod tests {
         );
         assert_eq!(
             manifest_with_fragment.next_fragment_seq_no(),
-            Some(FragmentSeqNo(11))
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(11)))
         );
     }
 
@@ -1337,7 +1132,7 @@ mod tests {
         };
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1352,7 +1147,7 @@ mod tests {
             snapshots: vec![snapshot],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(25)),
-            initial_seq_no: Some(FragmentSeqNo(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
 
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(50));
@@ -1372,7 +1167,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(1000)),
-            initial_seq_no: Some(FragmentSeqNo(100)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100))),
         };
 
         let serialized = serde_json::to_string(&manifest).unwrap();
@@ -1382,7 +1177,10 @@ mod tests {
             deserialized.initial_offset,
             Some(LogPosition::from_offset(1000))
         );
-        assert_eq!(deserialized.initial_seq_no, Some(FragmentSeqNo(100)));
+        assert_eq!(
+            deserialized.initial_seq_no,
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100)))
+        );
 
         let manifest_none = Manifest {
             writer: "bootstrap".to_string(),
@@ -1411,12 +1209,12 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(500)),
-            initial_seq_no: Some(FragmentSeqNo(50)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(50))),
         };
 
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(50),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(50)),
             start: LogPosition::from_offset(500),
             limit: LogPosition::from_offset(600),
             num_bytes: 100,
@@ -1437,18 +1235,21 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(500)),
-            initial_seq_no: Some(FragmentSeqNo(50)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(50))),
         };
 
         assert_eq!(manifest, expected_manifest);
-        assert_eq!(manifest.next_fragment_seq_no(), Some(FragmentSeqNo(51)));
+        assert_eq!(
+            manifest.next_fragment_seq_no(),
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(51)))
+        );
     }
 
     #[test]
     fn manifest_fragment_for_position_with_initial_offset() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(150),
             num_bytes: 50,
@@ -1456,7 +1257,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentSeqNo(2),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
             start: LogPosition::from_offset(150),
             limit: LogPosition::from_offset(200),
             num_bytes: 50,
@@ -1471,7 +1272,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1.clone(), fragment2.clone()],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
 
         assert_eq!(
@@ -1496,7 +1297,7 @@ mod tests {
     fn manifest_contains_position_with_initial_offset() {
         let fragment = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(200),
             num_bytes: 100,
@@ -1511,7 +1312,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(1)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1))),
         };
 
         assert!(!manifest.contains_position(LogPosition::from_offset(50)));
@@ -1523,7 +1324,7 @@ mod tests {
     fn manifest_timestamps_with_initial_offset() {
         let fragment1 = Fragment {
             path: "path1".to_string(),
-            seq_no: FragmentSeqNo(1),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
             start: LogPosition::from_offset(100),
             limit: LogPosition::from_offset(150),
             num_bytes: 50,
@@ -1531,7 +1332,7 @@ mod tests {
         };
         let fragment2 = Fragment {
             path: "path2".to_string(),
-            seq_no: FragmentSeqNo(2),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
             start: LogPosition::from_offset(150),
             limit: LogPosition::from_offset(200),
             num_bytes: 50,
@@ -1546,7 +1347,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![fragment1, fragment2],
             initial_offset: Some(LogPosition::from_offset(100)),
-            initial_seq_no: Some(FragmentSeqNo(42)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(42))),
         };
 
         assert_eq!(manifest.oldest_timestamp(), LogPosition::from_offset(100));
@@ -1563,7 +1364,7 @@ mod tests {
             snapshots: vec![],
             fragments: vec![],
             initial_offset: Some(LogPosition::from_offset(500)),
-            initial_seq_no: Some(FragmentSeqNo(50)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(50))),
         };
 
         assert_eq!(
@@ -1577,7 +1378,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_garbage_equal_nonzero_fragment_seq_nos() {
+    fn apply_garbage_equal_nonzero_fragment_identifiers() {
         let manifest = Manifest {
             writer: "test_writer".to_string(),
             setsum: Setsum::default(),
@@ -1592,8 +1393,9 @@ mod tests {
         let garbage = Garbage {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
-            fragments_to_drop_start: FragmentSeqNo(5),
-            fragments_to_drop_limit: FragmentSeqNo(5),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(100),
             snapshot_for_root: None,
@@ -1603,7 +1405,10 @@ mod tests {
 
         // When fragments_to_drop_start == fragments_to_drop_limit and both are non-zero,
         // initial_seq_no should be set to the limit value
-        assert_eq!(result.initial_seq_no, Some(FragmentSeqNo(5)));
+        assert_eq!(
+            result.initial_seq_no,
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(5)))
+        );
         assert_eq!(result.initial_offset, Some(LogPosition::from_offset(100)));
     }
 
@@ -1618,8 +1423,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(10),
-            fragments_to_drop_limit: FragmentSeqNo(5),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(10),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1628,6 +1434,7 @@ mod tests {
         assert!(result.is_err());
 
         if let Err(crate::Error::GarbageCollection(msg)) = result {
+            println!("GarbageCollection error message: {msg}");
             assert!(msg.contains("Garbage has start > limit"));
             assert!(msg.contains("FragmentSeqNo(10) > FragmentSeqNo(5)"));
         } else {
@@ -1639,8 +1446,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(5),
-            fragments_to_drop_limit: FragmentSeqNo(5),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(5),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1654,8 +1462,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(1),
-            fragments_to_drop_limit: FragmentSeqNo(5),
+            fragments_to_drop_start: FragmentSeqNo::from_u64(1),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(5),
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::default(),
             first_to_keep: LogPosition::from_offset(1),
         };
@@ -1683,7 +1492,7 @@ mod tests {
             fragments: vec![Fragment {
                 path: "log/Bucket=00000000002f2000/FragmentSeqNo=00000000002f2372.parquet"
                     .to_string(),
-                seq_no: FragmentSeqNo(3089266),
+                seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089266)),
                 start: LogPosition { offset: 5566918 },
                 limit: LogPosition { offset: 5566919 },
                 num_bytes: 2116,
@@ -1693,7 +1502,7 @@ mod tests {
                 .unwrap(),
             }],
             initial_offset: Some(LogPosition { offset: 5566918 }),
-            initial_seq_no: Some(FragmentSeqNo(3089266)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(3089266))),
         };
 
         // Case 1: fragments_to_drop_limit <= initial_seq_no, no snapshots to drop/make
@@ -1701,8 +1510,9 @@ mod tests {
             snapshots_to_drop: vec![],
             snapshots_to_make: vec![],
             snapshot_for_root: None,
-            fragments_to_drop_start: FragmentSeqNo(3089257),
-            fragments_to_drop_limit: FragmentSeqNo(3089266), // Equal to initial_seq_no
+            fragments_to_drop_start: FragmentSeqNo::from_u64(3089257),
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(3089266), // Equal to initial_seq_no
+            fragments_are_uuids: false,
             setsum_to_discard: Setsum::from_hexdigest(
                 "7287d2d717e35117811f1afb7c5e8dd6517417dcbc5ad195dabbafaca6df9ef3",
             )
@@ -1719,7 +1529,7 @@ mod tests {
 
         // Case 2: fragments_to_drop_limit < initial_seq_no, no snapshots to drop/make
         let garbage_below_initial = Garbage {
-            fragments_to_drop_limit: FragmentSeqNo(3089265), // Less than initial_seq_no
+            fragments_to_drop_limit: FragmentSeqNo::from_u64(3089265), // Less than initial_seq_no
             ..garbage.clone()
         };
 
@@ -1731,77 +1541,476 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_k8s_integration_head_returns_true_for_matching_etag() {
-        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
+    #[test]
+    fn manifest_scrub_rejects_mixed_fragment_identifiers() {
+        use uuid::Uuid;
 
-        let storage = s3_client_for_test_with_new_bucket().await;
-        let prefix = "test-head-matching";
-        let throttle_options = crate::ThrottleOptions::default();
-
-        let manifest = Manifest::new_empty("test-writer");
-
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
-            &storage,
-            prefix,
-            manifest,
-        )
-        .await
-        .unwrap();
-
-        let (_loaded_manifest, etag) = Manifest::load(&throttle_options, &storage, prefix)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let result = Manifest::head(&throttle_options, &storage, prefix, &etag)
-            .await
-            .unwrap();
-        assert!(result, "head should return true for matching etag");
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_head_returns_false_for_non_matching_etag() {
-        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
-
-        let storage = s3_client_for_test_with_new_bucket().await;
-        let prefix = "test-head-non-matching";
-        let throttle_options = crate::ThrottleOptions::default();
-
-        let manifest = Manifest::new_empty("test-writer");
-
-        Manifest::initialize_from_manifest(
-            &crate::LogWriterOptions::default(),
-            &storage,
-            prefix,
-            manifest,
-        )
-        .await
-        .unwrap();
-
-        let fake_etag = chroma_storage::ETag("fake-etag-wont-match".to_string());
-
-        let result = Manifest::head(&throttle_options, &storage, prefix, &fake_etag)
-            .await
-            .unwrap();
-        assert!(!result, "head should return false for non-matching etag");
-    }
-
-    #[tokio::test]
-    async fn test_k8s_integration_head_returns_error_for_nonexistent_manifest() {
-        use chroma_storage::s3::s3_client_for_test_with_new_bucket;
-
-        let storage = s3_client_for_test_with_new_bucket().await;
-        let prefix = "test-head-nonexistent";
-        let throttle_options = crate::ThrottleOptions::default();
-
-        let fake_etag = chroma_storage::ETag("fake-etag".to_string());
-
-        let result = Manifest::head(&throttle_options, &storage, prefix, &fake_etag).await;
+        let fragment_seq_no = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment_uuid = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(Uuid::nil())),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: fragment_seq_no.setsum + fragment_uuid.setsum,
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment_seq_no, fragment_uuid],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let result = manifest.scrub();
         assert!(
             result.is_err(),
-            "head should return error for nonexistent manifest"
+            "scrub should reject mixed FragmentIdentifier variants"
         );
+        let err = result.unwrap_err();
+        let err_str = format!("{err}");
+        println!("manifest_scrub_rejects_mixed_fragment_identifiers error: {err_str}");
+        assert!(
+            err_str.contains("mixed FragmentIdentifier variants"),
+            "error message should mention mixed variants: {err_str}"
+        );
+    }
+
+    #[test]
+    fn manifest_scrub_accepts_uniform_seq_no_identifiers() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
+            )
+            .unwrap(),
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        assert!(
+            manifest.scrub().is_ok(),
+            "scrub should accept uniform SeqNo identifiers"
+        );
+    }
+
+    #[test]
+    fn manifest_scrub_accepts_uniform_uuid_identifiers() {
+        use uuid::Uuid;
+
+        let uuid1 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "test_writer".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
+            )
+            .unwrap(),
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        assert!(
+            manifest.scrub().is_ok(),
+            "scrub should accept uniform Uuid identifiers"
+        );
+    }
+
+    #[test]
+    fn snapshot_scrub_rejects_mixed_fragment_identifiers() {
+        use uuid::Uuid;
+
+        let fragment_seq_no = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment_uuid = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(Uuid::nil())),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let combined_setsum = fragment_seq_no.setsum + fragment_uuid.setsum;
+        let snapshot = Snapshot {
+            path: unprefixed_snapshot_path(combined_setsum),
+            depth: 1,
+            setsum: combined_setsum,
+            writer: "test_writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![fragment_seq_no, fragment_uuid],
+        };
+        let result = snapshot.scrub();
+        assert!(
+            result.is_err(),
+            "scrub should reject mixed FragmentIdentifier variants"
+        );
+        let err = result.unwrap_err();
+        let err_str = format!("{err}");
+        println!("snapshot_scrub_rejects_mixed_fragment_identifiers error: {err_str}");
+        assert!(
+            err_str.contains("mixed FragmentIdentifier variants"),
+            "error message should mention mixed variants: {err_str}"
+        );
+    }
+
+    #[test]
+    fn snapshot_scrub_accepts_uniform_seq_no_identifiers() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let combined_setsum = fragment1.setsum + fragment2.setsum;
+        let snapshot = Snapshot {
+            path: unprefixed_snapshot_path(combined_setsum),
+            depth: 1,
+            setsum: combined_setsum,
+            writer: "test_writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+        };
+        assert!(
+            snapshot.scrub().is_ok(),
+            "scrub should accept uniform SeqNo identifiers"
+        );
+    }
+
+    #[test]
+    fn snapshot_scrub_accepts_uniform_uuid_identifiers() {
+        use uuid::Uuid;
+
+        let uuid1 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440001").unwrap();
+        let uuid2 = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440002").unwrap();
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let combined_setsum = fragment1.setsum + fragment2.setsum;
+        let snapshot = Snapshot {
+            path: unprefixed_snapshot_path(combined_setsum),
+            depth: 1,
+            setsum: combined_setsum,
+            writer: "test_writer".to_string(),
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+        };
+        assert!(
+            snapshot.scrub().is_ok(),
+            "scrub should accept uniform Uuid identifiers"
+        );
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_empty_manifest() {
+        let manifest = Manifest::new_empty("test-writer");
+        let witness = ManifestWitness::ETag(ETag("test-etag-12345".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (empty): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_fragments() {
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(1)),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(22),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(2)),
+            start: LogPosition::from_offset(22),
+            limit: LogPosition::from_offset(42),
+            num_bytes: 4100,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "manifest writer 1".to_string(),
+            setsum: Setsum::from_hexdigest(
+                "307d93deb6b3e91525dc277027bc34958d8f1e74965e4c027820c3596e0f2847",
+            )
+            .unwrap(),
+            collected: Setsum::default(),
+            acc_bytes: 8200,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("etag-with-fragments".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with fragments): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_snapshots() {
+        let snapshot_setsum = Setsum::from_hexdigest(
+            "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+        )
+        .unwrap();
+        let snapshot_pointer = SnapshotPointer {
+            path_to_snapshot: unprefixed_snapshot_path(snapshot_setsum),
+            setsum: snapshot_setsum,
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(100),
+            depth: 1,
+            num_bytes: 5000,
+        };
+        let fragment = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(10)),
+            start: LogPosition::from_offset(100),
+            limit: LogPosition::from_offset(200),
+            num_bytes: 3000,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "snapshot-writer".to_string(),
+            setsum: snapshot_setsum + fragment.setsum,
+            collected: Setsum::default(),
+            acc_bytes: 8000,
+            snapshots: vec![snapshot_pointer],
+            fragments: vec![fragment],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("snapshot-etag-xyz".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with snapshots): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_initial_offset() {
+        let manifest = Manifest {
+            writer: "bootstrap".to_string(),
+            setsum: Setsum::default(),
+            collected: Setsum::default(),
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: Some(LogPosition::from_offset(1000)),
+            initial_seq_no: Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100))),
+        };
+        let witness = ManifestWitness::ETag(ETag("initial-offset-etag".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with initial_offset): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+        assert_eq!(
+            deserialized.manifest.initial_offset,
+            Some(LogPosition::from_offset(1000))
+        );
+        assert_eq!(
+            deserialized.manifest.initial_seq_no,
+            Some(FragmentIdentifier::SeqNo(FragmentSeqNo::from_u64(100)))
+        );
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_uuid_fragments() {
+        let uuid1 = uuid::Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let uuid2 = uuid::Uuid::parse_str("6ba7b810-9dad-11d1-80b4-00c04fd430c8").unwrap();
+        let fragment1 = Fragment {
+            path: "path1".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid1)),
+            start: LogPosition::from_offset(0),
+            limit: LogPosition::from_offset(50),
+            num_bytes: 1000,
+            setsum: Setsum::from_hexdigest(
+                "4eec78e0b5cd15df7b36fd42cdc3aecb1986ffa3655c338201db88f80d855465",
+            )
+            .unwrap(),
+        };
+        let fragment2 = Fragment {
+            path: "path2".to_string(),
+            seq_no: FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid2)),
+            start: LogPosition::from_offset(50),
+            limit: LogPosition::from_offset(100),
+            num_bytes: 2000,
+            setsum: Setsum::from_hexdigest(
+                "dd901afef0e5d336aaa52a2df7f785c909091fd0aa011980de443a61a889d3e1",
+            )
+            .unwrap(),
+        };
+        let manifest = Manifest {
+            writer: "uuid-writer".to_string(),
+            setsum: fragment1.setsum + fragment2.setsum,
+            collected: Setsum::default(),
+            acc_bytes: 3000,
+            snapshots: vec![],
+            fragments: vec![fragment1, fragment2],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("uuid-etag".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with uuid fragments): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+    }
+
+    #[test]
+    fn manifest_and_witness_serde_round_trip_with_collected() {
+        let collected_setsum = Setsum::from_hexdigest(
+            "1111111111111111111111111111111111111111111111111111111111111111",
+        )
+        .unwrap();
+        let manifest = Manifest {
+            writer: "gc-writer".to_string(),
+            setsum: Setsum::default(),
+            collected: collected_setsum,
+            acc_bytes: 0,
+            snapshots: vec![],
+            fragments: vec![],
+            initial_offset: None,
+            initial_seq_no: None,
+        };
+        let witness = ManifestWitness::ETag(ETag("collected-etag".to_string()));
+        let original = ManifestAndWitness { manifest, witness };
+        let serialized = serde_json::to_string(&original).expect("serialization should succeed");
+        println!("serialized ManifestAndWitness (with collected): {serialized}");
+        let deserialized: ManifestAndWitness =
+            serde_json::from_str(&serialized).expect("deserialization should succeed");
+        assert_eq!(original, deserialized);
+        assert_eq!(deserialized.manifest.collected, collected_setsum);
     }
 }

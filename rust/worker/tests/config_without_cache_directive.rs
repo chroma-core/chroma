@@ -12,7 +12,6 @@ fn test_config_without_cache_directive() {
             query_service:
                 service_name: "query-service"
                 otel_endpoint: "http://jaeger:4317"
-                my_member_id: "query-service-0"
                 my_port: 50051
                 assignment_policy:
                     rendezvous_hashing:
@@ -134,7 +133,6 @@ fn test_config_without_cache_directive() {
             "#,
         );
         let config = RootConfig::load_from_path("random_path.yaml");
-        assert_eq!(config.query_service.my_member_id, "query-service-0");
         assert_eq!(config.query_service.my_port, 50051);
 
         assert_eq!(

@@ -1,0 +1,32 @@
+name: Rust tests
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        platform: [blacksmith-8vcpu-ubuntu-2404]
+    runs-on: ${{ matrix.platform }}
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+      RUST_MIN_STACK_SIZE: 8388608
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup
+        uses: ./.github/actions/rust
+        with:
+          github-token: ${{ github.token }}
+      - name: Install cargo hack
+        run: cargo install cargo-hack
+      - name: Check chroma-error
+        run: cargo hack clippy -p chroma-error --all-targets --feature-powerset -- -D clippy::all
+      - name: Check chroma-api-types
+        run: cargo hack clippy -p chroma-api-types --all-targets --feature-powerset -- -D clippy::all
+      - name: Check chroma-types
+        run: cargo hack clippy -p chroma-types --all-targets --feature-powerset -- -D clippy::all
+      - name: Check chroma
+        run: cargo hack clippy -p chroma --all-targets --feature-powerset -- -D clippy::all

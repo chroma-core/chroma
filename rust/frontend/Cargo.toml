@@ -31,7 +31,8 @@ mdac = { workspace = true }
 opentelemetry.workspace = true
 validator = { workspace = true }
 rust-embed = { workspace = true }
-chroma = { workspace = true, features = ["utoipa"] }
+chroma = { workspace = true }
+chroma-api-types = { workspace = true, features = ["utoipa"] }
 chroma-cache = { workspace = true }
 chroma-config = { workspace = true }
 chroma-distance = { workspace = true }
@@ -43,12 +44,11 @@ chroma-segment = { workspace = true }
 chroma-sysdb = { workspace = true }
 chroma-system = { workspace = true }
 chroma-tracing = { workspace = true, features = ["middleware"] }
-chroma-types = { workspace = true }
+chroma-types = { workspace = true, features = ["utoipa"] }
 chroma-sqlite = { workspace = true }
 utoipa = { workspace = true }
 utoipa-axum = { version = "0.2.0", features = ["debug"] }
 utoipa-swagger-ui = { version = "9", features = ["axum"] }
-base64 = { workspace = true }
 strum = "0.27.1"
 strum_macros = "0.27.1"
 
@@ -60,9 +60,3 @@ chroma-types = { workspace = true, features = ["testing"] }
 tempfile = { workspace = true }
 worker = { workspace = true }
 ndarray = { workspace = true }
-criterion = { workspace = true }
-
-
-[[bench]]
-name = "base64"
-harness = false

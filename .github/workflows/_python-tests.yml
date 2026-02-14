@@ -142,16 +142,27 @@ jobs:
           - "chromadb/test/distributed/test_log_backpressure.py"
           - "chromadb/test/distributed/test_repair_collection_log_offset.py"
           - "chromadb/test/distributed/test_task_api.py"
+          - "chromadb/test/distributed/test_statistics_wrapper.py"
+          - "chromadb/test/api/test_indexing_status.py"
         include:
           - test-glob: "chromadb/test/property/test_add.py"
             parallelized: false
           - test-glob: "chromadb/test/property/test_embeddings.py"
             parallelized: true
+          # Tests that create tenants need MULTI_REGION for spanner instance
+          - test-glob: "chromadb/test/api"
+            multi_region: true
+          - test-glob: "chromadb/test/property/test_collections_with_database_tenant.py"
+            multi_region: true
+          - test-glob: "chromadb/test/property/test_collections_with_database_tenant_overwrite.py"
+            multi_region: true
     runs-on: blacksmith-8vcpu-ubuntu-2404
     # OIDC token auth for AWS
     permissions:
       contents: read
       id-token: write
+    env:
+      MULTI_REGION: ${{ matrix.multi_region && 'true' || '' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

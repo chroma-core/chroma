@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::future::{ready, Future};
 use std::pin::Pin;
@@ -5,7 +6,7 @@ use std::pin::Pin;
 use axum::http::HeaderMap;
 use axum::http::StatusCode;
 
-use chroma::types::GetUserIdentityResponse;
+use chroma_api_types::GetUserIdentityResponse;
 use chroma_types::Collection;
 use serde::Serialize;
 
@@ -37,8 +38,8 @@ pub enum AuthzAction {
     Update,
     Upsert,
     Search,
-    CreateTask,
-    RemoveTask,
+    CreateAttachedFunction,
+    RemoveAttachedFunction,
 }
 
 impl Display for AuthzAction {
@@ -69,8 +70,8 @@ impl Display for AuthzAction {
             AuthzAction::Update => write!(f, "collection:update"),
             AuthzAction::Upsert => write!(f, "collection:upsert"),
             AuthzAction::Search => write!(f, "collection:search"),
-            AuthzAction::CreateTask => write!(f, "collection:create_task"),
-            AuthzAction::RemoveTask => write!(f, "collection:remove_task"),
+            AuthzAction::CreateAttachedFunction => write!(f, "collection:create_attached_function"),
+            AuthzAction::RemoveAttachedFunction => write!(f, "collection:remove_attached_function"),
         }
     }
 }
@@ -122,7 +123,7 @@ fn default_identity() -> GetUserIdentityResponse {
     GetUserIdentityResponse {
         user_id: String::new(),
         tenant: "default_tenant".to_string(),
-        databases: vec!["default_database".to_string()],
+        databases: HashSet::from(["default_database".to_string()]),
     }
 }
 

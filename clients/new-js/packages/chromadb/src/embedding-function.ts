@@ -1,5 +1,7 @@
 import { EmbeddingFunctionConfiguration, SparseVector } from "./api";
 import { ChromaValueError } from "./errors";
+import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
+import { ChromaClient } from "./chroma-client";
 
 /**
  * Supported vector space types.
@@ -33,7 +35,10 @@ export interface EmbeddingFunction {
   /** Returns all supported vector spaces for this embedding function */
   supportedSpaces?(): EmbeddingFunctionSpace[];
   /** Creates an instance from configuration object */
-  buildFromConfig?(config: Record<string, any>): EmbeddingFunction;
+  buildFromConfig?(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): EmbeddingFunction;
   /** Returns the current configuration as an object */
   getConfig?(): Record<string, any>;
   /**
@@ -71,7 +76,10 @@ export interface SparseEmbeddingFunction {
   /** Optional name identifier for the embedding function */
   name?: string;
   /** Creates an instance from configuration object */
-  buildFromConfig?(config: Record<string, any>): SparseEmbeddingFunction;
+  buildFromConfig?(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): SparseEmbeddingFunction;
   /** Returns the current configuration as an object */
   getConfig?(): Record<string, any>;
   /**
@@ -92,11 +100,14 @@ export interface SparseEmbeddingFunction {
  */
 export interface EmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): EmbeddingFunction;
+  new (...args: any[]): EmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
-  buildFromConfig(config: Record<string, any>): EmbeddingFunction;
+  buildFromConfig(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): EmbeddingFunction;
 }
 
 /**
@@ -105,11 +116,14 @@ export interface EmbeddingFunctionClass {
  */
 export interface SparseEmbeddingFunctionClass {
   /** Constructor for creating new instances */
-  new(...args: any[]): SparseEmbeddingFunction;
+  new (...args: any[]): SparseEmbeddingFunction;
   /** Name identifier for the embedding function */
   name: string;
   /** Static method to build instance from configuration */
-  buildFromConfig(config: Record<string, any>): SparseEmbeddingFunction;
+  buildFromConfig(
+    config: Record<string, any>,
+    client?: ChromaClient,
+  ): SparseEmbeddingFunction;
 }
 
 /**
@@ -121,6 +135,30 @@ export const knownEmbeddingFunctions = new Map<
   EmbeddingFunctionClass
 >();
 
+const pythonEmbeddingFunctions: Record<string, string> = {
+  onnx_mini_lm_l6_v2: "default-embed",
+  default: "default-embed",
+  together_ai: "together-ai",
+  sentence_transformer: "sentence-transformer",
+};
+
+const unsupportedEmbeddingFunctions: Set<string> = new Set([
+  "amazon_bedrock",
+  "baseten",
+  "langchain",
+  "google_palm",
+  "huggingface",
+  "instructor",
+  "open_clip",
+  "roboflow",
+  "text2vec",
+]);
+
+const chromaCloudEmbeddingFunctions: Set<string> = new Set([
+  "chroma-cloud-splade",
+  "chroma-cloud-qwen",
+]);
+
 /**
  * Registry of available sparse embedding functions.
  * Maps function names to their constructor classes.
@@ -129,6 +167,21 @@ export const knownSparseEmbeddingFunctions = new Map<
   string,
   SparseEmbeddingFunctionClass
 >();
+
+const pythonSparseEmbeddingFunctions: Record<string, string> = {
+  chroma_bm25: "chroma-bm25",
+};
+
+const unsupportedSparseEmbeddingFunctions: Set<string> = new Set([
+  "bm25",
+  "fastembed_sparse",
+  "huggingface_sparse",
+]);
+
+/**
+ * Union type covering both dense and sparse embedding functions.
+ */
+export type AnyEmbeddingFunction = EmbeddingFunction | SparseEmbeddingFunction;
 
 /**
  * Registers an embedding function in the global registry.
@@ -168,14 +221,15 @@ export const registerSparseEmbeddingFunction = (
 
 /**
  * Retrieves and instantiates an embedding function from configuration.
- * @param collectionName - Name of the collection (for error messages)
- * @param efConfig - Configuration for the embedding function
- * @returns Promise resolving to an EmbeddingFunction instance
+ * @returns EmbeddingFunction instance or undefined if it cannot be constructed
  */
-export const getEmbeddingFunction = async (
-  collectionName: string,
-  efConfig?: EmbeddingFunctionConfiguration,
-) => {
+export const getEmbeddingFunction = async (args: {
+  collectionName: string;
+  client: ChromaClient;
+  efConfig?: EmbeddingFunctionConfiguration;
+}) => {
+  const { collectionName, client, efConfig } = args;
+
   if (!efConfig) {
     console.warn(
       `No embedding function configuration found for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
@@ -197,14 +251,39 @@ export const getEmbeddingFunction = async (
     return undefined;
   }
 
-  const name = efConfig.name;
+  if (efConfig.type !== "known") {
+    return undefined;
+  }
 
-  const embeddingFunction = knownEmbeddingFunctions.get(name);
-  if (!embeddingFunction) {
+  if (unsupportedEmbeddingFunctions.has(efConfig.name)) {
     console.warn(
-      `Collection ${collectionName} was created with the ${embeddingFunction} embedding function. However, the @chroma-core/${embeddingFunction} package is not install. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${embeddingFunction} package.`,
+      `Embedding function ${efConfig.name} is not supported in the JS/TS SDK. 'add' and 'query' will fail unless you provide them embeddings directly.`,
     );
     return undefined;
+  }
+
+  const packageName = pythonEmbeddingFunctions[efConfig.name] || efConfig.name;
+
+  if (packageName === "default-embed") {
+    await getDefaultEFConfig();
+  }
+
+  let embeddingFunction = knownEmbeddingFunctions.get(packageName);
+  if (!embeddingFunction) {
+    try {
+      const fullPackageName = `@chroma-core/${packageName}`;
+      await import(fullPackageName);
+      embeddingFunction = knownEmbeddingFunctions.get(packageName);
+    } catch (error) {
+      // Dynamic loading failed, proceed with warning
+    }
+
+    if (!embeddingFunction) {
+      console.warn(
+        `Collection ${collectionName} was created with the ${packageName} embedding function. However, the @chroma-core/${packageName} package is not installed. 'add' and 'query' will fail unless you provide them embeddings directly, or install the @chroma-core/${packageName} package.`,
+      );
+      return undefined;
+    }
   }
 
   let constructorConfig: Record<string, any> =
@@ -212,16 +291,16 @@ export const getEmbeddingFunction = async (
 
   try {
     if (embeddingFunction.buildFromConfig) {
-      return embeddingFunction.buildFromConfig(constructorConfig);
+      return embeddingFunction.buildFromConfig(constructorConfig, client);
     }
 
     console.warn(
-      `Embedding function ${name} does not define a 'buildFromConfig' function. 'add' and 'query' will fail unless you provide them embeddings directly.`,
+      `Embedding function ${packageName} does not define a 'buildFromConfig' function. 'add' and 'query' will fail unless you provide them embeddings directly.`,
     );
     return undefined;
   } catch (e) {
     console.warn(
-      `Embedding function ${name} failed to build with config: ${constructorConfig}. 'add' and 'query' will fail unless you provide them embeddings directly. Error: ${e}`,
+      `Embedding function ${packageName} failed to build with config: ${constructorConfig}. 'add' and 'query' will fail unless you provide them embeddings directly. Error: ${e}`,
     );
     return undefined;
   }
@@ -229,43 +308,51 @@ export const getEmbeddingFunction = async (
 
 /**
  * Retrieves and instantiates a sparse embedding function from configuration.
- * @param collectionName - Name of the collection (for error messages)
- * @param efConfig - Configuration for the sparse embedding function
- * @returns Promise resolving to a SparseEmbeddingFunction instance
+ * @returns SparseEmbeddingFunction instance or undefined if it cannot be constructed
  */
 export const getSparseEmbeddingFunction = async (
   collectionName: string,
+  client: ChromaClient,
   efConfig?: EmbeddingFunctionConfiguration,
 ) => {
   if (!efConfig) {
-    console.warn(
-      `No sparse embedding function configuration found for collection ${collectionName}.`,
-    );
     return undefined;
   }
 
   if (efConfig.type === "legacy") {
+    return undefined;
+  }
+
+  if (efConfig.type !== "known") {
+    return undefined;
+  }
+
+  if (unsupportedSparseEmbeddingFunctions.has(efConfig.name)) {
     console.warn(
-      `No sparse embedding function configuration found for collection ${collectionName}.`,
+      "Embedding function ${efConfig.name} is not supported in the JS/TS SDK. 'add' and 'query' will fail unless you provide them embeddings directly.",
     );
     return undefined;
   }
 
-  if (efConfig.type === "unknown") {
-    console.warn(
-      `Unknown embedding function configuration for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
-    );
-    return undefined;
-  }
+  const packageName =
+    pythonSparseEmbeddingFunctions[efConfig.name] || efConfig.name;
 
-  const name = efConfig.name;
-
-  const sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(name);
+  let sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(packageName);
   if (!sparseEmbeddingFunction) {
-    console.warn(
-      `Collection ${collectionName} was created with the ${name} sparse embedding function. However, the @chroma-core/${name} package is not installed.`,
-    );
-    return undefined;
+    try {
+      const fullPackageName = `@chroma-core/${packageName}`;
+      await import(fullPackageName);
+      sparseEmbeddingFunction = knownSparseEmbeddingFunctions.get(packageName);
+    } catch (error) {
+      // Dynamic loading failed, proceed with warning
+    }
+
+    if (!sparseEmbeddingFunction) {
+      console.warn(
+        `Collection ${collectionName} was created with the ${packageName} sparse embedding function. However, the @chroma-core/${packageName} package is not installed.`,
+      );
+      return undefined;
+    }
   }
 
   let constructorConfig: Record<string, any> =
@@ -273,16 +360,16 @@ export const getSparseEmbeddingFunction = async (
 
   try {
     if (sparseEmbeddingFunction.buildFromConfig) {
-      return sparseEmbeddingFunction.buildFromConfig(constructorConfig);
+      return sparseEmbeddingFunction.buildFromConfig(constructorConfig, client);
     }
 
     console.warn(
-      `Sparse embedding function ${name} does not define a 'buildFromConfig' function.`,
+      `Sparse embedding function ${packageName} does not define a 'buildFromConfig' function.`,
     );
     return undefined;
   } catch (e) {
     console.warn(
-      `Sparse embedding function ${name} failed to build with config: ${constructorConfig}. Error: ${e}`,
+      `Sparse embedding function ${packageName} failed to build with config: ${constructorConfig}. Error: ${e}`,
     );
     return undefined;
   }
@@ -340,12 +427,11 @@ export const getDefaultEFConfig =
       const { DefaultEmbeddingFunction } = await import(
         "@chroma-core/default-embed"
       );
-      if (!knownEmbeddingFunctions.has(new DefaultEmbeddingFunction().name)) {
-        registerEmbeddingFunction("default", DefaultEmbeddingFunction);
+      if (!knownEmbeddingFunctions.has("default-embed")) {
+        registerEmbeddingFunction("default-embed", DefaultEmbeddingFunction);
       }
     } catch (e) {
-      console.error(e);
-      throw new Error(
+      console.warn(
         "Cannot instantiate a collection with the DefaultEmbeddingFunction. Please install @chroma-core/default-embed, or provide a different embedding function",
       );
     }

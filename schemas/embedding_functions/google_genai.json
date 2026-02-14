@@ -1,0 +1,38 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Google GenAI Embedding Function Schema",
+    "description": "Schema for the Google GenAI embedding function configuration",
+    "version": "1.0.0",
+    "type": "object",
+    "properties": {
+        "model_name": {
+            "type": "string",
+            "description": "The name of the model to use for text embeddings"
+        },
+        "vertexai": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Whether to use Vertex AI"
+        },
+        "project": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The Google Cloud project ID (required for Vertex AI)"
+        },
+        "location": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The Google Cloud location/region (required for Vertex AI)"
+        }
+    },
+    "required": [
+        "model_name"
+    ],
+    "additionalProperties": false
+}

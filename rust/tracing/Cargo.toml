@@ -3,6 +3,9 @@ name = "chroma-tracing"
 version = "0.1.0"
 edition = "2021"
 
+[lints.rust]
+unexpected_cfgs = { check-cfg = ['cfg(tokio_unstable)'], level = "warn" }
+
 [dependencies]
 fastrace = "0.7.8"
 fastrace-opentelemetry = "0.8"
@@ -21,9 +24,12 @@ uuid = { workspace = true }
 axum = { workspace = true, optional = true }
 tower-http = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
+tokio = { workspace = true }
 
 chroma-system = { workspace = true }
 
 [features]
 grpc = ["dep:tower", "dep:http"]
 middleware = ["dep:tower", "dep:axum", "dep:tower-http", "dep:futures"]
+# Enable tokio unstable features just for tokio metrics
+tokio_unstable = []

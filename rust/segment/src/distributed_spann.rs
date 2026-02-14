@@ -14,8 +14,9 @@ use chroma_index::spann::types::{
 };
 use chroma_index::IndexUuid;
 use chroma_index::{hnsw_provider::HnswIndexProvider, spann::types::SpannIndexWriter};
+use chroma_types::Cmek;
 use chroma_types::Collection;
-use chroma_types::InternalSchema;
+use chroma_types::Schema;
 use chroma_types::SchemaError;
 use chroma_types::SegmentUuid;
 use chroma_types::HNSW_PATH;
@@ -106,20 +107,19 @@ impl SpannSegmentWriter {
         gc_context: GarbageCollectionContext,
         pl_block_size: usize,
         metrics: SpannMetrics,
+        cmek: Option<Cmek>,
     ) -> Result<SpannSegmentWriter, SpannSegmentWriterError> {
         if segment.r#type != SegmentType::Spann || segment.scope != SegmentScope::VECTOR {
             return Err(SpannSegmentWriterError::InvalidArgument);
         }
 
-        let reconciled_schema = InternalSchema::reconcile_schema_and_config(
-            collection.schema.clone(),
-            Some(collection.config.clone()),
-        )
-        .map_err(|e| {
-            SpannSegmentWriterError::InvalidSchema(SchemaError::InvalidSchema { reason: e })
-        })?;
+        let schema = if let Some(schema) = &collection.schema {
+            schema
+        } else {
+            &Schema::try_from(&collection.config).map_err(SpannSegmentWriterError::InvalidSchema)?
+        };
 
-        let params = reconciled_schema
+        let params = schema
             .get_internal_spann_config()
             .ok_or(SpannSegmentWriterError::MissingSpannConfiguration)?;
 
@@ -208,6 +208,7 @@ impl SpannSegmentWriter {
             gc_context,
             pl_block_size,
             metrics,
+            cmek,
         )
         .await
         {
@@ -616,13 +617,12 @@ mod test {
         },
         hnsw_provider::HnswIndexProvider,
         spann::types::{GarbageCollectionContext, SpannMetrics},
-        Index,
     };
     use chroma_storage::{local::LocalStorage, Storage};
     use chroma_types::{
         Chunk, Collection, CollectionUuid, DatabaseUuid, InternalCollectionConfiguration,
-        InternalSchema, InternalSpannConfiguration, LogRecord, Operation, OperationRecord,
-        SegmentUuid, SpannPostingList,
+        InternalSpannConfiguration, LogRecord, Operation, OperationRecord, Schema, SegmentUuid,
+        SpannPostingList,
     };
 
     use crate::{
@@ -690,8 +690,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let pl_block_size = 5 * 1024 * 1024;
@@ -704,6 +704,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -801,6 +802,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -927,8 +929,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let pl_block_size = 5 * 1024 * 1024;
@@ -941,6 +943,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1089,8 +1092,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let segment_id = SegmentUuid::new();
@@ -1129,6 +1132,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");
@@ -1220,8 +1224,8 @@ mod test {
             ..Default::default()
         };
         collection.schema = Some(
-            InternalSchema::reconcile_schema_and_config(None, Some(collection.config.clone()))
-                .expect("Error reconciling schema for test collection"),
+            Schema::try_from(&collection.config)
+                .expect("Error converting config to schema for test collection"),
         );
 
         let pl_block_size = 5 * 1024 * 1024;
@@ -1234,6 +1238,7 @@ mod test {
             gc_context,
             pl_block_size,
             SpannMetrics::default(),
+            None,
         )
         .await
         .expect("Error creating spann segment writer");

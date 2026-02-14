@@ -4,7 +4,13 @@ import pytest
 from chromadb.api import AdminAPI
 import chromadb.api.types as types
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT
-from chromadb.test.conftest import ClientFactories
+from chromadb.test.conftest import (
+    ClientFactories,
+    MULTI_REGION_ENABLED,
+    DEFAULT_MCMR_DATABASE,
+    MULTI_REGION_TOPOLOGY,
+)
+
 from chromadb.test.property.test_collections import CollectionStateMachine
 from hypothesis.stateful import (
     Bundle,
@@ -15,6 +21,10 @@ from hypothesis.stateful import (
     MultipleResults,
 )
 import chromadb.test.property.strategies as strategies
+
+EFFECTIVE_DEFAULT_DATABASE = (
+    DEFAULT_MCMR_DATABASE if MULTI_REGION_ENABLED else DEFAULT_DATABASE
+)
 
 
 class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
@@ -44,8 +54,8 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         self.client.reset()
         self.tenant_to_database_to_model = {}
         self.curr_tenant = DEFAULT_TENANT
-        self.curr_database = DEFAULT_DATABASE
-        self.client.set_tenant(DEFAULT_TENANT, DEFAULT_DATABASE)
+        self.curr_database = EFFECTIVE_DEFAULT_DATABASE
+        self.client.set_tenant(DEFAULT_TENANT, EFFECTIVE_DEFAULT_DATABASE)
         self.set_tenant_model(self.curr_tenant, {})
         self.set_database_model_for_tenant(self.curr_tenant, self.curr_database, {})
 
@@ -62,13 +72,15 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
         # When we create a tenant, create a default database for it just for testing
         # since the state machine could call collection operations before creating a
         # database
-        self.admin_client.create_database(DEFAULT_DATABASE, tenant=tenant)
+        self.admin_client.create_database(EFFECTIVE_DEFAULT_DATABASE, tenant=tenant)
         self.set_tenant_model(tenant, {})
-        self.set_database_model_for_tenant(tenant, DEFAULT_DATABASE, {})
+        self.set_database_model_for_tenant(tenant, EFFECTIVE_DEFAULT_DATABASE, {})
         return multiple(tenant)
 
     @rule(target=databases, name=strategies.tenant_database_name)
     def create_database(self, name: str) -> MultipleResults:  # [Tuple[str, str]]:
+        if MULTI_REGION_ENABLED:
+            name = f"{MULTI_REGION_TOPOLOGY}+{name}"
         database = self.overwrite_database(name)
         tenant = self.overwrite_tenant(self.curr_tenant)
         # If database already exists in current tenant, raise an error
@@ -94,9 +106,9 @@ class TenantDatabaseCollectionStateMachine(CollectionStateMachine):
 
     @rule(tenant=tenants)
     def set_tenant(self, tenant: str) -> None:
-        self.set_api_tenant_database(tenant, DEFAULT_DATABASE)
+        self.set_api_tenant_database(tenant, EFFECTIVE_DEFAULT_DATABASE)
         self.curr_tenant = tenant
-        self.curr_database = DEFAULT_DATABASE
+        self.curr_database = EFFECTIVE_DEFAULT_DATABASE
 
     # These methods allow other tests, namely
     # test_collections_with_database_tenant_override.py, to swap out the model

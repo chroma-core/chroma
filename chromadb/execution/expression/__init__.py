@@ -39,11 +39,18 @@ from chromadb.execution.expression.operator import (
     Sub,
     Sum,
     Val,
+    # GroupBy and Aggregate expressions
+    Aggregate,
+    MinK,
+    MaxK,
+    GroupBy,
 )
 
 from chromadb.execution.expression.plan import (
     Search,
 )
+
+SearchWhere = Where
 
 __all__ = [
     # Main search class
@@ -52,6 +59,7 @@ __all__ = [
     "Key",
     "K",
     # Where expressions
+    "SearchWhere",
     "Where",
     "And",
     "Or",
@@ -84,4 +92,9 @@ __all__ = [
     "Sub",
     "Sum",
     "Val",
+    # GroupBy and Aggregate expressions
+    "Aggregate",
+    "MinK",
+    "MaxK",
+    "GroupBy",
 ]
