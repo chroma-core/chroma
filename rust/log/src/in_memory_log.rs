@@ -152,7 +152,7 @@ impl InMemoryLog {
         &mut self,
         collection_id: CollectionUuid,
         starting_offset: u64,
-    ) -> Result<u64, Box<dyn ChromaError>> {
+    ) -> Result<crate::ScoutLogsResult, Box<dyn ChromaError>> {
         let answer = self
             .collection_to_log
             .get(&collection_id)
@@ -160,11 +160,15 @@ impl InMemoryLog {
             .flat_map(|x| x.iter().map(|rec| rec.log_offset + 1).max())
             .max()
             .unwrap_or(starting_offset as i64) as u64;
-        if answer >= starting_offset {
-            Ok(answer)
+        let first_uninserted_record_offset = if answer >= starting_offset {
+            answer
         } else {
-            Ok(starting_offset)
-        }
+            starting_offset
+        };
+        Ok(crate::ScoutLogsResult {
+            first_uninserted_record_offset,
+            fragment_paths: vec![],
+        })
     }
 }
 
