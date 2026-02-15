@@ -729,3 +729,17 @@ func (s *collectionDb) IncrementCompactionFailureCount(collectionID string) erro
 	}
 	return nil
 }
+
+// GetCompactionDLQSize returns the count of collections with compaction_failure_count > 0.
+// This uses the read replica to minimize overhead on the primary database.
+func (s *collectionDb) GetCompactionDLQSize() (int64, error) {
+	var count int64
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Where("compaction_failure_count > 0").
+		Count(&count).Error
+	if err != nil {
+		log.Error("GetCompactionDLQSize failed", zap.Error(err))
+		return 0, err
+	}
+	return count, nil
+}
