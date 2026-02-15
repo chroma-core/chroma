@@ -641,70 +641,6 @@ impl<'me> MetadataSegmentWriter<'me> {
         Ok(self.set_metadata(key, new_value, offset_id).await?)
     }
 
-    async fn apply_fts_logs(
-        &self,
-        record_segment_reader: &Option<RecordSegmentReader<'_>>,
-        materialized: &MaterializeLogsResult,
-        schema: &Option<Schema>,
-    ) -> Result<(), ApplyMaterializedLogError> {
-        // Skip FTS indexing if disabled in schema (default to enabled for backwards compatibility)
-        let fts_enabled = schema.as_ref().is_none_or(|s| s.is_fts_enabled());
-        if !fts_enabled {
-            tracing::info!("FTS is disabled in schema, skipping indexing");
-            return Ok(());
-        }
-
-        let mut full_text_writer_batch = vec![];
-        for record in materialized {
-            let record = record
-                .hydrate(record_segment_reader.as_ref())
-                .await
-                .map_err(ApplyMaterializedLogError::Materialization)?;
-            let offset_id = record.get_offset_id();
-            let old_document = record.document_ref_from_segment();
-            let new_document = record.document_ref_from_log();
-
-            if matches!(
-                record.get_operation(),
-                MaterializedLogOperation::UpdateExisting
-            ) && new_document.is_none()
-            {
-                continue;
-            }
-
-            match (old_document, new_document) {
-                (None, None) => continue,
-                (Some(old_document), Some(new_document)) => {
-                    full_text_writer_batch.push(DocumentMutation::Update {
-                        offset_id,
-                        old_document,
-                        new_document,
-                    })
-                }
-                (None, Some(new_document)) => {
-                    full_text_writer_batch.push(DocumentMutation::Create {
-                        offset_id,
-                        new_document,
-                    })
-                }
-                (Some(old_document), None) => {
-                    full_text_writer_batch.push(DocumentMutation::Delete {
-                        offset_id,
-                        old_document,
-                    })
-                }
-            }
-        }
-
-        self.full_text_index_writer
-            .as_ref()
-            .unwrap()
-            .handle_batch(full_text_writer_batch)
-            .map_err(ApplyMaterializedLogError::FullTextIndex)?;
-
-        Ok(())
-    }
-
     pub async fn apply_materialized_log_chunk(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
@@ -715,8 +651,12 @@ impl<'me> MetadataSegmentWriter<'me> {
         let mut schema = schema;
         let mut schema_modified = false;
 
-        self.apply_fts_logs(record_segment_reader, materialized, &schema)
-            .await?;
+        // Skip FTS indexing if disabled in schema (default to enabled for backwards compatibility)
+        let fts_enabled = schema.as_ref().is_none_or(|s| s.is_fts_enabled());
+        if !fts_enabled {
+            tracing::info!("FTS is disabled in schema, skipping indexing");
+        }
+        let mut full_text_writer_batch = vec![];
 
         for record in materialized {
             count += 1;
@@ -726,6 +666,42 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .await
                 .map_err(ApplyMaterializedLogError::Materialization)?;
             let segment_offset_id = record.get_offset_id();
+
+            // Build FTS batch entry from the already-hydrated record
+            if fts_enabled {
+                let old_document = record.document_ref_from_segment();
+                let new_document = record.document_ref_from_log();
+
+                let skip_fts = matches!(
+                    record.get_operation(),
+                    MaterializedLogOperation::UpdateExisting
+                ) && new_document.is_none();
+
+                if !skip_fts {
+                    match (old_document, new_document) {
+                        (None, None) => {}
+                        (Some(old_document), Some(new_document)) => {
+                            full_text_writer_batch.push(DocumentMutation::Update {
+                                offset_id: segment_offset_id,
+                                old_document,
+                                new_document,
+                            })
+                        }
+                        (None, Some(new_document)) => {
+                            full_text_writer_batch.push(DocumentMutation::Create {
+                                offset_id: segment_offset_id,
+                                new_document,
+                            })
+                        }
+                        (Some(old_document), None) => {
+                            full_text_writer_batch.push(DocumentMutation::Delete {
+                                offset_id: segment_offset_id,
+                                old_document,
+                            })
+                        }
+                    }
+                }
+            }
 
             match record.get_operation() {
                 MaterializedLogOperation::AddNew => {
@@ -923,6 +899,15 @@ impl<'me> MetadataSegmentWriter<'me> {
                 MaterializedLogOperation::Initial => panic!("Not expected mat records in the initial state")
             }
         }
+
+        if fts_enabled {
+            self.full_text_index_writer
+                .as_ref()
+                .unwrap()
+                .handle_batch(full_text_writer_batch)
+                .map_err(ApplyMaterializedLogError::FullTextIndex)?;
+        }
+
         tracing::info!("Applied {} records to metadata segment", count,);
         // return the schema only if it was modified (so will not affect legacy paths)
         Ok(if schema_modified { schema } else { None })
