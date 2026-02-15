@@ -756,15 +756,18 @@ impl<'me> MetadataSegmentWriter<'me> {
         Ok(self.set_metadata(key, new_value, offset_id).await?)
     }
 
-    pub async fn apply_materialized_log_chunk(
+    async fn apply_fts_logs(
         &self,
         record_segment_reader: &Option<RecordSegmentReader<'_>>,
         materialized: &MaterializeLogsResult,
-        schema: Option<Schema>,
-    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
-        let mut count = 0u64;
-        let mut schema = schema;
-        let mut schema_modified = false;
+        schema: &Option<Schema>,
+    ) -> Result<(), ApplyMaterializedLogError> {
+        // Skip FTS indexing if disabled in schema (default to enabled for backwards compatibility)
+        let fts_enabled = schema.as_ref().is_none_or(|s| s.is_fts_enabled());
+        if !fts_enabled {
+            tracing::info!("FTS is disabled in schema, skipping indexing");
+            return Ok(());
+        }
 
         let mut full_text_writer_batch = vec![];
         for record in materialized {
@@ -813,6 +816,22 @@ impl<'me> MetadataSegmentWriter<'me> {
             .unwrap()
             .handle_batch(full_text_writer_batch)
             .map_err(ApplyMaterializedLogError::FullTextIndex)?;
+
+        Ok(())
+    }
+
+    pub async fn apply_materialized_log_chunk(
+        &self,
+        record_segment_reader: &Option<RecordSegmentReader<'_>>,
+        materialized: &MaterializeLogsResult,
+        schema: Option<Schema>,
+    ) -> Result<Option<Schema>, ApplyMaterializedLogError> {
+        let mut count = 0u64;
+        let mut schema = schema;
+        let mut schema_modified = false;
+
+        self.apply_fts_logs(record_segment_reader, materialized, &schema)
+            .await?;
 
         for record in materialized {
             count += 1;
@@ -1429,8 +1448,9 @@ mod test {
     use chroma_types::{
         regex::literal_expr::{LiteralExpr, NgramLiteralProvider},
         strategies::{ArbitraryChromaRegexTestDocumentsParameters, ChromaRegexTestDocuments},
-        Chunk, CollectionUuid, DatabaseUuid, LogRecord, MetadataValue, Operation, OperationRecord,
-        ScalarEncoding, SegmentUuid, UpdateMetadataValue, SPARSE_MAX, SPARSE_OFFSET_VALUE,
+        Chunk, CollectionUuid, DatabaseUuid, FtsIndexConfig, IndexConfig, KnnIndex, LogRecord,
+        MetadataValue, Operation, OperationRecord, ScalarEncoding, Schema, SegmentUuid,
+        UpdateMetadataValue, DOCUMENT_KEY, SPARSE_MAX, SPARSE_OFFSET_VALUE,
     };
     use proptest::prelude::any_with;
     use roaring::RoaringBitmap;
@@ -3210,5 +3230,359 @@ mod test {
                 "Sparse index reader should be created, verifying files exist and are readable"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_compaction_skips_fts_indexing_when_disabled() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+
+        let mut record_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000000").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000001").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000000")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        // Build a schema with FTS disabled
+        let fts_disabled_schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+        assert!(!fts_disabled_schema.is_fts_enabled());
+
+        {
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+                None,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+                None,
+            )
+            .await
+            .expect("Error creating segment writer");
+
+            let mut update_metadata = HashMap::new();
+            update_metadata.insert(
+                String::from("color"),
+                UpdateMetadataValue::Str(String::from("red")),
+            );
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "doc1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: Some(update_metadata.clone()),
+                        document: Some(String::from("This is a document about cats.")),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "doc2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: Some(update_metadata),
+                        document: Some(String::from("This is a document about dogs.")),
+                        operation: Operation::Add,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => match *e {
+                    RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    _ => panic!("Error creating record segment reader"),
+                },
+            };
+
+            let mat_records = materialize_logs(&record_segment_reader, data, None)
+                .await
+                .expect("Log materialization failed");
+
+            // Pass the FTS-disabled schema
+            metadata_writer
+                .apply_materialized_log_chunk(
+                    &record_segment_reader,
+                    &mat_records,
+                    Some(fts_disabled_schema),
+                )
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .finish()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+
+            let record_flusher = Box::pin(segment_writer.commit())
+                .await
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = Box::pin(metadata_writer.commit())
+                .await
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = Box::pin(record_flusher.flush())
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+
+        // Verify: FTS search should return NO results (indexing was skipped)
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &metadata_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Metadata segment reader construction failed");
+
+        let fts_reader = metadata_segment_reader
+            .full_text_index_reader
+            .as_ref()
+            .expect("FTS reader blockfile should still exist");
+        let res = fts_reader.search("cats").await.unwrap();
+        assert_eq!(
+            res.len(),
+            0,
+            "FTS search should return 0 results when FTS is disabled"
+        );
+        let res = fts_reader.search("dogs").await.unwrap();
+        assert_eq!(
+            res.len(),
+            0,
+            "FTS search should return 0 results when FTS is disabled"
+        );
+
+        // Verify: metadata indexing still works
+        let string_reader = metadata_segment_reader
+            .string_metadata_index_reader
+            .as_ref()
+            .expect("String metadata reader should exist");
+        let res = string_reader
+            .get(
+                "color",
+                &chroma_blockstore::key::KeyWrapper::String("red".to_string()),
+            )
+            .await
+            .expect("String metadata query should succeed");
+        assert_eq!(
+            res.len(),
+            2,
+            "Metadata indexing should still work even with FTS disabled"
+        );
+
+        // Verify: documents are still stored in record segment
+        let record_segment_reader = Box::pin(RecordSegmentReader::from_segment(
+            &record_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Record segment reader should be initialized");
+        let res = record_segment_reader
+            .get_all_data()
+            .await
+            .expect("Should be able to get all data")
+            .collect::<Vec<_>>();
+        assert_eq!(res.len(), 2, "Both documents should be stored");
+    }
+
+    #[tokio::test]
+    async fn test_compaction_indexes_fts_when_enabled_by_default() {
+        // Control test: FTS is enabled by default (schema = None),
+        // so FTS search should return results after compaction.
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let arrow_blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let blockfile_provider =
+            BlockfileProvider::ArrowBlockfileProvider(arrow_blockfile_provider);
+        let tenant = String::from("test_tenant");
+        let database_id = DatabaseUuid::new();
+
+        let mut record_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000010").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileRecord,
+            scope: chroma_types::SegmentScope::RECORD,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000010")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+        let mut metadata_segment = chroma_types::Segment {
+            id: SegmentUuid::from_str("00000000-0000-0000-0000-000000000011").expect("parse error"),
+            r#type: chroma_types::SegmentType::BlockfileMetadata,
+            scope: chroma_types::SegmentScope::METADATA,
+            collection: CollectionUuid::from_str("00000000-0000-0000-0000-000000000010")
+                .expect("parse error"),
+            metadata: None,
+            file_path: HashMap::new(),
+        };
+
+        {
+            let segment_writer = RecordSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &record_segment,
+                &blockfile_provider,
+                None,
+            )
+            .await
+            .expect("Error creating segment writer");
+            let mut metadata_writer = MetadataSegmentWriter::from_segment(
+                &tenant,
+                &database_id,
+                &metadata_segment,
+                &blockfile_provider,
+                None,
+            )
+            .await
+            .expect("Error creating segment writer");
+
+            let data = vec![
+                LogRecord {
+                    log_offset: 1,
+                    record: OperationRecord {
+                        id: "doc1".to_string(),
+                        embedding: Some(vec![1.0, 2.0, 3.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: Some(String::from("This is a document about cats.")),
+                        operation: Operation::Add,
+                    },
+                },
+                LogRecord {
+                    log_offset: 2,
+                    record: OperationRecord {
+                        id: "doc2".to_string(),
+                        embedding: Some(vec![4.0, 5.0, 6.0]),
+                        encoding: None,
+                        metadata: None,
+                        document: Some(String::from("This is a document about dogs.")),
+                        operation: Operation::Add,
+                    },
+                },
+            ];
+            let data: Chunk<LogRecord> = Chunk::new(data.into());
+            let record_segment_reader: Option<RecordSegmentReader> = match Box::pin(
+                RecordSegmentReader::from_segment(&record_segment, &blockfile_provider),
+            )
+            .await
+            {
+                Ok(reader) => Some(reader),
+                Err(e) => match *e {
+                    RecordSegmentReaderCreationError::UninitializedSegment => None,
+                    _ => panic!("Error creating record segment reader"),
+                },
+            };
+
+            let mat_records = materialize_logs(&record_segment_reader, data, None)
+                .await
+                .expect("Log materialization failed");
+
+            // Pass None (default = FTS enabled)
+            metadata_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records, None)
+                .await
+                .expect("Apply materialized log to metadata segment failed");
+            metadata_writer
+                .finish()
+                .await
+                .expect("Write to blockfiles for metadata writer failed");
+            segment_writer
+                .apply_materialized_log_chunk(&record_segment_reader, &mat_records)
+                .await
+                .expect("Apply materialized log to record segment failed");
+
+            let record_flusher = Box::pin(segment_writer.commit())
+                .await
+                .expect("Commit for segment writer failed");
+            let metadata_flusher = Box::pin(metadata_writer.commit())
+                .await
+                .expect("Commit for metadata writer failed");
+            record_segment.file_path = Box::pin(record_flusher.flush())
+                .await
+                .expect("Flush record segment writer failed");
+            metadata_segment.file_path = Box::pin(metadata_flusher.flush())
+                .await
+                .expect("Flush metadata segment writer failed");
+        }
+
+        // Verify: FTS search SHOULD return results (FTS enabled by default)
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &metadata_segment,
+            &blockfile_provider,
+        ))
+        .await
+        .expect("Metadata segment reader construction failed");
+
+        let fts_reader = metadata_segment_reader
+            .full_text_index_reader
+            .as_ref()
+            .expect("FTS reader should exist");
+        let res = fts_reader.search("cats").await.unwrap();
+        assert_eq!(
+            res.len(),
+            1,
+            "FTS search for 'cats' should return 1 result when FTS is enabled"
+        );
+        let res = fts_reader.search("dogs").await.unwrap();
+        assert_eq!(
+            res.len(),
+            1,
+            "FTS search for 'dogs' should return 1 result when FTS is enabled"
+        );
     }
 }
