@@ -183,6 +183,7 @@ impl ArrowOrderedBlockfileWriter {
             self.id,
             count,
             self.cmek,
+            false, // Ordered blockfile writer doesn't support value buffer offset tracking
         );
 
         Ok(flusher)

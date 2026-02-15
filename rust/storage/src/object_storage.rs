@@ -257,6 +257,28 @@ impl ObjectStorage {
         Ok(current_etag.0 == e_tag.0)
     }
 
+    /// Fetch a byte range from object storage.
+    pub async fn get_range(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
+        let bytes = self
+            .store
+            .get_opts(
+                &key.into(),
+                object_store::GetOptions {
+                    range: Some(GetRange::Bounded(start..end)),
+                    ..Default::default()
+                },
+            )
+            .await?
+            .bytes()
+            .await?;
+        Ok(Arc::new(bytes.to_vec()))
+    }
+
     pub fn partition(total_size: u64, chunk_size: u64) -> impl Iterator<Item = (u64, u64)> {
         let chunk_count = total_size.div_ceil(chunk_size);
         let chunk_start = (0..chunk_count).map(move |i| i * chunk_size);

@@ -249,6 +249,36 @@ impl S3Storage {
             .map_err(|e| self.get_object_error_to_storage_error(&key, e))
     }
 
+    /// Fetch a byte range from S3 and return the bytes directly.
+    #[tracing::instrument(skip(self), level = "trace")]
+    pub async fn get_range(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
+        let range_str = format!("bytes={}-{}", start, end - 1); // HTTP range is inclusive
+        let output = self.fetch_range(key.to_string(), range_str).await?;
+
+        let content_length = output.content_length.unwrap_or(0) as usize;
+        if content_length == 0 {
+            return Ok(Arc::new(Vec::new()));
+        }
+
+        let mut buf = vec![0u8; content_length];
+        let mut reader = output.body.into_async_read();
+
+        use tokio::io::AsyncReadExt;
+        reader.read_exact(&mut buf).await.map_err(|e| {
+            tracing::error!("Error reading range from S3: {}", e);
+            StorageError::Generic {
+                source: Arc::new(e),
+            }
+        })?;
+
+        Ok(Arc::new(buf))
+    }
+
     #[tracing::instrument(skip(self), level = "trace")]
     async fn get_parallel(&self, key: &str) -> Result<(Arc<Vec<u8>>, Option<ETag>), StorageError> {
         let (content_length, ranges, e_tag) = self.get_key_ranges(key).await?;
