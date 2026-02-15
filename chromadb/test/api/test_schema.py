@@ -499,44 +499,40 @@ class TestNewSchema:
         schema = Schema()
         fts_config = FtsIndexConfig()
 
-        # Test 1: CAN set FTS config globally - applies to defaults and #document
-        result = schema.create_index(config=fts_config)
+        # Test 1: MUST specify key="#document" for FTS — global (no key) is not allowed
+        with pytest.raises(
+            ValueError, match="FTS index can only be enabled on #document key"
+        ):
+            schema.create_index(config=fts_config)
+
+        # Enable FTS explicitly on #document
+        result = schema.create_index(config=fts_config, key="#document")
         assert result is schema  # Should return self for chaining
 
-        # Verify the FTS config was applied to defaults (enabled state preserved as False)
-        assert schema.defaults.string is not None
-        assert schema.defaults.string.fts_index is not None
-        assert (
-            schema.defaults.string.fts_index.enabled is False
-        )  # Still disabled in defaults
-        assert schema.defaults.string.fts_index.config == fts_config
-
-        # Verify the FTS config was also applied to #document (enabled state preserved as True)
+        # Verify FTS is enabled on #document
         assert schema.keys["#document"].string is not None
         assert schema.keys["#document"].string.fts_index is not None
-        assert (
-            schema.keys["#document"].string.fts_index.enabled is True
-        )  # Still enabled on #document
+        assert schema.keys["#document"].string.fts_index.enabled is True
         assert schema.keys["#document"].string.fts_index.config == fts_config
 
         # Test 2: Cannot create FTS index on custom key
         fts_config2 = FtsIndexConfig()
         with pytest.raises(
-            ValueError, match="FTS index cannot be enabled on specific keys"
+            ValueError, match="FTS index can only be enabled on #document key"
         ):
             schema.create_index(config=fts_config2, key="custom_text_field")
 
-        # Test 3: Cannot create FTS index on #embedding key (special key blocked globally)
+        # Test 3: Cannot create FTS index on #embedding key (special key blocked)
         with pytest.raises(
             ValueError, match="Cannot create index on special key '#embedding'"
         ):
             schema.create_index(config=fts_config2, key="#embedding")
 
-        # Test 4: Cannot create FTS index on #document key (special key blocked globally)
+        # Test 4: Cannot create non-FTS index on #document key
         with pytest.raises(
             ValueError, match="Cannot create index on special key '#document'"
         ):
-            schema.create_index(config=fts_config2, key="#document")
+            schema.create_index(config=StringInvertedIndexConfig(), key="#document")
 
     def test_special_keys_blocked_for_all_index_types(self) -> None:
         """Test that #embedding and #document keys are blocked for all index types."""
@@ -585,10 +581,10 @@ class TestNewSchema:
             schema.delete_index(key="my_key")
 
     def test_cannot_delete_vector_or_fts_index(self) -> None:
-        """Test that deleting vector and FTS indexes is not allowed."""
+        """Test that deleting vector index is not allowed and FTS delete is restricted."""
         schema = Schema()
 
-        # Try to delete vector index globally
+        # Vector delete - fully disallowed
         vector_config = VectorIndexConfig()
         with pytest.raises(
             ValueError, match="Deleting vector index is not currently supported"
@@ -601,18 +597,25 @@ class TestNewSchema:
         ):
             schema.delete_index(config=vector_config, key="my_vectors")
 
-        # Try to delete FTS index globally
+        # FTS delete: only allowed on #document, other cases must error
         fts_config = FtsIndexConfig()
         with pytest.raises(
-            ValueError, match="Deleting FTS index is not currently supported"
+            ValueError, match="Deleting FTS index is only supported on #document key"
         ):
             schema.delete_index(config=fts_config)
 
         # Try to delete FTS index on a custom key
         with pytest.raises(
-            ValueError, match="Deleting FTS index is not currently supported"
+            ValueError, match="Deleting FTS index is only supported on #document key"
         ):
             schema.delete_index(config=fts_config, key="my_text")
+
+        # Positive case: deleting FTS index on #document should succeed and disable FTS
+        schema.delete_index(config=fts_config, key="#document")
+        assert schema.keys["#document"].string is not None
+        assert schema.keys["#document"].string.fts_index is not None
+        assert schema.keys["#document"].string.fts_index.enabled is False
+        assert schema.keys["#document"].string.fts_index.config == fts_config
 
     def test_disable_string_inverted_index_globally(self) -> None:
         """Test disabling string inverted index globally."""
@@ -1862,50 +1865,59 @@ class TestNewSchema:
         ):
             schema.create_index(config=vector_config, key="#embedding")
 
-        # Test 2: Cannot create index on #document key
-        fts_config = FtsIndexConfig()
+        # Test 2: Cannot create non-FTS index on #document key
         with pytest.raises(
             ValueError, match="Cannot create index on special key '#document'"
         ):
-            schema.create_index(config=fts_config, key="#document")
+            schema.create_index(config=StringInvertedIndexConfig(), key="#document")
 
-        # Test 3: Cannot enable all indexes globally
+        # FTS index on #document IS allowed
+        fts_config = FtsIndexConfig()
+        schema.create_index(config=fts_config, key="#document")
+
+        # Test 3: Cannot disable all indexes globally (no config, no key)
+        with pytest.raises(
+            ValueError, match="Cannot disable all indexes"
+        ):
+            schema.delete_index()
+
+        # Test 4: Cannot enable all indexes globally
         with pytest.raises(ValueError, match="Cannot enable all index types globally"):
             schema.create_index()
 
-        # Test 4: Cannot enable all indexes for a specific key
+        # Test 5: Cannot enable all indexes for a specific key
         with pytest.raises(
             ValueError, match="Cannot enable all index types for key 'mykey'"
         ):
             schema.create_index(key="mykey")
 
-        # Test 5: Cannot disable all indexes for a specific key
+        # Test 6: Cannot disable all indexes for a specific key
         with pytest.raises(
             ValueError, match="Cannot disable all index types for key 'mykey'"
         ):
             schema.delete_index(key="mykey")
 
-        # Test 6: Cannot delete vector index
+        # Test 7: Cannot delete vector index
         with pytest.raises(
             ValueError, match="Deleting vector index is not currently supported"
         ):
             schema.delete_index(config=vector_config)
 
-        # Test 7: Cannot delete FTS index
+        # Test 8: Cannot delete FTS index except on #document
         with pytest.raises(
-            ValueError, match="Deleting FTS index is not currently supported"
+            ValueError, match="Deleting FTS index is only supported on #document key"
         ):
             schema.delete_index(config=fts_config)
 
-        # Test 8: Cannot create vector index on custom key
+        # Test 9: Cannot create vector index on custom key
         with pytest.raises(
             ValueError, match="Vector index cannot be enabled on specific keys"
         ):
             schema.create_index(config=vector_config, key="custom_field")
 
-        # Test 9: Cannot create FTS index on custom key
+        # Test 10: Cannot create FTS index on custom key
         with pytest.raises(
-            ValueError, match="FTS index cannot be enabled on specific keys"
+            ValueError, match="FTS index can only be enabled on #document key"
         ):
             schema.create_index(config=fts_config, key="custom_field")
 
@@ -2945,21 +2957,21 @@ def test_delete_index_rejects_special_keys() -> None:
     schema = Schema()
     string_config = StringInvertedIndexConfig()
 
-    # Test that Key.DOCUMENT is rejected (first check catches it)
+    # Test that Key.DOCUMENT with non-FTS config is rejected
     with pytest.raises(
         ValueError, match="Cannot delete index on special key '#document'"
     ):
         schema.delete_index(config=string_config, key=Key.DOCUMENT)
 
-    # Test that Key.EMBEDDING is rejected (first check catches it)
+    # Test that Key.EMBEDDING is rejected
     with pytest.raises(
-        ValueError, match="Cannot delete index on special key '#embedding'"
+        ValueError, match="Cannot modify #embedding"
     ):
         schema.delete_index(config=string_config, key=Key.EMBEDDING)
 
     # Test that string "#embedding" is also rejected (for consistency)
     with pytest.raises(
-        ValueError, match="Cannot delete index on special key '#embedding'"
+        ValueError, match="Cannot modify #embedding"
     ):
         schema.delete_index(config=string_config, key="#embedding")
 

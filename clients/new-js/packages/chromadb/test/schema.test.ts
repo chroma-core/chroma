@@ -26,7 +26,7 @@ import { ChromaClient } from "../src/chroma-client";
 class MockEmbedding implements EmbeddingFunction {
   public readonly name = "mock_embedding";
 
-  constructor(private readonly modelName = "mock_model") {}
+  constructor(private readonly modelName = "mock_model") { }
 
   async generate(texts: string[]): Promise<number[][]> {
     return texts.map(() => [1, 2, 3]);
@@ -52,7 +52,7 @@ class MockEmbedding implements EmbeddingFunction {
 class MockSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "mock_sparse";
 
-  constructor(private readonly identifier = "mock_sparse") {}
+  constructor(private readonly identifier = "mock_sparse") { }
 
   async generate(texts: string[]) {
     return texts.map(() => ({ indices: [0, 1], values: [1, 1] }));
@@ -70,7 +70,7 @@ class MockSparseEmbedding implements SparseEmbeddingFunction {
 class DeterministicSparseEmbedding implements SparseEmbeddingFunction {
   public readonly name = "deterministic_sparse";
 
-  constructor(private readonly label = "det") {}
+  constructor(private readonly label = "det") { }
 
   async generate(texts: string[]) {
     return texts.map((text, index) => {
@@ -332,23 +332,33 @@ describe("Schema", () => {
     const schema = new Schema();
     const ftsConfig = new FtsIndexConfig();
 
-    const result = schema.createIndex(ftsConfig);
+    // FTS must be created on #document key
+    expect(() => schema.createIndex(ftsConfig)).toThrow(
+      /FTS index can only be enabled on #document key/,
+    );
+
+    // Enable FTS explicitly on #document
+    const result = schema.createIndex(ftsConfig, DOCUMENT_KEY);
     expect(result).toBe(schema);
 
-    const defaultsString = schema.defaults.string;
-    expect(defaultsString?.ftsIndex?.enabled).toBe(false);
-    expect(defaultsString?.ftsIndex?.config).toBe(ftsConfig);
-
+    // Verify FTS is enabled on #document
     const documentOverride = schema.keys[DOCUMENT_KEY];
+    expect(documentOverride.string).not.toBeNull();
+    expect(documentOverride.string?.ftsIndex).not.toBeNull();
     expect(documentOverride.string?.ftsIndex?.enabled).toBe(true);
     expect(documentOverride.string?.ftsIndex?.config).toBe(ftsConfig);
 
+    // Cannot create FTS index on custom key
     expect(() =>
       schema.createIndex(new FtsIndexConfig(), "custom_text_field"),
-    ).toThrow(/FTS index cannot be enabled on specific keys/);
+    ).toThrow(/FTS index can only be enabled on #document key/);
+
+    // Cannot create non-FTS index on #document
     expect(() =>
-      schema.createIndex(new FtsIndexConfig(), DOCUMENT_KEY),
+      schema.createIndex(new StringInvertedIndexConfig(), DOCUMENT_KEY),
     ).toThrow(/Cannot create index on special key '#document'/);
+
+    // Cannot create FTS index on #embedding
     expect(() =>
       schema.createIndex(new FtsIndexConfig(), EMBEDDING_KEY),
     ).toThrow(/Cannot create index on special key '#embedding'/);
@@ -385,8 +395,9 @@ describe("Schema", () => {
     );
   });
 
-  it("cannot delete vector or fts index", () => {
+  it("cannot delete vector or fts index (except fts on #document)", () => {
     const schema = new Schema();
+    const ftsConfig = new FtsIndexConfig();
 
     expect(() => schema.deleteIndex(new VectorIndexConfig())).toThrow(
       "Deleting vector index is not currently supported.",
@@ -394,12 +405,22 @@ describe("Schema", () => {
     expect(() =>
       schema.deleteIndex(new VectorIndexConfig(), "my_vectors"),
     ).toThrow("Deleting vector index is not currently supported.");
-    expect(() => schema.deleteIndex(new FtsIndexConfig())).toThrow(
-      "Deleting FTS index is not currently supported.",
+
+    // FTS deletion globally is blocked
+    expect(() => schema.deleteIndex(ftsConfig)).toThrow(
+      /Deleting FTS index is only supported on #document key/,
     );
+    // FTS deletion on custom key is blocked
     expect(() =>
-      schema.deleteIndex(new FtsIndexConfig(), "my_text_field"),
-    ).toThrow("Deleting FTS index is not currently supported.");
+      schema.deleteIndex(ftsConfig, "my_text_field"),
+    ).toThrow(/Deleting FTS index is only supported on #document key/);
+
+    // FTS deletion on #document is allowed and disables FTS
+    schema.deleteIndex(ftsConfig, DOCUMENT_KEY);
+    expect(schema.keys[DOCUMENT_KEY].string).not.toBeNull();
+    expect(schema.keys[DOCUMENT_KEY].string?.ftsIndex).not.toBeNull();
+    expect(schema.keys[DOCUMENT_KEY].string?.ftsIndex?.enabled).toBe(false);
+    expect(schema.keys[DOCUMENT_KEY].string?.ftsIndex?.config).toBe(ftsConfig);
   });
 
   it("disable string inverted index globally", () => {
@@ -833,35 +854,80 @@ describe("Schema", () => {
   it("error handling invalid operations", () => {
     const schema = new Schema();
 
+    // Test 1: Cannot create index on #embedding
     expect(() =>
       schema.createIndex(new VectorIndexConfig(), EMBEDDING_KEY),
     ).toThrow(/Cannot create index on special key '#embedding'/);
+
+    // Test 2: Cannot create non-FTS index on #document
     expect(() =>
-      schema.createIndex(new FtsIndexConfig(), DOCUMENT_KEY),
+      schema.createIndex(new StringInvertedIndexConfig(), DOCUMENT_KEY),
     ).toThrow(/Cannot create index on special key '#document'/);
+
+    // Test 3: Cannot disable all indexes globally
+    expect(() => schema.deleteIndex()).toThrow(
+      /Cannot disable all indexes/,
+    );
+
+    // Test 4: Cannot enable all indexes globally
     expect(() => schema.createIndex()).toThrow(
       /Cannot enable all index types globally/,
     );
-    // TODO: Consider removing this check in the future to allow enabling all indexes for a key
+
+    // Test 5: Cannot enable all index types for a key
     expect(() => schema.createIndex(undefined, "mykey")).toThrow(
       /Cannot enable all index types for key 'mykey'/,
     );
-    // TODO: Consider removing this check in the future to allow disabling all indexes for a key
+
+    // Test 6: Cannot disable all index types for a key
     expect(() => schema.deleteIndex(undefined, "mykey")).toThrow(
       /Cannot disable all index types for key 'mykey'/,
     );
+
+    // Test 7: Cannot delete vector index
     expect(() => schema.deleteIndex(new VectorIndexConfig())).toThrow(
       /Deleting vector index is not currently supported/,
     );
+
+    // Test 8: Cannot delete FTS index except on #document
     expect(() => schema.deleteIndex(new FtsIndexConfig())).toThrow(
-      /Deleting FTS index is not currently supported/,
+      /Deleting FTS index is only supported on #document key/,
     );
+
+    // Test 9: Vector index cannot be enabled on specific keys
     expect(() =>
       schema.createIndex(new VectorIndexConfig(), "custom_field"),
     ).toThrow(/Vector index cannot be enabled on specific keys/);
+
+    // Test 10: FTS index can only be enabled on #document
     expect(() =>
       schema.createIndex(new FtsIndexConfig(), "custom_field"),
-    ).toThrow(/FTS index cannot be enabled on specific keys/);
+    ).toThrow(/FTS index can only be enabled on #document key/);
+
+    // Test 11: Cannot create index on key starting with # (reserved prefix)
+    expect(() =>
+      schema.createIndex(new StringInvertedIndexConfig(), "#custom_field"),
+    ).toThrow(/key cannot begin with '#'/);
+
+    // Test 12: Cannot delete index on key starting with # (reserved prefix)
+    expect(() =>
+      schema.deleteIndex(new StringInvertedIndexConfig(), "#custom_field"),
+    ).toThrow(/key cannot begin with '#'/);
+
+    // Test 13: Cannot delete FTS on custom key
+    expect(() =>
+      schema.deleteIndex(new FtsIndexConfig(), "my_text_field"),
+    ).toThrow(/Deleting FTS index is only supported on #document key/);
+
+    // Test 14: Cannot delete non-FTS on #document
+    expect(() =>
+      schema.deleteIndex(new StringInvertedIndexConfig(), DOCUMENT_KEY),
+    ).toThrow(/Cannot delete index on special key '#document'/);
+
+    // Test 15: Cannot delete on #embedding
+    expect(() =>
+      schema.deleteIndex(new StringInvertedIndexConfig(), EMBEDDING_KEY),
+    ).toThrow(/Cannot modify #embedding/);
   });
 
   it("empty schema serialization", async () => {
