@@ -12,6 +12,12 @@ import {
 
 const NAME = "chroma-cloud-splade";
 
+// SPLADE models are BERT-based with a 512 token max sequence length.
+// 2 tokens are reserved for [CLS] and [SEP] special tokens, leaving 510
+// content tokens. BERT tokenization averages ~4 characters per token for
+// English text. We use a conservative estimate to avoid silent truncation.
+const SPLADE_MAX_CHARS_PER_CHUNK = 2000;
+
 export interface ChromaCloudSpladeConfig {
   model: ChromaCloudSpladeEmbeddingModel;
   api_key_env_var: string;
@@ -35,6 +41,74 @@ interface ChromaCloudSparseEmbeddingRequest {
 
 export interface ChromaCloudSparseEmbeddingsResponse {
   embeddings: SparseVector[];
+}
+
+/**
+ * Combine multiple sparse vectors using element-wise max pooling.
+ * For each unique index across all input vectors, takes the maximum value.
+ * This is the standard way to combine SPLADE embeddings across chunks.
+ */
+/** @internal Exported for testing only. */
+export function maxPoolSparseVectors(vectors: SparseVector[]): SparseVector {
+  if (vectors.length === 1) return vectors[0];
+
+  const maxValues = new Map<number, number>();
+  for (const vec of vectors) {
+    for (let i = 0; i < vec.indices.length; i++) {
+      const idx = vec.indices[i];
+      const val = vec.values[i];
+      const current = maxValues.get(idx);
+      if (current === undefined || val > current) {
+        maxValues.set(idx, val);
+      }
+    }
+  }
+
+  const entries = Array.from(maxValues.entries()).sort((a, b) => a[0] - b[0]);
+  return {
+    indices: entries.map((e) => e[0]),
+    values: entries.map((e) => e[1]),
+  };
+}
+
+/**
+ * Split text into chunks that fit within the SPLADE token limit.
+ * Uses a conservative character-based estimate (~4 chars/token for BERT).
+ * Splits on word boundaries to avoid breaking words.
+ */
+/** @internal Exported for testing only. */
+export function chunkText(text: string): string[] {
+  if (text.length <= SPLADE_MAX_CHARS_PER_CHUNK) {
+    return [text];
+  }
+
+  const chunks: string[] = [];
+  let remaining = text;
+
+  while (remaining.length > 0) {
+    if (remaining.length <= SPLADE_MAX_CHARS_PER_CHUNK) {
+      chunks.push(remaining);
+      break;
+    }
+
+    // Find a word boundary to split at
+    let splitAt = SPLADE_MAX_CHARS_PER_CHUNK;
+    while (splitAt > 0 && remaining[splitAt] !== " ") {
+      splitAt--;
+    }
+    // If no space found, force split at the limit
+    if (splitAt === 0) {
+      splitAt = SPLADE_MAX_CHARS_PER_CHUNK;
+    }
+
+    const chunk = remaining.slice(0, splitAt).trim();
+    if (chunk.length > 0) {
+      chunks.push(chunk);
+    }
+    remaining = remaining.slice(splitAt).trim();
+  }
+
+  return chunks.length > 0 ? chunks : [text];
 }
 
 /**
@@ -113,6 +187,35 @@ export class ChromaCloudSpladeEmbeddingFunction
       return [];
     }
 
+    // Chunk documents that exceed the token limit and track the mapping
+    // back to the original document index.
+    const allChunks: string[] = [];
+    const docChunkRanges: [number, number][] = [];
+
+    for (const text of texts) {
+      const start = allChunks.length;
+      const chunks = chunkText(text);
+      allChunks.push(...chunks);
+      docChunkRanges.push([start, allChunks.length]);
+    }
+
+    const chunkEmbeddings = await this.embedTexts(allChunks);
+
+    // Aggregate chunk embeddings per original document via max pooling.
+    const result: SparseVector[] = [];
+    for (const [start, end] of docChunkRanges) {
+      const docVectors = chunkEmbeddings.slice(start, end);
+      if (docVectors.length === 1) {
+        result.push(docVectors[0]);
+      } else {
+        result.push(maxPoolSparseVectors(docVectors));
+      }
+    }
+
+    return result;
+  }
+
+  private async embedTexts(texts: string[]): Promise<SparseVector[]> {
     const body: ChromaCloudSparseEmbeddingRequest = {
       texts,
       task: "",

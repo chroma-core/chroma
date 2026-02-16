@@ -3,6 +3,8 @@ import {
   ChromaCloudSpladeArgs,
   ChromaCloudSpladeEmbeddingFunction,
   ChromaCloudSpladeEmbeddingModel,
+  maxPoolSparseVectors,
+  chunkText,
 } from "./index";
 import { CloudClient } from "chromadb";
 
@@ -182,5 +184,91 @@ describe("ChromaCloudSpladeEmbeddingFunction", () => {
     );
 
     expect(embedder.getConfig()).toEqual(config);
+  });
+});
+
+describe("maxPoolSparseVectors", () => {
+  it("should return single vector as-is", () => {
+    const vec = { indices: [1, 3, 5], values: [0.1, 0.2, 0.3] };
+    const result = maxPoolSparseVectors([vec]);
+    expect(result).toBe(vec);
+  });
+
+  it("should max pool two vectors with disjoint indices", () => {
+    const v1 = { indices: [1, 3], values: [0.5, 0.8] };
+    const v2 = { indices: [2, 4], values: [0.6, 0.9] };
+    const result = maxPoolSparseVectors([v1, v2]);
+    expect(result.indices).toEqual([1, 2, 3, 4]);
+    expect(result.values).toEqual([0.5, 0.6, 0.8, 0.9]);
+  });
+
+  it("should take max value for overlapping indices", () => {
+    const v1 = { indices: [1, 2, 3], values: [0.5, 0.8, 0.1] };
+    const v2 = { indices: [1, 2, 3], values: [0.3, 0.9, 0.4] };
+    const result = maxPoolSparseVectors([v1, v2]);
+    expect(result.indices).toEqual([1, 2, 3]);
+    expect(result.values).toEqual([0.5, 0.9, 0.4]);
+  });
+
+  it("should handle partial overlap", () => {
+    const v1 = { indices: [1, 3, 5], values: [0.5, 0.8, 0.1] };
+    const v2 = { indices: [2, 3, 6], values: [0.6, 0.2, 0.9] };
+    const result = maxPoolSparseVectors([v1, v2]);
+    expect(result.indices).toEqual([1, 2, 3, 5, 6]);
+    expect(result.values).toEqual([0.5, 0.6, 0.8, 0.1, 0.9]);
+  });
+
+  it("should handle three vectors", () => {
+    const v1 = { indices: [1, 2], values: [0.1, 0.5] };
+    const v2 = { indices: [1, 3], values: [0.3, 0.6] };
+    const v3 = { indices: [2, 3], values: [0.9, 0.2] };
+    const result = maxPoolSparseVectors([v1, v2, v3]);
+    expect(result.indices).toEqual([1, 2, 3]);
+    expect(result.values).toEqual([0.3, 0.9, 0.6]);
+  });
+
+  it("should return sorted indices", () => {
+    const v1 = { indices: [100, 200], values: [0.1, 0.2] };
+    const v2 = { indices: [50, 150], values: [0.3, 0.4] };
+    const result = maxPoolSparseVectors([v1, v2]);
+    expect(result.indices).toEqual([50, 100, 150, 200]);
+  });
+});
+
+describe("chunkText", () => {
+  it("should not chunk short text", () => {
+    const text = "This is a short document.";
+    expect(chunkText(text)).toEqual([text]);
+  });
+
+  it("should chunk text exceeding the character limit", () => {
+    // Generate text well over 2000 characters
+    const text = "word ".repeat(600).trim(); // ~3000 chars
+    const chunks = chunkText(text);
+    expect(chunks.length).toBeGreaterThan(1);
+  });
+
+  it("should split on word boundaries", () => {
+    const text = "word ".repeat(600).trim();
+    const chunks = chunkText(text);
+    for (const chunk of chunks) {
+      // No chunk should start or end with a partial word
+      expect(chunk).not.toMatch(/^\s/);
+      expect(chunk).not.toMatch(/\s$/);
+    }
+  });
+
+  it("should cover all content in chunks", () => {
+    const words = Array.from({ length: 600 }, (_, i) => `word${i}`);
+    const text = words.join(" ");
+    const chunks = chunkText(text);
+    const allChunkText = chunks.join(" ");
+    for (const word of words) {
+      expect(allChunkText).toContain(word);
+    }
+  });
+
+  it("should handle empty string", () => {
+    expect(chunkText("")).toEqual([""]);
   });
 });

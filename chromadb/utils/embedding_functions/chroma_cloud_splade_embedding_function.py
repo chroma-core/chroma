@@ -4,13 +4,23 @@ from chromadb.api.types import (
     SparseVectors,
     Documents,
 )
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 from enum import Enum
 from chromadb.utils.embedding_functions.schemas import validate_config_schema
-from chromadb.utils.sparse_embedding_utils import normalize_sparse_vector
+from chromadb.utils.sparse_embedding_utils import (
+    max_pool_sparse_vectors,
+    normalize_sparse_vector,
+)
+import logging
 import os
-from typing import Union
 from chromadb.utils.embedding_functions.utils import _get_shared_system_client
+
+logger = logging.getLogger(__name__)
+
+# SPLADE models are BERT-based with a 512 token max sequence length.
+# 2 tokens are reserved for [CLS] and [SEP] special tokens.
+_SPLADE_MAX_CONTENT_TOKENS = 510
+_SPLADE_TOKENIZER_MODEL = "bert-base-uncased"
 
 
 class ChromaCloudSpladeEmbeddingModel(Enum):
@@ -18,6 +28,8 @@ class ChromaCloudSpladeEmbeddingModel(Enum):
 
 
 class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
+    _tokenizer: Any = None
+
     def __init__(
         self,
         api_key_env_var: str = "CHROMA_API_KEY",
@@ -76,9 +88,107 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         if hasattr(self, "_session"):
             self._session.close()
 
+    @classmethod
+    def _get_tokenizer(cls) -> Any:
+        """Lazy-load and cache the BERT tokenizer used by SPLADE models.
+
+        Returns ``None`` if the tokenizer cannot be loaded (e.g. no network
+        access to HuggingFace Hub). Callers must handle the ``None`` case.
+        """
+        if cls._tokenizer is None:
+            try:
+                from tokenizers import Tokenizer
+
+                cls._tokenizer = Tokenizer.from_pretrained(
+                    _SPLADE_TOKENIZER_MODEL
+                )
+            except Exception:
+                logger.debug(
+                    "Could not load BERT tokenizer for SPLADE chunking; "
+                    "falling back to character-based estimation."
+                )
+                return None
+        return cls._tokenizer
+
+    @classmethod
+    def _chunk_text(cls, text: str) -> List[str]:
+        """Split text into chunks that each fit within the SPLADE token limit.
+
+        When the BERT tokenizer is available, splits at exact token boundaries.
+        Otherwise falls back to a conservative character-based estimate (~4
+        characters per BERT token, splitting on word boundaries).
+
+        Returns the original text as a single-element list if it fits within
+        the limit.
+        """
+        tokenizer = cls._get_tokenizer()
+        if tokenizer is not None:
+            return cls._chunk_text_with_tokenizer(text, tokenizer)
+        return cls._chunk_text_by_chars(text)
+
+    @staticmethod
+    def _chunk_text_with_tokenizer(text: str, tokenizer: Any) -> List[str]:
+        """Chunk using the real BERT tokenizer for precise splitting."""
+        encoding = tokenizer.encode(text, add_special_tokens=False)
+        token_ids = encoding.ids
+
+        if len(token_ids) <= _SPLADE_MAX_CONTENT_TOKENS:
+            return [text]
+
+        offsets = encoding.offsets
+        chunks: List[str] = []
+        for i in range(0, len(token_ids), _SPLADE_MAX_CONTENT_TOKENS):
+            chunk_offsets = offsets[i : i + _SPLADE_MAX_CONTENT_TOKENS]
+            if chunk_offsets:
+                start_char = chunk_offsets[0][0]
+                end_char = chunk_offsets[-1][1]
+                chunk = text[start_char:end_char]
+                if chunk.strip():
+                    chunks.append(chunk)
+
+        return chunks if chunks else [text]
+
+    @staticmethod
+    def _chunk_text_by_chars(text: str) -> List[str]:
+        """Fallback: chunk by character count when no tokenizer is available.
+
+        Uses a conservative estimate of ~4 characters per BERT token, giving
+        a maximum of ~2000 characters per chunk for 510 content tokens. Splits
+        on word boundaries to avoid breaking words.
+        """
+        max_chars = _SPLADE_MAX_CONTENT_TOKENS * 4  # ~2040, conservative
+        if len(text) <= max_chars:
+            return [text]
+
+        chunks: List[str] = []
+        remaining = text
+        while remaining:
+            if len(remaining) <= max_chars:
+                chunks.append(remaining)
+                break
+
+            # Find a word boundary to split at
+            split_at = max_chars
+            while split_at > 0 and remaining[split_at] != " ":
+                split_at -= 1
+            if split_at == 0:
+                split_at = max_chars  # force split if no space found
+
+            chunk = remaining[:split_at].strip()
+            if chunk:
+                chunks.append(chunk)
+            remaining = remaining[split_at:].strip()
+
+        return chunks if chunks else [text]
+
     def __call__(self, input: Documents) -> SparseVectors:
         """
         Generate embeddings for the given documents.
+
+        Documents that exceed the SPLADE token limit (512 tokens) are
+        automatically split into chunks. Each chunk is embedded independently,
+        and the per-chunk sparse vectors are combined via element-wise max
+        pooling to produce a single sparse vector per input document.
 
         Args:
             input (Documents): The documents to generate embeddings for.
@@ -86,8 +196,34 @@ class ChromaCloudSpladeEmbeddingFunction(SparseEmbeddingFunction[Documents]):
         if not input:
             return []
 
-        payload: Dict[str, Union[str, Documents]] = {
-            "texts": list(input),
+        # Chunk documents that exceed the token limit and track the mapping
+        # back to the original document index.
+        all_chunks: List[str] = []
+        doc_chunk_ranges: List[Tuple[int, int]] = []
+
+        for doc in input:
+            start = len(all_chunks)
+            chunks = self._chunk_text(doc)
+            all_chunks.extend(chunks)
+            doc_chunk_ranges.append((start, len(all_chunks)))
+
+        chunk_embeddings = self._embed_texts(all_chunks)
+
+        # Aggregate chunk embeddings per original document via max pooling.
+        result: SparseVectors = []
+        for start, end in doc_chunk_ranges:
+            doc_vectors = chunk_embeddings[start:end]
+            if len(doc_vectors) == 1:
+                result.append(doc_vectors[0])
+            else:
+                result.append(max_pool_sparse_vectors(doc_vectors))
+
+        return result
+
+    def _embed_texts(self, texts: List[str]) -> SparseVectors:
+        """Send texts to the Chroma Cloud sparse embedding API."""
+        payload: Dict[str, Union[str, List[str]]] = {
+            "texts": texts,
             "task": "",
             "target": "",
             "fetch_tokens": "true" if self.include_tokens is True else "false",

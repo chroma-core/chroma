@@ -1,5 +1,47 @@
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from chromadb.base_types import SparseVector
+
+
+def max_pool_sparse_vectors(vectors: Sequence[SparseVector]) -> SparseVector:
+    """Combine multiple sparse vectors using element-wise max pooling.
+
+    For each unique index across all input vectors, takes the maximum value.
+    This is the standard way to combine SPLADE embeddings across chunks,
+    consistent with how SPLADE uses max pooling internally across token
+    positions within a single forward pass.
+
+    Args:
+        vectors: Sequence of SparseVector instances to combine.
+
+    Returns:
+        A single SparseVector with max-pooled values.
+
+    Raises:
+        ValueError: If vectors is empty.
+    """
+    if not vectors:
+        raise ValueError("Cannot max pool an empty list of vectors")
+
+    if len(vectors) == 1:
+        return vectors[0]
+
+    has_labels = vectors[0].labels is not None
+
+    max_values: Dict[int, float] = {}
+    max_labels: Dict[int, str] = {}
+
+    for vec in vectors:
+        for i, (idx, val) in enumerate(zip(vec.indices, vec.values)):
+            if idx not in max_values or val > max_values[idx]:
+                max_values[idx] = val
+                if has_labels and vec.labels is not None:
+                    max_labels[idx] = vec.labels[i]
+
+    sorted_indices = sorted(max_values.keys())
+    values = [max_values[i] for i in sorted_indices]
+    labels = [max_labels[i] for i in sorted_indices] if has_labels else None
+
+    return SparseVector(indices=sorted_indices, values=values, labels=labels)
 
 
 def normalize_sparse_vector(
