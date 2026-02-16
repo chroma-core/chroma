@@ -105,21 +105,12 @@ class Client(SharedSystemClient, ClientAPI):
 
             self._submit_client_start_event()
         except Exception:
-            # If init fails after refcount was incremented, decrement it to
-            # avoid a resource leak (the caller never receives the object to
+            # If init fails after refcount was incremented, release references
+            # to avoid a resource leak (the caller never receives the object to
             # call close() on it).
-            # Also decrement the admin_client's refcount if it was created
             if hasattr(self, "_admin_client"):
-                SharedSystemClient._decrement_refcount(
-                    self._admin_client._identifier
-                )
-            refcount = SharedSystemClient._decrement_refcount(self._identifier)
-            if refcount <= 0:
-                system = SharedSystemClient._identifier_to_system.pop(
-                    self._identifier, None
-                )
-                if system is not None:
-                    system.stop()
+                SharedSystemClient._release_system(self._admin_client._identifier)
+            SharedSystemClient._release_system(self._identifier)
             raise
 
     @classmethod
@@ -581,20 +572,13 @@ class Client(SharedSystemClient, ClientAPI):
             return
         self._closed = True
 
-        # Decrement the internal admin client's refcount first, since it also
-        # incremented the refcount for the same shared system on creation.
+        # Release the internal admin client's reference first, since it also
+        # incremented the refcount for the shared system on creation.
         if hasattr(self, "_admin_client"):
-            SharedSystemClient._decrement_refcount(self._admin_client._identifier)
+            SharedSystemClient._release_system(self._admin_client._identifier)
 
-        # Decrement reference count and only stop system if this is the last client
-        refcount = SharedSystemClient._decrement_refcount(self._identifier)
-        if refcount <= 0:
-            system = SharedSystemClient._identifier_to_system.pop(
-                self._identifier, None
-            )
-            if system is None:
-                return
-            system.stop()
+        # Release our own reference; stops system if this was the last client
+        SharedSystemClient._release_system(self._identifier)
 
     def __enter__(self) -> "Client":
         """Context manager entry."""
