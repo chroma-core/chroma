@@ -414,6 +414,13 @@ def CloudClient(
     if settings is None:
         settings = Settings()
 
+    resolved_api_key = required_args[0].value
+    if resolved_api_key is None:
+        # This is guarded above, but keep the branch explicit for type checkers.
+        raise ValueError(
+            "Missing required argument: api_key. Please provide it or set CHROMA_API_KEY."
+        )
+
     # Make sure paramaters are the correct types -- users can pass anything.
     tenant = tenant or os.environ.get("CHROMA_TENANT")
     if tenant is not None:
@@ -421,7 +428,7 @@ def CloudClient(
     database = database or os.environ.get("CHROMA_DATABASE")
     if database is not None:
         database = str(database)
-    api_key = str(api_key)
+    api_key = str(resolved_api_key)
     cloud_host = str(cloud_host)
     cloud_port = int(cloud_port)
     enable_ssl = bool(enable_ssl)
