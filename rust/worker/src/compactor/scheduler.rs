@@ -31,7 +31,9 @@ impl Default for SchedulerMetrics {
             .build();
         let dlq_size = meter
             .u64_gauge("compaction_dlq_size")
-            .with_description("Number of collections that have exceeded the max compaction failure count")
+            .with_description(
+                "Number of collections that have exceeded the max compaction failure count",
+            )
             .build();
 
         Self {
