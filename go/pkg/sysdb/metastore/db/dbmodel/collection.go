@@ -75,5 +75,4 @@ type ICollectionDb interface {
 	BatchGetCollectionVersionFilePaths(collectionIDs []string) (map[string]string, error)
 	BatchGetCollectionSoftDeleteStatus(collectionIDs []string) (map[string]bool, error)
 	IncrementCompactionFailureCount(collectionID string) error
-	GetCompactionDLQSize() (int64, error)
 }

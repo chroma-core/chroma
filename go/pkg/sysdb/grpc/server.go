@@ -9,7 +9,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/leader"
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
-	coordinatorpkg "github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/utils"
@@ -77,7 +77,7 @@ type Config struct {
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
-	coordinator  coordinatorpkg.Coordinator
+	coordinator  coordinator.Coordinator
 	grpcServer   grpcutils.GrpcServer
 	healthServer *health.Server
 }
@@ -151,7 +151,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		return nil, err
 	}
 
-	coordinator, err := coordinatorpkg.NewCoordinator(ctx, coordinatorpkg.CoordinatorConfig{
+	coordinator, err := coordinator.NewCoordinator(ctx, coordinator.CoordinatorConfig{
 		ObjectStore:                 s3MetaStore,
 		VersionFileEnabled:          config.VersionFileEnabled,
 		HeapServiceEnabled:          config.HeapServiceEnabled,
@@ -173,10 +173,6 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 			}
 			log.Info("Released leadership for memberlist management")
 		})
-
-		// Start DLQ metrics goroutine (runs on all pods, uses read replica)
-		go coordinatorpkg.StartDLQMetrics(context.Background())
-
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)

@@ -9,7 +9,7 @@ use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_types::{CollectionUuid, DatabaseName, JobId};
 use figment::providers::Env;
 use figment::Figment;
-use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use crate::compactor::types::CompactionJob;
 #[derive(Debug, Clone)]
 pub(crate) struct SchedulerMetrics {
     job_failure_count: Counter<u64>,
+    dlq_size: Gauge<u64>,
 }
 
 impl Default for SchedulerMetrics {
@@ -28,14 +29,25 @@ impl Default for SchedulerMetrics {
             .u64_counter("compactor_job_failure_count")
             .with_description("Number of compaction job failures")
             .build();
+        let dlq_size = meter
+            .u64_gauge("compaction_dlq_size")
+            .with_description("Number of collections that have exceeded the max compaction failure count")
+            .build();
 
-        Self { job_failure_count }
+        Self {
+            job_failure_count,
+            dlq_size,
+        }
     }
 }
 
 impl SchedulerMetrics {
     fn increment_job_failure_count(&self) {
         self.job_failure_count.add(1, &[]);
+    }
+
+    fn set_dlq_size(&self, size: u64) {
+        self.dlq_size.record(size, &[]);
     }
 }
 
@@ -171,6 +183,7 @@ impl Scheduler {
         collections: Vec<CollectionInfo>,
     ) -> Vec<CollectionRecord> {
         let mut collection_records = Vec::new();
+        let mut dlq_count: u64 = 0;
         for collection_info in collections {
             if self
                 .disabled_collections
@@ -212,6 +225,7 @@ impl Scheduler {
                             collection[0].compaction_failure_count,
                             self.max_failure_count
                         );
+                        dlq_count += 1;
                         continue;
                     }
 
@@ -275,6 +289,7 @@ impl Scheduler {
                 }
             }
         }
+        self.metrics.set_dlq_size(dlq_count);
         collection_records
     }
 
