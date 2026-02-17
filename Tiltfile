@@ -323,17 +323,17 @@ k8s_resource('compaction-service:statefulset:chroma', resource_deps=['sysdb:depl
 k8s_resource('garbage-collector:statefulset:chroma', resource_deps=['k8s_setup', 'minio-deployment'], labels=["chroma"], port_forwards='50055:50055')
 
 # Production Chroma 2
-k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2'], labels=["infrastructure2"], port_forwards='6432:5432')
+k8s_resource('postgres:deployment:chroma2', resource_deps=['k8s_setup2'], labels=["infrastructure2", 'postgres:deployment:chroma'], port_forwards='6432:5432')
 # Jobs are suffixed with the image tag to ensure they are unique. In this context, the image tag is defined in k8s/distributed-chroma/values.yaml.
-k8s_resource('sysdb-migration-latest:job:chroma2', resource_deps=['postgres:deployment:chroma2'], labels=["infrastructure2"])
-k8s_resource('rust-log-service:statefulset:chroma2', labels=["chroma2"], port_forwards=['60054:50051', '60052:50052'], resource_deps=['minio-deployment'] + (['rust-sysdb-migration-latest'] if multi_region_enabled else []))
+k8s_resource('sysdb-migration-latest:job:chroma2', resource_deps=['postgres:deployment:chroma2'], labels=["infrastructure2", 'sysdb-migration-latest:job:chroma'])
+k8s_resource('rust-log-service:statefulset:chroma2', labels=["chroma2"], port_forwards=['60054:50051', '60052:50052'], resource_deps=['minio-deployment', 'rust-sysdb-migration-latest', 'rust-log-service:statefulset:chroma'])
 k8s_resource('rust-sysdb-migration-latest', resource_deps=['spanner-deployment'], labels=["infrastructure2"])
-k8s_resource('sysdb:deployment:chroma2', resource_deps=['sysdb-migration-latest:job:chroma2'], labels=["chroma2"], port_forwards='60051:50051')
-k8s_resource('rust-sysdb-service:deployment:chroma2', resource_deps=['k8s_setup2', 'spanner-deployment', 'rust-sysdb-migration-latest'], labels=["chroma2"], port_forwards='60056:50051')
+k8s_resource('sysdb:deployment:chroma2', resource_deps=['sysdb-migration-latest:job:chroma2', 'sysdb:deployment:chroma'], labels=["chroma2"], port_forwards='60051:50051')
+k8s_resource('rust-sysdb-service:deployment:chroma2', resource_deps=['k8s_setup2', 'spanner-deployment', 'rust-sysdb-migration-latest', 'rust-sysdb-service:deployment:chroma'], labels=["chroma2"], port_forwards='60056:50051')
 k8s_resource('rust-frontend-service:deployment:chroma2', resource_deps=['sysdb:deployment:chroma2', 'rust-log-service:statefulset:chroma2', 'rust-frontend-service:deployment:chroma'], labels=["chroma2"], port_forwards='8001:8000')
-k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2'], labels=["chroma2"], port_forwards='60053:50051')
-k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2'], labels=["chroma2"])
-k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment'], labels=["chroma2"], port_forwards='60055:50055')
+k8s_resource('query-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'query-service:statefulset:chroma'], labels=["chroma2"], port_forwards='60053:50051')
+k8s_resource('compaction-service:statefulset:chroma2', resource_deps=['sysdb:deployment:chroma2', 'compaction-service:statefulset:chroma'], labels=["chroma2"])
+k8s_resource('garbage-collector:statefulset:chroma2', resource_deps=['k8s_setup2', 'minio-deployment', 'garbage-collector:statefulset:chroma'], labels=["chroma2"], port_forwards='60055:50055')
 
 # Observability
 k8s_resource('jaeger', resource_deps=['k8s_setup'], labels=["observability"])
