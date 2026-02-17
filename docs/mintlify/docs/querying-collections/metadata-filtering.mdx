@@ -32,6 +32,7 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+```
 
 ```go Go
 results, err := collection.Query(ctx,
@@ -68,6 +69,7 @@ let where_clause = Where::Metadata(MetadataExpression {
         MetadataValue::Str("value".to_string()),
     ),
 });
+```
 
 ```go Go
 // Go uses type-safe filter functions
@@ -117,6 +119,7 @@ let direct = Where::Metadata(MetadataExpression {
         MetadataValue::Str("search_string".to_string()),
     ),
 });
+```
 
 ```go Go
 // In Go, use explicit equality functions
@@ -153,6 +156,7 @@ let where_clause = Where::Metadata(MetadataExpression {
 let results = collection
     .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
     .await?;
+```
 
 ```go Go
 results, err := collection.Query(ctx,

@@ -31,6 +31,7 @@ const collection = await client.createCollection({
 let collection = client
     .create_collection("my_collection", None, None)
     .await?;
+```
 
 ```go Go
 collection, err := client.CreateCollection(ctx, "my_collection")
@@ -156,6 +157,9 @@ collection.add(
     None,
     None,
 ).await?;
+```
+
+</Tab>
 
 <Tab title="Go" icon="golang">
 
@@ -232,6 +236,7 @@ metadata.insert("created".to_string(), "2024-01-01T00:00:00Z".into());
 let collection = client
     .create_collection("my_collection", None, Some(metadata))
     .await?;
+```
 
 ```go Go
 collection, err := client.CreateCollection(ctx, "my_collection",
@@ -364,6 +369,9 @@ let collection = client
     .await?;
 
 let collections = client.list_collections(100, Some(0)).await?;
+```
+
+</Tab>
 
 <Tab title="Go" icon="golang">
 

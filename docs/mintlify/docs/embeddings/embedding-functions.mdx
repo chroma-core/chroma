@@ -7,20 +7,6 @@ Embeddings are the way to represent any kind of data, making them the perfect fi
 
 Chroma provides lightweight wrappers around popular embedding providers, making it easy to use them in your apps. You can set an embedding function when you [create](../collections/manage-collections) a Chroma collection, to be automatically used when adding and querying data, or you can call them directly yourself.
 
-|                                                                                          | Python | Typescript |
-| ---------------------------------------------------------------------------------------- | ------ | ---------- |
-| [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)       | ✓      | ✓          |
-| [Cohere](../../integrations/embedding-models/cohere)                                     | ✓      | ✓          |
-| [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          |
-| [Hugging Face](../../integrations/embedding-models/hugging-face)                         | ✓      | -          |
-| [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          |
-| [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          |
-| [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          |
-| [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          |
-| [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          |
-| [Sentence Transformers](../../integrations/embedding-models/sentence-transformer)        | ✓      | ✓          |
-| [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          |
-
 |                                                                                          | Python | Typescript | Go |
 | ---------------------------------------------------------------------------------------- | ------ | ---------- | -- |
 | [Cloudflare Workers AI](../../integrations/embedding-models/cloudflare-workers-ai)       | ✓      | ✓          | ✓  |
@@ -28,11 +14,11 @@ Chroma provides lightweight wrappers around popular embedding providers, making 
 | [Google Generative AI](../../integrations/embedding-models/google-gemini)                | ✓      | ✓          | ✓  |
 | [Hugging Face](../../integrations/embedding-models/hugging-face)                         | ✓      | -          | -  |
 | [Hugging Face Embedding Server](../../integrations/embedding-models/hugging-face-server) | ✓      | ✓          | ✓  |
-| [Instructor](../../integrations/embedding-models/instructor)                             | ✓      | -          | -  |
 | [Jina AI](../../integrations/embedding-models/jina-ai)                                   | ✓      | ✓          | ✓  |
 | [Mistral](../../integrations/embedding-models/mistral)                                   | ✓      | ✓          | ✓  |
 | [Morph](../../integrations/embedding-models/morph)                                       | ✓      | ✓          | ✓  |
 | [OpenAI](../../integrations/embedding-models/openai)                                     | ✓      | ✓          | ✓  |
+| [Sentence Transformers](../../integrations/embedding-models/sentence-transformer)        | ✓      | ✓          | -  |
 | [Amazon Bedrock](../../integrations/embedding-models/amazon-bedrock)                     | ✓      | -          | ✓  |
 | [Together AI](../../integrations/embedding-models/together-ai)                           | ✓      | ✓          | ✓  |
 
@@ -295,6 +281,7 @@ collection
     .await?;
 ```
 
+</Tab>
 
 <Tab title="Go" icon="golang">
 
