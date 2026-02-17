@@ -2,6 +2,7 @@ package chroma
 
 import (
 	"encoding/json"
+	"math"
 
 	"github.com/pkg/errors"
 
@@ -212,4 +213,156 @@ func BuildEmbeddingFunctionFromConfig(cfg *CollectionConfigurationImpl) (embeddi
 	}
 
 	return nil, nil
+}
+
+// UpdateHNSWConfiguration contains mutable HNSW parameters that can be changed after collection creation.
+type UpdateHNSWConfiguration struct {
+	EfSearch      *uint    `json:"ef_search,omitempty"`
+	NumThreads    *uint    `json:"num_threads,omitempty"`
+	BatchSize     *uint    `json:"batch_size,omitempty"`
+	SyncThreshold *uint    `json:"sync_threshold,omitempty"`
+	ResizeFactor  *float64 `json:"resize_factor,omitempty"`
+}
+
+// UpdateSpannConfiguration contains mutable SPANN parameters that can be changed after collection creation.
+type UpdateSpannConfiguration struct {
+	SearchNprobe *uint `json:"search_nprobe,omitempty"`
+	EfSearch     *uint `json:"ef_search,omitempty"`
+}
+
+// UpdateCollectionConfiguration holds configuration updates for an existing collection.
+type UpdateCollectionConfiguration struct {
+	Hnsw  *UpdateHNSWConfiguration  `json:"hnsw,omitempty"`
+	Spann *UpdateSpannConfiguration `json:"spann,omitempty"`
+}
+
+func (u *UpdateCollectionConfiguration) GetRaw(key string) (any, bool) {
+	switch key {
+	case "hnsw":
+		return u.Hnsw, u.Hnsw != nil
+	case "spann":
+		return u.Spann, u.Spann != nil
+	default:
+		return nil, false
+	}
+}
+
+func (u *UpdateCollectionConfiguration) Validate() error {
+	if u.Hnsw == nil && u.Spann == nil {
+		return errors.New("configuration must specify at least one parameter to modify (hnsw or spann)")
+	}
+	if u.Hnsw != nil && u.Spann != nil {
+		return errors.New("cannot update both hnsw and spann configuration in the same request")
+	}
+	if u.Hnsw != nil {
+		if u.Hnsw.EfSearch == nil && u.Hnsw.NumThreads == nil && u.Hnsw.BatchSize == nil &&
+			u.Hnsw.SyncThreshold == nil && u.Hnsw.ResizeFactor == nil {
+			return errors.New("hnsw configuration must specify at least one parameter")
+		}
+		if u.Hnsw.EfSearch != nil && *u.Hnsw.EfSearch == 0 {
+			return errors.New("ef_search must be greater than 0")
+		}
+		if u.Hnsw.NumThreads != nil && *u.Hnsw.NumThreads == 0 {
+			return errors.New("num_threads must be greater than 0")
+		}
+		if u.Hnsw.BatchSize != nil && *u.Hnsw.BatchSize == 0 {
+			return errors.New("batch_size must be greater than 0")
+		}
+		if u.Hnsw.SyncThreshold != nil && *u.Hnsw.SyncThreshold == 0 {
+			return errors.New("sync_threshold must be greater than 0")
+		}
+		if u.Hnsw.ResizeFactor != nil && *u.Hnsw.ResizeFactor <= 0 {
+			return errors.New("resize_factor must be greater than 0")
+		}
+		if u.Hnsw.ResizeFactor != nil && (math.IsNaN(*u.Hnsw.ResizeFactor) || math.IsInf(*u.Hnsw.ResizeFactor, 0)) {
+			return errors.New("resize_factor must be a finite number")
+		}
+	}
+	if u.Spann != nil {
+		if u.Spann.SearchNprobe == nil && u.Spann.EfSearch == nil {
+			return errors.New("spann configuration must specify at least one parameter")
+		}
+		if u.Spann.SearchNprobe != nil && *u.Spann.SearchNprobe == 0 {
+			return errors.New("search_nprobe must be greater than 0")
+		}
+		if u.Spann.EfSearch != nil && *u.Spann.EfSearch == 0 {
+			return errors.New("ef_search must be greater than 0")
+		}
+	}
+	return nil
+}
+
+// ModifyConfigOption is a functional option for building an UpdateCollectionConfiguration.
+type ModifyConfigOption func(*UpdateCollectionConfiguration)
+
+// NewUpdateCollectionConfiguration creates an UpdateCollectionConfiguration from functional options.
+func NewUpdateCollectionConfiguration(opts ...ModifyConfigOption) *UpdateCollectionConfiguration {
+	cfg := &UpdateCollectionConfiguration{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
+	return cfg
+}
+
+func WithHNSWEfSearchModify(v uint) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Hnsw == nil {
+			c.Hnsw = &UpdateHNSWConfiguration{}
+		}
+		c.Hnsw.EfSearch = &v
+	}
+}
+
+func WithHNSWNumThreadsModify(v uint) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Hnsw == nil {
+			c.Hnsw = &UpdateHNSWConfiguration{}
+		}
+		c.Hnsw.NumThreads = &v
+	}
+}
+
+func WithHNSWBatchSizeModify(v uint) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Hnsw == nil {
+			c.Hnsw = &UpdateHNSWConfiguration{}
+		}
+		c.Hnsw.BatchSize = &v
+	}
+}
+
+func WithHNSWSyncThresholdModify(v uint) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Hnsw == nil {
+			c.Hnsw = &UpdateHNSWConfiguration{}
+		}
+		c.Hnsw.SyncThreshold = &v
+	}
+}
+
+func WithHNSWResizeFactorModify(v float64) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Hnsw == nil {
+			c.Hnsw = &UpdateHNSWConfiguration{}
+		}
+		c.Hnsw.ResizeFactor = &v
+	}
+}
+
+func WithSpannSearchNprobeModify(v uint) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Spann == nil {
+			c.Spann = &UpdateSpannConfiguration{}
+		}
+		c.Spann.SearchNprobe = &v
+	}
+}
+
+func WithSpannEfSearchModify(v uint) ModifyConfigOption {
+	return func(c *UpdateCollectionConfiguration) {
+		if c.Spann == nil {
+			c.Spann = &UpdateSpannConfiguration{}
+		}
+		c.Spann.EfSearch = &v
+	}
 }

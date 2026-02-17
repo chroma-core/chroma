@@ -322,6 +322,67 @@ err := collection.ModifyMetadata(ctx,
 )
 ```
 
+### ModifyConfiguration
+
+Modify the collection's index configuration. Only mutable parameters can be changed after creation.
+
+```go
+cfg := chroma.NewUpdateCollectionConfiguration(options...)
+err := collection.ModifyConfiguration(ctx, cfg)
+```
+
+**HNSW Options:**
+
+<ParamField path="WithHNSWEfSearchModify(v)" type="uint">
+  The size of the dynamic candidate list during search.
+</ParamField>
+
+<ParamField path="WithHNSWNumThreadsModify(v)" type="uint">
+  Number of threads for index operations.
+</ParamField>
+
+<ParamField path="WithHNSWBatchSizeModify(v)" type="uint">
+  Batch size for index operations.
+</ParamField>
+
+<ParamField path="WithHNSWSyncThresholdModify(v)" type="uint">
+  Sync threshold for persistent storage.
+</ParamField>
+
+<ParamField path="WithHNSWResizeFactorModify(v)" type="float64">
+  Growth factor when the index needs resizing.
+</ParamField>
+
+**SPANN Options:**
+
+<ParamField path="WithSpannSearchNprobeModify(v)" type="uint">
+  Number of centers probed during search.
+</ParamField>
+
+<ParamField path="WithSpannEfSearchModify(v)" type="uint">
+  The size of the dynamic candidate list during search.
+</ParamField>
+
+```go
+// Modify HNSW parameters
+cfg := chroma.NewUpdateCollectionConfiguration(
+    chroma.WithHNSWEfSearchModify(200),
+    chroma.WithHNSWBatchSizeModify(500),
+)
+err := collection.ModifyConfiguration(ctx, cfg)
+
+// Modify SPANN parameters
+cfg := chroma.NewUpdateCollectionConfiguration(
+    chroma.WithSpannSearchNprobeModify(32),
+    chroma.WithSpannEfSearchModify(64),
+)
+err := collection.ModifyConfiguration(ctx, cfg)
+```
+
+<Note>
+HNSW and SPANN configurations cannot be modified in the same request. Immutable parameters like `space`, `ef_construction`, and `max_neighbors` cannot be changed after creation.
+</Note>
+
 ### Fork
 
 Creates a fork of the collection with a new name.

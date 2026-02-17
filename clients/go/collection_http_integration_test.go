@@ -925,4 +925,25 @@ func TestCollectionAddIntegration(t *testing.T) {
 		require.Equal(t, 1, len(idGroups[0]))
 		require.Equal(t, DocumentID("1"), idGroups[0][0])
 	})
+
+	t.Run("modify HNSW configuration", func(t *testing.T) {
+		if chromaVersion != "latest" {
+			cVersion, err := semver.NewVersion(chromaVersion)
+			require.NoError(t, err)
+			constraint, _ := semver.NewConstraint(">= 0.5.3")
+			if !constraint.Check(cVersion) {
+				t.Skipf("ModifyConfiguration requires Chroma >= 0.5.3, got %s", chromaVersion)
+			}
+		}
+		err := c.Reset(ctx)
+		require.NoError(t, err)
+		collection, err := createCollection("test_modify_config",
+			WithEmbeddingFunctionCreate(embeddings.NewConsistentHashEmbeddingFunction()),
+		)
+		require.NoError(t, err)
+
+		cfg := NewUpdateCollectionConfiguration(WithHNSWEfSearchModify(200))
+		err = collection.ModifyConfiguration(ctx, cfg)
+		require.NoError(t, err)
+	})
 }

@@ -40,8 +40,8 @@ type Collection interface {
 	ModifyName(ctx context.Context, newName string) error
 	// ModifyMetadata modifies the metadata of the collection
 	ModifyMetadata(ctx context.Context, newMetadata CollectionMetadata) error
-	// ModifyConfiguration modifies the configuration of the collection
-	ModifyConfiguration(ctx context.Context, newConfig CollectionConfiguration) error // not supported yet
+	// ModifyConfiguration updates the collection's configuration.
+	ModifyConfiguration(ctx context.Context, newConfig *UpdateCollectionConfiguration) error
 	// Get gets documents from the collection
 	Get(ctx context.Context, opts ...CollectionGetOption) (GetResult, error)
 	// Query queries the collection
