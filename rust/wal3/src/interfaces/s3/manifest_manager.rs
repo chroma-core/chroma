@@ -824,6 +824,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
 mod tests {
     use chroma_storage::s3_client_for_test_with_new_bucket;
 
+    use crate::interfaces::ManifestPublisher;
     use crate::*;
 
     use super::*;
@@ -1041,7 +1042,6 @@ mod tests {
         .await
         .unwrap();
 
-        use crate::interfaces::ManifestPublisher;
         let result = manager.load_intrinsic_cursor().await.unwrap();
         assert!(
             result.is_none(),
@@ -1093,7 +1093,6 @@ mod tests {
             .await
             .unwrap();
 
-        use crate::interfaces::ManifestPublisher;
         let result = manager.load_intrinsic_cursor().await.unwrap();
         assert_eq!(
             result,

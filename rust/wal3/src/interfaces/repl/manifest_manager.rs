@@ -1021,8 +1021,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::ManifestManager;
+    use crate::interfaces::ManifestConsumer;
     use crate::interfaces::{ManifestPublisher, PositionWitness};
     use crate::{Error, FragmentUuid, LogPosition, Manifest, ManifestWitness};
+    use crate::{Fragment, FragmentIdentifier};
 
     fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
         let mut config = SessionConfig::default();
@@ -1836,7 +1838,6 @@ mod tests {
             num_bytes: 1000,
         };
 
-        use crate::interfaces::ManifestConsumer;
         let result =
             <ManifestManager as ManifestConsumer<FragmentUuid>>::snapshot_load(&manager, &pointer)
                 .await;
@@ -2190,8 +2191,6 @@ mod tests {
     // via publish_fragment.
     #[tokio::test]
     async fn test_k8s_mcmr_integration_init_fragments_visible_to_gc() {
-        use crate::{Fragment, FragmentIdentifier};
-
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
