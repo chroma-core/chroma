@@ -15,11 +15,19 @@ type DocumentMetadata interface {
 	GetInt(key string) (int64, bool)
 	GetFloat(key string) (float64, bool)
 	GetBool(key string) (bool, bool)
+	GetStringArray(key string) ([]string, bool)
+	GetIntArray(key string) ([]int64, bool)
+	GetFloatArray(key string) ([]float64, bool)
+	GetBoolArray(key string) ([]bool, bool)
 	SetRaw(key string, value interface{})
 	SetString(key, value string)
 	SetInt(key string, value int64)
 	SetFloat(key string, value float64)
 	SetBool(key string, value bool)
+	SetStringArray(key string, value []string)
+	SetIntArray(key string, value []int64)
+	SetFloatArray(key string, value []float64)
+	SetBoolArray(key string, value []bool)
 }
 
 type DocumentMetadatas []DocumentMetadata
@@ -88,6 +96,9 @@ type DocumentMetadataImpl struct {
 func NewDocumentMetadata(attributes ...*MetaAttribute) DocumentMetadata {
 	metadata := make(map[string]MetadataValue)
 	for _, attribute := range attributes {
+		if attribute == nil {
+			continue
+		}
 		metadata[attribute.key] = attribute.value
 	}
 	return &DocumentMetadataImpl{metadata: metadata}
@@ -132,6 +143,20 @@ func NewDocumentMetadataFromMap(metadata map[string]interface{}) (DocumentMetada
 			mv.SetInt(k, val)
 		case string:
 			mv.SetString(k, val)
+		case []string:
+			mv.SetStringArray(k, val)
+		case []int64:
+			mv.SetIntArray(k, val)
+		case []float64:
+			mv.SetFloatArray(k, val)
+		case []bool:
+			mv.SetBoolArray(k, val)
+		case []interface{}:
+			arrVal, err := convertInterfaceSliceToMetadataValue(val)
+			if err != nil {
+				return nil, errors.Wrapf(err, "invalid array metadata for key %q", k)
+			}
+			mv.metadata[k] = arrVal
 		default:
 			return nil, errors.Errorf("invalid metadata value type: %T", v)
 		}
@@ -188,6 +213,38 @@ func (cm *DocumentMetadataImpl) GetBool(key string) (value bool, ok bool) {
 	return b, ok
 }
 
+func (cm *DocumentMetadataImpl) GetStringArray(key string) ([]string, bool) {
+	v, ok := cm.metadata[key]
+	if !ok {
+		return nil, false
+	}
+	return v.GetStringArray()
+}
+
+func (cm *DocumentMetadataImpl) GetIntArray(key string) ([]int64, bool) {
+	v, ok := cm.metadata[key]
+	if !ok {
+		return nil, false
+	}
+	return v.GetIntArray()
+}
+
+func (cm *DocumentMetadataImpl) GetFloatArray(key string) ([]float64, bool) {
+	v, ok := cm.metadata[key]
+	if !ok {
+		return nil, false
+	}
+	return v.GetFloatArray()
+}
+
+func (cm *DocumentMetadataImpl) GetBoolArray(key string) ([]bool, bool) {
+	v, ok := cm.metadata[key]
+	if !ok {
+		return nil, false
+	}
+	return v.GetBoolArray()
+}
+
 func (cm *DocumentMetadataImpl) SetRaw(key string, value interface{}) {
 	switch val := value.(type) {
 	case bool:
@@ -207,6 +264,14 @@ func (cm *DocumentMetadataImpl) SetRaw(key string, value interface{}) {
 		cm.metadata[key] = MetadataValue{Int: &val}
 	case string:
 		cm.metadata[key] = MetadataValue{StringValue: &val}
+	case []string:
+		cm.SetStringArray(key, val)
+	case []int64:
+		cm.SetIntArray(key, val)
+	case []float64:
+		cm.SetFloatArray(key, val)
+	case []bool:
+		cm.SetBoolArray(key, val)
 	}
 }
 
@@ -226,6 +291,42 @@ func (cm *DocumentMetadataImpl) SetBool(key string, value bool) {
 	cm.metadata[key] = MetadataValue{Bool: &value}
 }
 
+func (cm *DocumentMetadataImpl) SetStringArray(key string, value []string) {
+	if len(value) == 0 {
+		return
+	}
+	cp := make([]string, len(value))
+	copy(cp, value)
+	cm.metadata[key] = MetadataValue{StringArray: cp}
+}
+
+func (cm *DocumentMetadataImpl) SetIntArray(key string, value []int64) {
+	if len(value) == 0 {
+		return
+	}
+	cp := make([]int64, len(value))
+	copy(cp, value)
+	cm.metadata[key] = MetadataValue{IntArray: cp}
+}
+
+func (cm *DocumentMetadataImpl) SetFloatArray(key string, value []float64) {
+	if len(value) == 0 {
+		return
+	}
+	cp := make([]float64, len(value))
+	copy(cp, value)
+	cm.metadata[key] = MetadataValue{FloatArray: cp}
+}
+
+func (cm *DocumentMetadataImpl) SetBoolArray(key string, value []bool) {
+	if len(value) == 0 {
+		return
+	}
+	cp := make([]bool, len(value))
+	copy(cp, value)
+	cm.metadata[key] = MetadataValue{BoolArray: cp}
+}
+
 func (cm *DocumentMetadataImpl) MarshalJSON() ([]byte, error) {
 	processed := make(map[string]interface{})
 	for k, v := range cm.metadata {
@@ -241,6 +342,22 @@ func (cm *DocumentMetadataImpl) MarshalJSON() ([]byte, error) {
 			processed[k], _ = v.GetInt()
 		case string:
 			processed[k], _ = v.GetString()
+		case []string:
+			cp := make([]string, len(v.StringArray))
+			copy(cp, v.StringArray)
+			processed[k] = cp
+		case []int64:
+			cp := make([]int64, len(v.IntArray))
+			copy(cp, v.IntArray)
+			processed[k] = cp
+		case []float64:
+			cp := make([]float64, len(v.FloatArray))
+			copy(cp, v.FloatArray)
+			processed[k] = cp
+		case []bool:
+			cp := make([]bool, len(v.BoolArray))
+			copy(cp, v.BoolArray)
+			processed[k] = cp
 		}
 	}
 	b := bytes.NewBuffer(nil)

@@ -42,12 +42,17 @@ func main() {
 	}
 
 	err = col.Add(context.Background(),
-		// chroma.WithIDGenerator(chroma.NewULIDGenerator()),
 		chroma.WithIDs("1", "2"),
 		chroma.WithTexts("hello world", "goodbye world"),
 		chroma.WithMetadatas(
-			chroma.NewDocumentMetadata(chroma.NewIntAttribute("int", 1)),
-			chroma.NewDocumentMetadata(chroma.NewStringAttribute("str1", "hello2")),
+			chroma.NewDocumentMetadata(
+				chroma.NewIntAttribute("int", 1),
+				chroma.NewStringArrayAttribute("tags", []string{"greeting", "english"}),
+			),
+			chroma.NewDocumentMetadata(
+				chroma.NewStringAttribute("str1", "hello2"),
+				chroma.NewStringArrayAttribute("tags", []string{"farewell", "english"}),
+			),
 		))
 	if err != nil {
 		log.Printf("Error adding collection: %s \n", err)
@@ -79,6 +84,19 @@ func main() {
 		return
 	}
 	fmt.Printf("Query result expected: 'hello world', actual: '%v'\n", qr.GetDocumentsGroups()[0][0]) // goodbye world is also returned because of the OR filter
+
+	// Example with array contains filter (Chroma >= 1.5.0)
+	arrayFilter := chroma.MetadataContainsString(chroma.K("tags"), "greeting")
+	qr2, err := col.Query(context.Background(),
+		chroma.WithQueryTexts("say hello"),
+		chroma.WithInclude(chroma.IncludeDocuments, chroma.IncludeMetadatas),
+		chroma.WithWhere(arrayFilter),
+	)
+	if err != nil {
+		log.Printf("Error querying collection with array filter: %s \n", err)
+		return
+	}
+	fmt.Printf("Array filter result expected: 'hello world', actual: '%v'\n", qr2.GetDocumentsGroups()[0][0])
 
 	err = col.Delete(context.Background(), chroma.WithIDs("1", "2"))
 	if err != nil {

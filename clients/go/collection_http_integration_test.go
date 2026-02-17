@@ -800,4 +800,129 @@ func TestCollectionAddIntegration(t *testing.T) {
 			require.True(t, id == "4" || id == "5", "expected ID 4 or 5, got %s", id)
 		}
 	})
+
+	t.Run("array metadata round-trip and filtering", func(t *testing.T) {
+		// Requires Chroma >= 1.5.0
+		if chromaVersion != "latest" {
+			v, err := semver.NewVersion(chromaVersion)
+			require.NoError(t, err)
+			constraint, _ := semver.NewConstraint(">= 1.5.0")
+			if !constraint.Check(v) {
+				t.Skip("array metadata requires Chroma >= 1.5.0")
+			}
+		}
+
+		err := c.Reset(ctx)
+		require.NoError(t, err)
+		collection, err := createCollection("test_array_metadata",
+			WithEmbeddingFunctionCreate(embeddings.NewConsistentHashEmbeddingFunction()),
+		)
+		require.NoError(t, err)
+
+		meta1 := NewDocumentMetadata(
+			NewStringArrayAttribute("tags", []string{"science", "physics"}),
+			NewIntArrayAttribute("scores", []int64{100, 200}),
+			NewFloatArrayAttribute("ratios", []float64{0.5, 1.5}),
+			NewBoolArrayAttribute("flags", []bool{true, false}),
+		)
+		meta2 := NewDocumentMetadata(
+			NewStringArrayAttribute("tags", []string{"math", "algebra"}),
+			NewIntArrayAttribute("scores", []int64{300, 400}),
+			NewFloatArrayAttribute("ratios", []float64{2.0, 3.0}),
+			NewBoolArrayAttribute("flags", []bool{false}),
+		)
+		meta3 := NewDocumentMetadata(
+			NewStringArrayAttribute("tags", []string{"science", "biology"}),
+			NewIntArrayAttribute("scores", []int64{500}),
+			NewFloatArrayAttribute("ratios", []float64{4.0}),
+			NewBoolArrayAttribute("flags", []bool{true}),
+		)
+
+		err = collection.Add(ctx,
+			WithIDs("1", "2", "3"),
+			WithTexts("doc about physics", "doc about algebra", "doc about biology"),
+			WithMetadatas(meta1, meta2, meta3),
+		)
+		require.NoError(t, err)
+
+		// Verify round-trip: get docs back and check array metadata
+		res, err := collection.Get(ctx, WithIDs("1"), WithInclude(IncludeMetadatas))
+		require.NoError(t, err)
+		require.Equal(t, 1, len(res.GetIDs()))
+		md := res.GetMetadatas()
+		require.Equal(t, 1, len(md))
+		tags, ok := md[0].GetStringArray("tags")
+		require.True(t, ok)
+		require.Equal(t, []string{"science", "physics"}, tags)
+
+		scores, ok := md[0].GetIntArray("scores")
+		require.True(t, ok)
+		require.Equal(t, []int64{100, 200}, scores)
+
+		ratios, ok := md[0].GetFloatArray("ratios")
+		require.True(t, ok)
+		require.Equal(t, []float64{0.5, 1.5}, ratios)
+
+		flags, ok := md[0].GetBoolArray("flags")
+		require.True(t, ok)
+		require.Equal(t, []bool{true, false}, flags)
+
+		// Query with MetadataContainsString - should match doc 1 and 3
+		qr, err := collection.Query(ctx,
+			WithQueryTexts("science"),
+			WithNResults(10),
+			WithWhere(MetadataContainsString(K("tags"), "science")),
+			WithInclude(IncludeMetadatas, IncludeDocuments),
+		)
+		require.NoError(t, err)
+		idGroups := qr.GetIDGroups()
+		require.Equal(t, 1, len(idGroups))
+		require.Equal(t, 2, len(idGroups[0]))
+		idSet := map[DocumentID]bool{}
+		for _, id := range idGroups[0] {
+			idSet[id] = true
+		}
+		require.True(t, idSet["1"], "expected doc 1 in results")
+		require.True(t, idSet["3"], "expected doc 3 in results")
+
+		// Query with MetadataNotContainsString - exclude "science", should return doc 2
+		qr, err = collection.Query(ctx,
+			WithQueryTexts("math"),
+			WithNResults(10),
+			WithWhere(MetadataNotContainsString(K("tags"), "science")),
+			WithInclude(IncludeMetadatas),
+		)
+		require.NoError(t, err)
+		idGroups = qr.GetIDGroups()
+		require.Equal(t, 1, len(idGroups))
+		require.Equal(t, 1, len(idGroups[0]))
+		require.Equal(t, DocumentID("2"), idGroups[0][0])
+
+		// Query with MetadataContainsInt
+		qr, err = collection.Query(ctx,
+			WithQueryTexts("test"),
+			WithNResults(10),
+			WithWhere(MetadataContainsInt(K("scores"), 500)),
+		)
+		require.NoError(t, err)
+		idGroups = qr.GetIDGroups()
+		require.Equal(t, 1, len(idGroups))
+		require.Equal(t, 1, len(idGroups[0]))
+		require.Equal(t, DocumentID("3"), idGroups[0][0])
+
+		// And composition: array filter + scalar filter via contains
+		qr, err = collection.Query(ctx,
+			WithQueryTexts("test"),
+			WithNResults(10),
+			WithWhere(And(
+				MetadataContainsString(K("tags"), "science"),
+				MetadataContainsInt(K("scores"), 100),
+			)),
+		)
+		require.NoError(t, err)
+		idGroups = qr.GetIDGroups()
+		require.Equal(t, 1, len(idGroups))
+		require.Equal(t, 1, len(idGroups[0]))
+		require.Equal(t, DocumentID("1"), idGroups[0][0])
+	})
 }
