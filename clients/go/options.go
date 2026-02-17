@@ -538,6 +538,9 @@ type metadatasOption struct {
 
 // WithMetadatas sets the document metadata for [Collection.Add], [Collection.Upsert],
 // and [Collection.Update] operations.
+//
+// Each metadata is a map of string keys to values (string, int, float, bool,
+// or arrays of these types).
 func WithMetadatas(metadatas ...DocumentMetadata) *metadatasOption {
 	return &metadatasOption{metadatas: metadatas}
 }

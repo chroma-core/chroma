@@ -168,8 +168,9 @@ func (w *WhereClauseInt) Validate() error {
 		return errors.Errorf("invalid key for %s, expected non-empty", w.operator)
 	}
 	switch w.operator {
-	case EqualOperator, NotEqualOperator, GreaterThanOperator, GreaterThanOrEqualOperator, LessThanOperator, LessThanOrEqualOperator:
-		// Valid operators for int
+	case EqualOperator, NotEqualOperator, GreaterThanOperator, GreaterThanOrEqualOperator, LessThanOperator, LessThanOrEqualOperator,
+		ContainsWhereOperator, NotContainsWhereOperator:
+		// Valid operators for int (includes $contains/$not_contains for array metadata)
 	default:
 		return errors.Errorf("invalid operator %s for int clause", w.operator)
 	}
@@ -266,8 +267,9 @@ func (w *WhereClauseFloat) Validate() error {
 		return errors.Errorf("invalid key for %s, expected non-empty", w.operator)
 	}
 	switch w.operator {
-	case EqualOperator, NotEqualOperator, GreaterThanOperator, GreaterThanOrEqualOperator, LessThanOperator, LessThanOrEqualOperator:
-		// Valid operators for float
+	case EqualOperator, NotEqualOperator, GreaterThanOperator, GreaterThanOrEqualOperator, LessThanOperator, LessThanOrEqualOperator,
+		ContainsWhereOperator, NotContainsWhereOperator:
+		// Valid operators for float (includes $contains/$not_contains for array metadata)
 	default:
 		return errors.Errorf("invalid operator %s for float clause", w.operator)
 	}
@@ -364,8 +366,8 @@ func (w *WhereClauseBool) Validate() error {
 		return errors.Errorf("invalid key for %s, expected non-empty", w.operator)
 	}
 	switch w.operator {
-	case EqualOperator, NotEqualOperator:
-		// Valid operators for bool
+	case EqualOperator, NotEqualOperator, ContainsWhereOperator, NotContainsWhereOperator:
+		// Valid operators for bool (includes $contains/$not_contains for array metadata)
 	default:
 		return errors.Errorf("invalid operator %s for bool clause", w.operator)
 	}
@@ -793,5 +795,85 @@ func DocumentNotContains(text string) WhereClause {
 			key:      KDocument,
 		},
 		operand: text,
+	}
+}
+
+func MetadataContainsString(field Key, value string) WhereClause {
+	return &WhereClauseString{
+		WhereClauseBase: WhereClauseBase{
+			operator: ContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataNotContainsString(field Key, value string) WhereClause {
+	return &WhereClauseString{
+		WhereClauseBase: WhereClauseBase{
+			operator: NotContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataContainsInt(field Key, value int) WhereClause {
+	return &WhereClauseInt{
+		WhereClauseBase: WhereClauseBase{
+			operator: ContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataNotContainsInt(field Key, value int) WhereClause {
+	return &WhereClauseInt{
+		WhereClauseBase: WhereClauseBase{
+			operator: NotContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataContainsFloat(field Key, value float32) WhereClause {
+	return &WhereClauseFloat{
+		WhereClauseBase: WhereClauseBase{
+			operator: ContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataNotContainsFloat(field Key, value float32) WhereClause {
+	return &WhereClauseFloat{
+		WhereClauseBase: WhereClauseBase{
+			operator: NotContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataContainsBool(field Key, value bool) WhereClause {
+	return &WhereClauseBool{
+		WhereClauseBase: WhereClauseBase{
+			operator: ContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
+	}
+}
+
+func MetadataNotContainsBool(field Key, value bool) WhereClause {
+	return &WhereClauseBool{
+		WhereClauseBase: WhereClauseBase{
+			operator: NotContainsWhereOperator,
+			key:      field,
+		},
+		operand: value,
 	}
 }

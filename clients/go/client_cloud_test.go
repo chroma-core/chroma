@@ -781,6 +781,69 @@ func TestCloudClientSearch(t *testing.T) {
 	})
 }
 
+// TestCloudClientArrayMetadata tests array metadata with $contains/$not_contains queries
+func TestCloudClientArrayMetadata(t *testing.T) {
+	client := setupCloudClient(t)
+
+	t.Run("array metadata round-trip and contains queries", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_array_meta-" + uuid.New().String()
+		collection, err := client.CreateCollection(ctx, collectionName)
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+
+		meta1 := NewDocumentMetadata(
+			NewStringArrayAttribute("tags", []string{"science", "physics"}),
+			NewIntArrayAttribute("scores", []int64{100, 200}),
+		)
+		meta2 := NewDocumentMetadata(
+			NewStringArrayAttribute("tags", []string{"math", "algebra"}),
+			NewIntArrayAttribute("scores", []int64{300}),
+		)
+		meta3 := NewDocumentMetadata(
+			NewStringArrayAttribute("tags", []string{"science", "biology"}),
+			NewIntArrayAttribute("scores", []int64{400, 500}),
+		)
+
+		err = collection.Add(ctx,
+			WithIDs("1", "2", "3"),
+			WithTexts("doc about physics", "doc about algebra", "doc about biology"),
+			WithMetadatas(meta1, meta2, meta3),
+		)
+		require.NoError(t, err)
+		time.Sleep(2 * time.Second)
+
+		// MetadataContainsString: "science" should match docs 1 and 3
+		qr, err := collection.Query(ctx,
+			WithQueryTexts("science"),
+			WithNResults(10),
+			WithWhere(MetadataContainsString(K("tags"), "science")),
+		)
+		require.NoError(t, err)
+		idGroups := qr.GetIDGroups()
+		require.Equal(t, 1, len(idGroups))
+		require.Equal(t, 2, len(idGroups[0]))
+		idSet := map[DocumentID]bool{}
+		for _, id := range idGroups[0] {
+			idSet[id] = true
+		}
+		require.True(t, idSet["1"])
+		require.True(t, idSet["3"])
+
+		// MetadataNotContainsString: exclude "science" should return doc 2
+		qr, err = collection.Query(ctx,
+			WithQueryTexts("math"),
+			WithNResults(10),
+			WithWhere(MetadataNotContainsString(K("tags"), "science")),
+		)
+		require.NoError(t, err)
+		idGroups = qr.GetIDGroups()
+		require.Equal(t, 1, len(idGroups))
+		require.Equal(t, 1, len(idGroups[0]))
+		require.Equal(t, DocumentID("2"), idGroups[0][0])
+	})
+}
+
 // TestCloudClientSchema tests Schema configuration
 func TestCloudClientSchema(t *testing.T) {
 	client := setupCloudClient(t)

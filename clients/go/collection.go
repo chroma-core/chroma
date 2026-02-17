@@ -505,6 +505,12 @@ func (c *CollectionUpdateOp) PrepareAndValidate() error {
 		}
 	}
 
+	if len(c.Metadatas) > 0 {
+		if err := validateDocumentMetadatas(c.Metadatas); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
