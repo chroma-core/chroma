@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
 	"strconv"
 	"strings"
@@ -489,6 +490,25 @@ func validateDocumentMetadatas(metadatas []DocumentMetadata) error {
 	return nil
 }
 
+type goInt interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64
+}
+
+func convertIntSlice[T goInt](slice []interface{}) (MetadataValue, error) {
+	arr := make([]int64, len(slice))
+	for i, v := range slice {
+		n, ok := v.(T)
+		if !ok {
+			return MetadataValue{}, errors.Errorf("metadata array has mixed types: expected integer at index %d, got %T", i, v)
+		}
+		if uint64(n) > math.MaxInt64 && n > 0 {
+			return MetadataValue{}, errors.Errorf("metadata integer overflow at index %d: value %v exceeds int64 range", i, v)
+		}
+		arr[i] = int64(n)
+	}
+	return MetadataValue{IntArray: arr}, nil
+}
+
 func convertInterfaceSliceToMetadataValue(slice []interface{}) (MetadataValue, error) {
 	if len(slice) == 0 {
 		return MetadataValue{}, errors.New("metadata arrays must be non-empty")
@@ -565,6 +585,26 @@ func convertInterfaceSliceToMetadataValue(slice []interface{}) (MetadataValue, e
 			arr[i] = fv
 		}
 		return MetadataValue{FloatArray: arr}, nil
+	case int:
+		return convertIntSlice[int](slice)
+	case int8:
+		return convertIntSlice[int8](slice)
+	case int16:
+		return convertIntSlice[int16](slice)
+	case int32:
+		return convertIntSlice[int32](slice)
+	case int64:
+		return convertIntSlice[int64](slice)
+	case uint:
+		return convertIntSlice[uint](slice)
+	case uint8:
+		return convertIntSlice[uint8](slice)
+	case uint16:
+		return convertIntSlice[uint16](slice)
+	case uint32:
+		return convertIntSlice[uint32](slice)
+	case uint64:
+		return convertIntSlice[uint64](slice)
 	case []interface{}:
 		return MetadataValue{}, errors.New("nested arrays are not supported in metadata values; only flat arrays of string, int, float, or bool are allowed")
 	default:

@@ -4,6 +4,7 @@ package chroma
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -601,6 +602,69 @@ func TestUnmarshalArrayNullRejected(t *testing.T) {
 			require.Contains(t, err.Error(), "null")
 		})
 	}
+}
+
+func TestConvertInterfaceSliceGoIntTypes(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []interface{}
+	}{
+		{"int", []interface{}{int(1), int(2), int(3)}},
+		{"int8", []interface{}{int8(1), int8(2), int8(3)}},
+		{"int16", []interface{}{int16(1), int16(2), int16(3)}},
+		{"int32", []interface{}{int32(1), int32(2), int32(3)}},
+		{"int64", []interface{}{int64(1), int64(2), int64(3)}},
+		{"uint", []interface{}{uint(1), uint(2), uint(3)}},
+		{"uint8", []interface{}{uint8(1), uint8(2), uint8(3)}},
+		{"uint16", []interface{}{uint16(1), uint16(2), uint16(3)}},
+		{"uint32", []interface{}{uint32(1), uint32(2), uint32(3)}},
+		{"uint64", []interface{}{uint64(1), uint64(2), uint64(3)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mv, err := convertInterfaceSliceToMetadataValue(tt.input)
+			require.NoError(t, err)
+			require.Equal(t, []int64{1, 2, 3}, mv.IntArray)
+		})
+	}
+}
+
+func TestConvertInterfaceSliceGoIntMixedWithOtherType(t *testing.T) {
+	_, err := convertInterfaceSliceToMetadataValue([]interface{}{1, "two", 3})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "mixed types")
+}
+
+func TestNewMetadataFromMapWithGoIntInterfaceSlice(t *testing.T) {
+	m := NewMetadataFromMap(map[string]interface{}{
+		"ids": []interface{}{1, 2, 3},
+	})
+	arr, ok := m.GetIntArray("ids")
+	require.True(t, ok)
+	require.Equal(t, []int64{1, 2, 3}, arr)
+}
+
+func TestConvertInterfaceSliceUintOverflow(t *testing.T) {
+	tests := []struct {
+		name  string
+		input []interface{}
+	}{
+		{"uint", []interface{}{uint(math.MaxInt64 + 1)}},
+		{"uint64", []interface{}{uint64(math.MaxInt64 + 1)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := convertInterfaceSliceToMetadataValue(tt.input)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), "overflow")
+		})
+	}
+}
+
+func TestConvertInterfaceSliceUintMaxInt64IsValid(t *testing.T) {
+	mv, err := convertInterfaceSliceToMetadataValue([]interface{}{uint64(math.MaxInt64)})
+	require.NoError(t, err)
+	require.Equal(t, []int64{math.MaxInt64}, mv.IntArray)
 }
 
 func TestConvertInterfaceSliceFloat64(t *testing.T) {
