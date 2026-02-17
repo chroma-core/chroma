@@ -57,7 +57,7 @@ use wal3::{
     Fragment, FragmentManagerFactory, GarbageCollectionOptions, Limits, LogPosition, LogReader,
     LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest,
     ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentOptions, Snapshot,
-    SnapshotCache, SnapshotPointer, StorageWrapper,
+    SnapshotCache, SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
 };
 
 mod scrub;
@@ -93,7 +93,6 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
-static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("compaction") };
 
 ////////////////////////////////////////////// Metrics /////////////////////////////////////////////
 
@@ -1058,6 +1057,18 @@ impl LogServer {
         }
     }
 
+    /// Returns a CursorStore for the dirty log.
+    fn dirty_log_cursors(&self) -> Result<CursorStore, Error> {
+        let storage = self.preferred_storage()?;
+        let prefix = MarkDirty::path_for_hostname(&self.config.my_member_id);
+        Ok(CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::new(storage.clone()),
+            prefix,
+            "dirty log".to_string(),
+        ))
+    }
+
     /// Creates a LogReader for the given database and collection.
     async fn make_log_reader(
         &self,
@@ -1175,50 +1186,30 @@ impl LogServer {
             )));
         }
         res.map_err(|err| Status::unknown(err.to_string()))?;
-        let cursor_name = &COMPACTION;
-        let cursor_store = log
-            .cursors(CursorStoreOptions::default())
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        let witness = log_reader
+            .update_intrinsic_cursor(
+                LogPosition::from_offset(adjusted_log_offset as u64),
+                epoch_us,
+                &self.config.my_member_id,
+                allow_rollback,
+            )
             .await
             .map_err(|err| {
                 Status::new(
                     err.code().into(),
-                    format!("Failed to create cursor store: {}", err),
+                    format!("Failed to update intrinsic cursor: {}", err),
                 )
             })?;
-        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
-            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
-        })?;
-        let default = Cursor::default();
-        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        if !allow_rollback && cursor.position.offset() > adjusted_log_offset as u64 {
+        let Some(witness) = witness else {
             return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
-        }
-        let cursor = Cursor {
-            position: LogPosition::from_offset(adjusted_log_offset as u64),
-            epoch_us: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::internal(file!(), line!()))
-                .unwrap()
-                .as_micros() as u64,
-            writer: self.config.my_member_id.clone(),
-        };
-        let witness = if let Some(witness) = witness.as_ref() {
-            cursor_store
-                .save(cursor_name, &cursor, witness)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
-                })?
-        } else {
-            cursor_store
-                .init(cursor_name, cursor)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
-                })?
         };
         if let Some(cache) = self.cache.as_ref() {
-            let cache_key = cache_key_for_cursor(collection_id, cursor_name);
+            let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
                     let value = CachedBytes::new(Vec::from(json_witness));
@@ -1430,12 +1421,10 @@ impl LogServer {
             .map(|d| d.as_micros() as u64)
             .unwrap_or(0);
         let mut rollups = HashMap::new();
-        for (log_id, enumeration_offset) in dirty_logs {
+        for (log_id, compaction_offset, enumeration_offset) in dirty_logs {
             let collection_id = CollectionUuid(log_id);
             let rollup = RollupPerCollection {
-                start_log_position: LogPosition::from_offset(
-                    enumeration_offset.offset().saturating_sub(1),
-                ),
+                start_log_position: compaction_offset,
                 limit_log_position: enumeration_offset,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now_us,
@@ -1490,9 +1479,8 @@ impl LogServer {
             Err(err) => Err(err),
         }?;
         new_cursor.position = rollup.last_record_witnessed + 1u64;
-        let cursors = dirty_log
-            .cursors(CursorStoreOptions::default())
-            .await
+        let cursors = self
+            .dirty_log_cursors()
             .map_err(|_| Error::CouldNotGetDirtyLogCursors)?;
         tracing::info!(
             "Advancing dirty log cursor {:?} -> {:?}",
@@ -1529,7 +1517,7 @@ impl LogServer {
                 }
             }
             for collection_id in cache_collections_to_purge {
-                let cache_key = cache_key_for_cursor(collection_id, &COMPACTION);
+                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
                 cache.remove(&cache_key).await;
             }
         }
@@ -1546,9 +1534,8 @@ impl LogServer {
         let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
             return Err(Error::CouldNotGetDirtyLogReader);
         };
-        let cursors = dirty_log
-            .cursors(CursorStoreOptions::default())
-            .await
+        let cursors = self
+            .dirty_log_cursors()
             .map_err(|_| Error::CouldNotGetDirtyLogCursors)?;
         let witness = cursors.load(&STABLE_PREFIX).await?;
         let default = Cursor::default();
@@ -1673,7 +1660,7 @@ impl LogServer {
                             topology: Option<TopologyName>,
                             collection_id: CollectionUuid| {
             async move {
-                let cursor = &COMPACTION;
+                let cursor = &INTRINSIC_CURSOR;
                 let cursor_store = CursorStore::new(
                     CursorStoreOptions::default(),
                     Arc::clone(&storage),
@@ -2159,13 +2146,6 @@ impl LogServer {
             .map(|t| TopologyName::new(&t))
             .transpose()
             .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
-        let source_prefix = source_collection_id.storage_prefix_for_log();
-        let storage = Arc::new(
-            self.preferred_storage()
-                .map_err(|e| Status::internal(e.to_string()))?
-                .clone(),
-        );
-
         // Extract CMEK from request
         let cmek = request.cmek.map(Cmek::try_from).transpose().map_err(|e| {
             tracing::error!("Failed to convert CMEK: {}", e);
@@ -2180,18 +2160,12 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), source_collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
-        let cursors = CursorStore::new(
-            CursorStoreOptions::default(),
-            Arc::clone(&storage),
-            source_prefix,
-            "copy task".to_string(),
-        );
-        let cursor_name = &COMPACTION;
-        let witness = cursors.load(cursor_name).await.map_err(|err| {
-            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        let cursor = log_reader.load_intrinsic_cursor().await.map_err(|err| {
+            Status::new(
+                err.code().into(),
+                format!("Failed to load intrinsic cursor: {}", err),
+            )
         })?;
-        // This is the existing compaction_offset, which is the next record to compact.
-        let cursor = witness.map(|x| x.cursor.position);
         tracing::event!(Level::INFO, offset = ?cursor);
 
         // Use FactoryCreationContext to handle both replicated and S3 targets
@@ -2252,7 +2226,24 @@ impl LogServer {
         }
 
         let cursor = cursor.unwrap_or(LogPosition::from_offset(1));
-        if cursor != max_offset {
+        // Ensure the target log's intrinsic cursor reflects the source compaction point.
+        // This prevents empty/fully-compacted forks from being reported as dirty on repl.
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        log_reader
+            .update_intrinsic_cursor(cursor, epoch_us, &self.config.my_member_id, false)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to update intrinsic cursor on fork target: {}", err),
+                )
+            })?;
+
+        if cursor != max_offset && topology_name.is_none() {
             let mark_dirty = MarkDirty {
                 collection_id: target_collection_id,
                 dirty_log: self.dirty_log.clone(),
@@ -2363,9 +2354,8 @@ impl LogServer {
         let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
             return Err(Status::unavailable("Failed to get dirty log reader"));
         };
-        let cursors = dirty_log
-            .cursors(CursorStoreOptions::default())
-            .await
+        let cursors = self
+            .dirty_log_cursors()
             .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         let witness = match cursors.load(&STABLE_PREFIX).await {
             Ok(witness) => witness,
@@ -2464,7 +2454,7 @@ impl LogServer {
         }
         let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
 
-        let cursor_name = &COMPACTION;
+        let cursor_name = &INTRINSIC_CURSOR;
         let cursor_store = CursorStore::new(
             CursorStoreOptions::default(),
             Arc::new(
@@ -2590,7 +2580,7 @@ impl LogServer {
                 let collection_id = Uuid::parse_str(&x)
                     .map(CollectionUuid)
                     .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-                Some(cache_key_for_cursor(collection_id, &COMPACTION))
+                Some(cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR))
             }
             Some(EntryToEvict::ManifestForCollectionId(x)) => {
                 let collection_id = Uuid::parse_str(&x)

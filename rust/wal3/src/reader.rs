@@ -14,8 +14,8 @@ use crate::interfaces::{
     ManifestManagerFactory,
 };
 use crate::{
-    Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest, ManifestAndWitness,
-    ScrubError, ScrubSuccess, SnapshotCache,
+    CursorWitness, Error, Fragment, FragmentSeqNo, LogPosition, LogReaderOptions, Manifest,
+    ManifestAndWitness, ScrubError, ScrubSuccess, SnapshotCache,
 };
 
 fn ranges_overlap(lhs: (LogPosition, LogPosition), rhs: (LogPosition, LogPosition)) -> bool {
@@ -351,6 +351,25 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
         self.fragment_consumer
             .parse_parquet_fast(parquet, starting_log_position)
+            .await
+    }
+
+    /// Load the intrinsic cursor position, proxying to the manifest consumer.
+    pub async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+        self.manifest_consumer.load_intrinsic_cursor().await
+    }
+
+    /// Update the intrinsic cursor using an init-or-swap pattern, proxying to the manifest
+    /// consumer.
+    pub async fn update_intrinsic_cursor(
+        &self,
+        position: LogPosition,
+        epoch_us: u64,
+        writer: &str,
+        allow_rollback: bool,
+    ) -> Result<Option<CursorWitness>, Error> {
+        self.manifest_consumer
+            .update_intrinsic_cursor(position, epoch_us, writer, allow_rollback)
             .await
     }
 
