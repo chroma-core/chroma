@@ -207,6 +207,20 @@ await collection.add({
 });
 ```
 
+```go Go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1"),
+    chroma.WithTexts("lorem ipsum..."),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(
+            chroma.NewIntAttribute("chapter", 3),
+            chroma.NewStringArrayAttribute("tags", []string{"fiction", "adventure"}),
+            chroma.NewIntArrayAttribute("scores", []int64{1, 2, 3}),
+        ),
+    ),
+)
+```
+
 ```rust Rust
 use chroma::types::{Metadata, MetadataValue};
 

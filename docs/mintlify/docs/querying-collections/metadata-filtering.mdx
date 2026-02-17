@@ -581,6 +581,31 @@ await collection.add({
 });
 ```
 
+```go Go
+err := collection.Add(ctx,
+    chroma.WithIDs("m1", "m2", "m3"),
+    chroma.WithEmbeddings(
+        chroma.NewEmbeddingFromFloat32([]float32{1, 0, 0}),
+        chroma.NewEmbeddingFromFloat32([]float32{0, 1, 0}),
+        chroma.NewEmbeddingFromFloat32([]float32{0, 0, 1}),
+    ),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(
+            chroma.NewStringArrayAttribute("genres", []string{"action", "comedy"}),
+            chroma.NewIntAttribute("year", 2020),
+        ),
+        chroma.NewDocumentMetadata(
+            chroma.NewStringArrayAttribute("genres", []string{"drama"}),
+            chroma.NewIntAttribute("year", 2021),
+        ),
+        chroma.NewDocumentMetadata(
+            chroma.NewStringArrayAttribute("genres", []string{"action", "thriller"}),
+            chroma.NewIntAttribute("year", 2022),
+        ),
+    ),
+)
+```
+
 ```rust Rust
 use chroma::types::{Metadata, MetadataValue};
 
@@ -658,6 +683,33 @@ await collection.get({
 });
 ```
 
+```go Go
+// Get all records where genres contains "action"
+result, err := collection.Get(ctx,
+    chroma.WithWhere(chroma.MetadataContainsString("genres", "action")),
+)
+
+// Get all records where genres does NOT contain "action"
+result, err = collection.Get(ctx,
+    chroma.WithWhere(chroma.MetadataNotContainsString("genres", "action")),
+)
+
+// Works with integer arrays too
+result, err = collection.Get(ctx,
+    chroma.WithWhere(chroma.MetadataContainsInt("scores", 20)),
+)
+
+// Combine with other filters
+result, err = collection.Get(ctx,
+    chroma.WithWhere(
+        chroma.And(
+            chroma.MetadataContainsString("genres", "action"),
+            chroma.GteInt(chroma.K("year"), 2021),
+        ),
+    ),
+)
+```
+
 ```rust Rust
 use chroma::types::{
     ContainsOperator, MetadataComparison, MetadataExpression, MetadataValue, Where,
@@ -706,12 +758,12 @@ let results = collection
 
 ### Supported Array Types
 
-| Type | Python | TypeScript | Rust |
-|------|--------|------------|------|
-| String | `["a", "b"]` | `["a", "b"]` | `MetadataValue::StringArray(...)` |
-| Integer | `[1, 2, 3]` | `[1, 2, 3]` | `MetadataValue::IntArray(...)` |
-| Float | `[1.5, 2.5]` | `[1.5, 2.5]` | `MetadataValue::FloatArray(...)` |
-| Boolean | `[true, false]` | `[true, false]` | `MetadataValue::BoolArray(...)` |
+| Type | Python | TypeScript | Go | Rust |
+|------|--------|------------|-----|------|
+| String | `["a", "b"]` | `["a", "b"]` | `NewStringArrayAttribute(...)` | `MetadataValue::StringArray(...)` |
+| Integer | `[1, 2, 3]` | `[1, 2, 3]` | `NewIntArrayAttribute(...)` | `MetadataValue::IntArray(...)` |
+| Float | `[1.5, 2.5]` | `[1.5, 2.5]` | `NewFloatArrayAttribute(...)` | `MetadataValue::FloatArray(...)` |
+| Boolean | `[true, false]` | `[true, false]` | `NewBoolArrayAttribute(...)` | `MetadataValue::BoolArray(...)` |
 
 **Constraints:**
 
