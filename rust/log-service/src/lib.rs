@@ -3082,6 +3082,7 @@ impl Default for LogServerConfig {
             grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
             grpc_max_concurrent_streams: Self::default_grpc_max_concurrent_streams(),
             rollup_concurrency: Self::default_rollup_concurrency(),
+            rollup_concurrent_manifests: Self::default_rollup_concurrent_manifests(),
             regions_and_topologies: None,
         }
     }
