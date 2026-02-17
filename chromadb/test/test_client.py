@@ -154,9 +154,6 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert captured["verify"] is True
 
 
-pytest.importorskip("chromadb_rust_bindings")
-
-
 @pytest.mark.asyncio
 async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
     client = await chromadb.AsyncPersistentClient(path=tmp_path)
