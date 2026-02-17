@@ -1185,7 +1185,7 @@ mod tests {
             Setsum::default(),
         ));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
         assert!(
             result.unwrap(),
@@ -1215,7 +1215,7 @@ mod tests {
             Setsum::default(),
         ));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
         assert!(
             !result.unwrap(),
@@ -1344,7 +1344,7 @@ mod tests {
             LogPosition::from_offset(messages_len),
             Setsum::default(),
         ));
-        let head_result = manager.manifest_head(&witness).await;
+        let head_result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(head_result.is_ok(), "manifest_head failed");
         assert!(
             head_result.unwrap(),
@@ -1423,7 +1423,7 @@ mod tests {
             LogPosition::from_offset(60),
             Setsum::default(),
         ));
-        let head_result = manager.manifest_head(&witness).await;
+        let head_result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(head_result.is_ok() && head_result.unwrap());
 
         println!(
@@ -1944,10 +1944,10 @@ mod tests {
                 .expect("manifest should exist");
 
         // Verify witness is valid before GC.
-        let is_valid_before = manager
-            .manifest_head(&witness_before_gc)
-            .await
-            .expect("manifest_head failed");
+        let is_valid_before =
+            ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness_before_gc)
+                .await
+                .expect("manifest_head failed");
         assert!(
             is_valid_before,
             "witness should be valid before GC: {:?}",
@@ -1974,10 +1974,10 @@ mod tests {
                 .expect("apply_garbage failed");
 
             // After GC, the old witness should be INVALID because `collected` changed.
-            let is_valid_after = manager
-                .manifest_head(&witness_before_gc)
-                .await
-                .expect("manifest_head failed");
+            let is_valid_after =
+                ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness_before_gc)
+                    .await
+                    .expect("manifest_head failed");
             assert!(
                 !is_valid_after,
                 "witness from before GC should be INVALID after GC. \
@@ -1993,10 +1993,10 @@ mod tests {
                     .expect("load failed")
                     .expect("manifest should exist");
 
-            let is_new_valid = manager
-                .manifest_head(&witness_after_gc)
-                .await
-                .expect("manifest_head failed");
+            let is_new_valid =
+                ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness_after_gc)
+                    .await
+                    .expect("manifest_head failed");
             assert!(
                 is_new_valid,
                 "new witness should be valid after GC: {:?}",
@@ -2063,7 +2063,7 @@ mod tests {
             wrong_collected,
         ));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
         assert!(
             !result.unwrap(),
@@ -2171,7 +2171,7 @@ mod tests {
         let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let witness = ManifestWitness::ETag(crate::interfaces::ETag("test-etag".to_string()));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         match result {
             Err(Error::Internal { .. }) => {
                 println!(
