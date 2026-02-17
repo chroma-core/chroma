@@ -304,8 +304,7 @@ func extractSpecificFile(tarGzPath, targetFile, destPath string) error {
 }
 
 var (
-	onnxInitErr error
-	onnxMu      sync.Mutex
+	onnxMu sync.Mutex
 )
 
 func EnsureOnnxRuntimeSharedLibrary() error {
@@ -341,27 +340,27 @@ func EnsureOnnxRuntimeSharedLibrary() error {
 	}
 
 	downloadAndExtractNeeded := false
-	if _, onnxInitErr = os.Stat(cfg.OnnxLibPath); os.IsNotExist(onnxInitErr) {
+	if _, err = os.Stat(cfg.OnnxLibPath); os.IsNotExist(err) {
 		downloadAndExtractNeeded = true
-		onnxInitErr = os.MkdirAll(cfg.OnnxCacheDir, 0755)
-		if onnxInitErr != nil {
-			return errors.Wrap(onnxInitErr, "failed to create onnx cache")
+		err = os.MkdirAll(cfg.OnnxCacheDir, 0755)
+		if err != nil {
+			return errors.Wrap(err, "failed to create onnx cache")
 		}
 	}
 	if !downloadAndExtractNeeded {
 		return nil
 	}
 	targetArchive := filepath.Join(cfg.OnnxCacheDir, "onnxruntime-"+cos+"-"+carch+"-"+cfg.LibOnnxRuntimeVersion+".tgz")
-	if _, onnxInitErr = os.Stat(cfg.OnnxLibPath); os.IsNotExist(onnxInitErr) {
+	if _, err = os.Stat(cfg.OnnxLibPath); os.IsNotExist(err) {
 		// Download the library from official Microsoft GitHub releases.
 		// Note: Checksum verification is not practical here because versions are user-configurable
 		// and each version/OS/arch combination has a unique checksum. Integrity is ensured through:
 		// 1. HTTPS transport security 2. Archive format validation 3. File size verification
 		url := "https://github.com/microsoft/onnxruntime/releases/download/v" + cfg.LibOnnxRuntimeVersion + "/onnxruntime-" + cos + "-" + carch + "-" + cfg.LibOnnxRuntimeVersion + ".tgz"
-		if _, onnxInitErr = os.Stat(targetArchive); os.IsNotExist(onnxInitErr) {
-			onnxInitErr = downloadFile(targetArchive, url)
-			if onnxInitErr != nil {
-				return errors.Wrap(onnxInitErr, "failed to download onnxruntime.tgz")
+		if _, err = os.Stat(targetArchive); os.IsNotExist(err) {
+			err = downloadFile(targetArchive, url)
+			if err != nil {
+				return errors.Wrap(err, "failed to download onnxruntime.tgz")
 			}
 			if _, err := os.Stat(targetArchive); err != nil {
 				return errors.Wrap(err, "downloaded archive not found after download")
@@ -375,15 +374,15 @@ func EnsureOnnxRuntimeSharedLibrary() error {
 	if cos == "linux" {
 		targetFile = "onnxruntime-" + cos + "-" + carch + "-" + cfg.LibOnnxRuntimeVersion + "/lib/libonnxruntime." + getExtensionForOs() + "." + cfg.LibOnnxRuntimeVersion
 	}
-	onnxInitErr = extractSpecificFile(targetArchive, targetFile, cfg.OnnxCacheDir)
-	if onnxInitErr != nil {
-		return errors.Wrapf(onnxInitErr, "could not extract onnxruntime shared library")
+	err = extractSpecificFile(targetArchive, targetFile, cfg.OnnxCacheDir)
+	if err != nil {
+		return errors.Wrapf(err, "could not extract onnxruntime shared library")
 	}
 
 	if cos == "linux" {
-		onnxInitErr = os.Rename(filepath.Join(cfg.OnnxCacheDir, "libonnxruntime."+getExtensionForOs()+"."+cfg.LibOnnxRuntimeVersion), cfg.OnnxLibPath)
-		if onnxInitErr != nil {
-			return errors.Wrapf(onnxInitErr, "could not rename extracted file to %s", cfg.OnnxLibPath)
+		err = os.Rename(filepath.Join(cfg.OnnxCacheDir, "libonnxruntime."+getExtensionForOs()+"."+cfg.LibOnnxRuntimeVersion), cfg.OnnxLibPath)
+		if err != nil {
+			return errors.Wrapf(err, "could not rename extracted file to %s", cfg.OnnxLibPath)
 		}
 	}
 
@@ -391,12 +390,12 @@ func EnsureOnnxRuntimeSharedLibrary() error {
 		return errors.Wrapf(err, "extracted file not found at expected location: %s", cfg.OnnxLibPath)
 	}
 
-	onnxInitErr = os.RemoveAll(targetArchive)
-	if onnxInitErr != nil {
-		return errors.Wrapf(onnxInitErr, "could not remove temporary archive: %s", targetArchive)
+	err = os.RemoveAll(targetArchive)
+	if err != nil {
+		return errors.Wrapf(err, "could not remove temporary archive: %s", targetArchive)
 	}
 
-	return onnxInitErr
+	return nil
 }
 
 func EnsureDefaultEmbeddingFunctionModel() error {

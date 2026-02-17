@@ -235,6 +235,9 @@ func (e *DefaultEmbeddingFunction) EmbedDocuments(ctx context.Context, documents
 	}
 	initLock.RLock()
 	defer initLock.RUnlock()
+	if atomic.LoadInt32(&e.closed) == 1 {
+		return nil, errors.New("embedding function is closed")
+	}
 	embeddingInputs, err := e.tokenize(documents)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to tokenize documents")
@@ -263,6 +266,9 @@ func (e *DefaultEmbeddingFunction) EmbedQuery(ctx context.Context, document stri
 	}
 	initLock.RLock()
 	defer initLock.RUnlock()
+	if atomic.LoadInt32(&e.closed) == 1 {
+		return nil, errors.New("embedding function is closed")
+	}
 	embeddingInputs, err := e.tokenize([]string{document})
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to tokenize query")
