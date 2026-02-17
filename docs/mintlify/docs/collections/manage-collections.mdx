@@ -434,6 +434,12 @@ err = collection.ModifyName(ctx, "new-name")
 err = collection.ModifyMetadata(ctx, chroma.NewMetadata(
     chroma.NewStringAttribute("description", "new description"),
 ))
+
+// Modify mutable index configuration
+cfg := chroma.NewUpdateCollectionConfiguration(
+    chroma.WithHNSWEfSearchModify(200),
+)
+err = collection.ModifyConfiguration(ctx, cfg)
 ```
 </CodeGroup>
 

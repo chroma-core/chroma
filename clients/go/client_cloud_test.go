@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings"
@@ -1346,5 +1347,34 @@ func TestCloudClientConfig(t *testing.T) {
 		require.Equal(t, "different_test_key", p.Token)
 		require.Equal(t, NewTenant("other_tenant"), testClient.Tenant())
 		require.Equal(t, NewDatabase("other_db", NewTenant("other_tenant")), testClient.Database())
+	})
+}
+
+// TestCloudModifyConfiguration tests ModifyConfiguration with HNSW and SPANN parameters
+func TestCloudModifyConfiguration(t *testing.T) {
+	client := setupCloudClient(t)
+
+	t.Run("modify SPANN configuration", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_modify_spann_cfg-" + uuid.New().String()
+		collection, err := client.CreateCollection(ctx, collectionName)
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+
+		cfg := NewUpdateCollectionConfiguration(
+			WithSpannSearchNprobeModify(32),
+			WithSpannEfSearchModify(64),
+		)
+		err = collection.ModifyConfiguration(ctx, cfg)
+		require.NoError(t, err)
+
+		updated, err := client.GetCollection(ctx, collectionName)
+		require.NoError(t, err)
+		spannCfg, ok := updated.Configuration().GetRaw("spann")
+		require.True(t, ok)
+		spannMap, ok := spannCfg.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, float64(32), spannMap["search_nprobe"])
+		assert.Equal(t, float64(64), spannMap["ef_search"])
 	})
 }

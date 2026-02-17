@@ -360,8 +360,24 @@ func (c *CollectionImpl) Query(ctx context.Context, opts ...CollectionQueryOptio
 	return queryResult, nil
 }
 
-func (c *CollectionImpl) ModifyConfiguration(ctx context.Context, newConfig CollectionConfiguration) error {
-	return errors.New("not yet supported")
+func (c *CollectionImpl) ModifyConfiguration(ctx context.Context, newConfig *UpdateCollectionConfiguration) error {
+	if newConfig == nil {
+		return errors.New("newConfig cannot be nil")
+	}
+	if err := newConfig.Validate(); err != nil {
+		return err
+	}
+	reqURL, err := url.JoinPath("tenants", c.Tenant().Name(), "databases", c.Database().Name(), "collections", c.ID())
+	if err != nil {
+		return errors.Wrap(err, "error composing request URL")
+	}
+	_, err = c.client.ExecuteRequest(ctx, http.MethodPut, reqURL, map[string]interface{}{
+		"new_configuration": newConfig,
+	})
+	if err != nil {
+		return errors.Wrap(err, "error modifying collection configuration")
+	}
+	return nil
 }
 
 func (c *CollectionImpl) Metadata() CollectionMetadata {
