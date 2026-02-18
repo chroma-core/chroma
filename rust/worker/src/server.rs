@@ -5,6 +5,7 @@ use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_index::hnsw_provider::HnswIndexProvider;
+use chroma_index::usearch::USearchIndexProvider;
 use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_log::Log;
 use chroma_segment::spann_provider::SpannProvider;
@@ -34,6 +35,7 @@ use crate::{
             knn::KnnOrchestrator,
             knn_filter::KnnFilterOrchestrator,
             projection::ProjectionOrchestrator,
+            quantized_spann_knn::QuantizedSpannKnnOrchestrator,
             rank::{RankOrchestrator, RankOrchestratorOutput},
             spann_knn::SpannKnnOrchestrator,
             sparse_knn::SparseKnnOrchestrator,
@@ -82,11 +84,16 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
+        let usearch_cache =
+            chroma_cache::from_config(&config.spann_provider.usearch_provider.cache_config).await?;
+        let usearch_provider = USearchIndexProvider::new(storage.clone(), usearch_cache);
+
         let spann_provider = SpannProvider::try_from_config(
             &(
                 hnsw_index_provider.clone(),
                 blockfile_provider.clone(),
                 config.spann_provider.clone(),
+                usearch_provider,
             ),
             registry,
         )
@@ -362,7 +369,10 @@ impl WorkerServer {
 
         let pulled_log_bytes = matching_records.fetch_log_bytes;
 
-        if vector_segment_type == SegmentType::Spann {
+        if matches!(
+            vector_segment_type,
+            SegmentType::Spann | SegmentType::QuantizedSpann
+        ) {
             tracing::debug!("Running KNN on SPANN segment");
             // Create unified futures that run KNN then projection
             let knn_with_projection_futures =
@@ -374,22 +384,35 @@ impl WorkerServer {
                     let system = system.clone();
                     let blockfile_provider = self.blockfile_provider.clone();
                     let knn_projection = knn_projection.clone();
+                    let segment_type = vector_segment_type;
 
                     async move {
-                        // Run KNN orchestrator
-                        let knn_orchestrator = SpannKnnOrchestrator::new(
-                            spann_provider,
-                            dispatcher.clone(),
-                            1000,
-                            collection_and_segments.clone(),
-                            matching_records.clone(),
-                            knn.fetch as usize,
-                            knn.embedding,
-                        );
-                        let record_distances = knn_orchestrator
+                        // Run KNN orchestrator — dispatch based on segment type.
+                        let record_distances = match segment_type {
+                            SegmentType::QuantizedSpann => QuantizedSpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher.clone(),
+                                1000,
+                                collection_and_segments.clone(),
+                                matching_records.clone(),
+                                knn,
+                            )
                             .run(system.clone())
                             .await
-                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?;
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                            _ => SpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher.clone(),
+                                1000,
+                                collection_and_segments.clone(),
+                                matching_records.clone(),
+                                knn.fetch as usize,
+                                knn.embedding,
+                            )
+                            .run(system.clone())
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                        };
 
                         // Run projection orchestrator
                         let projection_orchestrator = ProjectionOrchestrator::new(
@@ -535,9 +558,22 @@ impl WorkerServer {
                         let vector_segment_type =
                             collection_and_segments_clone.vector_segment.r#type;
 
-                        if vector_segment_type == SegmentType::Spann {
-                            // Use SPANN KNN orchestrator
-                            let spann_orchestrator = SpannKnnOrchestrator::new(
+                        match vector_segment_type {
+                            SegmentType::QuantizedSpann => QuantizedSpannKnnOrchestrator::new(
+                                spann_provider,
+                                dispatcher,
+                                1000,
+                                collection_and_segments_clone,
+                                knn_filter_output_clone,
+                                Knn {
+                                    embedding: query,
+                                    fetch: knn_query.limit,
+                                },
+                            )
+                            .run(system_clone)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                            SegmentType::Spann => SpannKnnOrchestrator::new(
                                 spann_provider,
                                 dispatcher,
                                 1000,
@@ -545,32 +581,28 @@ impl WorkerServer {
                                 knn_filter_output_clone,
                                 knn_query.limit as usize,
                                 query,
-                            );
+                            )
+                            .run(system_clone)
+                            .await
+                            .map_err(|e| Status::new(e.code().into(), e.to_string()))?,
+                            _ => {
+                                let knn = Knn {
+                                    embedding: query,
+                                    fetch: knn_query.limit,
+                                };
 
-                            spann_orchestrator
+                                KnnOrchestrator::new(
+                                    blockfile_provider,
+                                    dispatcher,
+                                    1000,
+                                    collection_and_segments_clone,
+                                    knn_filter_output_clone,
+                                    knn,
+                                )
                                 .run(system_clone)
                                 .await
                                 .map_err(|e| Status::new(e.code().into(), e.to_string()))?
-                        } else {
-                            // Use HNSW KNN orchestrator
-                            let knn = Knn {
-                                embedding: query,
-                                fetch: knn_query.limit,
-                            };
-
-                            let knn_orchestrator = KnnOrchestrator::new(
-                                blockfile_provider,
-                                dispatcher,
-                                1000,
-                                collection_and_segments_clone,
-                                knn_filter_output_clone,
-                                knn,
-                            );
-
-                            knn_orchestrator
-                                .run(system_clone)
-                                .await
-                                .map_err(|e| Status::new(e.code().into(), e.to_string()))?
+                            }
                         }
                     }
                     QueryVector::Sparse(query) => {

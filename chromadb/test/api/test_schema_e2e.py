@@ -1,6 +1,7 @@
 from chromadb.api import ClientAPI, ServerAPI
 from chromadb.api.types import (
     Schema,
+    FtsIndexConfig,
     SparseVectorIndexConfig,
     SparseEmbeddingFunction,
     SparseVector,
@@ -2650,3 +2651,193 @@ def test_search_api_uses_embedded_searches_with_sparse_embeddings(
     assert len(results["ids"]) == 1
     assert len(results["ids"][0]) > 0
     assert "doc1" in results["ids"][0]
+
+
+# ============================================================================
+# FTS Disable / Enable Tests
+# ============================================================================
+
+
+def test_fts_disabled_blocks_where_document_queries(
+    client_factories: "ClientFactories",
+) -> None:
+    """Disabling FTS via schema should block where_document queries on get, query, and delete."""
+    schema = Schema()
+    schema.delete_index(config=FtsIndexConfig(), key="#document")
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    # Verify FTS is disabled in the schema
+    assert collection.schema is not None
+    doc_override = collection.schema.keys["#document"].string
+    assert doc_override is not None
+    assert doc_override.fts_index is not None
+    assert doc_override.fts_index.enabled is False
+
+    # Add documents — should succeed (documents are stored, just not FTS-indexed)
+    collection.add(
+        ids=["fts-off-1", "fts-off-2", "fts-off-3"],
+        documents=["alpha beta gamma", "delta epsilon zeta", "eta theta iota"],
+        metadatas=[
+            {"category": "group_a"},
+            {"category": "group_b"},
+            {"category": "group_a"},
+        ],
+    )
+
+    # where_document queries should fail with InvalidArgumentError
+    with pytest.raises(InvalidArgumentError) as exc_info:
+        collection.get(where_document={"$contains": "alpha"})
+    assert "fts" in str(exc_info.value).lower()
+
+    with pytest.raises(InvalidArgumentError) as exc_info:
+        collection.query(
+            query_texts=["some query text"],
+            n_results=1,
+            where_document={"$contains": "delta"},
+        )
+    assert "fts" in str(exc_info.value).lower()
+
+    with pytest.raises(InvalidArgumentError) as exc_info:
+        collection.delete(where_document={"$contains": "eta"})
+    assert "fts" in str(exc_info.value).lower()
+
+    # Regular metadata filtering should still work
+    filtered = collection.get(where={"category": "group_a"})
+    assert set(filtered["ids"]) == {"fts-off-1", "fts-off-3"}
+
+
+def test_fts_enabled_by_default_where_document_works(
+    client_factories: "ClientFactories",
+) -> None:
+    """Default schema should have FTS enabled and where_document queries should work."""
+    collection, _ = _create_isolated_collection(client_factories)
+
+    # Verify FTS is enabled in the default schema
+    assert collection.schema is not None
+    doc_override = collection.schema.keys["#document"].string
+    assert doc_override is not None
+    assert doc_override.fts_index is not None
+    assert doc_override.fts_index.enabled is True
+
+    collection.add(
+        ids=["fts-on-1", "fts-on-2"],
+        documents=["the quick brown fox", "lazy dog sleeps"],
+    )
+
+    items = collection.get(where_document={"$contains": "fox"})
+    assert set(items["ids"]) == {"fts-on-1"}
+
+    items = collection.get(where_document={"$contains": "lazy"})
+    assert set(items["ids"]) == {"fts-on-2"}
+
+
+def test_fts_disabled_schema_persistence(
+    client_factories: "ClientFactories",
+) -> None:
+    """FTS-disabled schema should persist across client reloads."""
+    schema = Schema()
+    schema.delete_index(config=FtsIndexConfig(), key="#document")
+
+    collection, client = _create_isolated_collection(client_factories, schema=schema)
+    collection_name = collection.name
+
+    collection.add(
+        ids=["persist-fts-1"],
+        documents=["persistent doc for fts test"],
+    )
+
+    # Reload client
+    reloaded_client = client_factories.create_client_from_system()
+    reloaded_collection = reloaded_client.get_collection(name=collection_name)
+
+    # Verify FTS is still disabled after reload
+    assert reloaded_collection.schema is not None
+    doc_override = reloaded_collection.schema.keys["#document"].string
+    assert doc_override is not None
+    assert doc_override.fts_index is not None
+    assert doc_override.fts_index.enabled is False
+
+    # where_document should still fail
+    with pytest.raises(InvalidArgumentError):
+        reloaded_collection.get(where_document={"$contains": "persistent"})
+
+
+def test_fts_disabled_documents_still_stored(
+    client_factories: "ClientFactories",
+) -> None:
+    """Documents should still be stored and retrievable when FTS is disabled."""
+    schema = Schema()
+    schema.delete_index(config=FtsIndexConfig(), key="#document")
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    collection.add(
+        ids=["stored-1", "stored-2"],
+        documents=["document one content", "document two content"],
+    )
+
+    # Documents should be retrievable by ID
+    result = collection.get(ids=["stored-1", "stored-2"], include=["documents"])
+    assert result["documents"] is not None
+    assert result["documents"][0] == "document one content"
+    assert result["documents"][1] == "document two content"
+
+    # Count should be correct
+    assert collection.count() == 2
+
+
+def test_fts_disabled_then_new_collection_with_fts_enabled(
+    client_factories: "ClientFactories",
+) -> None:
+    """Deleting a FTS-disabled collection and recreating with FTS enabled should restore FTS."""
+    # Create with FTS disabled
+    schema_disabled = Schema()
+    schema_disabled.delete_index(config=FtsIndexConfig(), key="#document")
+
+    collection, client = _create_isolated_collection(
+        client_factories, schema=schema_disabled
+    )
+    col_name = collection.name
+
+    collection.add(
+        ids=["fts-toggle-1"],
+        documents=["searchable text"],
+    )
+
+    with pytest.raises(InvalidArgumentError):
+        collection.get(where_document={"$contains": "searchable"})
+
+    # Delete and recreate with default schema (FTS enabled)
+    client.delete_collection(name=col_name)
+    restored = client.get_or_create_collection(name=col_name)
+
+    restored.add(
+        ids=["fts-toggle-2"],
+        documents=["searchable text again"],
+    )
+
+    items = restored.get(where_document={"$contains": "searchable"})
+    assert set(items["ids"]) == {"fts-toggle-2"}
+
+
+@pytest.mark.skipif(is_spann_disabled_mode, reason=skip_reason_spann_disabled)
+def test_fts_disabled_search_api_blocks_document_filter(
+    client_factories: "ClientFactories",
+) -> None:
+    """Search API should also reject document filters when FTS is disabled."""
+    schema = Schema()
+    schema.delete_index(config=FtsIndexConfig(), key="#document")
+
+    collection, _ = _create_isolated_collection(client_factories, schema=schema)
+
+    collection.add(
+        ids=["search-fts-1", "search-fts-2"],
+        documents=["alpha content", "beta content"],
+    )
+
+    with pytest.raises(InvalidArgumentError) as exc_info:
+        collection.search(
+            Search(where=Key.DOCUMENT.contains("alpha"))
+        )
+    assert "fts" in str(exc_info.value).lower()

@@ -9,9 +9,10 @@ sysdb:
     kubernetes-namespace: chroma2
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
+
 rustFrontendService:
   # We have to specify the command, because the Dockerfile uses the CLI since its shared with
   # single node, so in values.dev we pass the CONFIG_PATH into the chroma run command
@@ -23,9 +24,9 @@ rustFrontendService:
       value: 'value: "1"'
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
 
 queryService:
   env:
@@ -34,9 +35,9 @@ queryService:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
 
 compactionService:
   env:
@@ -45,38 +46,38 @@ compactionService:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
 
 rustLogService:
   replicaCount: 1
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
 
 garbageCollector:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
 
 rustSysdbService:
   replicaCount: 1
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m
 
 rustSysdbMigration:
   enabled: true
   resources:
     limits:
-      cpu: 100m
+      cpu: 200m
     requests:
-      cpu: 100m
+      cpu: 200m

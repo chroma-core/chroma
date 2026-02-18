@@ -866,6 +866,7 @@ impl SysdbService {
                         collection_id: collection.collection_id.to_string(),
                         collection_name: collection.name.clone(),
                         collection_creation_secs: chrono::Utc::now().timestamp(),
+                        database_name: collection.database.clone(),
                         ..Default::default()
                     },
                 ),
@@ -893,18 +894,29 @@ impl SysdbService {
             segments
         };
 
+        let new_version_file_path = version_file_manager.generate_file_path(
+            collection,
+            new_version,
+            version_file_type.clone(),
+        );
+        let ts_secs = chrono::Utc::now().timestamp();
         let new_version_info = chroma_types::chroma_proto::CollectionVersionInfo {
             version: new_version,
             segment_info: Some(chroma_types::chroma_proto::CollectionSegmentInfo {
                 segment_compaction_info: segments_to_use,
             }),
-            collection_info_mutable: None,
-            created_at_secs: chrono::Utc::now().timestamp(),
+            collection_info_mutable: Some(chroma_types::chroma_proto::CollectionInfoMutable {
+                current_log_position: collection.log_position,
+                current_collection_version: collection.version as i64,
+                updated_at_secs: ts_secs,
+                dimension: 0, // Default value - not used in Go version
+                last_compaction_time_secs: collection.last_compaction_time_secs as i64,
+            }),
+            created_at_secs: ts_secs,
             version_change_reason: VersionChangeReason::DataCompaction as i32,
-            version_file_name: String::new(),
+            version_file_name: new_version_file_path.clone(),
             marked_for_deletion: false,
         };
-
         if let Some(ref mut version_history) = version_file_pb.version_history {
             version_history.versions.push(new_version_info);
         } else {
@@ -913,16 +925,19 @@ impl SysdbService {
                     versions: vec![new_version_info],
                 });
         }
-
-        let generated_file_path = version_file_manager
-            .upload(&version_file_pb, collection, version_file_type, new_version)
+        version_file_manager
+            .upload(
+                &new_version_file_path,
+                &version_file_pb,
+                collection,
+                new_version,
+            )
             .await
             .map_err(|e| {
                 tracing::error!("Failed to upload version file: {}", e);
                 e
             })?;
-
-        Ok((version_file_pb, generated_file_path))
+        Ok((version_file_pb, new_version_file_path))
     }
 }
 
@@ -994,11 +1009,24 @@ mod tests {
 
         // Create segment info for segments that will actually exist
         // Create all three required segments (metadata, record, vector)
-        let segment_uuid = Uuid::new_v4();
-        vec![FlushSegmentCompactionInfo {
-            segment_id: segment_uuid.to_string(),
-            file_paths,
-        }]
+        let metadata_uuid = Uuid::new_v4();
+        let record_uuid = Uuid::new_v4();
+        let vector_uuid = Uuid::new_v4();
+
+        vec![
+            FlushSegmentCompactionInfo {
+                segment_id: metadata_uuid.to_string(),
+                file_paths: file_paths.clone(),
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: record_uuid.to_string(),
+                file_paths: file_paths.clone(),
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: vector_uuid.to_string(),
+                file_paths,
+            },
+        ]
     }
 
     async fn setup_test_service(backend: SpannerBackend) -> (SysdbService, TempDir) {
@@ -1032,9 +1060,52 @@ mod tests {
         let collection_id = CollectionUuid(Uuid::new_v4());
 
         // Create collection with segments
-        let segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+        let metadata_segment_id = SegmentUuid(Uuid::new_v4());
+        let record_segment_id = SegmentUuid(Uuid::new_v4());
+        let vector_segment_id = SegmentUuid(Uuid::new_v4());
+
+        // Create segment_compaction_info using the same IDs
+        let segment_compaction_info = vec![
+            FlushSegmentCompactionInfo {
+                segment_id: metadata_segment_id.0.to_string(),
+                file_paths: {
+                    let mut file_paths = HashMap::new();
+                    file_paths.insert(
+                        "data".to_string(),
+                        FilePaths {
+                            paths: vec!["new/path1.bin".to_string()],
+                        },
+                    );
+                    file_paths
+                },
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: record_segment_id.0.to_string(),
+                file_paths: {
+                    let mut file_paths = HashMap::new();
+                    file_paths.insert(
+                        "data".to_string(),
+                        FilePaths {
+                            paths: vec!["new/path2.bin".to_string()],
+                        },
+                    );
+                    file_paths
+                },
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: vector_segment_id.0.to_string(),
+                file_paths: {
+                    let mut file_paths = HashMap::new();
+                    file_paths.insert(
+                        "data".to_string(),
+                        FilePaths {
+                            paths: vec!["new/path3.bin".to_string()],
+                        },
+                    );
+                    file_paths
+                },
+            },
+        ];
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -1045,7 +1116,7 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: metadata_segment_id,
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -1053,7 +1124,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: record_segment_id,
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -1061,7 +1132,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: vector_segment_id,
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1143,6 +1214,87 @@ mod tests {
         assert!(version_file_path.contains("versionfiles/"));
         assert!(version_file_path.contains(&format!("/{:06}", collection.version)));
         assert!(version_file_path.contains("_flush"));
+
+        // Read and validate the version file contents
+        let version_file_manager =
+            VersionFileManager::new(service.local_region_object_storage.clone());
+        let version_file = version_file_manager
+            .fetch(collection)
+            .await
+            .expect("Failed to fetch version file after flush");
+
+        // Verify version file structure
+        assert!(
+            version_file.collection_info_immutable.is_some(),
+            "Collection immutable info should be set"
+        );
+        let collection_info_immutable = version_file.collection_info_immutable.as_ref().unwrap();
+        assert_eq!(
+            collection_info_immutable.collection_id,
+            collection_id.0.to_string()
+        );
+        assert_eq!(collection_info_immutable.collection_name, "test_collection");
+        assert_eq!(collection_info_immutable.tenant_id, tenant_id);
+        assert_eq!(
+            collection_info_immutable.database_id,
+            database_name.as_ref().to_string()
+        );
+
+        // Verify version history
+        assert!(
+            version_file.version_history.is_some(),
+            "Version history should be set"
+        );
+        let version_history = version_file.version_history.as_ref().unwrap();
+        assert_eq!(
+            version_history.versions.len(),
+            1,
+            "Should have exactly one version after flush"
+        );
+
+        // Verify the version details
+        let version_info = &version_history.versions[0];
+        assert_eq!(version_info.version, 1, "Version should be 1");
+        assert!(
+            !version_info.marked_for_deletion,
+            "Version should not be marked for deletion"
+        );
+        assert_eq!(
+            version_info.version_change_reason,
+            VersionChangeReason::DataCompaction as i32
+        );
+
+        // Verify segment info is preserved
+        assert!(
+            version_info.segment_info.is_some(),
+            "Segment info should be set"
+        );
+        let segment_info = version_info.segment_info.as_ref().unwrap();
+        assert_eq!(
+            segment_info.segment_compaction_info.len(),
+            3,
+            "Should have 3 segments"
+        );
+
+        // Verify collection mutable info
+        assert!(
+            version_info.collection_info_mutable.is_some(),
+            "Collection mutable info should be set"
+        );
+        let mutable_info = version_info.collection_info_mutable.as_ref().unwrap();
+        assert_eq!(
+            mutable_info.current_collection_version,
+            current_version as i64
+        );
+        assert_eq!(mutable_info.current_log_position, 0);
+        assert!(
+            mutable_info.updated_at_secs > 0,
+            "Updated timestamp should be set"
+        );
+        assert_eq!(
+            mutable_info.last_compaction_time_secs, 0,
+            "Last compaction time should be default value"
+        );
     }
 
     #[tokio::test]
@@ -1267,8 +1419,9 @@ mod tests {
 
         // Create collection with segments in US region
         let segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+        let metadata_uuid = Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap();
+        let record_uuid = Uuid::parse_str(&segment_compaction_info[1].segment_id).unwrap();
+        let vector_uuid = Uuid::parse_str(&segment_compaction_info[2].segment_id).unwrap();
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -1279,7 +1432,7 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(metadata_uuid),
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -1287,7 +1440,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(record_uuid),
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -1295,7 +1448,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: SegmentUuid(vector_uuid),
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1598,8 +1751,9 @@ mod tests {
 
         // Create collection with segments
         let segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+        let metadata_uuid = Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap();
+        let record_uuid = Uuid::parse_str(&segment_compaction_info[1].segment_id).unwrap();
+        let vector_uuid = Uuid::parse_str(&segment_compaction_info[2].segment_id).unwrap();
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -1610,7 +1764,7 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(metadata_uuid),
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -1618,7 +1772,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(record_uuid),
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -1626,7 +1780,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: SegmentUuid(vector_uuid),
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1761,8 +1915,6 @@ mod tests {
 
         // Create collection with initial segments
         let initial_segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&initial_segment_compaction_info[0].segment_id).unwrap());
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -1773,7 +1925,12 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(
+                        initial_segment_compaction_info[0]
+                            .segment_id
+                            .parse()
+                            .unwrap(),
+                    ),
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -1781,7 +1938,12 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(
+                        initial_segment_compaction_info[1]
+                            .segment_id
+                            .parse()
+                            .unwrap(),
+                    ),
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -1789,7 +1951,12 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: SegmentUuid(
+                        initial_segment_compaction_info[2]
+                            .segment_id
+                            .parse()
+                            .unwrap(),
+                    ),
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1810,7 +1977,11 @@ mod tests {
         let proto_req_first = FlushCollectionCompactionRequest {
             tenant_id: tenant_id.clone(),
             collection_id: collection_id.0.to_string(),
-            segment_compaction_info: initial_segment_compaction_info.clone(),
+            segment_compaction_info: vec![
+                initial_segment_compaction_info[0].clone(),
+                initial_segment_compaction_info[1].clone(),
+                initial_segment_compaction_info[2].clone(),
+            ],
             log_position: 100,
             collection_version: 0,
             total_records_post_compaction: 1000,
@@ -1899,14 +2070,21 @@ mod tests {
         let segment_info = latest_version.segment_info.as_ref().unwrap();
         assert_eq!(
             segment_info.segment_compaction_info.len(),
-            1,
+            3,
             "Should preserve the original segment info even with empty flush"
         );
-        assert_eq!(
-            segment_info.segment_compaction_info[0].segment_id,
-            initial_segment_compaction_info[0].segment_id,
-            "Should preserve the original segment ID"
-        );
+
+        for (i, segment_compaction_info) in segment_info
+            .segment_compaction_info
+            .iter()
+            .enumerate()
+            .take(3)
+        {
+            assert_eq!(
+                segment_compaction_info.segment_id, initial_segment_compaction_info[i].segment_id,
+                "Should preserve the original segment ID"
+            );
+        }
     }
 
     #[tokio::test]

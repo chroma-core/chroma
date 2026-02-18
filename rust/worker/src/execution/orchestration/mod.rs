@@ -7,6 +7,7 @@ pub mod knn;
 pub mod knn_filter;
 pub mod log_fetch_orchestrator;
 pub mod projection;
+pub mod quantized_spann_knn;
 pub mod rank;
 pub mod register_orchestrator;
 pub mod spann_knn;

@@ -6,7 +6,7 @@ use chroma_sysdb::SysDb;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{
     chroma_proto::{CollectionVersionFile, VersionListForCollection},
-    Segment, HNSW_PATH,
+    Segment, HNSW_PATH, QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
 };
 use std::collections::HashMap;
 use thiserror::Error;
@@ -124,12 +124,16 @@ impl Operator<FetchSparseIndexFilesInput, FetchSparseIndexFilesOutput>
                                 "Processing file type {}",
                                 file_type
                             );
-                            // Skip hnsw_index files
-                            if file_type == "hnsw_index" || file_type == HNSW_PATH {
+                            // Skip hnsw_index and usearch index files
+                            if file_type == "hnsw_index"
+                                || file_type == HNSW_PATH
+                                || file_type == QUANTIZED_SPANN_RAW_CENTROID
+                                || file_type == QUANTIZED_SPANN_QUANTIZED_CENTROID
+                            {
                                 if *version == input.oldest_version_to_keep {
                                     continue;
                                 }
-                                // Add the hnsw_index files to the hnsw_prefixes_for_deletion vector
+                                // Add the index files to the hnsw_prefixes_for_deletion vector
                                 hnsw_prefixes_for_deletion.extend(file_paths.paths.clone());
                                 continue;
                             }

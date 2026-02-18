@@ -1419,13 +1419,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
 
         let config = RootConfig::default();
@@ -1612,13 +1617,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
 
         let config = RootConfig::default();
@@ -1804,13 +1814,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
 
         let config = RootConfig::default();
@@ -2065,13 +2080,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
         let system = System::new();
 
@@ -2290,13 +2310,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
         let system = System::new();
 
@@ -2609,13 +2634,18 @@ mod tests {
             16,
             false,
         );
+        let usearch_provider = chroma_index::usearch::USearchIndexProvider::new(
+            storage.clone(),
+            new_non_persistent_cache_for_test(),
+        );
         let spann_provider = SpannProvider {
-            hnsw_provider: hnsw_provider.clone(),
+            adaptive_search_nprobe: true,
             blockfile_provider: blockfile_provider.clone(),
             garbage_collection_context: gc_context,
+            hnsw_provider: hnsw_provider.clone(),
             metrics: SpannMetrics::default(),
             pl_block_size: 5 * 1024 * 1024,
-            adaptive_search_nprobe: true,
+            usearch_provider,
         };
         let system = System::new();
 

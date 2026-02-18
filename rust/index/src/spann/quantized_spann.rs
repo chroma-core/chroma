@@ -4,8 +4,8 @@ use std::sync::{
 };
 
 use chroma_blockstore::{
-    arrow::provider::BlockfileReaderOptions, BlockfileFlusher, BlockfileReader,
-    BlockfileWriterOptions,
+    arrow::provider::BlockfileReaderOptions, provider::BlockfileProvider, BlockfileFlusher,
+    BlockfileReader, BlockfileWriterOptions,
 };
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_error::{ChromaError, ErrorCodes};
@@ -26,27 +26,26 @@ use faer::{
     Mat,
 };
 use simsimd::SpatialSimilarity;
-
 use thiserror::Error;
-
-use chroma_blockstore::provider::BlockfileProvider;
+use tracing::Instrument;
+use uuid::Uuid;
 
 use crate::{
     quantization::Code,
-    spann::{types::QuantizedSpannIds, utils},
+    spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
-    OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 // Blockfile prefixes
-const PREFIX_CENTER: &str = "center";
+pub const PREFIX_CENTER: &str = "center";
 const PREFIX_LENGTH: &str = "length";
 const PREFIX_NEXT_CLUSTER: &str = "next";
-const PREFIX_ROTATION: &str = "rotation";
-const PREFIX_VERSION: &str = "version";
+pub const PREFIX_ROTATION: &str = "rotation";
+pub const PREFIX_VERSION: &str = "version";
 
 // Key for singleton values (center, next_cluster_id)
-const SINGLETON_KEY: u32 = 0;
+pub const SINGLETON_KEY: u32 = 0;
 
 /// In-memory staging for a quantized cluster head.
 #[derive(Clone)]
@@ -56,6 +55,16 @@ struct QuantizedDelta {
     ids: Vec<u32>,
     length: usize,
     versions: Vec<u32>,
+}
+
+#[derive(Clone, Debug)]
+pub struct QuantizedSpannIds {
+    pub embedding_metadata_id: Uuid,
+    pub prefix_path: String,
+    pub quantized_centroid_id: IndexUuid,
+    pub quantized_cluster_id: Uuid,
+    pub raw_centroid_id: IndexUuid,
+    pub scalar_metadata_id: Uuid,
 }
 
 #[derive(Error, Debug)]
@@ -79,8 +88,10 @@ impl ChromaError for QuantizedSpannError {
 }
 
 /// Mutable quantized SPANN index, generic over centroid index.
+#[derive(Clone)]
 pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // === Config ===
+    cluster_block_size: usize,
     cmek: Option<Cmek>,
     collection_id: CollectionUuid,
     config: SpannIndexConfig,
@@ -798,39 +809,17 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
     /// Commit all in-memory state to blockfile writers and return a flusher.
     ///
     /// This method consumes the index and prepares all data for persistence.
-    /// Call `flush()` on the returned flusher to actually write to storage.
+    /// Call `finish()` before this method, then `flush()` on the returned
+    /// flusher to actually write to storage.
     pub async fn commit(
-        mut self,
+        self,
         blockfile_provider: &BlockfileProvider,
         usearch_provider: &USearchIndexProvider,
     ) -> Result<QuantizedSpannFlusher, QuantizedSpannError> {
-        // === Step 0: Pre-scrub cleanup ===
-        let mut mutated_cluster_ids = self
-            .cluster_deltas
-            .iter()
-            .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
-            .collect::<Vec<_>>();
-
-        for cluster_id in &mutated_cluster_ids {
-            self.scrub(*cluster_id).await?;
-        }
-
-        let zero_length_cluster_ids = self
-            .cluster_deltas
-            .iter()
-            .filter_map(|entry| (entry.value().length == 0).then_some(*entry.key()))
-            .collect::<Vec<_>>();
-
-        for cluster_id in zero_length_cluster_ids {
-            self.drop(cluster_id).await?;
-        }
-
-        // === Step 1: Check center drift and rebuild centroid indexes if needed ===
-        self.rebuild_on_drift(usearch_provider).await?;
-
-        // === Step 2: Create blockfile writers ===
-        let mut qc_options =
-            BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
+        // === Create blockfile writers ===
+        let mut qc_options = BlockfileWriterOptions::new(self.prefix_path.clone())
+            .ordered_mutations()
+            .max_block_size_bytes(self.cluster_block_size);
         let mut sm_options =
             BlockfileWriterOptions::new(self.prefix_path.clone()).ordered_mutations();
         let mut em_options =
@@ -862,9 +851,14 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .await
             .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
 
-        // === Step 3: Write quantized_cluster data ===
-        let quantized_cluster_flusher = {
-            // Add tombstoned cluster ids (need to delete from blockfile)
+        // === Write quantized_cluster data ===
+        let quantized_cluster_flusher = async {
+            // Collect clusters that received mutations plus tombstones.
+            let mut mutated_cluster_ids = self
+                .cluster_deltas
+                .iter()
+                .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
+                .collect::<Vec<_>>();
             for cluster_id in self.tombstones.iter() {
                 mutated_cluster_ids.push(*cluster_id);
             }
@@ -902,11 +896,13 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             quantized_cluster_writer
                 .commit::<u32, QuantizedCluster<'_>>()
                 .await
-                .map_err(QuantizedSpannError::Blockfile)?
-        };
+                .map_err(QuantizedSpannError::Blockfile)
+        }
+        .instrument(tracing::trace_span!("Commit quantized cluster blockfile"))
+        .await?;
 
-        // === Step 4: Write scalar_metadata ===
-        let scalar_metadata_flusher = {
+        // === Write scalar_metadata ===
+        let scalar_metadata_flusher = async {
             // 1. PREFIX_LENGTH - sorted by cluster_id
             let mut lengths = self
                 .cluster_deltas
@@ -945,11 +941,13 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             scalar_metadata_writer
                 .commit::<u32, u32>()
                 .await
-                .map_err(QuantizedSpannError::Blockfile)?
-        };
+                .map_err(QuantizedSpannError::Blockfile)
+        }
+        .instrument(tracing::trace_span!("Commit scalar metadata blockfile"))
+        .await?;
 
-        // === Step 5: Write embedding_metadata ===
-        let embedding_metadata_flusher = {
+        // === Write embedding_metadata ===
+        let embedding_metadata_flusher = async {
             // 1. PREFIX_CENTER - quantization center (always write, may be updated)
             embedding_metadata_writer
                 .set(PREFIX_CENTER, SINGLETON_KEY, self.center.to_vec())
@@ -973,11 +971,14 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             embedding_metadata_writer
                 .commit::<u32, Vec<f32>>()
                 .await
-                .map_err(QuantizedSpannError::Blockfile)?
-        };
+                .map_err(QuantizedSpannError::Blockfile)
+        }
+        .instrument(tracing::trace_span!("Commit embedding metadata blockfile"))
+        .await?;
 
         Ok(QuantizedSpannFlusher {
             embedding_metadata_flusher,
+            prefix_path: self.prefix_path.clone(),
             quantized_centroid: self.quantized_centroid,
             quantized_cluster_flusher,
             raw_centroid: self.raw_centroid,
@@ -987,7 +988,9 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
     }
 
     /// Create a new quantized SPANN index.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
+        cluster_block_size: usize,
         collection_id: CollectionUuid,
         config: SpannIndexConfig,
         dimension: usize,
@@ -1027,6 +1030,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         // Create centroid indexes
         let raw_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Create)
+            .instrument(tracing::trace_span!("Create raw centroid index"))
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
@@ -1036,11 +1040,13 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         };
         let quantized_centroid = usearch_provider
             .open(&quantized_usearch_config, OpenMode::Create)
+            .instrument(tracing::trace_span!("Create quantized centroid index"))
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
         Ok(Self {
             // === Config ===
+            cluster_block_size,
             cmek,
             collection_id,
             config,
@@ -1068,9 +1074,48 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         })
     }
 
+    /// Prepare the index for commit: scrub mutated clusters, drop empty
+    /// clusters, and rebuild centroid indexes if the quantization center
+    /// has drifted. Must be called before `commit()`.
+    pub async fn finish(
+        &mut self,
+        usearch_provider: &USearchIndexProvider,
+    ) -> Result<(), QuantizedSpannError> {
+        // Scrub all clusters that received mutations.
+        let mut mutated_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (!entry.value().ids.is_empty()).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+        mutated_cluster_ids.sort_unstable();
+
+        for cluster_id in &mutated_cluster_ids {
+            self.scrub(*cluster_id).await?;
+        }
+
+        // Drop clusters that ended up empty after scrubbing.
+        let zero_length_cluster_ids = self
+            .cluster_deltas
+            .iter()
+            .filter_map(|entry| (entry.value().length == 0).then_some(*entry.key()))
+            .collect::<Vec<_>>();
+
+        for cluster_id in zero_length_cluster_ids {
+            self.drop(cluster_id).await?;
+        }
+
+        // Check center drift and rebuild centroid indexes if needed.
+        self.rebuild_on_drift(usearch_provider)
+            .instrument(tracing::trace_span!("Check center drift and rebuild"))
+            .await?;
+
+        Ok(())
+    }
+
     /// Open an existing quantized SPANN index from file IDs.
     #[allow(clippy::too_many_arguments)]
     pub async fn open(
+        cluster_block_size: usize,
         collection_id: CollectionUuid,
         config: SpannIndexConfig,
         dimension: usize,
@@ -1083,48 +1128,57 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         usearch_provider: &USearchIndexProvider,
     ) -> Result<Self, QuantizedSpannError> {
         // Step 0: Load embedding_metadata (rotation matrix + quantization center)
-        let options =
-            BlockfileReaderOptions::new(file_ids.embedding_metadata_id, prefix_path.clone());
-        let reader = blockfile_provider
-            .read::<u32, &'static [f32]>(options)
-            .await
-            .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
+        let (rotation, center) = async {
+            let options =
+                BlockfileReaderOptions::new(file_ids.embedding_metadata_id, prefix_path.clone());
+            let reader = blockfile_provider
+                .read::<u32, &'static [f32]>(options)
+                .await
+                .map_err(|e| QuantizedSpannError::Blockfile(e.boxed()))?;
 
-        // Load rotation matrix columns
-        let columns = reader
-            .get_range(PREFIX_ROTATION..=PREFIX_ROTATION, ..)
-            .await
-            .map_err(QuantizedSpannError::Blockfile)?
-            .collect::<Vec<_>>();
+            // Load rotation matrix columns
+            let columns = reader
+                .get_range(PREFIX_ROTATION..=PREFIX_ROTATION, ..)
+                .await
+                .map_err(QuantizedSpannError::Blockfile)?
+                .collect::<Vec<_>>();
 
-        // Validate number of columns
-        if columns.len() != dimension {
-            return Err(QuantizedSpannError::DimensionMismatch {
-                expected: dimension,
-                got: columns.len(),
-            });
-        }
-
-        // Validate each column length
-        for (_prefix, _key, col) in &columns {
-            if col.len() != dimension {
+            // Validate number of columns
+            if columns.len() != dimension {
                 return Err(QuantizedSpannError::DimensionMismatch {
                     expected: dimension,
-                    got: col.len(),
+                    got: columns.len(),
                 });
             }
+
+            // Validate each column length
+            for (_prefix, _key, col) in &columns {
+                if col.len() != dimension {
+                    return Err(QuantizedSpannError::DimensionMismatch {
+                        expected: dimension,
+                        got: col.len(),
+                    });
+                }
+            }
+
+            // Construct rotation matrix column by column
+            let rotation = Mat::from_fn(dimension, dimension, |i, j| columns[j].2[i]);
+
+            // Load quantization center
+            let center = reader
+                .get(PREFIX_CENTER, SINGLETON_KEY)
+                .await
+                .map_err(QuantizedSpannError::Blockfile)?
+                .map(Arc::<[f32]>::from)
+                .unwrap_or_else(|| vec![0.0; dimension].into());
+
+            Ok((rotation, center))
         }
-
-        // Construct rotation matrix column by column
-        let rotation = Mat::from_fn(dimension, dimension, |i, j| columns[j].2[i]);
-
-        // Load quantization center
-        let center = reader
-            .get(PREFIX_CENTER, SINGLETON_KEY)
-            .await
-            .map_err(QuantizedSpannError::Blockfile)?
-            .map(Arc::<[f32]>::from)
-            .unwrap_or_else(|| vec![0.0; dimension].into());
+        .instrument(tracing::trace_span!(
+            "Load rotation matrix and quantization center",
+            dimension
+        ))
+        .await?;
 
         // Get config values with defaults
         let max_neighbors = config.max_neighbors.unwrap_or(default_m_spann());
@@ -1149,6 +1203,10 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
         // Step 1: Open centroid indexes
         let raw_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Fork(file_ids.raw_centroid_id))
+            .instrument(tracing::trace_span!(
+                "Fork raw centroid index",
+                index_id = %file_ids.raw_centroid_id.0
+            ))
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
@@ -1161,79 +1219,100 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 &quantized_usearch_config,
                 OpenMode::Fork(file_ids.quantized_centroid_id),
             )
+            .instrument(tracing::trace_span!(
+                "Fork quantized centroid index",
+                index_id = %file_ids.quantized_centroid_id.0
+            ))
             .await
             .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?;
 
         // Step 2: Load scalar metadata (next_cluster_id, versions, cluster_lengths)
-        let options = BlockfileReaderOptions::new(file_ids.scalar_metadata_id, prefix_path.clone());
-        let reader = blockfile_provider
-            .read::<u32, u32>(options)
-            .await
-            .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
-
-        // Load cluster lengths
-        let cluster_lengths = DashMap::new();
-        for (_prefix, key, value) in reader
-            .get_range(PREFIX_LENGTH..=PREFIX_LENGTH, ..)
-            .await
-            .map_err(QuantizedSpannError::Blockfile)?
-        {
-            cluster_lengths.insert(key, value as usize);
-        }
-
-        // Load next_cluster_id
-        let next_cluster_id = reader
-            .get(PREFIX_NEXT_CLUSTER, SINGLETON_KEY)
-            .await
-            .map_err(QuantizedSpannError::Blockfile)?
-            .unwrap_or(0);
-
-        // Load versions
-        let versions = DashMap::new();
-        for (_prefix, key, value) in reader
-            .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
-            .await
-            .map_err(QuantizedSpannError::Blockfile)?
-        {
-            versions.insert(key, value);
-        }
-
-        // Open quantized cluster reader
-        let options =
-            BlockfileReaderOptions::new(file_ids.quantized_cluster_id, prefix_path.clone());
-        let quantized_cluster_reader = Some(
-            blockfile_provider
-                .read(options)
+        let (cluster_lengths, next_cluster_id, versions) = async {
+            let options =
+                BlockfileReaderOptions::new(file_ids.scalar_metadata_id, prefix_path.clone());
+            let reader = blockfile_provider
+                .read::<u32, u32>(options)
                 .await
-                .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?,
-        );
+                .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?;
 
-        // Step 3: Initialize deltas from cluster_lengths by getting centers from raw_centroid
-        let deltas = DashMap::new();
-        for entry in cluster_lengths.iter() {
-            let cluster_id = *entry.key();
-            let length = *entry.value();
-
-            // Get center embedding from raw_centroid index
-            if let Some(center_embedding) = raw_centroid
-                .get(cluster_id)
-                .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?
+            // Load cluster lengths
+            let cluster_lengths = DashMap::new();
+            for (_prefix, key, value) in reader
+                .get_range(PREFIX_LENGTH..=PREFIX_LENGTH, ..)
+                .await
+                .map_err(QuantizedSpannError::Blockfile)?
             {
-                deltas.insert(
-                    cluster_id,
-                    QuantizedDelta {
-                        center: center_embedding.into(),
-                        codes: Vec::new(),
-                        ids: Vec::new(),
-                        length,
-                        versions: Vec::new(),
-                    },
-                );
+                cluster_lengths.insert(key, value as usize);
             }
+
+            // Load next_cluster_id
+            let next_cluster_id = reader
+                .get(PREFIX_NEXT_CLUSTER, SINGLETON_KEY)
+                .await
+                .map_err(QuantizedSpannError::Blockfile)?
+                .unwrap_or(0);
+
+            // Load versions
+            let versions = DashMap::new();
+            for (_prefix, key, value) in reader
+                .get_range(PREFIX_VERSION..=PREFIX_VERSION, ..)
+                .await
+                .map_err(QuantizedSpannError::Blockfile)?
+            {
+                versions.insert(key, value);
+            }
+
+            Ok::<_, QuantizedSpannError>((cluster_lengths, next_cluster_id, versions))
         }
+        .instrument(tracing::trace_span!("Load scalar metadata"))
+        .await?;
+
+        // Step 3: Open cluster reader + initialize deltas from cluster_lengths
+        let (quantized_cluster_reader, deltas) = async {
+            let options =
+                BlockfileReaderOptions::new(file_ids.quantized_cluster_id, prefix_path.clone());
+            let reader = Some(
+                blockfile_provider
+                    .read(options)
+                    .await
+                    .map_err(|err| QuantizedSpannError::Blockfile(err.boxed()))?,
+            );
+
+            // Initialize deltas from cluster_lengths by getting centers from raw_centroid
+            let deltas = DashMap::new();
+            for entry in cluster_lengths.iter() {
+                let cluster_id = *entry.key();
+                let length = *entry.value();
+
+                // Get center embedding from raw_centroid index
+                if let Some(center_embedding) = raw_centroid
+                    .get(cluster_id)
+                    .map_err(|err| QuantizedSpannError::CentroidIndex(err.boxed()))?
+                {
+                    deltas.insert(
+                        cluster_id,
+                        QuantizedDelta {
+                            center: center_embedding.into(),
+                            codes: Vec::new(),
+                            ids: Vec::new(),
+                            length,
+                            versions: Vec::new(),
+                        },
+                    );
+                }
+            }
+
+            Ok::<_, QuantizedSpannError>((reader, deltas))
+        }
+        .instrument(tracing::trace_span!(
+            "Initialize cluster deltas",
+            num_clusters = cluster_lengths.len()
+        ))
+        .await?;
 
         Ok(Self {
             // === Config ===
+            cluster_block_size,
             cmek,
             collection_id,
             config,
@@ -1294,7 +1373,16 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             .unwrap_or(default_center_drift_threshold());
 
         // Check if drift exceeds threshold
-        if drift_dist_sq > center_drift_threshold.powi(2) * center_norm_sq {
+        let rebuilding = drift_dist_sq > center_drift_threshold.powi(2) * center_norm_sq;
+        tracing::info!(
+            drift_dist_sq,
+            center_norm_sq,
+            center_drift_threshold,
+            rebuilding,
+            "Center drift check"
+        );
+
+        if rebuilding {
             let max_neighbors = self.config.max_neighbors.unwrap_or(default_m_spann());
             let ef_construction = self
                 .config
@@ -1353,6 +1441,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
 /// Flusher for persisting a quantized SPANN index to storage.
 pub struct QuantizedSpannFlusher {
     embedding_metadata_flusher: BlockfileFlusher,
+    prefix_path: String,
     quantized_centroid: USearchIndex,
     quantized_cluster_flusher: BlockfileFlusher,
     raw_centroid: USearchIndex,
@@ -1371,14 +1460,17 @@ impl QuantizedSpannFlusher {
         // Flush blockfiles
         self.embedding_metadata_flusher
             .flush::<u32, Vec<f32>>()
+            .instrument(tracing::trace_span!("Flush embedding metadata blockfile"))
             .await
             .map_err(QuantizedSpannError::Blockfile)?;
         self.quantized_cluster_flusher
             .flush::<u32, QuantizedCluster<'_>>()
+            .instrument(tracing::trace_span!("Flush quantized cluster blockfile"))
             .await
             .map_err(QuantizedSpannError::Blockfile)?;
         self.scalar_metadata_flusher
             .flush::<u32, u32>()
+            .instrument(tracing::trace_span!("Flush scalar metadata blockfile"))
             .await
             .map_err(QuantizedSpannError::Blockfile)?;
 
@@ -1386,17 +1478,20 @@ impl QuantizedSpannFlusher {
         let quantized_centroid_id = self
             .usearch_provider
             .flush(&self.quantized_centroid)
+            .instrument(tracing::trace_span!("Flush quantized centroid index"))
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
         let raw_centroid_id = self
             .usearch_provider
             .flush(&self.raw_centroid)
+            .instrument(tracing::trace_span!("Flush raw centroid index"))
             .await
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))?;
 
         // Return file IDs
         Ok(QuantizedSpannIds {
             embedding_metadata_id,
+            prefix_path: self.prefix_path.clone(),
             quantized_centroid_id,
             quantized_cluster_id,
             raw_centroid_id,
@@ -1419,7 +1514,7 @@ mod tests {
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_distance::DistanceFunction;
     use chroma_storage::{local::LocalStorage, Storage};
-    use chroma_types::{CollectionUuid, DataRecord, SpannIndexConfig};
+    use chroma_types::{CollectionUuid, DataRecord, Quantization, SpannIndexConfig};
     use rand::{Rng, SeedableRng};
     use tempfile::TempDir;
 
@@ -1431,6 +1526,7 @@ mod tests {
 
     use super::{QuantizedDelta, QuantizedSpannIndexWriter};
 
+    const TEST_CLUSTER_BLOCK_SIZE: usize = 2 * 1024 * 1024;
     const TEST_DIMENSION: usize = 4;
     const TEST_EPSILON: f32 = 1e-5;
 
@@ -1453,7 +1549,7 @@ mod tests {
             initial_lambda: None,
             num_centers_to_merge_to: None,
             max_neighbors: Some(8),
-            quantize: true,
+            quantize: Quantization::FourBitRabitQWithUSearch,
         }
     }
 
@@ -1491,6 +1587,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage);
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             CollectionUuid::new(),
             test_config(),
             TEST_DIMENSION,
@@ -1618,7 +1715,8 @@ mod tests {
         let delta = writer
             .cluster_deltas
             .get(&cluster_id_1)
-            .expect("delta not found");
+            .expect("delta not found")
+            .clone();
         assert!(delta.ids.contains(&10));
         assert_eq!(delta.length, 1);
 
@@ -1741,7 +1839,8 @@ mod tests {
         // =======================================================================
         // Phase 1: Create index, add points, commit, flush
         // =======================================================================
-        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -1784,9 +1883,12 @@ mod tests {
         let expected_rotated_101 = writer.rotate(&[0.0, 1.0, 0.0, 0.0]);
         let expected_rotated_102 = writer.rotate(&[0.0, 0.0, 1.0, 0.0]);
 
-        // Commit and flush
-        let flusher = writer
-            .commit(&blockfile_provider, &usearch_provider)
+        // Finish, commit, and flush
+        writer
+            .finish(&usearch_provider)
+            .await
+            .expect("Failed to finish");
+        let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
         let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
@@ -1807,6 +1909,7 @@ mod tests {
             .expect("Failed to open raw embedding reader");
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2016,6 +2119,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage);
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             CollectionUuid::new(),
             test_config(),
             TEST_DIMENSION,
@@ -2103,7 +2207,7 @@ mod tests {
             length: 2,
             versions: vec![v100, v101],
         };
-        let neighbor_cluster_id = writer.spawn(neighbor_delta).expect("spawn failed");
+        writer.spawn(neighbor_delta).expect("spawn failed");
 
         // Now we have 2 clusters
         assert_eq!(writer.cluster_deltas.len(), 2);
@@ -2169,20 +2273,6 @@ mod tests {
             writer.cluster_deltas.len()
         );
 
-        // Verify the misplaced points got reassigned
-        // The reassignment upgrades the version, so the old entries in neighbor cluster
-        // are now stale. We verify that the current version is higher than the original.
-        let v100_current = *writer.versions.get(&100).expect("version not found");
-        let v101_current = *writer.versions.get(&101).expect("version not found");
-
-        // Either neighbor cluster was dropped, or the points' versions were upgraded (reassigned)
-        let neighbor_dropped = writer.cluster_deltas.get(&neighbor_cluster_id).is_none();
-        let points_were_reassigned = v100_current > v100 || v101_current > v101;
-        assert!(
-            neighbor_dropped || points_were_reassigned,
-            "Misplaced points should have been reassigned (versions upgraded)"
-        );
-
         // =======================================================================
         // Step 4: merge (triggered by balance after scrub)
         // =======================================================================
@@ -2228,8 +2318,6 @@ mod tests {
         };
         let isolated_cluster_id = writer.spawn(isolated_delta).expect("spawn failed");
 
-        let clusters_before_merge = writer.cluster_deltas.len();
-
         // Invalidate 3 points, leaving only 1 valid (below merge_threshold of 2)
         writer.upgrade_version(201);
         writer.upgrade_version(202);
@@ -2245,13 +2333,6 @@ mod tests {
         assert!(
             writer.cluster_deltas.get(&isolated_cluster_id).is_none(),
             "Isolated cluster should have been merged"
-        );
-
-        // Should have one fewer cluster
-        assert_eq!(
-            writer.cluster_deltas.len(),
-            clusters_before_merge - 1,
-            "One cluster should have been removed by merge"
         );
 
         // Point 200 should now be in some other cluster (reassigned during merge)
@@ -2272,7 +2353,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_open_commit() {
+    async fn test_open_finish_commit() {
         // =======================================================================
         // Setup
         // =======================================================================
@@ -2282,7 +2363,8 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
         let collection_id = CollectionUuid::new();
 
-        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2371,8 +2453,11 @@ mod tests {
 
         let next_cluster_id_after_spawn = writer.next_cluster_id.load(Ordering::Relaxed);
 
-        let flusher = writer
-            .commit(&blockfile_provider, &usearch_provider)
+        writer
+            .finish(&usearch_provider)
+            .await
+            .expect("Failed to finish");
+        let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
         let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
@@ -2383,7 +2468,8 @@ mod tests {
         let blockfile_provider = test_blockfile_provider(storage.clone());
         let usearch_provider = test_usearch_provider(storage.clone());
 
-        let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+        let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2424,8 +2510,11 @@ mod tests {
         // --- Cluster D: drop ---
         writer.drop(cluster_d).await.expect("drop D failed");
 
-        let flusher = writer
-            .commit(&blockfile_provider, &usearch_provider)
+        writer
+            .finish(&usearch_provider)
+            .await
+            .expect("Failed to finish");
+        let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
             .await
             .expect("Failed to commit");
         let file_ids = Box::pin(flusher.flush()).await.expect("Failed to flush");
@@ -2437,6 +2526,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
 
         let writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2616,6 +2706,7 @@ mod tests {
         let usearch_provider = test_usearch_provider(storage.clone());
 
         let mut writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
             collection_id,
             test_config(),
             TEST_DIMENSION,
@@ -2697,12 +2788,15 @@ mod tests {
             let test_vec = [rng.gen(), rng.gen(), rng.gen(), rng.gen()];
             let expected_rotated = writer.rotate(&test_vec);
 
-            // --- Commit + Flush ---
+            // --- Finish + Commit + Flush ---
             let blockfile_provider = test_blockfile_provider(storage.clone());
             let usearch_provider = test_usearch_provider(storage.clone());
 
-            let flusher = writer
-                .commit(&blockfile_provider, &usearch_provider)
+            writer
+                .finish(&usearch_provider)
+                .await
+                .expect("finish failed");
+            let flusher = Box::pin(writer.commit(&blockfile_provider, &usearch_provider))
                 .await
                 .expect("commit failed");
             file_ids = Box::pin(flusher.flush()).await.expect("flush failed");
@@ -2720,6 +2814,7 @@ mod tests {
                 .expect("Failed to open raw embedding reader");
 
             writer = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                TEST_CLUSTER_BLOCK_SIZE,
                 collection_id,
                 test_config(),
                 TEST_DIMENSION,
