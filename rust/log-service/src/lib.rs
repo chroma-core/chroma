@@ -1624,7 +1624,7 @@ impl LogServer {
             .collect::<Vec<_>>();
 
         let stream = futures::stream::iter(dirty_futures);
-        let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency);
+        let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
         while let Some(res) = buffered.next().await {
             if let Err(err) = res {
                 tracing::error!(error = ?err);
@@ -1656,7 +1656,7 @@ impl LogServer {
         rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
     ) -> Result<(), Error> {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(
-            self.config.rollup_concurrent_manifests,
+            self.config.rollup_concurrent_manifests.max(1),
         ));
         let load_witness = |_this: &LogServer,
                             storage: Arc<Storage>,
@@ -1746,7 +1746,7 @@ impl LogServer {
         }
         if !futures.is_empty() {
             let stream = futures::stream::iter(futures);
-            let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency);
+            let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
             while let Some(result) = buffered.next().await {
                 if let Some((key, rollup)) = result {
                     rollups.insert(key, rollup);
