@@ -91,6 +91,7 @@ pub(crate) struct CompactionManagerContext {
     max_compaction_size: usize,
     max_partition_size: usize,
     fetch_log_batch_size: u32,
+    fetch_log_concurrency: usize,
     purge_dirty_log_timeout_seconds: u64,
     repair_log_offsets_timeout_seconds: u64,
     disabled_function_collections: HashSet<CollectionUuid>,
@@ -139,6 +140,7 @@ impl CompactionManager {
         max_compaction_size: usize,
         max_partition_size: usize,
         fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
         purge_dirty_log_timeout_seconds: u64,
         repair_log_offsets_timeout_seconds: u64,
         heap_service: Option<GrpcHeapService>,
@@ -172,6 +174,7 @@ impl CompactionManager {
                 max_compaction_size,
                 max_partition_size,
                 fetch_log_batch_size,
+                fetch_log_concurrency,
                 purge_dirty_log_timeout_seconds,
                 repair_log_offsets_timeout_seconds,
                 disabled_function_collections,
@@ -391,6 +394,7 @@ impl CompactionManagerContext {
             database_name,
             is_rebuild,
             self.fetch_log_batch_size,
+            self.fetch_log_concurrency,
             self.max_compaction_size,
             self.max_partition_size,
             self.log.clone(),
@@ -456,6 +460,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_compaction_size = config.compactor.max_compaction_size;
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
+        let fetch_log_concurrency = config.compactor.fetch_log_concurrency;
         let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let repair_log_offsets_timeout_seconds =
             config.compactor.repair_log_offsets_timeout_seconds;
@@ -566,6 +571,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            fetch_log_concurrency,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
             heap_service,
@@ -989,6 +995,7 @@ mod tests {
         let max_compaction_size = 1000;
         let max_partition_size = 1000;
         let fetch_log_batch_size = 100;
+        let fetch_log_concurrency = 10;
         let purge_dirty_log_timeout_seconds = 60;
         let repair_log_offsets_timeout_seconds = 60;
         let job_expiry_seconds = 3600;
@@ -1068,6 +1075,7 @@ mod tests {
             max_compaction_size,
             max_partition_size,
             fetch_log_batch_size,
+            fetch_log_concurrency,
             purge_dirty_log_timeout_seconds,
             repair_log_offsets_timeout_seconds,
             None,           // heap_service not needed in tests

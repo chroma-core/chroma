@@ -128,6 +128,7 @@ pub struct CompactionContext {
     pub orchestrator_context: OrchestratorContext,
     pub is_rebuild: bool,
     pub fetch_log_batch_size: u32,
+    pub fetch_log_concurrency: usize,
     pub max_compaction_size: usize,
     pub max_partition_size: usize,
     pub hnsw_index_uuids: HashSet<IndexUuid>, // TODO(tanujnay112): Remove after direct hnsw is solidified
@@ -150,6 +151,7 @@ impl Clone for CompactionContext {
             orchestrator_context,
             is_rebuild: self.is_rebuild,
             fetch_log_batch_size: self.fetch_log_batch_size,
+            fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             hnsw_index_uuids: self.hnsw_index_uuids.clone(),
@@ -176,6 +178,7 @@ impl CompactionContext {
             orchestrator_context,
             is_rebuild: self.is_rebuild,
             fetch_log_batch_size: self.fetch_log_batch_size,
+            fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
             max_partition_size: self.max_partition_size,
             hnsw_index_uuids: self.hnsw_index_uuids.clone(),
@@ -272,6 +275,7 @@ impl CompactionContext {
     pub fn new(
         is_rebuild: bool,
         fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
         max_compaction_size: usize,
         max_partition_size: usize,
         log: Log,
@@ -287,6 +291,7 @@ impl CompactionContext {
             collection_info: OnceCell::new(),
             is_rebuild,
             fetch_log_batch_size,
+            fetch_log_concurrency,
             max_compaction_size,
             max_partition_size,
             log,
@@ -372,6 +377,7 @@ impl CompactionContext {
             database_name,
             self.is_rebuild || is_getting_compacted_logs,
             self.fetch_log_batch_size,
+            self.fetch_log_concurrency,
             self.max_compaction_size,
             self.max_partition_size,
             self.log.clone(),
@@ -903,6 +909,7 @@ pub async fn compact(
     database_name: chroma_types::DatabaseName,
     is_rebuild: bool,
     fetch_log_batch_size: u32,
+    fetch_log_concurrency: usize,
     max_compaction_size: usize,
     max_partition_size: usize,
     log: Log,
@@ -917,6 +924,7 @@ pub async fn compact(
     let mut compaction_context = CompactionContext::new(
         is_rebuild,
         fetch_log_batch_size,
+        fetch_log_concurrency,
         max_compaction_size,
         max_partition_size,
         log.clone(),
@@ -996,6 +1004,7 @@ mod tests {
             collection_uuid: cas.collection.collection_id,
             tenant: cas.collection.tenant.clone(),
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
+            fetch_log_concurrency: 10,
         };
 
         let filter = Filter {
@@ -1095,6 +1104,7 @@ mod tests {
             database_name.clone(),
             false,
             50,
+            10,
             1000,
             50,
             log.clone(),
@@ -1123,6 +1133,7 @@ mod tests {
             collection_uuid: collection_id,
             tenant: old_cas.collection.tenant.clone(),
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
+            fetch_log_concurrency: 10,
         };
         let filter = Filter {
             query_ids: None,
@@ -1173,6 +1184,7 @@ mod tests {
             database_name,
             true,
             5000,
+            10,
             10000,
             1000,
             log,
@@ -1281,6 +1293,7 @@ mod tests {
             database_name,
             true,
             5000,
+            10,
             10000,
             1000,
             log,
@@ -1464,6 +1477,7 @@ mod tests {
             database_name,
             false,
             5000,
+            10,
             10000,
             1,
             log.clone(),
@@ -1661,6 +1675,7 @@ mod tests {
             database_name,
             false,
             5000,
+            10,
             10000,
             1, // Important to make sure each partition is one key.
             log.clone(),
@@ -1859,6 +1874,7 @@ mod tests {
             database_name.clone(),
             false,
             5000,
+            10,
             10000,
             1000,
             log.clone(),
@@ -1894,6 +1910,7 @@ mod tests {
             database_name,
             false,
             5000,
+            10,
             10000,
             1000,
             log.clone(),
@@ -2127,6 +2144,7 @@ mod tests {
             database_name,
             false, // walrus_enabled
             50,    // min_compaction_size
+            10,    // fetch_log_concurrency
             1000,  // max_compaction_size
             50,    // max_partition_size
             log.clone(),
@@ -2343,6 +2361,7 @@ mod tests {
             database_name.clone(),
             false, // walrus_enabled
             50,    // min_compaction_size
+            10,    // fetch_log_concurrency
             1000,  // max_compaction_size
             50,    // max_partition_size
             log.clone(),
@@ -2428,6 +2447,7 @@ mod tests {
             database_name,
             false, // walrus_enabled
             50,    // min_compaction_size
+            10,    // fetch_log_concurrency
             1000,  // max_compaction_size
             50,    // max_partition_size
             log.clone(),
@@ -2679,6 +2699,7 @@ mod tests {
         let mut compaction_context_1 = CompactionContext::new(
             false,
             50,
+            10,
             1000,
             50,
             log.clone(),
@@ -2729,6 +2750,7 @@ mod tests {
         let _ = CompactionContext::new(
             false,
             50,
+            10,
             1000,
             50,
             log.clone(),
@@ -2750,6 +2772,7 @@ mod tests {
             database_name,
             false, // walrus_enabled
             50,    // min_compaction_size
+            10,    // fetch_log_concurrency
             1000,  // max_compaction_size
             50,    // max_partition_size
             log.clone(),
@@ -3004,6 +3027,7 @@ mod tests {
             database_name.clone(),
             false, // not a rebuild
             50,
+            10,
             1000,
             50,
             log.clone(),
@@ -3089,6 +3113,7 @@ mod tests {
             database_name.clone(),
             false, // not a rebuild
             50,
+            10,
             1000,
             50,
             log.clone(),
@@ -3148,6 +3173,7 @@ mod tests {
             database_name,
             true, // is_rebuild = true
             5000,
+            10,
             10000,
             1000,
             log.clone(),

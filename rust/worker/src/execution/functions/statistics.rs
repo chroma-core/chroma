@@ -1360,6 +1360,7 @@ mod tests {
             database_name,
             false,
             50,
+            10,
             1000,
             50,
             log.clone(),
