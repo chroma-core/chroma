@@ -46,13 +46,15 @@ pub struct USearchIndexConfig {
     pub expansion_search: usize,
     /// If provided, use RaBitQ quantization with this center point.
     pub quantization_center: Option<Arc<[f32]>>,
+    /// Quantization bits per dimension (1 or 4). Only used when `quantization_center` is `Some`.
+    pub quantization_bits: u8,
 }
 
 impl USearchIndexConfig {
     /// Derive cache key for the config
     fn cache_key(&self) -> CacheKey {
         match self.quantization_center {
-            Some(_) => CacheKey::Quantized(self.collection_id),
+            Some(_) => CacheKey::Quantized(self.collection_id, self.quantization_bits),
             None => CacheKey::Raw(self.collection_id),
         }
     }
@@ -61,7 +63,7 @@ impl USearchIndexConfig {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CacheKey {
     Raw(CollectionUuid),
-    Quantized(CollectionUuid),
+    Quantized(CollectionUuid, u8),
 }
 
 #[derive(Error, Debug)]
@@ -114,10 +116,22 @@ impl USearchIndex {
         index: &mut usearch::Index,
         center: &[f32],
         distance_function: DistanceFunction,
+        bits: u8,
+    ) {
+        match bits {
+            1 => Self::apply_quantization_metric_impl::<1>(index, center, distance_function),
+            _ => Self::apply_quantization_metric_impl::<4>(index, center, distance_function),
+        }
+    }
+
+    fn apply_quantization_metric_impl<const BITS: u8>(
+        index: &mut usearch::Index,
+        center: &[f32],
+        distance_function: DistanceFunction,
     ) {
         let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
         let dim = center.len();
-        let code_len = Code::<&[u8]>::size(dim);
+        let code_len = Code::<&[u8], BITS>::size(dim);
 
         index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
             // SAFETY: usearch passes valid pointers of `code_len` i8 elements
@@ -125,8 +139,8 @@ impl USearchIndex {
             let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
-            let code_a = Code::<_>::new(a);
-            let code_b = Code::<_>::new(b);
+            let code_a = Code::<_, BITS>::new(a);
+            let code_b = Code::<_, BITS>::new(b);
             code_a.distance_code(&distance_function, &code_b, c_norm, dim)
         }));
     }
@@ -136,6 +150,7 @@ impl USearchIndex {
         let distance_function = self.config.distance_function.clone();
         let index = self.index.clone();
         let quantization_center = self.config.quantization_center.clone();
+        let quantization_bits = self.config.quantization_bits;
         let tombstones = self.tombstones.clone();
         spawn_blocking(move || {
             let mut guard = index.write();
@@ -146,7 +161,12 @@ impl USearchIndex {
 
             // Re-apply custom metric after loading (load_from_buffer resets it)
             if let Some(center) = quantization_center {
-                Self::apply_quantization_metric(&mut guard, &center, distance_function);
+                Self::apply_quantization_metric(
+                    &mut guard,
+                    &center,
+                    distance_function,
+                    quantization_bits,
+                );
             }
 
             Ok(())
@@ -170,6 +190,26 @@ impl USearchIndex {
         .map_err(|e| USearchError::Index(e.to_string()))?
     }
 
+    /// Returns the code size in bytes for the configured quantization.
+    fn code_size(dimensions: usize, bits: u8) -> usize {
+        match bits {
+            1 => Code::<&[u8], 1>::size(dimensions),
+            _ => Code::<&[u8], 4>::size(dimensions),
+        }
+    }
+
+    /// Quantizes a vector using the configured bit width.
+    fn quantize_vector(vector: &[f32], center: &[f32], bits: u8) -> Vec<u8> {
+        match bits {
+            1 => Code::<Vec<u8>, 1>::quantize(vector, center)
+                .as_ref()
+                .to_vec(),
+            _ => Code::<Vec<u8>, 4>::quantize(vector, center)
+                .as_ref()
+                .to_vec(),
+        }
+    }
+
     /// Create a new empty index.
     fn new(config: USearchIndexConfig, id: IndexUuid) -> Result<Self, USearchError> {
         let (scalar, index_dimensions) = match &config.quantization_center {
@@ -180,7 +220,10 @@ impl USearchIndex {
                         got: center.len(),
                     });
                 }
-                (ScalarKind::I8, Code::<&[u8]>::size(config.dimensions))
+                (
+                    ScalarKind::I8,
+                    Self::code_size(config.dimensions, config.quantization_bits),
+                )
             }
             None => (ScalarKind::F32, config.dimensions),
         };
@@ -205,7 +248,12 @@ impl USearchIndex {
             usearch::Index::new(&options).map_err(|e| USearchError::Index(e.to_string()))?;
 
         if let Some(center) = &config.quantization_center {
-            Self::apply_quantization_metric(&mut index, center, config.distance_function.clone());
+            Self::apply_quantization_metric(
+                &mut index,
+                center,
+                config.distance_function.clone(),
+                config.quantization_bits,
+            );
         }
 
         Ok(Self {
@@ -232,7 +280,7 @@ impl VectorIndex for USearchIndex {
             .config
             .quantization_center
             .as_ref()
-            .map(|center| Code::<_>::quantize(vector, center));
+            .map(|center| Self::quantize_vector(vector, center, self.config.quantization_bits));
 
         let index = self.index.write();
         if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
@@ -244,7 +292,7 @@ impl VectorIndex for USearchIndex {
         }
 
         if let Some(code) = code {
-            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
+            let i8_slice = bytemuck::cast_slice::<_, i8>(&code);
             index.add(key as u64, i8_slice)
         } else {
             index.add(key as u64, vector)
@@ -300,8 +348,8 @@ impl VectorIndex for USearchIndex {
         }
 
         let matches = if let Some(center) = &self.config.quantization_center {
-            let code = Code::<_>::quantize(query, center);
-            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
+            let code = Self::quantize_vector(query, center, self.config.quantization_bits);
+            let i8_slice = bytemuck::cast_slice::<_, i8>(&code);
             self.index.read().search(i8_slice, count)
         } else {
             self.index.read().search(query, count)
@@ -484,6 +532,7 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: Some(center),
+            quantization_bits: 4,
         };
 
         // Generate test vectors
@@ -546,6 +595,7 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Generate all test vectors upfront
@@ -638,6 +688,7 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Generate 128 random vectors

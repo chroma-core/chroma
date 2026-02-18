@@ -1058,6 +1058,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Create centroid indexes
@@ -1180,6 +1181,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Step 1: Open centroid indexes
@@ -1339,7 +1341,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             let ef_search = self.config.ef_search.unwrap_or(default_search_ef_spann());
 
             // Build USearch config from stored fields
-            let usearch_config = USearchIndexConfig {
+            let usearch_config = F {
                 collection_id: self.collection_id,
                 cmek: self.cmek.clone(),
                 prefix_path: self.prefix_path.clone(),
@@ -1349,6 +1351,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 expansion_add: ef_construction,
                 expansion_search: ef_search,
                 quantization_center: None,
+                quantization_bits: 4,
             };
 
             // Rebuild raw centroid index

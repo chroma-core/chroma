@@ -114,9 +114,19 @@ impl<T, const BITS: u8> Code<T, BITS> {
         Self::padded_dim(dim) * BITS as usize / 8
     }
 
-    /// Returns the padded dimension (rounded up to BitPacker8x block size).
+    /// Returns the padded dimension.
+    ///
+    /// For BITS=1, pads to u64 boundary (64) for efficient popcount.
+    ///     We don't need to pad to 256 because we are using bit-level
+    ///     operations instead of unpacking the grid. i.e. hamming_distance and
+    ///     masked_sum and not BitPacker8x decompression.
+    /// For BITS≥2, pads to BitPacker8x block size (256).
     fn padded_dim(dim: usize) -> usize {
-        dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
+        if BITS == 1 {
+            dim.div_ceil(64) * 64
+        } else {
+            dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
+        }
     }
 }
 
@@ -143,9 +153,15 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         let correction_a = self.correction();
         let correction_b = code.correction();
 
-        let g_a = self.unpack_grid(dim);
-        let g_b = code.unpack_grid(dim);
-        let g_a_dot_g_b = f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32;
+        let g_a_dot_g_b = if BITS == 1 {
+            // ⟨g_a, g_b⟩ = 0.25 * (D - 2 * hamming(a, b))
+            let hamming = hamming_distance(self.packed(), code.packed());
+            0.25 * (dim as f32 - 2.0 * hamming as f32)
+        } else {
+            let g_a = self.unpack_grid(dim);
+            let g_b = code.unpack_grid(dim);
+            f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32
+        };
 
         // ⟨n_a, n_b⟩ ≈ ⟨g_a, g_b⟩ / (⟨g_a, n_a⟩ * ⟨g_b, n_b⟩)
         let n_a_dot_n_b = g_a_dot_g_b / (correction_a * correction_b);
@@ -185,8 +201,15 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         let radial = self.radial();
         let correction = self.correction();
 
-        let g = self.unpack_grid(r_q.len());
-        let g_dot_r_q = f32::dot(&g, r_q).unwrap_or(0.0) as f32;
+        let g_dot_r_q = if BITS == 1 {
+            // ⟨g, r_q⟩ = 0.5 * (2 * masked_sum - Σr_q)
+            let total: f32 = r_q.iter().sum();
+            let m_sum = masked_sum(self.packed(), r_q);
+            0.5 * (2.0 * m_sum - total)
+        } else {
+            let g = self.unpack_grid(r_q.len());
+            f32::dot(&g, r_q).unwrap_or(0.0) as f32
+        };
 
         // ⟨r, r_q⟩ ≈ ‖r‖ * ⟨g, r_q⟩ / ⟨g, n⟩
         let r_dot_r_q = norm * g_dot_r_q / correction;
@@ -282,7 +305,30 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             return Self(bytes);
         }
 
-        // Ray-walk: find optimal grid point maximizing cosine similarity
+        // 1-bit: sign-based quantization (no ray-walk needed)
+        if BITS == 1 {
+            let mut packed = vec![0u8; Self::packed_len(dim)];
+            let mut abs_sum = 0.0f32;
+            for (i, &val) in r.iter().enumerate() {
+                if val >= 0.0 {
+                    packed[i / 8] |= 1 << (i % 8);
+                }
+                abs_sum += val.abs();
+            }
+            // correction = ⟨g, n⟩ = 0.5 * Σ|r[i]| / ‖r‖
+            let correction = Self::GRID_OFFSET * abs_sum / norm;
+            let header = CodeHeader {
+                correction,
+                norm,
+                radial,
+            };
+            let mut bytes = Vec::with_capacity(Self::size(dim));
+            bytes.extend_from_slice(bytemuck::bytes_of(&header));
+            bytes.extend_from_slice(&packed);
+            return Self(bytes);
+        }
+
+        // Multi-bit ray-walk: find optimal grid point maximizing cosine similarity
         // max_t is when the largest magnitude component reaches max code
         let r_abs = r.iter().copied().map(f32::abs).collect::<Vec<_>>();
         let max_t = (f32::from(Self::CEIL) - 1.0 + f32::EPSILON)
@@ -359,6 +405,62 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
 
         Self(bytes)
     }
+}
+
+/// Computes hamming distance between two packed bit vectors.
+///
+/// Both slices must have the same length and that length must be a multiple of
+/// 8 (guaranteed when `padded_dim` is a multiple of 64).
+///
+/// # Notes on SIMD optimization:
+/// At the scalar level this is already near-optimal. Each iteration is three
+/// instructions: load, XOR, POPCNT. On any modern x86 CPU with the popcnt
+/// feature flag (which Rust can target with RUSTFLAGS="-C target-cpu=native"),
+/// count_ones() on a u64 compiles directly to a single POPCNT instruction.
+/// So for 1024-dim vectors we're doing 16 iterations of 64 bits and three
+/// instructions each.
+///
+/// True SIMD speedup requires AVX-512 VPOPCNTDQ, which provides
+/// _mm512_popcnt_epi64 — popcounting 8 u64 lanes simultaneously. That
+/// processes 512 bits instead of 64 per iteration. So for 1024-dim vectors
+/// we're doing 2 iterations.
+fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
+    debug_assert_eq!(a.len(), b.len());
+    debug_assert_eq!(a.len() % 8, 0);
+    let mut count = 0u32;
+    // Read 8 bytes at a time and count the number of ones in the XOR result.
+    for i in (0..a.len()).step_by(8) {
+        let a_word = u64::from_le_bytes(a[i..i + 8].try_into().unwrap());
+        let b_word = u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
+        count += (a_word ^ b_word).count_ones();
+    }
+    count
+}
+
+/// Sums `values[i]` for each `i` where bit `i` is set in `packed`.
+///
+/// # Notes on SIMD optimization:
+///
+/// Branchless but not auto-vectorizable as written.
+///
+/// The bit as f32 * val multiply-by-zero-or-one is branchless by design,
+/// which is necessary for vectorization.
+///
+/// But the bit extraction —
+/// (packed[i / 8] >> (i % 8)) & 1 — is a problem. Every 8 consecutive floats
+/// share the same source byte, but the shift amount changes per element
+/// (i % 8 = 0,1,2,...,7). The compiler's auto-vectorizer generally can't see
+/// through this non-uniform indexing pattern and will fall back to scalar.
+///
+/// To actually vectorize this we need to explicitly expand packed bits into a
+/// float mask. Or use a library (pulp).
+fn masked_sum(packed: &[u8], values: &[f32]) -> f32 {
+    let mut sum = 0.0f32;
+    for (i, &val) in values.iter().enumerate() {
+        let bit = (packed[i / 8] >> (i % 8)) & 1;
+        sum += bit as f32 * val;
+    }
+    sum
 }
 
 #[cfg(test)]
@@ -469,6 +571,200 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    // ==================== 1-bit tests ====================
+
+    #[test]
+    fn test_1bit_attributes() {
+        let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
+        let centroid = (0..300).map(|i| i as f32 * 0.5).collect::<Vec<_>>();
+
+        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+
+        // Verify accessors return finite values
+        assert!(code.correction().is_finite());
+        assert!(code.norm().is_finite());
+        assert!(code.radial().is_finite());
+
+        // Verify norm is ‖r‖
+        let r = embedding
+            .iter()
+            .zip(&centroid)
+            .map(|(e, c)| e - c)
+            .collect::<Vec<_>>();
+        let expected_norm = (f32::dot(&r, &r).unwrap_or(0.0) as f32).sqrt();
+        assert!((code.norm() - expected_norm).abs() < f32::EPSILON);
+
+        // Verify radial is ⟨r, c⟩
+        let expected_radial = f32::dot(&r, &centroid).unwrap_or(0.0) as f32;
+        assert!((code.radial() - expected_radial).abs() < f32::EPSILON);
+
+        // Verify correction = 0.5 * Σ|r[i]| / ‖r‖
+        let abs_sum: f32 = r.iter().map(|x| x.abs()).sum();
+        let expected_correction = 0.5 * abs_sum / expected_norm;
+        assert!(
+            (code.correction() - expected_correction).abs() < 1e-5,
+            "correction: got {}, expected {}",
+            code.correction(),
+            expected_correction
+        );
+
+        // Verify buffer size
+        assert_eq!(
+            code.as_ref().len(),
+            Code::<Vec<u8>, 1>::size(embedding.len())
+        );
+    }
+
+    #[test]
+    fn test_1bit_size() {
+        // 64-aligned (256 dims)
+        assert_eq!(Code::<Vec<u8>, 1>::packed_len(256), 256 / 8); // 32 bytes
+        assert_eq!(Code::<Vec<u8>, 1>::size(256), 12 + 32);
+
+        // Non-aligned (300) - should pad to 320 (5 * 64)
+        assert_eq!(Code::<Vec<u8>, 1>::packed_len(300), 320 / 8); // 40 bytes
+        assert_eq!(Code::<Vec<u8>, 1>::size(300), 12 + 40);
+
+        // 1024 dims
+        assert_eq!(Code::<Vec<u8>, 1>::packed_len(1024), 128);
+        assert_eq!(Code::<Vec<u8>, 1>::size(1024), 12 + 128);
+
+        // 4096 dims
+        assert_eq!(Code::<Vec<u8>, 1>::packed_len(4096), 512);
+        assert_eq!(Code::<Vec<u8>, 1>::size(4096), 12 + 512);
+    }
+
+    #[test]
+    fn test_1bit_zero_residual() {
+        let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
+
+        // Exactly zero residual
+        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &embedding);
+        assert_eq!(code.correction(), 1.0);
+        assert!(code.norm() < f32::EPSILON);
+
+        // Near-zero residual
+        let centroid = embedding.iter().map(|x| x + 1e-10).collect::<Vec<_>>();
+        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+        assert_eq!(code.correction(), 1.0);
+        assert!(code.norm() < f32::EPSILON);
+    }
+
+    /// Reads bit `i` from packed 1-bit codes and returns the grid value (±0.5).
+    fn read_1bit_grid(code: &Code<Vec<u8>, 1>, dim: usize) -> Vec<f32> {
+        let packed = &code.as_ref()[size_of::<CodeHeader>()..];
+        (0..dim)
+            .map(|i| {
+                let bit = (packed[i / 8] >> (i % 8)) & 1;
+                bit as f32 - 0.5
+            })
+            .collect()
+    }
+
+    /// Verify each bit matches the sign of the residual.
+    #[test]
+    fn test_1bit_quantize_signs() {
+        let embedding = vec![3.0, -1.0, 0.5, -2.0, 0.0, 1.0, -0.1, 0.1];
+        let centroid = vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0];
+        // residual: [2.0, -2.0, -0.5, -3.0, -1.0, 0.0, -1.1, -0.9]
+        // expected bits: [1, 0, 0, 0, 0, 1, 0, 0] (bit 5 is 1 because r=0.0 >= 0)
+
+        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+        let grid = read_1bit_grid(&code, 8);
+
+        let r: Vec<f32> = embedding
+            .iter()
+            .zip(&centroid)
+            .map(|(e, c)| e - c)
+            .collect();
+        for i in 0..8 {
+            let expected_sign = if r[i] >= 0.0 { 0.5 } else { -0.5 };
+            assert_eq!(
+                grid[i], expected_sign,
+                "dim {}: r={}, grid={}, expected={}",
+                i, r[i], grid[i], expected_sign
+            );
+        }
+    }
+
+    /// Tests that 1-bit grid points quantize exactly using distance_query.
+    #[test]
+    fn test_1bit_grid_points() {
+        let centroid = vec![0.0; 8];
+        let c_norm = 0.0;
+
+        // 2 grid values for BITS=1: -0.5, +0.5
+        let grid: Vec<f32> = vec![-0.5, 0.5];
+
+        // Test all 2^8=256 combinations for 8 dimensions
+        for bits in 0u8..=255 {
+            let embedding: Vec<f32> = (0..8).map(|i| grid[((bits >> i) & 1) as usize]).collect();
+            let embedding_norm = (f32::dot(&embedding, &embedding).unwrap_or(0.0) as f32).sqrt();
+
+            if embedding_norm < f32::EPSILON {
+                continue;
+            }
+
+            let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+            let dist = code.distance_query(
+                &DistanceFunction::Cosine,
+                &embedding,
+                c_norm,
+                0.0,
+                embedding_norm,
+            );
+            assert!(
+                dist.abs() < 4.0 * f32::EPSILON,
+                "1-bit grid {:08b} should have zero cosine self-distance, got {}",
+                bits,
+                dist
+            );
+        }
+    }
+
+    #[test]
+    fn test_hamming_distance() {
+        // Identical → hamming = 0
+        let a = vec![0xFF, 0x00, 0xAA, 0x55, 0xFF, 0x00, 0xAA, 0x55];
+        assert_eq!(hamming_distance(&a, &a), 0);
+
+        // All different → hamming = 64 (8 bytes * 8 bits)
+        let b = vec![0x00, 0xFF, 0x55, 0xAA, 0x00, 0xFF, 0x55, 0xAA];
+        assert_eq!(hamming_distance(&a, &b), 64);
+
+        // One bit different
+        let mut c = a.clone();
+        c[0] = 0xFE; // flip bit 0
+        assert_eq!(hamming_distance(&a, &c), 1);
+    }
+
+    #[test]
+    fn test_masked_sum() {
+        let values = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        // packed byte 0b10101010 = bits set at positions 1, 3, 5, 7
+        let packed = [0b10101010u8];
+        let result = masked_sum(&packed, &values);
+        assert_eq!(result, 2.0 + 4.0 + 6.0 + 8.0);
+
+        // All bits set
+        let packed_all = [0xFFu8];
+        let result_all = masked_sum(&packed_all, &values);
+        assert_eq!(result_all, 36.0);
+
+        // No bits set
+        let packed_none = [0x00u8];
+        let result_none = masked_sum(&packed_none, &values);
+        assert_eq!(result_none, 0.0);
+    }
+
+    /// BITS=1: P95 relative error bound 8.0%, observed ~5% (code), ~3.5% (query)
+    #[test]
+    fn test_error_bound_bits_1() {
+        for k in [1.0, 2.0, 4.0] {
+            assert_error_bound::<1>(1024, k, 128);
         }
     }
 
