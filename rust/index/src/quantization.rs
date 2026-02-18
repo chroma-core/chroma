@@ -454,6 +454,7 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 ///
 /// To actually vectorize this we need to explicitly expand packed bits into a
 /// float mask. Or use a library (pulp).
+/// TODO: use AVX-512 mask registers (_mm512_mask_add_ps)
 fn masked_sum(packed: &[u8], values: &[f32]) -> f32 {
     let mut sum = 0.0f32;
     for (i, &val) in values.iter().enumerate() {
