@@ -284,7 +284,6 @@ def ann_accuracy(
     use_search: bool = False,
 ) -> None:
     """Validate that the API performs nearest_neighbor searches correctly"""
-    print("ANN ACCURACY", record_set, n_results, query_indices, query_embeddings)
     normalized_record_set = wrap_all(record_set)
 
     if len(normalized_record_set["ids"]) == 0:
@@ -336,7 +335,6 @@ def ann_accuracy(
     )
 
     if use_search:
-        print("FINDME 338")
         # Use search API instead of query
         search_requests = []
         for query_embedding in query_embeddings:
@@ -370,12 +368,6 @@ def ann_accuracy(
             },
         )
     else:
-        print("FINDME 372", (
-            query_embeddings if have_embeddings else None,
-            query_documents if not have_embeddings else None,
-            n_results,
-            ["embeddings", "documents", "metadatas", "distances"],
-        ))
         query_results = collection.query(
             query_embeddings=query_embeddings if have_embeddings else None,
             query_texts=query_documents if not have_embeddings else None,
@@ -458,15 +450,10 @@ def _query_results_are_correct_shape(
         if not all(
             len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
             ):
-            print('FINDME')
             print([len(result) for result in query_results[result_type]], n_results)
-            print('FINDME')
-            print(query_results)
-            print('FINDME')
         assert all(
             len(result) == n_results for result in query_results[result_type]  # type: ignore[literal-required]
         )
-        print('SUCCESS', [len(result) for result in query_results[result_type]], n_results)
 
 
 def _total_embedding_queue_log_size(sqlite: SqliteDB) -> int:
