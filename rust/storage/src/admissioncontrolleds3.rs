@@ -332,7 +332,7 @@ impl ACStorageProvider {
 pub struct AdmissionControlledS3Storage {
     pub(crate) storage: ACStorageProvider,
     #[allow(clippy::type_complexity)]
-    outstanding_read_requests: Arc<tokio::sync::Mutex<HashMap<String, InflightRequest>>>,
+    outstanding_read_requests: Arc<std::sync::Mutex<HashMap<String, InflightRequest>>>,
     rate_limiter: Arc<RateLimitPolicy>,
     metrics: AdmissionControlledS3StorageMetrics,
     /// Controls whether fetch futures are spawned as separate tasks or awaited directly.
@@ -403,6 +403,114 @@ impl Default for AdmissionControlledS3StorageMetrics {
 
 ////// Inflight Request Management //////
 
+/// Unified cleanup guard for inflight requests
+struct InflightRequestCleanupGuard {
+    // Map cleanup
+    outstanding_read_requests: Option<Arc<std::sync::Mutex<HashMap<String, InflightRequest>>>>,
+    outstanding_counter: Option<Arc<AtomicUsize>>,
+    key_count: Option<usize>,
+    composite_key: Option<String>,
+
+    // Priority cleanup
+    request_context: Option<InflightRequestContext>,
+    entry_priority: Option<StorageRequestPriority>,
+
+    // State tracking
+    map_entry_inserted: bool,
+    completed: bool,
+}
+
+impl InflightRequestCleanupGuard {
+    // Create a new guard for priority cleanup (before map entry is inserted)
+    fn for_priority(
+        request_context: InflightRequestContext,
+        entry_priority: StorageRequestPriority,
+    ) -> Self {
+        Self {
+            outstanding_read_requests: None,
+            outstanding_counter: None,
+            key_count: None,
+            composite_key: None,
+            request_context: Some(request_context),
+            entry_priority: Some(entry_priority),
+            map_entry_inserted: false,
+            completed: false,
+        }
+    }
+
+    // Add map cleanup after the entry is inserted
+    fn with_map_cleanup(
+        mut self,
+        outstanding_read_requests: Arc<std::sync::Mutex<HashMap<String, InflightRequest>>>,
+        outstanding_counter: Arc<AtomicUsize>,
+        key_count: usize,
+        composite_key: String,
+    ) -> Self {
+        self.outstanding_read_requests = Some(outstanding_read_requests);
+        outstanding_counter.fetch_add(key_count, Ordering::Relaxed);
+        self.outstanding_counter = Some(outstanding_counter);
+        self.key_count = Some(key_count);
+        self.composite_key = Some(composite_key);
+        self.map_entry_inserted = true;
+        self
+    }
+
+    // Mark the request as completed - no cleanup needed
+    fn complete(&mut self) {
+        if !self.completed {
+            self.completed = true;
+            // Decrement counter if we have one (only the driver should do this)
+            if let (Some(counter), Some(key_count)) = (&self.outstanding_counter, self.key_count) {
+                counter.fetch_sub(key_count, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+impl Drop for InflightRequestCleanupGuard {
+    fn drop(&mut self) {
+        if self.completed {
+            return;
+        }
+
+        // Cleanup priority if we have a request context
+        if let (Some(ref mut request_context), Some(entry_priority)) =
+            (self.request_context.as_mut(), self.entry_priority)
+        {
+            request_context.cleanup_priority(entry_priority);
+        }
+
+        // Cleanup map entry if it was inserted
+        if self.map_entry_inserted {
+            if let (Some(outstanding_read_requests), Some(composite_key)) = (
+                self.outstanding_read_requests.clone(),
+                self.composite_key.clone(),
+            ) {
+                let mut requests = match outstanding_read_requests.lock() {
+                    Ok(requests) => requests,
+                    Err(poisoned) => {
+                        tracing::warn!(
+                            "Some other request panicked while holding the outstanding read requests lock"
+                        );
+                        outstanding_read_requests.clear_poison();
+                        poisoned.into_inner()
+                    }
+                };
+                if requests.remove(&*composite_key).is_some() {
+                    tracing::warn!(
+                        "Inflight request cancelled before completion: {}",
+                        composite_key
+                    );
+                    // Dropping the InflightRequest will drop all senders,
+                    // which will notify waiters with channel closure errors
+                }
+            }
+        }
+
+        self.complete();
+    }
+}
+
 #[derive(Clone)]
 struct InflightRequestContext {
     priority_holder: Arc<PriorityHolder>,
@@ -439,21 +547,18 @@ impl InflightRequestContext {
     }
 
     // Not thread safe.
-    async fn maybe_update_priority(
+    fn maybe_update_priority(
         &mut self,
         priority: StorageRequestPriority,
         update_priority_counter: Counter<u64>,
         hostname: &[KeyValue],
-    ) -> RollbackPriorityOnDrop {
+    ) -> InflightRequestCleanupGuard {
         // It is ok to not do Compare And Swap here since the caller obtains a mutex before
         // performing this operation so at any point there will only be one writer
         // for this AtomicUsize.
         let before_pri = self.priority_holder.get_priority();
         self.priority_holder.add_priority(priority);
-        let guard = RollbackPriorityOnDrop {
-            request: self.clone(),
-            entry_priority: priority,
-        };
+        let guard = InflightRequestCleanupGuard::for_priority(self.clone(), priority);
 
         if let Some(channel) = &self.priority_upgrade_channel {
             if priority.as_usize() < before_pri.as_usize() {
@@ -521,19 +626,6 @@ pub struct PriorityHolder {
     p1: Arc<AtomicUsize>,
 }
 
-pub struct RollbackPriorityOnDrop {
-    request: InflightRequestContext,
-
-    // The priority at which this request was requested.
-    entry_priority: StorageRequestPriority,
-}
-
-impl Drop for RollbackPriorityOnDrop {
-    fn drop(&mut self) {
-        self.request.cleanup_priority(self.entry_priority);
-    }
-}
-
 impl PriorityHolder {
     pub fn new(initial_priority: StorageRequestPriority) -> Self {
         let holder = Self {
@@ -598,7 +690,7 @@ impl AdmissionControlledS3Storage {
     pub fn new_s3_with_default_policy(storage: S3Storage) -> Self {
         Self {
             storage: ACStorageProvider::S3(storage.into()),
-            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            outstanding_read_requests: Arc::new(std::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
                 2,
                 &vec![1.0],
@@ -611,7 +703,7 @@ impl AdmissionControlledS3Storage {
     pub fn new_s3(storage: S3Storage, policy: RateLimitPolicy, spawn_fetches: bool) -> Self {
         Self {
             storage: ACStorageProvider::S3(storage.into()),
-            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            outstanding_read_requests: Arc::new(std::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
             metrics: AdmissionControlledS3StorageMetrics::default(),
             spawn_fetches,
@@ -621,7 +713,7 @@ impl AdmissionControlledS3Storage {
     pub fn new_object_with_default_policy(storage: ObjectStorage) -> Self {
         Self {
             storage: ACStorageProvider::Object(Box::new(storage)),
-            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            outstanding_read_requests: Arc::new(std::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(RateLimitPolicy::CountBasedPolicy(CountBasedPolicy::new(
                 2,
                 &vec![1.0],
@@ -638,7 +730,7 @@ impl AdmissionControlledS3Storage {
     ) -> Self {
         Self {
             storage: ACStorageProvider::Object(Box::new(storage)),
-            outstanding_read_requests: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            outstanding_read_requests: Arc::new(std::sync::Mutex::new(HashMap::new())),
             rate_limiter: Arc::new(policy),
             metrics: AdmissionControlledS3StorageMetrics::default(),
             spawn_fetches,
@@ -697,10 +789,13 @@ impl AdmissionControlledS3Storage {
             futures.push(fut);
         }
         // Await all futures and return the result.
-        let _ = stream::iter(futures)
+        let results = stream::iter(futures)
             .buffer_unordered(num_parts)
             .collect::<Vec<_>>()
             .await;
+        for result in results.into_iter() {
+            result?;
+        }
         Ok((Arc::new(output_buffer), e_tag))
     }
 
@@ -850,11 +945,11 @@ impl AdmissionControlledS3Storage {
                 .load(Ordering::Relaxed) as u64,
             &self.metrics.hostname_attribute,
         );
-        self.metrics
-            .outstanding_read_requests
-            .fetch_add(keys.len(), Ordering::Relaxed);
 
         if options.requires_strong_consistency {
+            self.metrics
+                .outstanding_read_requests
+                .fetch_add(keys.len(), Ordering::Relaxed);
             let futures: Vec<_> = keys
                 .iter()
                 .map(|key| self.strongly_consistent_get_with_e_tag(key, options.clone()))
@@ -870,40 +965,42 @@ impl AdmissionControlledS3Storage {
         // Create a dedup key.
         let composite_key = keys.join("|");
 
-        let (any_res, _guard);
-        {
-            let lock_held_duration = Stopwatch::new(
+        // Phase 1: Acquire lock, check/create inflight request.
+        // The std::sync::MutexGuard is scoped to this block so it provably
+        // drops before any .await point, keeping the future Send.
+        let (output_rx, new_request_data, cleanup_guard) = {
+            let _lock_held_duration = Stopwatch::new(
                 &self.metrics.nac_lock_wait_duration_us,
                 &self.metrics.hostname_attribute,
                 chroma_tracing::util::StopWatchUnit::Micros,
             );
-            let mut requests = self.outstanding_read_requests.lock().await;
-            any_res = match requests.get_mut(&composite_key) {
+            let mut requests = match self.outstanding_read_requests.lock() {
+                Ok(requests) => requests,
+                Err(poisoned) => {
+                    tracing::warn!(
+                        "Someone panicked while holding the nac_dedup lock: {}",
+                        poisoned
+                    );
+                    self.outstanding_read_requests.clear_poison();
+                    poisoned.into_inner()
+                }
+            };
+            match requests.get_mut(&composite_key) {
                 Some(inflight_req) => {
                     self.metrics
                         .nac_dedup_count
                         .add(1, &self.metrics.hostname_attribute);
                     // Update the priority if the new request has higher priority.
-                    _guard = inflight_req
-                        .context
-                        .maybe_update_priority(
-                            options.priority,
-                            self.metrics.nac_priority_increase_sent.clone(),
-                            &self.metrics.hostname_attribute,
-                        )
-                        .await;
+                    let cleanup_guard = inflight_req.context.maybe_update_priority(
+                        options.priority,
+                        self.metrics.nac_priority_increase_sent.clone(),
+                        &self.metrics.hostname_attribute,
+                    );
                     let (output_tx, output_rx) = tokio::sync::oneshot::channel();
                     // Add the new sender to the existing request, then release the lock so the driving task
                     // can make progress.
                     inflight_req.senders.push(output_tx);
-                    drop(requests);
-                    drop(lock_held_duration);
-                    output_rx.await.map_err(|e| {
-                        tracing::error!("Unexpected channel closure: {}", e);
-                        StorageError::Generic {
-                            source: Arc::new(e),
-                        }
-                    })??
+                    (output_rx, None, cleanup_guard)
                 }
                 None => {
                     let priority_holder = Arc::new(PriorityHolder::new(options.priority));
@@ -915,126 +1012,148 @@ impl AdmissionControlledS3Storage {
                         Some(priority_tx),
                         vec![output_tx],
                     );
-                    _guard = RollbackPriorityOnDrop {
-                        request: request.context.clone(),
-                        entry_priority: options.priority,
-                    };
+                    let mut guard = InflightRequestCleanupGuard::for_priority(
+                        request.context.clone(),
+                        options.priority,
+                    );
                     requests.insert(composite_key.clone(), request);
-                    // Release the lock before spawning the network request task
-                    drop(requests);
-                    drop(lock_held_duration);
 
-                    // Clones for the spawned task.
-                    let read_requests_waiting_for_token =
-                        self.metrics.read_requests_waiting_for_token.clone();
-                    let nac_read_requests_waiting_for_token =
-                        self.metrics.nac_read_requests_waiting_for_token.clone();
-                    let hostname_attr = self.metrics.hostname_attribute.clone();
-                    let storage_clone = self.storage.clone();
-                    let rate_limiter_clone = self.rate_limiter.clone();
-                    let outstanding_read_requests = self.outstanding_read_requests.clone();
-                    let composite_key_clone = composite_key.clone();
-                    let keys_clone: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
+                    // Add map cleanup to the guard after insertion
+                    guard = guard.with_map_cleanup(
+                        self.outstanding_read_requests.clone(),
+                        self.metrics.outstanding_read_requests.clone(),
+                        keys.len(),
+                        composite_key.clone(),
+                    );
 
-                    // NOTE(hammadb): If the upstream request gets cancelled, we still
-                    // finish the request once it has been spawned, if its cancelled
-                    // before it has been spawned, then the task will never run.
-                    // NOTE(sicheng): The following block used to be executed with tokio::spawn.
-                    // It could lead to unbounded growth in tokio task queue, and could cause
-                    // performance degration in tokio runtime. As a temporary solution, since
-                    // we do not cancel tasks right now, this block of logic is moved out
-                    // of tokio::spawn. If we introduce the cancellation logic in the future
-                    // we need to address the issue in the comment above.
-                    let fetching_future = async move {
-                        // Fetch all keys in parallel
-                        let fetch_futures: Vec<_> = keys_clone
-                            .iter()
-                            .map(|key| {
-                                let storage_clone = storage_clone.clone();
-                                let rate_limiter_clone = rate_limiter_clone.clone();
-                                let key_clone = key.clone();
-                                let priority_holder = priority_holder.clone();
-                                let read_requests_waiting_for_token =
-                                    read_requests_waiting_for_token.clone();
-                                let nac_read_requests_waiting_for_token =
-                                    nac_read_requests_waiting_for_token.clone();
-                                let hostname_attr = hostname_attr.clone();
+                    (output_rx, Some((priority_holder, priority_rx)), guard)
+                }
+            }
+        };
 
-                                async {
-                                    if is_parallel {
-                                        AdmissionControlledS3Storage::parallel_read(
-                                            storage_clone,
-                                            rate_limiter_clone,
-                                            key_clone,
-                                            priority_holder,
-                                            read_requests_waiting_for_token,
-                                            nac_read_requests_waiting_for_token,
-                                            hostname_attr,
-                                        )
-                                        .await
-                                    } else {
-                                        AdmissionControlledS3Storage::read(
-                                            storage_clone,
-                                            rate_limiter_clone,
-                                            key_clone,
-                                            priority_holder,
-                                            Some(priority_rx.resubscribe()),
-                                            read_requests_waiting_for_token,
-                                            nac_read_requests_waiting_for_token,
-                                            hostname_attr,
-                                        )
-                                        .await
-                                    }
-                                }
-                            })
-                            .collect();
+        // If we're the initiator (new request), set up and run the fetch.
+        if let Some((priority_holder, priority_rx)) = new_request_data {
+            // Clones for the spawned task.
+            let read_requests_waiting_for_token =
+                self.metrics.read_requests_waiting_for_token.clone();
+            let nac_read_requests_waiting_for_token =
+                self.metrics.nac_read_requests_waiting_for_token.clone();
+            let hostname_attr = self.metrics.hostname_attribute.clone();
+            let storage_clone = self.storage.clone();
+            let rate_limiter_clone = self.rate_limiter.clone();
+            let outstanding_read_requests = self.outstanding_read_requests.clone();
+            let composite_key_clone = composite_key.clone();
+            let keys_clone: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
 
-                        let fetch_results = futures::future::join_all(fetch_futures).await;
+            // NOTE(hammadb): If the upstream request gets cancelled, we still
+            // finish the request once it has been spawned, if its cancelled
+            // before it has been spawned, then the task will never run. (Applies if spawn_fetches is true)
+            // NOTE(sicheng): The following block used to be executed with tokio::spawn.
+            // It could lead to unbounded growth in tokio task queue, and could cause
+            // performance degration in tokio runtime. As a temporary solution, since
+            // we do not cancel tasks right now, this block of logic is moved out
+            // of tokio::spawn. If we introduce the cancellation logic in the future
+            // we need to address the issue in the comment above. (Applies if spawn_fetches is false)
+            let fetching_future = async move {
+                let mut cleanup_guard = cleanup_guard;
 
-                        // Call fetch_fn once with all the results
-                        let fetched = AdmissionControlledS3Storage::execute_batch_fetch(
-                            fetch_fn,
-                            fetch_results,
-                        )
+                // Fetch all keys in parallel
+                let fetch_futures: Vec<_> = keys_clone
+                    .iter()
+                    .map(|key| {
+                        let storage_clone = storage_clone.clone();
+                        let rate_limiter_clone = rate_limiter_clone.clone();
+                        let key_clone = key.clone();
+                        let priority_holder = priority_holder.clone();
+                        let read_requests_waiting_for_token =
+                            read_requests_waiting_for_token.clone();
+                        let nac_read_requests_waiting_for_token =
+                            nac_read_requests_waiting_for_token.clone();
+                        let hostname_attr = hostname_attr.clone();
+
+                        async {
+                            if is_parallel {
+                                AdmissionControlledS3Storage::parallel_read(
+                                    storage_clone,
+                                    rate_limiter_clone,
+                                    key_clone,
+                                    priority_holder,
+                                    read_requests_waiting_for_token,
+                                    nac_read_requests_waiting_for_token,
+                                    hostname_attr,
+                                )
+                                .await
+                            } else {
+                                AdmissionControlledS3Storage::read(
+                                    storage_clone,
+                                    rate_limiter_clone,
+                                    key_clone,
+                                    priority_holder,
+                                    Some(priority_rx.resubscribe()),
+                                    read_requests_waiting_for_token,
+                                    nac_read_requests_waiting_for_token,
+                                    hostname_attr,
+                                )
+                                .await
+                            }
+                        }
+                    })
+                    .collect();
+
+                let fetch_results = futures::future::join_all(fetch_futures).await;
+
+                // Call fetch_fn once with all the results
+                let fetched =
+                    AdmissionControlledS3Storage::execute_batch_fetch(fetch_fn, fetch_results)
                         .await
                         .map(|(r, e_tags)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tags));
 
-                        // Clean up the requests map entry.
-                        // SAFETY(hammadb): We just created this entry above, and only this task remove it,
-                        // so it must exist.
-                        let mut requests = outstanding_read_requests.lock().await;
-                        let mut inflight = requests
-                            .remove(&composite_key_clone)
-                            .expect("Key must exist");
-                        inflight.context.complete();
-                        drop(requests);
-                        for output_tx in inflight.senders.drain(..) {
-                            match output_tx.send(fetched.clone()) {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    tracing::error!("Unexpected channel closure, the calling task must have been dropped");
-                                }
-                            }
+                // Clean up the requests map entry.
+                let mut inflight = {
+                    let mut requests = match outstanding_read_requests.lock() {
+                        Ok(requests) => requests,
+                        Err(poisoned) => {
+                            tracing::warn!(
+                                "Someone panicked while holding the nac_dedup lock: {}",
+                                poisoned
+                            );
+                            outstanding_read_requests.clear_poison();
+                            poisoned.into_inner()
                         }
                     };
-                    if self.spawn_fetches {
-                        tokio::task::spawn(fetching_future);
-                    } else {
-                        fetching_future.await;
-                    }
-                    output_rx.await.map_err(|e| {
-                        tracing::error!("Unexpected channel closure: {}", e);
-                        StorageError::Generic {
-                            source: Arc::new(e),
+                    // SAFETY(hammadb): We just created this entry above, and only this task remove it,
+                    // so it must exist.
+                    let result = requests
+                        .remove(&composite_key_clone)
+                        .expect("Key must exist");
+                    // It is very important that we call complete here while holding the lock.
+                    result.context.complete();
+                    cleanup_guard.complete();
+                    result
+                };
+                for output_tx in inflight.senders.drain(..) {
+                    match output_tx.send(fetched.clone()) {
+                        Ok(_) => {}
+                        Err(_) => {
+                            tracing::error!("Unexpected channel closure, the calling task must have been dropped");
                         }
-                    })??
+                    }
                 }
             };
+            if self.spawn_fetches {
+                tokio::task::spawn(fetching_future);
+            } else {
+                fetching_future.await;
+            }
         }
 
-        self.metrics
-            .outstanding_read_requests
-            .fetch_sub(keys.len(), Ordering::Relaxed);
+        // Await result (common for both dedup'd waiters and initiator).
+        let any_res = output_rx.await.map_err(|e| {
+            tracing::error!("Unexpected channel closure: {}", e);
+            StorageError::Generic {
+                source: Arc::new(e),
+            }
+        })??;
 
         Ok((
             any_res
@@ -1377,11 +1496,16 @@ impl Configurable<RateLimitingConfig> for RateLimitPolicy {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use rand::{distributions::Alphanumeric, Rng};
 
-    use crate::{admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage, GetOptions};
+    use crate::{
+        admissioncontrolleds3::AdmissionControlledS3Storage, s3::S3Storage, GetOptions,
+        StorageError,
+    };
 
     fn get_s3_client() -> aws_sdk_s3::Client {
         // Set up credentials assuming minio is running locally
@@ -1621,6 +1745,131 @@ mod tests {
         }
         // Await all futures and return the result.
         let _ = futures::future::join_all(futures).await;
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_fetch_with_panic_cleanup() {
+        let client = get_s3_client();
+
+        let storage = S3Storage {
+            bucket: format!("test-{}", rand::thread_rng().gen::<u64>()),
+            client,
+            upload_part_size_bytes: 1024 * 1024 * 8,
+            download_part_size_bytes: 1024 * 1024 * 8,
+            metrics: Default::default(),
+        };
+        storage.create_bucket().await.unwrap();
+        let admission_controlled_storage =
+            AdmissionControlledS3Storage::new_s3_with_default_policy(storage);
+
+        let test_data_key: String = rand::thread_rng()
+            .sample_iter(Alphanumeric)
+            .take(16)
+            .map(char::from)
+            .collect();
+        let test_data_value_string = "test data".to_string();
+        admission_controlled_storage
+            .put_bytes(
+                &test_data_key,
+                test_data_value_string.as_bytes().to_vec().into(),
+                crate::PutOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        // Check initial state
+        let initial_outstanding = admission_controlled_storage
+            .metrics
+            .outstanding_read_requests
+            .load(Ordering::Relaxed);
+        assert_eq!(
+            initial_outstanding, 0,
+            "Initial outstanding requests should be 0"
+        );
+
+        const N_REQUESTS: usize = 50;
+        let mut futures = Vec::new();
+
+        // Launch multiple concurrent requests with a panic-inducing fetch function
+        for i in 0..N_REQUESTS {
+            let storage_clone = admission_controlled_storage.clone();
+            let key_clone = test_data_key.clone();
+            let fut = async move {
+                // Use a fetch function that panics to test cleanup
+                let _result: Result<(Arc<Vec<u8>>, _), _> = storage_clone
+                    .fetch(
+                        key_clone.as_str(),
+                        GetOptions::default(),
+                        move |_result: Result<Arc<Vec<u8>>, StorageError>| async move {
+                            // Panic in the fetch function to test cleanup
+                            panic!("Intentional panic in fetch function for request {}", i);
+                        },
+                    )
+                    .await;
+
+                // This should not be reached due to panic, but if it is, it's an error
+                unreachable!("Fetch should have panicked");
+            };
+
+            // Catch the panic so we can continue testing
+            let handled_fut = std::panic::AssertUnwindSafe(fut).catch_unwind();
+            futures.push(handled_fut);
+        }
+
+        // Wait for all futures (they should all panic) with timeout
+        let results = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            futures::future::join_all(futures),
+        )
+        .await
+        .expect("Test timed out - cleanup likely failed and dedupers are hanging");
+
+        // Verify all requests panicked
+        for (i, result) in results.into_iter().enumerate() {
+            assert!(result.is_err(), "Request {} should have panicked", i);
+        }
+        let final_outstanding = admission_controlled_storage
+            .metrics
+            .outstanding_read_requests
+            .load(Ordering::Relaxed);
+        assert_eq!(
+            final_outstanding, 0,
+            "Outstanding requests should be 0 even after panics"
+        );
+
+        // Also verify the internal map is empty
+        let map_size = admission_controlled_storage
+            .outstanding_read_requests
+            .lock()
+            .unwrap()
+            .len();
+        assert_eq!(
+            map_size, 0,
+            "Internal outstanding requests map should be empty after panics"
+        );
+
+        // Now verify that successful requests still work properly
+        let successful_result: Result<(Arc<Vec<u8>>, _), _> = admission_controlled_storage
+            .fetch(
+                &test_data_key,
+                GetOptions::default(),
+                move |result: Result<Arc<Vec<u8>>, StorageError>| async move {
+                    // Just return the result successfully
+                    result
+                },
+            )
+            .await;
+
+        assert!(
+            successful_result.is_ok(),
+            "Successful request should work after panic cleanup"
+        );
+        let (data, _) = successful_result.unwrap();
+        let retrieved_data = String::from_utf8(Arc::unwrap_or_clone(data)).unwrap();
+        assert_eq!(
+            retrieved_data, test_data_value_string,
+            "Retrieved data should match original"
+        );
     }
 
     #[tokio::test]

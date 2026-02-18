@@ -133,6 +133,50 @@ collection.add(
 ```
 </CodeGroup>
 
+## Metadata
+
+Metadata values can be strings, integers, floats, or booleans. Additionally, you can store arrays of these types.
+
+<CodeGroup>
+```python Python
+collection.add(
+    ids=["id1"],
+    documents=["lorem ipsum..."],
+    metadatas=[{
+        "chapter": 3,
+        "tags": ["fiction", "adventure"],
+        "scores": [1, 2, 3],
+    }],
+)
+```
+
+```typescript TypeScript
+await collection.add({
+    ids: ["id1"],
+    documents: ["lorem ipsum..."],
+    metadatas: [{
+        chapter: 3,
+        tags: ["fiction", "adventure"],
+        scores: [1, 2, 3],
+    }],
+});
+```
+
+```rust Rust
+use chroma::types::{Metadata, MetadataValue};
+
+let mut metadata = Metadata::new();
+metadata.insert("chapter".into(), MetadataValue::Int(3));
+metadata.insert(
+    "tags".into(),
+    MetadataValue::StringArray(vec!["fiction".to_string(), "adventure".to_string()]),
+);
+metadata.insert("scores".into(), MetadataValue::IntArray(vec![1, 2, 3]));
+```
+</CodeGroup>
+
+All elements in an array must be the same type, and empty arrays are not allowed. You can filter on array metadata using the `$contains` and `$not_contains` operators — see [Metadata Filtering](/docs/querying-collections/metadata-filtering#using-array-metadata) for details.
+
 ## Behaviors
 
 - If you add a record with an ID that already exists in the collection, it will be ignored without throwing an error. In order to overwrite data in your collection, you must [update](./update-data) the data.

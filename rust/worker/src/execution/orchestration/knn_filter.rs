@@ -31,6 +31,10 @@ use crate::execution::operators::{
     prefetch_segment::{
         PrefetchSegmentError, PrefetchSegmentInput, PrefetchSegmentOperator, PrefetchSegmentOutput,
     },
+    quantized_spann_bruteforce::QuantizedSpannBruteforceError,
+    quantized_spann_center_search::QuantizedSpannCenterSearchError,
+    quantized_spann_load_center::QuantizedSpannLoadCenterError,
+    quantized_spann_load_cluster::QuantizedSpannLoadClusterError,
     spann_bf_pl::SpannBfPlError,
     spann_centers_search::SpannCentersSearchError,
     spann_fetch_pl::SpannFetchPlError,
@@ -60,6 +64,14 @@ pub enum KnnError {
     NoCollectionDimension,
     #[error("Panic: {0}")]
     Panic(#[from] PanicError),
+    #[error("Error running quantized spann bruteforce operator: {0}")]
+    QuantizedSpannBruteforce(#[from] QuantizedSpannBruteforceError),
+    #[error("Error searching quantized spann centers: {0}")]
+    QuantizedSpannCenterSearch(#[from] QuantizedSpannCenterSearchError),
+    #[error("Error loading quantized spann center: {0}")]
+    QuantizedSpannLoadCenter(#[from] QuantizedSpannLoadCenterError),
+    #[error("Error loading quantized spann cluster: {0}")]
+    QuantizedSpannLoadCluster(#[from] QuantizedSpannLoadClusterError),
     #[error("Error receiving final result: {0}")]
     Result(#[from] RecvError),
     #[error("Error running Spann Bruteforce Postinglist Operator: {0}")]
@@ -92,6 +104,10 @@ impl ChromaError for KnnError {
             KnnError::KnnProjection(e) => e.code(),
             KnnError::NoCollectionDimension => ErrorCodes::InvalidArgument,
             KnnError::Panic(_) => ErrorCodes::Aborted,
+            KnnError::QuantizedSpannBruteforce(e) => e.code(),
+            KnnError::QuantizedSpannCenterSearch(e) => e.code(),
+            KnnError::QuantizedSpannLoadCenter(e) => e.code(),
+            KnnError::QuantizedSpannLoadCluster(e) => e.code(),
             KnnError::Result(_) => ErrorCodes::Internal,
             KnnError::SpannBfPl(e) => e.code(),
             KnnError::SpannFetchPl(e) => e.code(),

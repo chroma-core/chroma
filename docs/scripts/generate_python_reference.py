@@ -3,7 +3,7 @@
 # requires-python = ">=3.9"
 # dependencies = [
 #     "docstring-parser>=0.15",
-#     "chromadb",
+#     "chromadb==1.5.0",
 # ]
 # ///
 """
@@ -537,8 +537,43 @@ def extract_class(cls: type) -> ClassDoc:
 
 
 def _mdx_text(text: str) -> str:
-    """Escape { and } so MDX does not parse them as JS; use backslash so markdown still renders (paragraphs, code blocks)."""
-    return text.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+    """Escape MDX text while preserving fenced code blocks."""
+    chunks = re.split(r"(```[\s\S]*?```)", text)
+    escaped_chunks = []
+    for chunk in chunks:
+        if chunk.startswith("```") and chunk.endswith("```"):
+            escaped_chunks.append(chunk)
+            continue
+        escaped_chunks.append(
+            chunk.replace("\\", "\\\\").replace("{", "\\{").replace("}", "\\}")
+        )
+    return "".join(escaped_chunks)
+
+
+def _format_docstring_examples(text: str) -> str:
+    """Convert REPL-style >>> examples into fenced python code blocks."""
+    lines = text.splitlines()
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        stripped = lines[i].lstrip()
+        if stripped.startswith(">>>"):
+            block: list[str] = []
+            while i < len(lines):
+                current = lines[i].lstrip()
+                if current.startswith(">>>") or current.startswith("..."):
+                    code_line = re.sub(r"^(>>>|\.\.\.)\s?", "", current)
+                    block.append(code_line)
+                    i += 1
+                    continue
+                break
+            out.append("```python")
+            out.extend(block)
+            out.append("```")
+            continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
 
 
 def render_param(p: Param) -> str:
@@ -556,7 +591,7 @@ def render_function(fn: FunctionDoc, heading_level: int = 3) -> str:
     """Render a function as MDX."""
     lines = [f"{'#' * heading_level} {fn.name}\n"]
     if fn.description:
-        lines.append(f"{_mdx_text(fn.description)}\n")
+        lines.append(f"{_mdx_text(_format_docstring_examples(fn.description))}\n")
     lines.extend(render_param(p) for p in fn.params)
     return "\n".join(lines)
 
@@ -567,7 +602,7 @@ def render_method(method: MethodDoc, heading_level: int = 3) -> str:
     lines = [f"{heading} {method.name}\n"]
 
     if method.description:
-        lines.append(f"{_mdx_text(method.description)}\n")
+        lines.append(f"{_mdx_text(_format_docstring_examples(method.description))}\n")
 
     lines.extend(render_param(p) for p in method.params)
 
@@ -592,7 +627,7 @@ def render_class(
     lines = [f"{'#' * heading_level} {cls.name}\n"]
 
     if cls.description:
-        lines.append(f"{_mdx_text(cls.description)}\n")
+        lines.append(f"{_mdx_text(_format_docstring_examples(cls.description))}\n")
 
     if cls.properties:
         lines.append('<span class="text-sm">Properties</span>\n')

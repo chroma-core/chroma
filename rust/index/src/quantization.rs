@@ -446,11 +446,11 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 /// The bit as f32 * val multiply-by-zero-or-one is branchless by design,
 /// which is necessary for vectorization.
 ///
-/// But the bit extraction —
-/// (packed[i / 8] >> (i % 8)) & 1 — is a problem. Every 8 consecutive floats
-/// share the same source byte, but the shift amount changes per element
-/// (i % 8 = 0,1,2,...,7). The compiler's auto-vectorizer generally can't see
-/// through this non-uniform indexing pattern and will fall back to scalar.
+/// But the bit extraction — (packed[i / 8] >> (i % 8)) & 1 — is a problem.
+/// Every 8 consecutive floats share the same source byte, but the shift amount
+/// changes per element (i % 8 = 0,1,2,...,7). The compiler's auto-vectorizer
+/// generally can't see through this non-uniform indexing pattern and will fall
+/// back to scalar.
 ///
 /// To actually vectorize this we need to explicitly expand packed bits into a
 /// float mask. Or use a library (pulp).

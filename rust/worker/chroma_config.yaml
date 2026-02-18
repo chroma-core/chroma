@@ -86,6 +86,11 @@ query_service:
     permitted_parallelism: 180
   spann_provider:
     adaptive_search_nprobe: false
+    usearch_provider:
+      cache_config:
+        weighted_lru:
+          name: "usearch_cache"
+          capacity: 8192 # 8192 MiB = 8GB
   fetch_log_batch_size: 1000
 compaction_service:
   service_name: "compaction-service"
@@ -186,6 +191,11 @@ compaction_service:
     hnsw_garbage_collection:
       enabled: true
       policy: "full_rebuild"
+    usearch_provider:
+      cache_config:
+        weighted_lru:
+          name: "usearch_cache"
+          capacity: 8192 # 8192 MiB = 8GB
 log_service:
   num_records_before_backpressure: 100000
   reinsert_threshold: 0

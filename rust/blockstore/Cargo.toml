@@ -33,6 +33,7 @@ chroma-storage = { workspace = true }
 chroma-cache = { workspace = true }
 chroma-types = { workspace = true }
 chroma-tracing = { workspace = true }
+bincode = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }

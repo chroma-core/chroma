@@ -1,5 +1,5 @@
-![Chroma](./docs/docs.trychroma.com/public/chroma-wordmark-color.png#gh-light-mode-only)
-![Chroma](./docs/docs.trychroma.com/public/chroma-wordmark-white.png#gh-dark-mode-only)
+![Chroma](./docs/assets/chroma-wordmark-color.png#gh-light-mode-only)
+![Chroma](./docs/assets/chroma-wordmark-white.png#gh-dark-mode-only)
 
 <p align="center">
     <b>Chroma - the open-source search engine for AI</b>. <br />
@@ -92,10 +92,10 @@ Chroma allows you to store these vectors or embeddings and search by nearest nei
 ## Get involved
 
 Chroma is a rapidly developing project. We welcome PR contributors and ideas for how to improve the project.
-- [Join the conversation on Discord](https://discord.gg/MMeYNTmh3x) - `#contributing` channel
-- [Review the 🛣️ Roadmap and contribute your ideas](https://docs.trychroma.com/roadmap)
+- [Join the conversation on Discord](https://discord.com/invite/chromadb) - `#contributing` channel
+- [Review the 🛣️ Roadmap and contribute your ideas](https://docs.trychroma.com/docs/overview/oss#roadmap)
 - [Grab an issue and open a PR](https://github.com/chroma-core/chroma/issues) - [`Good first issue tag`](https://github.com/chroma-core/chroma/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-- [Read our contributing guide](https://docs.trychroma.com/contributing)
+- [Read our contributing guide](https://docs.trychroma.com/docs/overview/oss#contributing)
 
 **Release Cadence**
 We currently release new tagged versions of the `pypi` and `npm` packages on Mondays. Hotfixes go out at any time during the week.
