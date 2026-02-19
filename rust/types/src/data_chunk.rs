@@ -4,6 +4,7 @@ use std::sync::Arc;
 pub struct Chunk<T> {
     data: Arc<[T]>,
     visibility: Arc<[bool]>,
+    visible_count: usize,
 }
 
 impl<T> Clone for Chunk<T> {
@@ -11,6 +12,7 @@ impl<T> Clone for Chunk<T> {
         Chunk {
             data: self.data.clone(),
             visibility: self.visibility.clone(),
+            visible_count: self.visible_count,
         }
     }
 }
@@ -21,6 +23,7 @@ impl<T> Chunk<T> {
         Chunk {
             data,
             visibility: vec![true; len].into(),
+            visible_count: len,
         }
     }
 
@@ -31,7 +34,7 @@ impl<T> Chunk<T> {
 
     /// Returns the number of visible elements in the data chunk
     pub fn len(&self) -> usize {
-        self.visibility.iter().filter(|&v| *v).count()
+        self.visible_count
     }
 
     /// Returns whether the chunk has zero visible elements.
@@ -75,6 +78,7 @@ impl<T> Chunk<T> {
     /// # Arguments
     /// * `visibility` - A vector of boolean values indicating the visibility of the elements
     pub fn set_visibility(&mut self, visibility: Vec<bool>) {
+        self.visible_count = visibility.iter().filter(|&v| *v).count();
         self.visibility = visibility.into();
     }
 

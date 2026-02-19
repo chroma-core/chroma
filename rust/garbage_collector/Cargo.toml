@@ -51,7 +51,7 @@ chroma-sysdb = { workspace = true }
 chroma-storage = { workspace = true }
 chroma-blockstore = { workspace = true }
 chroma-cache = { workspace = true }
-chroma-index = { workspace = true }
+chroma-index = { workspace = true, features = ["usearch"] }
 chroma-memberlist = { workspace = true }
 chroma-tracing = { workspace = true }
 chroma-jemalloc-pprof-server = { workspace = true }

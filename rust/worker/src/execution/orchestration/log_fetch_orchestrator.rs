@@ -88,6 +88,8 @@ pub enum LogFetchOrchestratorError {
     RecordSegmentWriter(#[from] RecordSegmentWriterCreationError),
     #[error("Error receiving final result: {0}")]
     RecvError(#[from] RecvError),
+    #[error("Error creating quantized spann writer: {0}")]
+    QuantizedSpannSegment(#[from] chroma_segment::quantized_spann::QuantizedSpannSegmentError),
     #[error("Error creating spann writer: {0}")]
     SpannSegment(#[from] SpannSegmentWriterError),
     #[error("Error sourcing record segment: {0}")]
@@ -122,6 +124,7 @@ impl ChromaError for LogFetchOrchestratorError {
                 Self::Panic(e) => e.should_trace_error(),
                 Self::Partition(e) => e.should_trace_error(),
                 Self::PrefetchSegment(e) => e.should_trace_error(),
+                Self::QuantizedSpannSegment(e) => e.should_trace_error(),
                 Self::RecordSegmentReader(e) => e.should_trace_error(),
                 Self::RecordSegmentWriter(e) => e.should_trace_error(),
                 Self::RecvError(_) => true,
@@ -293,6 +296,7 @@ impl LogFetchOrchestrator {
         database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
         fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
         max_compaction_size: usize,
         max_partition_size: usize,
         log: Log,
@@ -305,6 +309,7 @@ impl LogFetchOrchestrator {
         let context = CompactionContext::new(
             is_rebuild,
             fetch_log_batch_size,
+            fetch_log_concurrency,
             max_compaction_size,
             max_partition_size,
             log,
@@ -482,6 +487,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     collection_uuid: collection.collection_id,
                     tenant: collection.tenant.clone(),
                     database_name,
+                    fetch_log_concurrency: self.context.fetch_log_concurrency,
                 }),
                 (),
                 ctx.receiver(),
@@ -571,6 +577,19 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
         let (hnsw_index_uuid, vector_writer, is_vector_segment_spann) = match vector_segment.r#type
         {
+            SegmentType::QuantizedSpann => match self
+                .ok_or_terminate(
+                    self.context
+                        .spann_provider
+                        .write_quantized_usearch(&collection, &vector_segment, &record_segment)
+                        .await,
+                    ctx,
+                )
+                .await
+            {
+                Some(writer) => (None, VectorSegmentWriter::QuantizedSpann(writer), true),
+                None => return,
+            },
             SegmentType::Spann => match self
                 .ok_or_terminate(
                     self.context
@@ -582,7 +601,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .await
             {
                 Some(writer) => (
-                    writer.hnsw_index_uuid(),
+                    Some(writer.hnsw_index_uuid()),
                     VectorSegmentWriter::Spann(writer),
                     true,
                 ),
@@ -604,7 +623,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 .await
             {
                 Some(writer) => (
-                    writer.index_uuid(),
+                    Some(writer.index_uuid()),
                     VectorSegmentWriter::Hnsw(writer),
                     false,
                 ),
@@ -628,7 +647,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         };
 
         collection_info.writers = Some(writers.clone());
-        collection_info.hnsw_index_uuid = Some(hnsw_index_uuid);
+        collection_info.hnsw_index_uuid = hnsw_index_uuid;
 
         // Prefetch segments
         let prefetch_segments = match self.context.is_rebuild {

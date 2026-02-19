@@ -1,0 +1,55 @@
+---
+title: "Where Filters"
+description: "Reference for the TypeScript DSL used to build where filters."
+---
+
+Use the `K` (Key) factory to construct where filters in TypeScript. Filters are passed to `get`, `query`, `search`, `delete`, and similar methods via the `where` parameter.
+
+## Field references
+
+| Type | DSL | Example |
+|------|-----|---------|
+| Metadata field | `K("field_name")` | `K("category")`, `K("year")` |
+| Document | `K.DOCUMENT` | `K.DOCUMENT.contains("text")` |
+| ID | `K.ID` | `K.ID.isIn(["id1", "id2"])` |
+
+## Comparison operators
+
+| Predicate | Method | Example |
+|-----------|--------|---------|
+| Equal | `.eq(value)` | `K("status").eq("active")` |
+| Not equal | `.ne(value)` | `K("count").ne(0)` |
+| Greater than | `.gt(value)` | `K("price").gt(100)` |
+| Greater than or equal | `.gte(value)` | `K("year").gte(2020)` |
+| Less than | `.lt(value)` | `K("stock").lt(10)` |
+| Less than or equal | `.lte(value)` | `K("discount").lte(0.25)` |
+
+## Set operators
+
+| Predicate | Method | Example |
+|-----------|--------|---------|
+| In list | `.isIn(values)` | `K("category").isIn(["tech", "ai"])` |
+| Not in list | `.notIn(values)` | `K("status").notIn(["draft", "deleted"])` |
+
+## Array operators
+
+| Predicate | Method | Example |
+|-----------|--------|---------|
+| Contains | `.contains(value)` | `K("tags").contains("action")` |
+| Not contains | `.notContains(value)` | `K("tags").notContains("draft")` |
+
+## Document operators
+
+| Predicate | Method | Example |
+|-----------|--------|---------|
+| Contains | `K.DOCUMENT.contains(value)` | `K.DOCUMENT.contains("machine learning")` |
+| Not contains | `K.DOCUMENT.notContains(value)` | `K.DOCUMENT.notContains("draft")` |
+| Regex match | `K.DOCUMENT.regex(pattern)` | `K.DOCUMENT.regex("^quantum\\s+\\w+")` |
+| Regex not match | `K.DOCUMENT.notRegex(pattern)` | `K.DOCUMENT.notRegex("^draft")` |
+
+## Combining conditions
+
+| Logic | Method | Example |
+|-------|--------|---------|
+| And | `.and(other)` | `K("status").eq("active").and(K("year").gte(2020))` |
+| Or | `.or(other)` | `K("status").eq("draft").or(K("status").eq("archived"))` |

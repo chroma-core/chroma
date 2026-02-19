@@ -7,6 +7,12 @@ sysdb:
     s3-force-path-style: true
     create-bucket-if-not-exists: true
     kubernetes-namespace: chroma
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
+
 rustFrontendService:
   # We have to specify the command, because the Dockerfile uses the CLI since its shared with
   # single node, so in values.dev we pass the CONFIG_PATH into the chroma run command
@@ -16,24 +22,54 @@ rustFrontendService:
       value: "true"
     - name: RUST_BACKTRACE
       value: 'value: "1"'
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
 
 queryService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
 
 compactionService:
   env:
     - name: RUST_BACKTRACE
       value: 'value: "1"'
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
 
 rustLogService:
   replicaCount: 1
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
 
 garbageCollector:
   jemallocConfig: "prof:true,prof_active:true,lg_prof_sample:19"
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m
 
 rustSysdbService:
   replicaCount: 1
+  resources:
+    limits:
+      cpu: 200m
+    requests:
+      cpu: 200m

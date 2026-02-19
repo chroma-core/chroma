@@ -114,8 +114,8 @@ Chroma supports three data types for metadata: strings, numbers (int/float), and
 **Supported operators:**
 - `is_in()` - Value matches any in the list
 - `not_in()` - Value doesn't match any in the list
-- `contains()` - String contains substring (case-sensitive, currently K.DOCUMENT only)
-- `not_contains()` - String doesn't contain substring (currently K.DOCUMENT only)
+- `contains()` - On `K.DOCUMENT`: substring search (case-sensitive). On metadata fields: checks if an array contains a scalar value.
+- `not_contains()` - On `K.DOCUMENT`: excludes by substring. On metadata fields: checks that an array does not contain a scalar value.
 - `regex()` - String matches regex pattern (currently K.DOCUMENT only)
 - `not_regex()` - String doesn't match regex pattern (currently K.DOCUMENT only)
 
@@ -126,14 +126,19 @@ K.ID.is_in(["doc1", "doc2", "doc3"])           # Match any ID in list
 K("category").is_in(["tech", "science"])       # Match any category
 K("status").not_in(["draft", "deleted"])       # Exclude specific values
 
-# String content operators (currently K.DOCUMENT only)
+# String content operators (K.DOCUMENT only)
 K.DOCUMENT.contains("machine learning")        # Substring search in document
 K.DOCUMENT.not_contains("deprecated")          # Exclude documents with text
 K.DOCUMENT.regex(r"\bAPI\b")                   # Match whole word "API" in document
 
-# Note: String pattern matching on metadata fields not yet supported
-# K("title").contains("Python")                # NOT YET SUPPORTED
-# K("email").regex(r".*@company\.com$")        # NOT YET SUPPORTED
+# Array membership operators (metadata fields)
+K("tags").contains("action")                   # Array contains value
+K("tags").not_contains("draft")                # Array does not contain value
+K("scores").contains(42)                       # Works with numbers
+K("flags").contains(True)                      # Works with booleans
+
+# Note: String pattern matching on metadata scalar fields not yet supported
+# K("title").regex(r".*Python.*")              # NOT YET SUPPORTED
 ```
 
 ```typescript TypeScript
@@ -142,14 +147,19 @@ K.ID.isIn(["doc1", "doc2", "doc3"]);           // Match any ID in list
 K("category").isIn(["tech", "science"]);       // Match any category
 K("status").notIn(["draft", "deleted"]);       // Exclude specific values
 
-// String content operators (currently K.DOCUMENT only)
+// String content operators (K.DOCUMENT only)
 K.DOCUMENT.contains("machine learning");       // Substring search in document
 K.DOCUMENT.notContains("deprecated");          // Exclude documents with text
 K.DOCUMENT.regex("\\bAPI\\b");                 // Match whole word "API" in document
 
-// Note: String pattern matching on metadata fields not yet supported
-// K("title").contains("Python")               // NOT YET SUPPORTED
-// K("email").regex(".*@company\\.com$")       // NOT YET SUPPORTED
+// Array membership operators (metadata fields)
+K("tags").contains("action");                  // Array contains value
+K("tags").notContains("draft");                // Array does not contain value
+K("scores").contains(42);                      // Works with numbers
+K("flags").contains(true);                     // Works with booleans
+
+// Note: String pattern matching on metadata scalar fields not yet supported
+// K("title").regex(".*Python.*")              // NOT YET SUPPORTED
 ```
 
 ```rust Rust
@@ -161,12 +171,149 @@ Key::field("status").not_in(["draft", "deleted"]);
 Key::Document.contains("machine learning");
 Key::Document.not_contains("deprecated");
 Key::Document.regex(r"\bAPI\b");
+
+// Array membership operators (metadata fields)
+Key::field("tags").contains_value("action");
+Key::field("tags").not_contains_value("draft");
+Key::field("scores").contains_value(42);
+Key::field("flags").contains_value(true);
 ```
 </CodeGroup>
 
 <Callout>
-String operations like `contains()` and `regex()` are case-sensitive by default. The `is_in()` operator is efficient even with large lists.
+String operations like `contains()` and `regex()` on `K.DOCUMENT` are case-sensitive by default. When used on metadata fields, `contains()` checks array membership rather than substring matching. The `is_in()` operator is efficient even with large lists.
 </Callout>
+
+## Array Metadata
+
+Chroma supports storing arrays of values in metadata fields. You can use `contains()` / `not_contains()` (or `$contains` / `$not_contains` in dictionary syntax) to filter records based on whether an array includes a specific scalar value.
+
+### Storing Array Metadata
+
+Arrays can contain strings, numbers, or booleans. All elements in an array must be the same type. Empty arrays are not allowed.
+
+<CodeGroup>
+```python Python
+collection.add(
+    ids=["m1", "m2", "m3"],
+    embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    metadatas=[
+        {"genres": ["action", "comedy"], "year": 2020},
+        {"genres": ["drama"], "year": 2021},
+        {"genres": ["action", "thriller"], "year": 2022},
+    ],
+)
+```
+
+```typescript TypeScript
+await collection.add({
+    ids: ["m1", "m2", "m3"],
+    embeddings: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    metadatas: [
+        { genres: ["action", "comedy"], year: 2020 },
+        { genres: ["drama"], year: 2021 },
+        { genres: ["action", "thriller"], year: 2022 },
+    ],
+});
+```
+
+```rust Rust
+use chroma::types::{Metadata, MetadataValue};
+
+let mut m = Metadata::new();
+m.insert(
+    "genres".into(),
+    MetadataValue::StringArray(vec!["action".to_string(), "comedy".to_string()]),
+);
+m.insert("year".into(), MetadataValue::Int(2020));
+
+// Also supports IntArray, FloatArray, and BoolArray
+let mut m2 = Metadata::new();
+m2.insert("scores".into(), MetadataValue::IntArray(vec![10, 20, 30]));
+```
+</CodeGroup>
+
+### Filtering Arrays
+
+Use `contains()` to check if a metadata array includes a value, and `not_contains()` to check that it does not.
+
+<CodeGroup>
+```python Python
+from chromadb import Search, K
+
+# Find all records where genres contains "action"
+search = Search().where(K("genres").contains("action"))
+
+# Exclude records with a specific tag
+search = Search().where(K("tags").not_contains("draft"))
+
+# Works with numbers and booleans too
+search = Search().where(K("scores").contains(42))
+
+# Combine with other filters
+search = Search().where(
+    K("genres").contains("action") &
+    (K("year") >= 2021)
+)
+```
+
+```typescript TypeScript
+import { Search, K } from 'chromadb';
+
+// Find all records where genres contains "action"
+const search1 = new Search().where(K("tags").contains("action"));
+
+// Exclude records with a specific tag
+const search2 = new Search().where(K("tags").notContains("draft"));
+
+// Works with numbers and booleans too
+const search3 = new Search().where(K("scores").contains(42));
+
+// Combine with other filters
+const search4 = new Search().where(
+    K("genres").contains("action")
+        .and(K("year").gte(2021))
+);
+```
+
+```rust Rust
+use chroma::types::{Key, SearchPayload};
+
+// Find all records where genres contains "action"
+let search = SearchPayload::default()
+    .r#where(Key::field("tags").contains_value("action"));
+
+// Exclude records with a specific tag
+let search = SearchPayload::default()
+    .r#where(Key::field("tags").not_contains_value("draft"));
+
+// Works with numbers and booleans too
+let search = SearchPayload::default()
+    .r#where(Key::field("scores").contains_value(42));
+
+// Combine with other filters
+let search = SearchPayload::default()
+    .r#where(
+        Key::field("genres").contains_value("action")
+            & Key::field("year").gte(2021i64),
+    );
+
+let results = collection.search(vec![search]).await?;
+```
+</CodeGroup>
+
+### Supported Array Types
+
+| Type | Python | TypeScript | Rust |
+|------|--------|------------|------|
+| String | `["a", "b"]` | `["a", "b"]` | `MetadataValue::StringArray(...)` |
+| Integer | `[1, 2, 3]` | `[1, 2, 3]` | `MetadataValue::IntArray(...)` |
+| Float | `[1.5, 2.5]` | `[1.5, 2.5]` | `MetadataValue::FloatArray(...)` |
+| Boolean | `[true, false]` | `[true, false]` | `MetadataValue::BoolArray(...)` |
+
+<Warning>
+The `$contains` value must be a scalar that matches the array's element type. All elements in an array must be the same type, and nested arrays are not supported.
+</Warning>
 
 ## Logical Operators
 
@@ -243,8 +390,8 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 - `$lte` - Less than or equal (numeric only)
 - `$in` - Value in list
 - `$nin` - Value not in list
-- `$contains` - String contains
-- `$not_contains` - String doesn't contain
+- `$contains` - On `#document`: substring search. On metadata fields: array contains value.
+- `$not_contains` - On `#document`: excludes by substring. On metadata fields: array does not contain value.
 - `$regex` - Regex match
 - `$not_regex` - Regex doesn't match
 - `$and` - Logical AND
@@ -268,11 +415,15 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 {"category": {"$in": ["tech", "ai"]}}       # Same as K("category").is_in(["tech", "ai"])
 {"status": {"$nin": ["draft", "deleted"]}}  # Same as K("status").not_in(["draft", "deleted"])
 
-# String operators (currently K.DOCUMENT only)
+# String operators (K.DOCUMENT only)
 {"#document": {"$contains": "API"}}         # Same as K.DOCUMENT.contains("API")
-# {"title": {"$not_contains": "draft"}}     # Not yet supported - metadata fields
 # {"email": {"$regex": ".*@example\\.com"}} # Not yet supported - metadata fields
 # {"version": {"$not_regex": "^beta"}}      # Not yet supported - metadata fields
+
+# Array membership operators (metadata fields)
+{"genres": {"$contains": "action"}}         # Same as K("genres").contains("action")
+{"genres": {"$not_contains": "draft"}}      # Same as K("genres").not_contains("draft")
+{"scores": {"$contains": 42}}               # Works with numbers
 
 # Logical operators
 {"$and": [
@@ -317,11 +468,15 @@ You can also use dictionary syntax instead of K expressions. This is useful when
 { category: { $in: ["tech", "ai"] } }       // Same as K("category").isIn(["tech", "ai"])
 { status: { $nin: ["draft", "deleted"] } }  // Same as K("status").notIn(["draft", "deleted"])
 
-// String operators (currently K.DOCUMENT only)
+// String operators (K.DOCUMENT only)
 { "#document": { $contains: "API" } }       // Same as K.DOCUMENT.contains("API")
-// { title: { $not_contains: "draft" } }    // Not yet supported - metadata fields
 // { email: { $regex: ".*@example\\.com" } } // Not yet supported - metadata fields
 // { version: { $not_regex: "^beta" } }     // Not yet supported - metadata fields
+
+// Array membership operators (metadata fields)
+{ genres: { $contains: "action" } }         // Same as K("genres").contains("action")
+{ genres: { $not_contains: "draft" } }      // Same as K("genres").notContains("draft")
+{ scores: { $contains: 42 } }               // Works with numbers
 
 // Logical operators
 {
@@ -488,38 +643,44 @@ K("score").gt(90);  // Undefined results when mixed types exist
 
 ### String Pattern Matching Limitations
 
-**Currently, `contains()`, `not_contains()`, `regex()`, and `not_regex()` operators only work on `K.DOCUMENT`**. These operators do not yet support metadata fields.
+**`regex()` and `not_regex()` only work on `K.DOCUMENT`**. These operators do not yet support metadata fields.
 
-Additionally, the pattern must contain at least 3 literal characters to ensure accurate results.
+`contains()` and `not_contains()` have different behavior depending on the field:
+- On `K.DOCUMENT`: substring search (the pattern must have at least 3 literal characters)
+- On metadata fields: array membership check (see [Array Metadata](#array-metadata) above)
+
+Substring matching on metadata scalar fields (e.g. checking if a string field contains a substring) is not yet supported.
 
 <CodeGroup>
 ```python Python
-# Currently supported - K.DOCUMENT only
+# Substring search on K.DOCUMENT - works
 K.DOCUMENT.contains("API")              # Works
 K.DOCUMENT.regex(r"v\d\.\d\.\d")       # Works
-K.DOCUMENT.contains("machine learning") # Works
 
-# NOT YET SUPPORTED - metadata fields
-K("title").contains("Python")           # Not supported yet
-K("description").regex(r"API.*")        # Not supported yet
+# Array membership on metadata fields - works
+K("tags").contains("action")            # Works - checks if array contains value
 
-# Pattern length requirements (for K.DOCUMENT)
+# Substring/regex on metadata scalar fields - NOT YET SUPPORTED
+# K("title").regex(r".*Python.*")       # Not supported yet
+
+# Pattern length requirements (for K.DOCUMENT substring search)
 K.DOCUMENT.contains("API")              # 3 characters - good
 K.DOCUMENT.contains("AI")               # Only 2 characters - may give incorrect results
 K.DOCUMENT.regex(r"\d+")                # No literal characters - may give incorrect results
 ```
 
 ```typescript TypeScript
-// Currently supported - K.DOCUMENT only
+// Substring search on K.DOCUMENT - works
 K.DOCUMENT.contains("API");              // Works
 K.DOCUMENT.regex("v\\d\\.\\d\\.\\d");    // Works
-K.DOCUMENT.contains("machine learning"); // Works
 
-// NOT YET SUPPORTED - metadata fields
-K("title").contains("Python");           // Not supported yet
-K("description").regex("API.*");         // Not supported yet
+// Array membership on metadata fields - works
+K("tags").contains("action");            // Works - checks if array contains value
 
-// Pattern length requirements (for K.DOCUMENT)
+// Substring/regex on metadata scalar fields - NOT YET SUPPORTED
+// K("title").regex(".*Python.*")        // Not supported yet
+
+// Pattern length requirements (for K.DOCUMENT substring search)
 K.DOCUMENT.contains("API");              // 3 characters - good
 K.DOCUMENT.contains("AI");               // Only 2 characters - may give incorrect results
 K.DOCUMENT.regex("\\d+");                // No literal characters - may give incorrect results
@@ -527,11 +688,11 @@ K.DOCUMENT.regex("\\d+");                // No literal characters - may give inc
 </CodeGroup>
 
 <Warning>
-String pattern matching currently only works on `K.DOCUMENT`. Support for metadata fields is not yet available. Also, patterns with fewer than 3 literal characters may return incorrect results.
+`regex()` and `not_regex()` currently only work on `K.DOCUMENT`. Substring matching on metadata scalar fields is not yet available. Also, patterns with fewer than 3 literal characters may return incorrect results.
 </Warning>
 
 <Callout>
-String pattern matching on metadata fields is not currently supported. Full support is coming in a future release, which will allow users to opt-in to additional indexes for string pattern matching on specific metadata fields.
+Substring and regex matching on metadata scalar fields is not currently supported. Full support is coming in a future release, which will allow users to opt-in to additional indexes for string pattern matching on specific metadata fields.
 </Callout>
 
 ## Complete Example
