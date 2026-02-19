@@ -16,11 +16,11 @@ use chroma_blockstore::{
 };
 use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
 use chroma_index::{
-    spann::{quantized_spann::QuantizedSpannIndexWriter, types::QuantizedSpannIds},
+    spann::quantized_spann::{QuantizedSpannIds, QuantizedSpannIndexWriter},
     usearch::{USearchIndex, USearchIndexProvider},
 };
 use chroma_storage::{local::LocalStorage, Storage};
-use chroma_types::{CollectionUuid, DataRecord, SpannIndexConfig};
+use chroma_types::{CollectionUuid, DataRecord, Quantization, SpannIndexConfig};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use uuid::Uuid;
@@ -117,7 +117,7 @@ fn spann_config() -> SpannIndexConfig {
         max_neighbors: Some(24),
 
         // Flag
-        quantize: true,
+        quantize: Quantization::FourBitRabitQWithUSearch,
 
         // Other
         ..Default::default()
@@ -477,6 +477,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .expect("Failed to open raw embedding reader");
 
             QuantizedSpannIndexWriter::<USearchIndex>::open(
+                BLOCK_SIZE_BYTES,
                 collection_id,
                 config.clone(),
                 dimension,
@@ -493,6 +494,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         } else {
             // Create new index
             QuantizedSpannIndexWriter::<USearchIndex>::create(
+                BLOCK_SIZE_BYTES,
                 collection_id,
                 config.clone(),
                 dimension,
@@ -610,6 +612,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 .expect("Failed to open raw embedding reader");
 
             let search_index = QuantizedSpannIndexWriter::<USearchIndex>::open(
+                BLOCK_SIZE_BYTES,
                 collection_id,
                 config.clone(),
                 dimension,
