@@ -1967,4 +1967,139 @@ describe("Schema", () => {
     const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.cmek).toBeNull();
   });
+
+  it("rawJSON is null for client-constructed schemas", () => {
+    const schema = new Schema();
+    expect(schema.rawJSON).toBeNull();
+  });
+
+  it("rawJSON is populated after deserializeFromJSON", async () => {
+    const schema = new Schema();
+    const json = schema.serializeToJSON();
+
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+    expect(deserialized).toBeDefined();
+    expect(deserialized!.rawJSON).not.toBeNull();
+    expect(deserialized!.rawJSON).toHaveProperty("defaults");
+    expect(deserialized!.rawJSON).toHaveProperty("keys");
+  });
+
+  it("rawJSON matches the original JSON passed to deserializeFromJSON", async () => {
+    const schema = new Schema();
+    const mockEf = new MockEmbedding("raw_json_test");
+    schema.createIndex(
+      new VectorIndexConfig({
+        embeddingFunction: mockEf,
+        space: "cosine",
+        hnsw: { ef_construction: 200, max_neighbors: 32 },
+      }),
+    );
+    schema.createIndex(
+      new SparseVectorIndexConfig({
+        embeddingFunction: new MockSparseEmbedding("raw_sparse"),
+        sourceKey: "text_field",
+      }),
+      "sparse_key",
+    );
+    schema.deleteIndex(new StringInvertedIndexConfig(), "no_index_field");
+
+    const json = schema.serializeToJSON();
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+
+    expect(deserialized!.rawJSON).toEqual(json);
+  });
+
+  it("rawJSON returns a deep copy (mutations do not affect stored value)", async () => {
+    const schema = new Schema();
+    const json = schema.serializeToJSON();
+
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+    const raw1 = deserialized!.rawJSON!;
+    const raw2 = deserialized!.rawJSON!;
+
+    // Should be equal but not the same reference
+    expect(raw1).toEqual(raw2);
+    expect(raw1).not.toBe(raw2);
+
+    // Mutating the returned copy should not affect the stored value
+    (raw1 as any).defaults = "mutated";
+    expect(deserialized!.rawJSON!.defaults).not.toBe("mutated");
+  });
+
+  it("rawJSON is not affected by subsequent schema modifications", async () => {
+    const schema = new Schema();
+    const json = schema.serializeToJSON();
+
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+    const rawBefore = deserialized!.rawJSON;
+
+    // The original json input should be preserved even though the
+    // deserialized schema object could theoretically be mutated
+    expect(rawBefore).toEqual(json);
+  });
+
+  it("rawJSON preserves extra fields from server response", async () => {
+    // Simulate a server response that contains fields the client doesn't know about
+    const serverJson = {
+      defaults: {
+        string: {
+          fts_index: { enabled: false, config: {} },
+          string_inverted_index: { enabled: true, config: {} },
+        },
+      },
+      keys: {},
+      some_future_field: "unexpected_value",
+      source_attached_function_id: "func-123",
+    };
+
+    const deserialized = await Schema.deserializeFromJSON(serverJson, client);
+    expect(deserialized).toBeDefined();
+
+    // rawJSON should contain the extra fields the client doesn't parse
+    const raw = deserialized!.rawJSON!;
+    expect(raw.some_future_field).toBe("unexpected_value");
+    expect(raw.source_attached_function_id).toBe("func-123");
+  });
+
+  it("rawJSON with CMEK", async () => {
+    const schema = new Schema();
+    const cmek = Cmek.gcp("projects/p/locations/l/keyRings/r/cryptoKeys/k");
+    schema.setCmek(cmek);
+
+    const json = schema.serializeToJSON();
+    const deserialized = await Schema.deserializeFromJSON(json, client);
+
+    const raw = deserialized!.rawJSON!;
+    expect(raw.cmek).toEqual({
+      gcp: "projects/p/locations/l/keyRings/r/cryptoKeys/k",
+    });
+  });
+
+  it("rawJSON is null after deserializeFromJSON with null input", async () => {
+    const deserialized = await Schema.deserializeFromJSON(null, client);
+    expect(deserialized).toBeUndefined();
+  });
+
+  it("rawJSON roundtrip: re-serialized schema differs from rawJSON when lossy", async () => {
+    // Simulate a server response with extra fields that serializeToJSON would drop
+    const serverJson = {
+      defaults: {
+        string: {
+          fts_index: { enabled: false, config: {} },
+          string_inverted_index: { enabled: true, config: {} },
+        },
+      },
+      keys: {},
+      source_attached_function_id: "func-abc",
+    };
+
+    const deserialized = await Schema.deserializeFromJSON(serverJson, client);
+
+    // rawJSON preserves the original
+    expect(deserialized!.rawJSON!.source_attached_function_id).toBe("func-abc");
+
+    // serializeToJSON does NOT include source_attached_function_id
+    const reserialized = deserialized!.serializeToJSON();
+    expect((reserialized as any).source_attached_function_id).toBeUndefined();
+  });
 });

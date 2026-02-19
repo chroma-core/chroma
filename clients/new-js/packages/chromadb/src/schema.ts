@@ -471,6 +471,7 @@ export class Schema {
   defaults: ValueTypes;
   keys: Record<string, ValueTypes>;
   cmek: Cmek | null;
+  private _rawJSON: Record<string, unknown> | null = null;
 
   constructor() {
     this.defaults = new ValueTypes();
@@ -478,6 +479,18 @@ export class Schema {
     this.cmek = null;
     this.initializeDefaults();
     this.initializeKeys();
+  }
+
+  /**
+   * Returns the raw JSON schema as received from the server, or null if the
+   * schema was constructed client-side rather than deserialized from a server
+   * response.
+   */
+  get rawJSON(): Record<string, unknown> | null {
+    if (this._rawJSON === null) {
+      return null;
+    }
+    return structuredClone(this._rawJSON);
   }
 
   /**
@@ -671,6 +684,7 @@ export class Schema {
 
     const data = json as JsonDict;
     const instance = Object.create(Schema.prototype) as Schema;
+    instance._rawJSON = structuredClone(data) as Record<string, unknown>;
     instance.defaults = await Schema.deserializeValueTypes(
       (data.defaults ?? {}) as Record<string, any>,
       client,
