@@ -7,6 +7,14 @@ This guide covers how to release chroma to PyPi
 ```
 __version__ = "A.B.C"
 ```
+
+In the `deployments` directory, update the version number for all the different templates:
+* `aws/chroma.cf.json`
+* `azure/chroma.tfvars.tf`
+* `azure/main.tf`
+* `gcp/chroma.tfvars.tf`
+* `gcp/main.tf`
+
 2. On Github, add the "release" label to this PR
 3. Once the PR checks pass, merge it. This will trigger Github Actions to release to PyPi, DockerHub, and the JS client. It may take a while before they complete.
 4. Once the PR is merged and the Github Actions complete, tag your commit SHA with the release version
@@ -18,3 +26,4 @@ git tag A.B.C <SHA>
 git push origin A.B.C
 ```
 6. On the right panel on Github, click on "Releases", and the new release should appear first. Make sure it is marked as "latest".
+7. Upload the updated AWS CF template to our public S3 bucket: s3://public.trychroma.com/cloudformation/latest/ 
