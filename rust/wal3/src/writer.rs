@@ -273,11 +273,6 @@ impl<
         ))
     }
 
-    pub async fn cursors(&self, options: CursorStoreOptions) -> Result<CursorStore, Error> {
-        let publisher = self.new_fragment_publisher.make_publisher().await?;
-        Ok(publisher.cursors(options).await)
-    }
-
     pub async fn manifest_and_witness(&self) -> Result<ManifestAndWitness, Error> {
         let inner = {
             // SAFETY(rescrv):  Mutex poisoning.
@@ -946,10 +941,14 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
     // NOTE(rescrv): Garbage collection cutoff is responsible for determining the crucial amount of
     // how much to garbage collect.  If there are no cursors, it must bail with an error.
     async fn garbage_collection_cutoff(&self) -> Result<LogPosition, Error> {
-        let cursors = self
-            .batch_manager
-            .cursors(CursorStoreOptions::default())
-            .await;
+        let storage = Arc::new(self.batch_manager.preferred_storage().await);
+        let prefix = self.batch_manager.preferred_prefix().await;
+        let cursors = CursorStore::new(
+            CursorStoreOptions::default(),
+            storage,
+            prefix,
+            "garbage_collection_cutoff".to_string(),
+        );
         // This will be None if there are no cursors, upholding the function invariant.
         let mut collect_up_to = None;
         for cursor_name in cursors.list().await? {
@@ -959,6 +958,12 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             };
             if cursor.position <= collect_up_to.unwrap_or(cursor.position) {
                 collect_up_to = Some(cursor.position);
+            }
+        }
+        // Also consider the intrinsic cursor stored in the manifest backend.
+        if let Some(intrinsic) = self.manifest_manager.load_intrinsic_cursor().await? {
+            if intrinsic <= collect_up_to.unwrap_or(intrinsic) {
+                collect_up_to = Some(intrinsic);
             }
         }
         let Some(collect_up_to) = collect_up_to else {

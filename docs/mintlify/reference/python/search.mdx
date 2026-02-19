@@ -6,58 +6,7 @@ title: "Search"
 
 Payload for hybrid search operations.
 
-Can be constructed directly or using builder pattern:
-
-Direct construction with expressions:
-    Search(
-        where=Key("status") == "active",
-        rank=Knn(query=[0.1, 0.2]),
-        limit=Limit(limit=10),
-        select=Select(keys=\{Key.DOCUMENT\})
-    )
-
-Direct construction with dicts:
-    Search(
-        where=\{"status": "active"\},
-        rank=\{"$knn": \{"query": [0.1, 0.2]\}\},
-        limit=10,  # Creates Limit(limit=10, offset=0)
-        select=["#document", "#score"]
-    )
-
-Builder pattern:
-    (Search()
-        .where(Key("status") == "active")
-        .rank(Knn(query=[0.1, 0.2]))
-        .limit(10)
-        .select(Key.DOCUMENT))
-
-Builder pattern with dicts:
-    (Search()
-        .where(\{"status": "active"\})
-        .rank(\{"$knn": \{"query": [0.1, 0.2]\}\})
-        .limit(10)
-        .select(Key.DOCUMENT))
-
-Filter by IDs:
-    Search().where(Key.ID.is_in(["id1", "id2", "id3"]))
-
-Combined with metadata filtering:
-    Search().where((Key.ID.is_in(["id1", "id2"])) & (Key("status") == "active"))
-
-With group_by:
-    (Search()
-        .rank(Knn(query=[0.1, 0.2]))
-        .group_by(GroupBy(
-            keys=[Key("category")],
-            aggregate=MinK(keys=[Key.SCORE], k=3)
-        )))
-
-Empty Search() is valid and will use defaults:
-    - where: None (no filtering)
-    - rank: None (no ranking - results ordered by default order)
-    - group_by: None (no grouping)
-    - limit: No limit
-    - select: Empty selection
+Can be constructed by directly providing the parameters, or by using the builder pattern.
 
 
 <span class="text-sm">Methods</span>
@@ -93,7 +42,7 @@ Note: You can use K as an alias for Key for more concise code.
 
 ## Knn
 
-KNN-based ranking
+KNN-based ranking expression.
 
 <span class="text-sm">Properties</span>
 
@@ -117,7 +66,7 @@ KNN-based ranking
 
 ## Rrf
 
-Reciprocal Rank Fusion for combining multiple ranking strategies.
+Reciprocal Rank Fusion for combining ranking strategies.
 
 RRF formula: score = -sum(weight_i / (k + rank_i)) for each ranking strategy
 The negative is used because RRF produces higher scores for better results,
@@ -215,18 +164,23 @@ Keep k records with maximum aggregate key values per group
 
 ## SearchResult
 
-Column-major response from the search API with conversion methods.
+Column-major response from the search API.
 
-Inherits from dict to maintain backward compatibility with existing code
-that treats SearchResult as a dictionary.
+Searches are performed in batches. Each batch is a list of records in columnar form.
 
-Structure:
-    - ids: List[List[str]] - Always present
-    - documents: List[Optional[List[Optional[str]]]] - Optional per payload
-    - embeddings: List[Optional[List[Optional[List[float]]]]] - Optional per payload
-    - metadatas: List[Optional[List[Optional[Dict[str, Any]]]]] - Optional per payload
-    - scores: List[Optional[List[Optional[float]]]] - Optional per payload
-    - select: List[List[str]] - Selected fields for each payload
+```python
+results = collection.search([search_1, search_2, ...])
+payloads = zip(results["ids"], results["documents"], results["metadatas"])
+```
+
+Each payload contains a field grouped per search payload, in column-major form.
+
+```python
+for payload in payloads:
+    ids, docs, metas = payload
+    for id, doc, meta in zip(ids, docs, metas):
+        print(id, doc, meta)
+```
 
 <span class="text-sm">Properties</span>
 

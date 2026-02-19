@@ -78,16 +78,16 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
             "embeddings must be a list of lists, a list of numpy arrays, a list of numbers, or None"
         )
 
-    return {
-        "ids": wrap(record_set["ids"]),
-        "documents": wrap(record_set["documents"])
+    return NormalizedRecordSet(
+        ids=wrap(record_set["ids"]),
+        documents=wrap(record_set["documents"])
         if record_set["documents"] is not None
         else None,
-        "metadatas": wrap(record_set["metadatas"])
+        metadatas=wrap(record_set["metadatas"])
         if record_set["metadatas"] is not None
         else None,
-        "embeddings": embedding_list,
-    }
+        embeddings=embedding_list,
+    )
 
 
 def check_metadata(
@@ -348,24 +348,25 @@ def ann_accuracy(
                 limit=Limit(limit=n_results),
             ).select_all()
             search_requests.append(search)
-        
-        # Call _search API
-        api = collection._client  # type: ignore
-        search_results = api._search(
-            collection_id=collection.id,
+
+        # Call search API
+        search_results = collection.search(
             searches=search_requests,
-            tenant='default_tenant',
-            database='default_database',
         )
-        
+
         # Convert search results to query-like format
-        query_results = cast(types.QueryResult, {
-            "ids": search_results["ids"],
-            "distances": search_results["scores"],  # scores is distances in search API
-            "embeddings": search_results["embeddings"],
-            "documents": search_results["documents"],
-            "metadatas": search_results["metadatas"],
-        })
+        query_results = cast(
+            types.QueryResult,
+            {
+                "ids": search_results["ids"],
+                "distances": search_results[
+                    "scores"
+                ],  # scores is distances in search API
+                "embeddings": search_results["embeddings"],
+                "documents": search_results["documents"],
+                "metadatas": search_results["metadatas"],
+            },
+        )
     else:
         query_results = collection.query(
             query_embeddings=query_embeddings if have_embeddings else None,

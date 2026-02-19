@@ -22,7 +22,7 @@ mod writer;
 
 pub use backoff::ExponentialBackoff;
 pub use copy::copy;
-pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness};
+pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness, INTRINSIC_CURSOR};
 pub use destroy::destroy;
 pub use gc::{Garbage, GarbageCollector};
 pub use interfaces::repl::{
@@ -863,9 +863,6 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     /// Returns a reader for this log writer.
     async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>>;
 
-    /// Returns a cursor store for this log writer.
-    async fn cursors(&self, options: CursorStoreOptions) -> Result<CursorStore, Error>;
-
     /// Perform phase 1 of garbage collection: compute garbage.
     async fn garbage_collect_phase1_compute_garbage(
         &self,
@@ -918,10 +915,6 @@ where
     async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>> {
         let reader = LogWriter::reader(self, options).await?;
         Some(Arc::new(reader) as Arc<dyn LogReaderTrait>)
-    }
-
-    async fn cursors(&self, options: CursorStoreOptions) -> Result<CursorStore, Error> {
-        LogWriter::cursors(self, options).await
     }
 
     async fn garbage_collect_phase1_compute_garbage(
@@ -1016,6 +1009,24 @@ pub trait LogReaderTrait: std::fmt::Debug + Send + Sync + 'static {
 
     /// Scrub the log to verify its integrity.
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>>;
+
+    /// Load the intrinsic cursor position.
+    ///
+    /// Returns `Ok(Some(position))` if an intrinsic cursor has been set, or `Ok(None)` if no
+    /// intrinsic cursor exists yet.
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error>;
+
+    /// Update the intrinsic cursor using an init-or-swap pattern.
+    ///
+    /// When `allow_rollback` is false and the existing cursor is already ahead of `position`, the
+    /// update is skipped and `Ok(None)` is returned.  Otherwise returns `Ok(Some(witness))`.
+    async fn update_intrinsic_cursor(
+        &self,
+        position: LogPosition,
+        epoch_us: u64,
+        writer: &str,
+        allow_rollback: bool,
+    ) -> Result<Option<CursorWitness>, Error>;
 }
 
 #[async_trait::async_trait]
@@ -1092,6 +1103,20 @@ impl<
 
     async fn scrub(&self, limits: reader::Limits) -> Result<ScrubSuccess, Vec<Error>> {
         LogReader::scrub(self, limits).await
+    }
+
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+        LogReader::load_intrinsic_cursor(self).await
+    }
+
+    async fn update_intrinsic_cursor(
+        &self,
+        position: LogPosition,
+        epoch_us: u64,
+        writer: &str,
+        allow_rollback: bool,
+    ) -> Result<Option<CursorWitness>, Error> {
+        LogReader::update_intrinsic_cursor(self, position, epoch_us, writer, allow_rollback).await
     }
 }
 

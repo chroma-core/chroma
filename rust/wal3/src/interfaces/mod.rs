@@ -12,9 +12,9 @@ use chroma_storage::{
 use chroma_types::Cmek;
 
 use crate::{
-    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
-    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness,
-    Snapshot, SnapshotPointer, StorageWrapper, ThrottleOptions,
+    CursorWitness, Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
+    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
+    StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -202,8 +202,6 @@ pub trait FragmentPublisher: Send + Sync + 'static {
 
     /// Reset the garbage on the preferred region.
     async fn reset_garbage(&self, options: &ThrottleOptions, e_tag: &ETag) -> Result<(), Error>;
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ///////////////////////////////////////// FragmentConsumer /////////////////////////////////////////
@@ -239,8 +237,6 @@ pub trait FragmentConsumer: Send + Sync + 'static {
         path: &str,
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error>;
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ////////////////////////////////////// ManifestManagerFactory //////////////////////////////////////
@@ -359,6 +355,13 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
 
     /// Destroy the named manifest.
     async fn destroy(&self) -> Result<(), Error>;
+
+    /// Load the intrinsic cursor position.
+    ///
+    /// Returns `Ok(Some(position))` if an intrinsic cursor has been set, or `Ok(None)` if no
+    /// intrinsic cursor exists yet.  GC uses this to include the intrinsic cursor in the minimum
+    /// of all cursors.
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error>;
 }
 
 ///////////////////////////////////////// ManifestConsumer /////////////////////////////////////////
@@ -370,6 +373,26 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
+
+    /// Update the intrinsic cursor using an init-or-swap pattern.
+    ///
+    /// Loads the current cursor value, then either initializes (if absent) or conditionally
+    /// updates (if present) the cursor to the new position.  When `allow_rollback` is false and
+    /// the existing cursor is already ahead of `position`, the update is skipped and `Ok(None)` is
+    /// returned.  Otherwise returns `Ok(Some(witness))` with the resulting cursor witness.
+    async fn update_intrinsic_cursor(
+        &self,
+        position: LogPosition,
+        epoch_us: u64,
+        writer: &str,
+        allow_rollback: bool,
+    ) -> Result<Option<CursorWitness>, Error>;
+
+    /// Load the intrinsic cursor position.
+    ///
+    /// Returns `Ok(Some(position))` if an intrinsic cursor has been set, or `Ok(None)` if no
+    /// intrinsic cursor exists yet.
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error>;
 }
 
 /////////////////////////////////////////////// utils //////////////////////////////////////////////

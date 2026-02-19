@@ -2,8 +2,10 @@ from concurrent.futures import ThreadPoolExecutor
 import uuid
 from chromadb.api import ClientAPI
 from chromadb.errors import ChromaError, UniqueConstraintError
+from chromadb.test.conftest import multi_region_test
 
 
+@multi_region_test
 def test_duplicate_collection_create(
     client: ClientAPI,
 ) -> None:
@@ -42,6 +44,7 @@ def test_not_existing_collection_delete(
         assert "does not exist" in e.args[0]
 
 
+# TODO: Spanner emulator only supports one transaction at a time
 def test_multithreaded_get_or_create(client: ClientAPI) -> None:
     N_THREADS = 50
     new_name = str(uuid.uuid4())

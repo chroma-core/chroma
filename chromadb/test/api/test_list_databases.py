@@ -4,7 +4,7 @@ from chromadb.test.conftest import (
     ClientFactories,
 )
 import hypothesis.strategies as st
-import os
+from chromadb.test.conftest import MULTI_REGION_ENABLED
 
 
 def test_list_databases(client_factories: ClientFactories) -> None:
@@ -16,10 +16,7 @@ def test_list_databases(client_factories: ClientFactories) -> None:
         admin_client.create_database(f"test_list_databases_{i}")
 
     databases = admin_client.list_databases()
-    # TODO(tanujnay112): Derive this to a global in conftest.py
-    total_default_databases = (
-        2 if os.getenv("MULTI_REGION") == "true" else 1
-    )  # 1 default db for each topology (single region is a topology)
+    total_default_databases = 2 if MULTI_REGION_ENABLED else 1
     assert len(databases) == 10 + total_default_databases
 
     for i in range(10):
@@ -27,7 +24,7 @@ def test_list_databases(client_factories: ClientFactories) -> None:
 
     assert any(d["name"] == "default_database" for d in databases)
 
-    if os.getenv("MULTI_REGION") == "true":
+    if MULTI_REGION_ENABLED:
         assert any(d["name"] == "tilt-spanning+default_database" for d in databases)
 
 
