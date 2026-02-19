@@ -16,6 +16,7 @@ use thiserror::Error;
 /// - `start_log_offset_id`: The offset id of the first log to read
 /// - `maximum_fetch_count`: The maximum number of logs to fetch in total
 /// - `collection_uuid`: The uuid of the collection where the fetched logs should belong
+/// - `fetch_log_concurrency`: The maximum number of concurrent log fetch requests
 ///
 /// # Inputs
 /// - No input is required
@@ -36,6 +37,7 @@ pub struct FetchLogOperator {
     pub collection_uuid: CollectionUuid,
     pub tenant: String,
     pub database_name: DatabaseName,
+    pub fetch_log_concurrency: usize,
 }
 
 type FetchLogInput = ();
@@ -104,7 +106,7 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             .step_by(window_size)
             .map(|x| (x, std::cmp::min(x + window_size as u64, limit_offset)))
             .collect::<Vec<_>>();
-        let sema = Arc::new(tokio::sync::Semaphore::new(10));
+        let sema = Arc::new(tokio::sync::Semaphore::new(self.fetch_log_concurrency));
         let batch_readers = ranges
             .into_iter()
             .map(|(start, limit)| {
@@ -188,6 +190,7 @@ mod tests {
             collection_uuid,
             tenant: "test-tenant".to_string(),
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
+            fetch_log_concurrency: 10,
         };
 
         let logs = fetch_log_operator
@@ -214,6 +217,7 @@ mod tests {
             collection_uuid,
             tenant: "test-tenant".to_string(),
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
+            fetch_log_concurrency: 10,
         };
 
         let logs = fetch_log_operator

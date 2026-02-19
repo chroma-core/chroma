@@ -251,72 +251,72 @@ export class SparseVectorIndexConfig {
 }
 
 export class FtsIndexType {
-  constructor(public enabled: boolean, public config: FtsIndexConfig) {}
+  constructor(public enabled: boolean, public config: FtsIndexConfig) { }
 }
 
 export class StringInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: StringInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class VectorIndexType {
-  constructor(public enabled: boolean, public config: VectorIndexConfig) {}
+  constructor(public enabled: boolean, public config: VectorIndexConfig) { }
 }
 
 export class SparseVectorIndexType {
   constructor(
     public enabled: boolean,
     public config: SparseVectorIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class IntInvertedIndexType {
-  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) {}
+  constructor(public enabled: boolean, public config: IntInvertedIndexConfig) { }
 }
 
 export class FloatInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: FloatInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class BoolInvertedIndexType {
   constructor(
     public enabled: boolean,
     public config: BoolInvertedIndexConfig,
-  ) {}
+  ) { }
 }
 
 export class StringValueType {
   constructor(
     public ftsIndex: FtsIndexType | null = null,
     public stringInvertedIndex: StringInvertedIndexType | null = null,
-  ) {}
+  ) { }
 }
 
 export class FloatListValueType {
-  constructor(public vectorIndex: VectorIndexType | null = null) {}
+  constructor(public vectorIndex: VectorIndexType | null = null) { }
 }
 
 export class SparseVectorValueType {
-  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) {}
+  constructor(public sparseVectorIndex: SparseVectorIndexType | null = null) { }
 }
 
 export class IntValueType {
-  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) {}
+  constructor(public intInvertedIndex: IntInvertedIndexType | null = null) { }
 }
 
 export class FloatValueType {
   constructor(
     public floatInvertedIndex: FloatInvertedIndexType | null = null,
-  ) {}
+  ) { }
 }
 
 export class BoolValueType {
-  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) {}
+  constructor(public boolInvertedIndex: BoolInvertedIndexType | null = null) { }
 }
 
 export class ValueTypes {
@@ -351,11 +351,11 @@ const cloneObject = <T>(value: T): T => {
   return Array.isArray(value)
     ? (value.map((item) => cloneObject(item)) as T)
     : (Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([k, v]) => [
-          k,
-          cloneObject(v),
-        ]),
-      ) as T);
+      Object.entries(value as Record<string, unknown>).map(([k, v]) => [
+        k,
+        cloneObject(v),
+      ]),
+    ) as T);
 };
 
 const resolveEmbeddingFunctionName = (
@@ -512,35 +512,48 @@ export class Schema {
       );
     }
 
-    if (keyProvided && key && (key === EMBEDDING_KEY || key === DOCUMENT_KEY)) {
+    // Disallow using special internal key #embedding
+    if (keyProvided && key && key === EMBEDDING_KEY) {
       throw new Error(
-        `Cannot create index on special key '${key}'. These keys are managed automatically by the system.`,
+        `Cannot create index on special key '${key}'. This key is managed automatically by the system. Invoke createIndex(new VectorIndexConfig(...)) without specifying a key to configure the vector index globally.`,
       );
     }
 
+    // Only allow #document with FtsIndexConfig
+    if (keyProvided && key === DOCUMENT_KEY && !(config instanceof FtsIndexConfig)) {
+      throw new Error(
+        `Cannot create index on special key '${key}' with this config. Only FtsIndexConfig is allowed for #document.`,
+      );
+    }
+
+    // Disallow any key starting with # (except #document which allows FTS)
+    if (keyProvided && key && key.startsWith("#") && key !== DOCUMENT_KEY) {
+      throw new Error(
+        "key cannot begin with '#'. Keys starting with '#' are reserved for system use.",
+      );
+    }
+
+    // Special handling for vector index
     if (config instanceof VectorIndexConfig) {
       if (!keyProvided) {
         this.setVectorIndexConfig(config);
         return this;
       }
       throw new Error(
-        "Vector index cannot be enabled on specific keys. Use createIndex(config=VectorIndexConfig(...)) without specifying a key to configure the vector index globally.",
+        "Vector index cannot be enabled on specific keys. Use createIndex(new VectorIndexConfig(...)) without specifying a key to configure the vector index globally.",
       );
     }
 
-    if (config instanceof FtsIndexConfig) {
-      if (!keyProvided) {
-        this.setFtsIndexConfig(config);
-        return this;
-      }
+    // FTS index is only allowed on #document key
+    if (config instanceof FtsIndexConfig && (!keyProvided || key !== DOCUMENT_KEY)) {
       throw new Error(
-        "FTS index cannot be enabled on specific keys. Use createIndex(config=FtsIndexConfig(...)) without specifying a key to configure the FTS index globally.",
+        "FTS index can only be enabled on #document key. Use createIndex(new FtsIndexConfig(), '#document')",
       );
     }
 
     if (config instanceof SparseVectorIndexConfig && !keyProvided) {
       throw new Error(
-        "Sparse vector index must be created on a specific key. Please specify a key using: createIndex(config=SparseVectorIndexConfig(...), key='your_key')",
+        "Sparse vector index must be created on a specific key. Please specify a key using: createIndex(new SparseVectorIndexConfig(...), 'your_key')",
       );
     }
 
@@ -571,24 +584,43 @@ export class Schema {
       );
     }
 
-    if (keyProvided && key && (key === EMBEDDING_KEY || key === DOCUMENT_KEY)) {
+    // Disallow using special internal key #embedding
+    if (keyProvided && key && key === EMBEDDING_KEY) {
       throw new Error(
-        `Cannot delete index on special key '${key}'. These keys are managed automatically by the system.`,
+        "Cannot modify #embedding. Currently not supported",
       );
     }
 
+    // Only allow #document with FtsIndexConfig (to disable FTS)
+    if (keyProvided && key === DOCUMENT_KEY && !(config instanceof FtsIndexConfig)) {
+      throw new Error(
+        `Cannot delete index on special key '${key}' with this config. Only FtsIndexConfig is allowed for #document.`,
+      );
+    }
+
+    // Disallow any key starting with # (except #document which allows FTS deletion)
+    if (keyProvided && key && key.startsWith("#") && key !== DOCUMENT_KEY) {
+      throw new Error(
+        "key cannot begin with '#'. Keys starting with '#' are reserved for system use.",
+      );
+    }
+
+    // TODO: Consider removing these checks in the future to allow disabling vector and sparse vector indexes
+    // Temporarily disallow deleting vector index (both globally and per-key)
     if (config instanceof VectorIndexConfig) {
       throw new Error("Deleting vector index is not currently supported.");
     }
 
-    if (config instanceof FtsIndexConfig) {
-      throw new Error("Deleting FTS index is not currently supported.");
-    }
-
+    // Temporarily disallow deleting sparse vector index (both globally and per-key)
     if (config instanceof SparseVectorIndexConfig) {
       throw new Error(
         "Deleting sparse vector index is not currently supported.",
       );
+    }
+
+    // FTS deletion is only allowed on #document key
+    if (config instanceof FtsIndexConfig && (!keyProvided || key !== DOCUMENT_KEY)) {
+      throw new Error("Deleting FTS index is only supported on #document key.");
     }
 
     // TODO: Consider removing this check in the future to allow disabling all indexes for a key
@@ -697,26 +729,6 @@ export class Schema {
         hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
         spann: config.spann ? cloneObject(config.spann) : null,
       }),
-    );
-  }
-
-  private setFtsIndexConfig(config: FtsIndexConfig): void {
-    const defaultsString = ensureStringValueType(this.defaults);
-    const currentDefaultsFts =
-      defaultsString.ftsIndex ?? new FtsIndexType(false, new FtsIndexConfig());
-    defaultsString.ftsIndex = new FtsIndexType(
-      currentDefaultsFts.enabled,
-      config,
-    );
-
-    const documentValueTypes = ensureValueTypes(this.keys[DOCUMENT_KEY]);
-    this.keys[DOCUMENT_KEY] = documentValueTypes;
-    const overrideString = ensureStringValueType(documentValueTypes);
-    const currentOverrideFts =
-      overrideString.ftsIndex ?? new FtsIndexType(true, new FtsIndexConfig());
-    overrideString.ftsIndex = new FtsIndexType(
-      currentOverrideFts.enabled,
-      config,
     );
   }
 
@@ -1075,8 +1087,7 @@ export class Schema {
       !embeddingFunction.supportedSpaces().includes(resolvedSpace)
     ) {
       console.warn(
-        `Space '${resolvedSpace}' is not supported by embedding function '${
-          resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"
+        `Space '${resolvedSpace}' is not supported by embedding function '${resolveEmbeddingFunctionName(embeddingFunction) ?? "unknown"
         }'. Supported spaces: ${embeddingFunction
           .supportedSpaces()
           .join(", ")}`,

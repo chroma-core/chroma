@@ -13,9 +13,9 @@ use uuid::Uuid;
 
 use crate::interfaces::{ManifestConsumer, ManifestPublisher, PositionWitness};
 use crate::{
-    Error, ExponentialBackoff, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
-    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, ManifestWitness, Snapshot,
-    SnapshotPointer,
+    Cursor, CursorWitness, Error, ExponentialBackoff, Fragment, FragmentIdentifier, FragmentSeqNo,
+    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness,
+    ManifestWitness, Snapshot, SnapshotPointer,
 };
 
 pub struct ManifestManager {
@@ -118,10 +118,18 @@ impl ManifestManager {
                 let mutations = mutations.clone();
                 Box::pin(async move {
                     tx.buffer_write(mutations);
-                    Ok::<_, Error>(())
+                    Ok::<_, google_cloud_spanner::session::SessionError>(())
                 })
             })
-            .await?;
+            .await
+            .map_err(|err| match err {
+                google_cloud_spanner::session::SessionError::GRPC(status)
+                    if status.code() == Code::AlreadyExists =>
+                {
+                    Error::LogContentionRetry
+                }
+                err => err.into(),
+            })?;
         Ok(())
     }
 
@@ -320,23 +328,25 @@ impl ManifestManager {
         Ok(Some((manifest, manifest_witness)))
     }
 
-    /// Returns all log_ids from the manifests table that have fragments in the specified region.
+    /// Returns log_ids from the manifests table that have fragments in the specified region and
+    /// have a spread between their intrinsic cursor and their enumeration_offset.
     ///
-    /// These are logs that exist in the system and may need compaction.
+    /// A spread indicates uncompacted data: the intrinsic cursor has not caught up to the
+    /// enumeration_offset.  Logs with no intrinsic cursor are included as they have never been
+    /// compacted.
     pub async fn get_dirty_logs(
         spanner: &Client,
         region: &str,
-    ) -> Result<Vec<(Uuid, LogPosition)>, Error> {
+    ) -> Result<Vec<(Uuid, LogPosition, LogPosition)>, Error> {
         let mut stmt = Statement::new(
             "
-            SELECT DISTINCT manifests.log_id, manifests.enumeration_offset
+            SELECT DISTINCT manifests.log_id, manifest_regions.intrinsic_cursor, manifests.enumeration_offset
             FROM manifests
-                INNER JOIN fragments
-                ON manifests.log_id = fragments.log_id
-                INNER JOIN fragment_regions
-                ON fragments.log_id = fragment_regions.log_id
-                    AND fragments.ident = fragment_regions.ident
-            WHERE fragment_regions.region = @region
+                INNER JOIN manifest_regions
+                ON manifests.log_id = manifest_regions.log_id
+            WHERE manifest_regions.region = @region
+                AND (manifest_regions.intrinsic_cursor IS NULL
+                    OR manifest_regions.intrinsic_cursor < manifests.enumeration_offset)
             ",
         );
         stmt.add_param("region", &region);
@@ -345,18 +355,27 @@ impl ManifestManager {
         let mut results = vec![];
         while let Some(row) = reader.next().await? {
             let log_id_str = row.column_by_name::<String>("log_id")?;
+            let intrinsic_cursor = row.column_by_name::<i64>("intrinsic_cursor")?;
             let enumeration_offset = row.column_by_name::<i64>("enumeration_offset")?;
             let Ok(log_id) = Uuid::parse_str(&log_id_str) else {
                 tracing::warn!("invalid log_id in manifests table: {log_id_str}");
                 continue;
             };
+            if intrinsic_cursor < 0 {
+                tracing::warn!("negative intrinsic_cursor {intrinsic_cursor} for log_id {log_id}");
+                continue;
+            }
             if enumeration_offset < 0 {
                 tracing::warn!(
                     "negative enumeration_offset {enumeration_offset} for log_id {log_id}"
                 );
                 continue;
             }
-            results.push((log_id, LogPosition::from_offset(enumeration_offset as u64)));
+            results.push((
+                log_id,
+                LogPosition::from_offset(intrinsic_cursor as u64),
+                LogPosition::from_offset(enumeration_offset as u64),
+            ));
         }
         Ok(results)
     }
@@ -884,6 +903,27 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
     /// FragmentPublisher shutdown.
     fn shutdown(&self) {}
+
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+        let mut stmt = Statement::new(
+            "SELECT intrinsic_cursor FROM manifest_regions \
+             WHERE log_id = @log_id AND region = @region",
+        );
+        stmt.add_param("log_id", &self.log_id.to_string());
+        stmt.add_param("region", &self.local_region);
+        let mut tx = self.spanner.read_only_transaction().await?;
+        let mut reader = tx.query(stmt).await?;
+        if let Some(row) = reader.next().await? {
+            let cursor = row.column_by_name::<i64>("intrinsic_cursor")?;
+            if cursor > 0 {
+                Ok(Some(LogPosition::from_offset(cursor as u64)))
+            } else {
+                Ok(None)
+            }
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -902,6 +942,68 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error> {
         Self::load(&self.spanner, self.log_id, &self.local_region).await
     }
+
+    async fn update_intrinsic_cursor(
+        &self,
+        position: LogPosition,
+        epoch_us: u64,
+        writer: &str,
+        allow_rollback: bool,
+    ) -> Result<Option<CursorWitness>, Error> {
+        let log_id = self.log_id.to_string();
+        let local_region = self.local_region.clone();
+        let new_offset = position.offset() as i64;
+        let writer = writer.to_string();
+        let (_, result) = self
+            .spanner
+            .read_write_transaction(|tx| {
+                let log_id = log_id.clone();
+                let local_region = local_region.clone();
+                let writer = writer.clone();
+                Box::pin(async move {
+                    let mut stmt = Statement::new(
+                        "SELECT intrinsic_cursor FROM manifest_regions \
+                         WHERE log_id = @log_id AND region = @region",
+                    );
+                    stmt.add_param("log_id", &log_id);
+                    stmt.add_param("region", &local_region);
+                    let mut reader = tx.query(stmt).await?;
+                    let current = if let Some(row) = reader.next().await? {
+                        row.column_by_name::<i64>("intrinsic_cursor")?
+                    } else {
+                        return Ok::<
+                            Result<Option<CursorWitness>, Error>,
+                            google_cloud_spanner::client::Error,
+                        >(Err(Error::UninitializedLog));
+                    };
+                    if !allow_rollback && current > new_offset {
+                        return Ok::<
+                            Result<Option<CursorWitness>, Error>,
+                            google_cloud_spanner::client::Error,
+                        >(Ok(None));
+                    }
+                    tx.buffer_write(vec![update(
+                        "manifest_regions",
+                        &["log_id", "region", "intrinsic_cursor"],
+                        &[&log_id, &local_region, &new_offset],
+                    )]);
+                    let cursor = Cursor {
+                        position: LogPosition::from_offset(new_offset as u64),
+                        epoch_us,
+                        writer,
+                    };
+                    Ok::<Result<Option<CursorWitness>, Error>, google_cloud_spanner::client::Error>(
+                        Ok(Some(CursorWitness::default_etag_with_cursor(cursor))),
+                    )
+                })
+            })
+            .await?;
+        result
+    }
+
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+        ManifestPublisher::load_intrinsic_cursor(self).await
+    }
 }
 
 #[cfg(test)]
@@ -919,8 +1021,10 @@ mod tests {
     use uuid::Uuid;
 
     use super::ManifestManager;
+    use crate::interfaces::ManifestConsumer;
     use crate::interfaces::{ManifestPublisher, PositionWitness};
     use crate::{Error, FragmentUuid, LogPosition, Manifest, ManifestWitness};
+    use crate::{Fragment, FragmentIdentifier};
 
     fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
         let mut config = SessionConfig::default();
@@ -1081,7 +1185,7 @@ mod tests {
             Setsum::default(),
         ));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
         assert!(
             result.unwrap(),
@@ -1111,7 +1215,7 @@ mod tests {
             Setsum::default(),
         ));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
         assert!(
             !result.unwrap(),
@@ -1240,7 +1344,7 @@ mod tests {
             LogPosition::from_offset(messages_len),
             Setsum::default(),
         ));
-        let head_result = manager.manifest_head(&witness).await;
+        let head_result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(head_result.is_ok(), "manifest_head failed");
         assert!(
             head_result.unwrap(),
@@ -1319,7 +1423,7 @@ mod tests {
             LogPosition::from_offset(60),
             Setsum::default(),
         ));
-        let head_result = manager.manifest_head(&witness).await;
+        let head_result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(head_result.is_ok() && head_result.unwrap());
 
         println!(
@@ -1734,7 +1838,6 @@ mod tests {
             num_bytes: 1000,
         };
 
-        use crate::interfaces::ManifestConsumer;
         let result =
             <ManifestManager as ManifestConsumer<FragmentUuid>>::snapshot_load(&manager, &pointer)
                 .await;
@@ -1841,10 +1944,10 @@ mod tests {
                 .expect("manifest should exist");
 
         // Verify witness is valid before GC.
-        let is_valid_before = manager
-            .manifest_head(&witness_before_gc)
-            .await
-            .expect("manifest_head failed");
+        let is_valid_before =
+            ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness_before_gc)
+                .await
+                .expect("manifest_head failed");
         assert!(
             is_valid_before,
             "witness should be valid before GC: {:?}",
@@ -1871,10 +1974,10 @@ mod tests {
                 .expect("apply_garbage failed");
 
             // After GC, the old witness should be INVALID because `collected` changed.
-            let is_valid_after = manager
-                .manifest_head(&witness_before_gc)
-                .await
-                .expect("manifest_head failed");
+            let is_valid_after =
+                ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness_before_gc)
+                    .await
+                    .expect("manifest_head failed");
             assert!(
                 !is_valid_after,
                 "witness from before GC should be INVALID after GC. \
@@ -1890,10 +1993,10 @@ mod tests {
                     .expect("load failed")
                     .expect("manifest should exist");
 
-            let is_new_valid = manager
-                .manifest_head(&witness_after_gc)
-                .await
-                .expect("manifest_head failed");
+            let is_new_valid =
+                ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness_after_gc)
+                    .await
+                    .expect("manifest_head failed");
             assert!(
                 is_new_valid,
                 "new witness should be valid after GC: {:?}",
@@ -1960,7 +2063,7 @@ mod tests {
             wrong_collected,
         ));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         assert!(result.is_ok(), "manifest_head failed: {:?}", result.err());
         assert!(
             !result.unwrap(),
@@ -2068,7 +2171,7 @@ mod tests {
         let manager = ManifestManager::new(Arc::new(client), "dummy".to_string(), log_id);
         let witness = ManifestWitness::ETag(crate::interfaces::ETag("test-etag".to_string()));
 
-        let result = manager.manifest_head(&witness).await;
+        let result = ManifestConsumer::<FragmentUuid>::manifest_head(&manager, &witness).await;
         match result {
             Err(Error::Internal { .. }) => {
                 println!(
@@ -2088,8 +2191,6 @@ mod tests {
     // via publish_fragment.
     #[tokio::test]
     async fn test_k8s_mcmr_integration_init_fragments_visible_to_gc() {
-        use crate::{Fragment, FragmentIdentifier};
-
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };

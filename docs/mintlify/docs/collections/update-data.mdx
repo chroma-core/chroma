@@ -45,6 +45,8 @@ collection.update(
 
 If an `id` is not found in the collection, an error will be logged and the update will be ignored. If `documents` are supplied without corresponding `embeddings`, the embeddings will be recomputed with the collection's embedding function.
 
+Metadata values can include arrays — see [Adding Data](/docs/collections/add-data#metadata) for supported metadata types.
+
 If the supplied `embeddings` are not the same dimension as the collection, an exception will be raised.
 
 Chroma also supports an `upsert` operation, which updates existing items, or adds them if they don't yet exist.

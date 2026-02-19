@@ -1,4 +1,4 @@
-use crate::table::MetadataTable;
+use crate::table::{EmbeddingMetadataArray, MetadataTable};
 use chroma_error::{ChromaError, WrappedSqlxError};
 use chroma_types::{CollectionUuid, Metadata, MetadataValue, UpdateMetadata};
 use sea_query::{Expr, Iden, InsertStatement, OnConflict, SimpleExpr, SqliteQueryBuilder};
@@ -88,11 +88,13 @@ fn construct_upsert_metadata_stmt<
             MetadataValue::SparseVector(_) => {
                 todo!("Sparse vector is not yet supported for local")
             }
+            // Array types are routed to the separate embedding_metadata_array
+            // table and should never appear here.
             MetadataValue::BoolArray(_)
             | MetadataValue::IntArray(_)
             | MetadataValue::FloatArray(_)
             | MetadataValue::StringArray(_) => {
-                todo!("Array metadata values are not yet supported for local")
+                unreachable!("Array metadata values are written to embedding_metadata_array")
             }
         })?;
     }
@@ -163,6 +165,192 @@ where
     let (sql, values) = Query::delete()
         .from_table(Table::table_name())
         .and_where(Expr::col(Table::id_column()).eq(id))
+        .to_owned()
+        .build_sqlx(SqliteQueryBuilder);
+
+    sqlx::query_with(&sql, values)
+        .execute(conn)
+        .await
+        .map_err(WrappedSqlxError)?;
+
+    Ok(())
+}
+
+// ── Array metadata helpers (embedding_metadata_array table) ──────────
+
+/// Upsert exploded array metadata values to `embedding_metadata_array`.
+///
+/// For each array `MetadataValue`, every element is inserted as a separate
+/// row.  Before inserting, any existing rows for the same `(id, key)` pairs
+/// are deleted so that updates replace old arrays.
+///
+/// Scalar values in `metadata` are silently skipped — they belong in the
+/// regular `embedding_metadata` table.
+pub async fn upsert_array_metadata<Id: Into<SimpleExpr> + Clone, C>(
+    conn: &mut C,
+    id: Id,
+    metadata: &Metadata,
+) -> Result<(), MetadataError>
+where
+    for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+{
+    let array_keys: Vec<&String> = metadata
+        .iter()
+        .filter(|(_, v)| {
+            matches!(
+                v,
+                MetadataValue::BoolArray(_)
+                    | MetadataValue::IntArray(_)
+                    | MetadataValue::FloatArray(_)
+                    | MetadataValue::StringArray(_)
+            )
+        })
+        .map(|(k, _)| k)
+        .collect();
+
+    if array_keys.is_empty() {
+        return Ok(());
+    }
+
+    // Delete old exploded rows for these keys.
+    let (del_sql, del_vals) = Query::delete()
+        .from_table(EmbeddingMetadataArray::Table)
+        .and_where(
+            Expr::col(EmbeddingMetadataArray::Id).eq(id.clone()).and(
+                Expr::col(EmbeddingMetadataArray::Key)
+                    .is_in(array_keys.iter().map(|k| k.as_str()).collect::<Vec<_>>()),
+            ),
+        )
+        .to_owned()
+        .build_sqlx(SqliteQueryBuilder);
+
+    sqlx::query_with(&del_sql, del_vals)
+        .execute(&mut *conn)
+        .await
+        .map_err(WrappedSqlxError)?;
+
+    let mut stmt = Query::insert();
+    stmt.into_table(EmbeddingMetadataArray::Table).columns([
+        EmbeddingMetadataArray::Id,
+        EmbeddingMetadataArray::Key,
+        EmbeddingMetadataArray::StringValue,
+        EmbeddingMetadataArray::IntValue,
+        EmbeddingMetadataArray::FloatValue,
+        EmbeddingMetadataArray::BoolValue,
+    ]);
+
+    let mut has_rows = false;
+    for (key, val) in metadata {
+        match val {
+            MetadataValue::BoolArray(arr) => {
+                for b in arr {
+                    stmt.values([
+                        id.clone().into(),
+                        key.clone().into(),
+                        String::null().into(),
+                        i32::null().into(),
+                        f32::null().into(),
+                        (*b).into(),
+                    ])?;
+                    has_rows = true;
+                }
+            }
+            MetadataValue::IntArray(arr) => {
+                for i in arr {
+                    stmt.values([
+                        id.clone().into(),
+                        key.clone().into(),
+                        String::null().into(),
+                        (*i).into(),
+                        f32::null().into(),
+                        bool::null().into(),
+                    ])?;
+                    has_rows = true;
+                }
+            }
+            MetadataValue::FloatArray(arr) => {
+                for f in arr {
+                    stmt.values([
+                        id.clone().into(),
+                        key.clone().into(),
+                        String::null().into(),
+                        i32::null().into(),
+                        (*f).into(),
+                        bool::null().into(),
+                    ])?;
+                    has_rows = true;
+                }
+            }
+            MetadataValue::StringArray(arr) => {
+                for s in arr {
+                    stmt.values([
+                        id.clone().into(),
+                        key.clone().into(),
+                        s.clone().into(),
+                        i32::null().into(),
+                        f32::null().into(),
+                        bool::null().into(),
+                    ])?;
+                    has_rows = true;
+                }
+            }
+            // Skip scalars — they go in the regular metadata table.
+            _ => {}
+        }
+    }
+
+    if has_rows {
+        let (sql, values) = stmt.build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(conn)
+            .await
+            .map_err(WrappedSqlxError)?;
+    }
+
+    Ok(())
+}
+
+/// Delete all array metadata rows for a given embedding id.
+pub async fn delete_array_metadata<Id: Into<SimpleExpr> + Clone, C>(
+    conn: &mut C,
+    id: Id,
+) -> Result<(), MetadataError>
+where
+    for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+{
+    let (sql, values) = Query::delete()
+        .from_table(EmbeddingMetadataArray::Table)
+        .and_where(Expr::col(EmbeddingMetadataArray::Id).eq(id))
+        .to_owned()
+        .build_sqlx(SqliteQueryBuilder);
+
+    sqlx::query_with(&sql, values)
+        .execute(conn)
+        .await
+        .map_err(WrappedSqlxError)?;
+
+    Ok(())
+}
+
+/// Delete array metadata rows for specific keys that are being set to None.
+pub async fn delete_array_metadata_keys<Id: Into<SimpleExpr> + Clone, C>(
+    conn: &mut C,
+    id: Id,
+    keys: &[String],
+) -> Result<(), MetadataError>
+where
+    for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+{
+    if keys.is_empty() {
+        return Ok(());
+    }
+    let (sql, values) = Query::delete()
+        .from_table(EmbeddingMetadataArray::Table)
+        .and_where(
+            Expr::col(EmbeddingMetadataArray::Id)
+                .eq(id)
+                .and(Expr::col(EmbeddingMetadataArray::Key).is_in(keys.to_vec())),
+        )
         .to_owned()
         .build_sqlx(SqliteQueryBuilder);
 

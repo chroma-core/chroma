@@ -11,10 +11,7 @@ use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
 use crate::interfaces::{FragmentConsumer, FragmentUploader, UploadResult};
-use crate::{
-    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentUuid,
-    LogPosition, LogWriterOptions,
-};
+use crate::{Error, Fragment, FragmentIdentifier, FragmentUuid, LogPosition, LogWriterOptions};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ReplicatedFragmentOptions {
@@ -511,6 +508,16 @@ impl FragmentConsumer for FragmentReader {
         crate::interfaces::s3::parse_parquet(parquet, Some(starting_log_position)).await
     }
 
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        // NOTE(rescrv):  ReplciatedFragmentManager deals with relatives; we therefore pass an
+        // offset.
+        crate::interfaces::s3::parse_parquet_fast(parquet, Some(starting_log_position)).await
+    }
+
     async fn read_fragment(
         &self,
         path: &str,
@@ -564,12 +571,6 @@ impl FragmentConsumer for FragmentReader {
         } else {
             Ok(None)
         }
-    }
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
-        let storage = Arc::new(self.storages[self.preferred].storage.clone());
-        let prefix = self.storages[self.preferred].prefix.clone();
-        CursorStore::new(options, storage, prefix, "fragment_reader".to_string())
     }
 }
 

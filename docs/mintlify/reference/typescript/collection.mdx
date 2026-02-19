@@ -1,0 +1,184 @@
+---
+title: "Collection"
+---
+
+## Collection Methods
+
+### count
+
+Gets the total number of records in the collection
+
+
+### add
+
+Adds new records to the collection.
+
+<ParamField path="ids" type="string[]" required />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="metadatas" type="Metadata[]" />
+
+<ParamField path="documents" type="string[]" />
+
+<ParamField path="uris" type="string[]" />
+
+
+### get
+
+Retrieves records from the collection based on filters.
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="where" type="Where" />
+
+<ParamField path="limit" type="number" />
+
+<ParamField path="offset" type="number" />
+
+<ParamField path="whereDocument" type="WhereDocument" />
+
+<ParamField path="include" type="Include[]" />
+
+**Returns:** Promise resolving to matching records
+
+
+### peek
+
+Retrieves a preview of records from the collection.
+
+<ParamField path="limit" type="number" />
+
+**Returns:** Promise resolving to a sample of records
+
+
+### query
+
+Performs similarity search on the collection.
+
+<ParamField path="queryEmbeddings" type="Embeddings" />
+
+<ParamField path="queryTexts" type="string[]" />
+
+<ParamField path="queryURIs" type="string[]" />
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="nResults" type="number" />
+
+<ParamField path="where" type="Where" />
+
+<ParamField path="whereDocument" type="WhereDocument" />
+
+<ParamField path="include" type="Include[]" />
+
+**Returns:** Promise resolving to similar records ranked by distance
+
+
+### modify
+
+Modifies collection properties like name, metadata, or configuration.
+
+<ParamField path="name" type="string" />
+
+<ParamField path="metadata" type="CollectionMetadata" />
+
+<ParamField path="configuration" type="UpdateCollectionConfiguration" />
+
+
+### update
+
+Updates existing records in the collection.
+
+<ParamField path="ids" type="string[]" required />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="metadatas" type="Metadata[]" />
+
+<ParamField path="documents" type="string[]" />
+
+<ParamField path="uris" type="string[]" />
+
+
+### upsert
+
+Inserts new records or updates existing ones (upsert operation).
+
+<ParamField path="ids" type="string[]" required />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="metadatas" type="Metadata[]" />
+
+<ParamField path="documents" type="string[]" />
+
+<ParamField path="uris" type="string[]" />
+
+
+### delete
+
+Deletes records from the collection based on filters.
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="where" type="Where" />
+
+<ParamField path="whereDocument" type="WhereDocument" />
+
+
+### search
+
+Performs hybrid search on the collection using expression builders.
+
+<ParamField path="searches" type="SearchLike | SearchLike[]" required>
+  Single search payload or array of payloads
+</ParamField>
+
+<ParamField path="readLevel" type="ReadLevel" />
+
+**Returns:** Promise resolving to column-major search results
+
+
+---
+
+## Types
+
+### GetResult
+
+Result class for get operations, containing retrieved records.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="documents" type="(string | null)[]" />
+
+<ParamField path="embeddings" type="Embeddings" />
+
+<ParamField path="ids" type="string[]" />
+
+<ParamField path="include" type="Include[]" />
+
+<ParamField path="metadatas" type="(TMeta | null)[]" />
+
+<ParamField path="uris" type="(string | null)[]" />
+
+
+### QueryResult
+
+Result class for query operations, containing search results.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="distances" type="(number | null)[][]" />
+
+<ParamField path="documents" type="(string | null)[][]" />
+
+<ParamField path="embeddings" type="(Embedding | null)[][]" />
+
+<ParamField path="ids" type="string[][]" />
+
+<ParamField path="include" type="Include[]" />
+
+<ParamField path="metadatas" type="(TMeta | null)[][]" />
+
+<ParamField path="uris" type="(string | null)[][]" />

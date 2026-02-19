@@ -21,12 +21,19 @@ type DefaultLogWriter = LogWriter<
 
 async fn writer_thread(
     writer: Arc<DefaultLogWriter>,
+    storage: Arc<chroma_storage::Storage>,
+    prefix: String,
     mutex: Arc<Mutex<()>>,
     wait: Arc<tokio::sync::Notify>,
     notify: Arc<tokio::sync::Notify>,
     iterations: usize,
 ) -> (usize, usize) {
-    let cursors = writer.cursors(CursorStoreOptions::default()).await.unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        storage,
+        prefix,
+        "writer_thread".to_string(),
+    );
     let mut witness = cursors
         .load(&CursorName::new("my_cursor").unwrap())
         .await
@@ -172,10 +179,12 @@ async fn test_k8s_integration_98_garbage_alternate() {
         .await
         .unwrap(),
     );
-    let cursors = writer1
-        .cursors(CursorStoreOptions::default())
-        .await
-        .unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "init_cursor".to_string(),
+    );
     cursors
         .init(&CursorName::new("my_cursor").unwrap(), Cursor::default())
         .await
@@ -217,6 +226,8 @@ async fn test_k8s_integration_98_garbage_alternate() {
     // Launch both threads using the same writer_thread function
     let handle1 = tokio::spawn(writer_thread(
         Arc::clone(&writer1),
+        Arc::clone(&storage),
+        prefix.to_string(),
         Arc::clone(&mutex),
         Arc::clone(&notify_writer),
         Arc::clone(&notify_gcer),

@@ -1,4 +1,4 @@
-use std::{cmp::min, collections::HashMap, sync::Arc};
+use std::{cmp::min, collections::HashMap, collections::HashSet, sync::Arc};
 
 use chroma_distance::DistanceFunction;
 use chroma_error::{ChromaError, ErrorCodes};
@@ -614,7 +614,7 @@ pub async fn rng_query(
 /// Split a set of embeddings into two groups using 2-means clustering.
 ///
 /// Returns (left_center, left_group, right_center, right_group) where centers
-/// are the nearest actual vectors to the computed cluster centroids.
+/// are the averages of the corresponding groups.
 pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFunction) -> SplitResult {
     let n = embeddings.len();
 
@@ -728,29 +728,6 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         prev_total_dist = total_dist;
     }
 
-    // Find nearest actual vectors as centers
-    let mut nearest_0_idx = 0;
-    let mut nearest_0_dist = f32::MAX;
-    let mut nearest_1_idx = 0;
-    let mut nearest_1_dist = f32::MAX;
-
-    for (i, (_, _, e)) in embeddings.iter().enumerate() {
-        let dist_0 = distance_function.distance(e, &c_0);
-        let dist_1 = distance_function.distance(e, &c_1);
-
-        if !labels[i] && dist_0 < nearest_0_dist {
-            nearest_0_dist = dist_0;
-            nearest_0_idx = i;
-        }
-        if labels[i] && dist_1 < nearest_1_dist {
-            nearest_1_dist = dist_1;
-            nearest_1_idx = i;
-        }
-    }
-
-    let left_center = embeddings[nearest_0_idx].2.clone();
-    let right_center = embeddings[nearest_1_idx].2.clone();
-
     // Build output groups
     let count_0 = labels.iter().filter(|&&l| !l).count();
     let count_1 = n - count_0;
@@ -766,23 +743,26 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         }
     }
 
-    (left_center, group_0, right_center, group_1)
+    (c_0.into(), group_0, c_1.into(), group_1)
 }
 
-/// Query a quantized cluster, returning all points with estimated distance.
+/// Query a quantized cluster, returning deduplicated, sorted results.
 ///
 /// Uses RaBitQ distance estimation between the query and each quantized point.
+/// The `predicate` receives `(id, version)` for each entry and should return
+/// `true` to include the entry in the results. Duplicate IDs are skipped
+/// (first valid occurrence wins).
 pub fn query_quantized_cluster(
     cluster: &QuantizedCluster<'_>,
     query: &[f32],
     distance_function: &DistanceFunction,
+    predicate: impl Fn(u32, u32) -> bool,
 ) -> SearchResult {
-    let dim = cluster.center.len();
-    if cluster.ids.is_empty() || dim == 0 {
+    if cluster.ids.is_empty() {
         return SearchResult::default();
     }
 
-    // Precompute query-related values
+    // Precompute query-related values.
     let c_norm = (f32::dot(cluster.center, cluster.center).unwrap_or(0.0) as f32).sqrt();
     let c_dot_q = f32::dot(cluster.center, query).unwrap_or(0.0) as f32;
     let q_norm = (f32::dot(query, query).unwrap_or(0.0) as f32).sqrt();
@@ -792,20 +772,34 @@ pub fn query_quantized_cluster(
         .map(|(q, c)| q - c)
         .collect::<Vec<_>>();
 
-    // Compute distances for each point
-    let code_size = cluster.codes.len() / cluster.ids.len().max(1);
-    let (keys, distances): (Vec<u32>, Vec<f32>) = cluster
+    let code_size = Code::<&[u8]>::size(cluster.center.len());
+    let mut seen = HashSet::new();
+    let mut keys = Vec::new();
+    let mut distances = Vec::new();
+
+    for ((id, version), code_bytes) in cluster
         .ids
         .iter()
+        .zip(cluster.versions.iter())
         .zip(cluster.codes.chunks(code_size))
-        .map(|(id, code_bytes)| {
-            let code = Code::<&[u8]>::new(code_bytes);
-            let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
-            (*id, distance)
-        })
-        .unzip();
+    {
+        if !predicate(*id, *version) || !seen.insert(*id) {
+            continue;
+        }
+        let code = Code::<&[u8]>::new(code_bytes);
+        let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
+        keys.push(*id);
+        distances.push(distance);
+    }
 
-    SearchResult { keys, distances }
+    // Sort by distance.
+    let mut indices = (0..keys.len()).collect::<Vec<_>>();
+    indices.sort_unstable_by(|&a, &b| distances[a].total_cmp(&distances[b]));
+
+    SearchResult {
+        keys: indices.iter().map(|&i| keys[i]).collect(),
+        distances: indices.iter().map(|&i| distances[i]).collect(),
+    }
 }
 
 #[cfg(test)]

@@ -191,7 +191,7 @@ impl TryFrom<chroma_proto::ListDatabasesRequest> for ListDatabasesRequest {
 pub type ListDatabasesResponse = Vec<Database>;
 
 /// Internal request for creating a collection.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CreateCollectionRequest {
     pub id: CollectionUuid,
     pub name: String,
@@ -202,6 +202,18 @@ pub struct CreateCollectionRequest {
     pub get_or_create: bool,
     pub tenant_id: String,
     pub database_name: DatabaseName,
+}
+
+impl std::fmt::Debug for CreateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateCollectionRequest")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("tenant_id", &self.tenant_id)
+            .field("get_or_create", &self.get_or_create)
+            .field("database_name", &self.database_name)
+            .finish()
+    }
 }
 
 impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
@@ -446,15 +458,26 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
             filter = filter.limit(limit);
         }
         if let Some(offset) = req.offset {
-            if req.limit.is_none() {
-                return Err(SysDbError::InvalidArgument(
-                    "offset requires limit to be specified".to_string(),
-                ));
+            if offset < 0 {
+                return Err(SysDbError::InvalidArgument(format!(
+                    "offset must be non-negative, got {}",
+                    offset
+                )));
             }
-            let offset = u32::try_from(offset).map_err(|_| {
-                SysDbError::InvalidArgument(format!("offset must be non-negative, got {}", offset))
-            })?;
-            filter = filter.offset(offset);
+            if offset > 0 {
+                if req.limit.is_none() {
+                    return Err(SysDbError::InvalidArgument(
+                        "offset requires limit to be specified".to_string(),
+                    ));
+                }
+                let offset = u32::try_from(offset).map_err(|_| {
+                    SysDbError::InvalidArgument(format!(
+                        "offset must be non-negative, got {}",
+                        offset
+                    ))
+                })?;
+                filter = filter.offset(offset);
+            }
         }
 
         // Handle include_soft_deleted
@@ -496,8 +519,13 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
     }
 }
 
-/// Internal request for updating a collection.
 #[derive(Debug, Clone)]
+pub struct UpdateCollectionCursor {
+    pub compaction_failure_count_increment: Option<u32>,
+}
+
+/// Internal request for updating a collection.
+#[derive(Clone)]
 pub struct UpdateCollectionRequest {
     /// The database containing the collection (required for routing)
     pub database_name: DatabaseName,
@@ -513,6 +541,21 @@ pub struct UpdateCollectionRequest {
     pub reset_metadata: bool,
     // New configuration to set (optional - None means don't change)
     pub new_configuration: Option<UpdateCollectionConfiguration>,
+    // Cursor updates (optional - None means don't change)
+    pub cursor_updates: Option<UpdateCollectionCursor>,
+    /// If true, mark the collection as soft deleted (for delete_collection operation)
+    pub is_deleted: Option<bool>,
+}
+
+impl std::fmt::Debug for UpdateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateCollectionRequest")
+            .field("database_name", &self.database_name)
+            .field("id", &self.id)
+            .field("reset_metadata", &self.reset_metadata)
+            .field("name", &self.name)
+            .finish()
+    }
 }
 
 impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
@@ -573,6 +616,8 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             metadata,
             reset_metadata,
             new_configuration,
+            cursor_updates: None,
+            is_deleted: None, // Not supported in proto UpdateCollectionRequest
         })
     }
 }
@@ -587,6 +632,18 @@ impl TryFrom<UpdateCollectionResponse> for chroma_proto::UpdateCollectionRespons
     fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
         // The proto response is empty - it doesn't return the updated collection
         Ok(chroma_proto::UpdateCollectionResponse {})
+    }
+}
+
+// For delete_collection, we reuse UpdateCollectionResponse
+use chroma_types::chroma_proto::DeleteCollectionResponse;
+
+impl TryFrom<UpdateCollectionResponse> for DeleteCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
+        // The proto response is empty
+        Ok(DeleteCollectionResponse {})
     }
 }
 

@@ -1,0 +1,241 @@
+---
+title: "Client"
+---
+
+## Clients
+
+### ChromaClient
+
+Main client class for interacting with ChromaDB.
+Provides methods for managing collections and performing operations on them.
+
+<ParamField path="host" type="string | undefined">
+  The host address of the Chroma server. Defaults to 'localhost'
+</ParamField>
+
+<ParamField path="port" type="number | undefined">
+  The port number of the Chroma server. Defaults to 8000
+</ParamField>
+
+<ParamField path="ssl" type="boolean | undefined">
+  Whether to use SSL/HTTPS for connections. Defaults to false
+</ParamField>
+
+<ParamField path="tenant" type="string | undefined">
+  The tenant name in the Chroma server to connect to
+</ParamField>
+
+<ParamField path="database" type="string | undefined">
+  The database name to connect to
+</ParamField>
+
+<ParamField path="headers" type="Record<string, string> | undefined">
+  Additional HTTP headers to send with requests
+</ParamField>
+
+<ParamField path="fetchOptions" type="RequestInit | undefined">
+  Additional fetch options for HTTP requests
+</ParamField>
+
+<ParamField path="path" type="string | undefined" />
+
+<ParamField path="auth" type="Record<string, string> | undefined" />
+
+
+### CloudClient
+
+ChromaDB cloud client for connecting to hosted Chroma instances.
+Extends ChromaClient with cloud-specific authentication and configuration.
+
+<ParamField path="apiKey" type="string" />
+
+<ParamField path="host" type="string" />
+
+<ParamField path="port" type="number" />
+
+<ParamField path="tenant" type="string" />
+
+<ParamField path="database" type="string" />
+
+<ParamField path="fetchOptions" type="RequestInit" />
+
+
+### AdminClient
+
+Administrative client for managing ChromaDB tenants and databases.
+Provides methods for creating, deleting, and listing tenants and databases.
+
+<ParamField path="host" type="string" required>
+  The host address of the Chroma server
+</ParamField>
+
+<ParamField path="port" type="number" required>
+  The port number of the Chroma server
+</ParamField>
+
+<ParamField path="ssl" type="boolean" required>
+  Whether to use SSL/HTTPS for connections
+</ParamField>
+
+<ParamField path="headers" type="Record<string, string> | undefined">
+  Additional HTTP headers to send with requests
+</ParamField>
+
+<ParamField path="fetchOptions" type="RequestInit | undefined">
+  Additional fetch options for HTTP requests
+</ParamField>
+
+
+---
+
+## Client Methods
+
+### heartbeat
+
+Sends a heartbeat request to check server connectivity.
+
+**Returns:** Promise resolving to the server's nanosecond heartbeat timestamp
+
+
+### listCollections
+
+Lists all collections in the current database.
+
+<ParamField path="limit" type="number" required />
+
+<ParamField path="offset" type="number" required />
+
+**Returns:** Promise resolving to an array of Collection instances
+
+
+### countCollections
+
+Gets the total number of collections in the current database.
+
+**Returns:** Promise resolving to the collection count
+
+
+### createCollection
+
+Creates a new collection with the specified configuration.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="configuration" type="CreateCollectionConfiguration" />
+
+<ParamField path="metadata" type="CollectionMetadata" />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction | null" />
+
+<ParamField path="schema" type="Schema" />
+
+**Returns:** Promise resolving to the created Collection instance
+
+
+### getCollection
+
+Retrieves an existing collection by name.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction" />
+
+**Returns:** Promise resolving to the Collection instance
+
+
+### getOrCreateCollection
+
+Gets an existing collection or creates it if it doesn't exist.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="configuration" type="CreateCollectionConfiguration" />
+
+<ParamField path="metadata" type="CollectionMetadata" />
+
+<ParamField path="embeddingFunction" type="EmbeddingFunction | null" />
+
+<ParamField path="schema" type="Schema" />
+
+**Returns:** Promise resolving to the Collection instance
+
+
+### deleteCollection
+
+Deletes a collection and all its data.
+
+<ParamField path="name" type="string" required />
+
+
+### reset
+
+Resets the entire database, deleting all collections and data.
+
+**Returns:** Promise that resolves when the reset is complete
+
+
+### version
+
+Gets the version of the Chroma server.
+
+**Returns:** Promise resolving to the server version string
+
+
+---
+
+## Admin Client Methods
+
+### createTenant
+
+Creates a new tenant.
+
+<ParamField path="name" type="string" required />
+
+
+### getTenant
+
+Retrieves information about a specific tenant.
+
+<ParamField path="name" type="string" required />
+
+**Returns:** Promise resolving to the tenant name
+
+
+### createDatabase
+
+Creates a new database within a tenant.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="tenant" type="string" required />
+
+
+### getDatabase
+
+Retrieves information about a specific database.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="tenant" type="string" required />
+
+**Returns:** Promise resolving to database information
+
+
+### deleteDatabase
+
+Deletes a database and all its data.
+
+<ParamField path="name" type="string" required />
+
+<ParamField path="tenant" type="string" required />
+
+
+### listDatabases
+
+Lists all databases within a tenant.
+
+<ParamField path="args" type="ListDatabasesArgs" required>
+  Listing parameters including tenant and pagination
+</ParamField>
+
+**Returns:** Promise resolving to an array of database information

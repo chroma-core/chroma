@@ -5,7 +5,7 @@ use setsum::Setsum;
 use chroma_storage::{Storage, StorageError};
 
 use crate::interfaces::FragmentConsumer;
-use crate::{CursorStore, CursorStoreOptions, Error, Fragment, LogPosition, LogReaderOptions};
+use crate::{Error, Fragment, LogPosition, LogReaderOptions};
 
 pub struct S3FragmentPuller {
     storage: Arc<Storage>,
@@ -41,16 +41,17 @@ impl FragmentConsumer for S3FragmentPuller {
         super::parse_parquet(parquet, None).await
     }
 
-    async fn read_fragment(&self, path: &str, _: LogPosition) -> Result<Option<Fragment>, Error> {
-        super::read_fragment(&self.storage, &self.prefix, path, None).await
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        _starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error> {
+        // NOTE(rescrv):  S3FragmentPuller deals with absolutes; we therefore do not pass an
+        // offset.
+        super::parse_parquet_fast(parquet, None).await
     }
 
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
-        CursorStore::new(
-            options,
-            Arc::clone(&self.storage),
-            self.prefix.clone(),
-            "fragment_puller".to_string(),
-        )
+    async fn read_fragment(&self, path: &str, _: LogPosition) -> Result<Option<Fragment>, Error> {
+        super::read_fragment(&self.storage, &self.prefix, path, None).await
     }
 }

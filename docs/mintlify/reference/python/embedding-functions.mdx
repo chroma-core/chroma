@@ -1,0 +1,116 @@
+---
+title: "Embedding Functions"
+---
+
+## Embedding Function Base Classes
+
+### EmbeddingFunction
+
+Protocol for embedding functions.
+
+To implement a new embedding function,
+you need to implement the following methods:
+    - __init__
+    - __call__
+    - name
+    - build_from_config
+    - get_config
+
+Additionally, you should register the embedding function so it will automatically
+be used by the Chroma client.
+
+```python
+@register_embedding_function
+class MyEmbeddingFunction(EmbeddingFunction[Documents]):
+    ...
+```
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `build_from_config()`, `default_space()`, `embed_query()`, `embed_with_retries()`, `get_config()`, `is_legacy()`, `name()`, `supported_spaces()`, `validate_config()`, `validate_config_update()`
+
+
+### SparseEmbeddingFunction
+
+Protocol for sparse embedding functions.
+
+To implement a new sparse embedding function, you need to implement the following methods:
+    - __call__
+    - __init__
+    - name
+    - build_from_config
+    - get_config
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `build_from_config()`, `embed_query()`, `embed_with_retries()`, `get_config()`, `name()`, `validate_config()`, `validate_config_update()`
+
+
+---
+
+## Registration
+
+### register_embedding_function
+
+Register a custom embedding function.
+
+Can be used as a decorator:
+```
+@register_embedding_function
+class MyEmbedding(EmbeddingFunction):
+    @classmethod
+    def name(cls): return "my_embedding"
+```
+
+Or directly:
+
+```
+register_embedding_function(MyEmbedding)
+```
+
+<ParamField path="ef_class" type="Any">
+  The embedding function class to register.
+</ParamField>
+
+
+### register_sparse_embedding_function
+
+Register a custom sparse embedding function.
+
+Can be used as a decorator:
+```
+@register_sparse_embedding_function
+class MySparseEmbeddingFunction(SparseEmbeddingFunction):
+    @classmethod
+    def name(cls): return "my_sparse_embedding"
+```
+<ParamField path="ef_class" type="Any" />
+
+
+---
+
+## Types
+
+### Embedding
+
+`Embedding[Tuple[Any, Ellipsis], dtype[Union[int32, float32]]]`
+
+
+### SparseVector
+
+Sparse vector using parallel indices and values arrays.
+
+<span class="text-sm">Properties</span>
+
+<ParamField path="indices" type="List[int]" />
+
+<ParamField path="values" type="List[float]" />
+
+<ParamField path="labels" type="Optional[IDs]" />
+
+
+<span class="text-sm">Methods</span>
+
+`__init__()`, `from_dict()`, `to_dict()`
