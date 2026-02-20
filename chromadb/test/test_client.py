@@ -9,6 +9,7 @@ from chromadb.api.fastapi import FastAPI
 import pytest
 import tempfile
 import os
+from pathlib import Path
 
 
 @pytest.fixture
@@ -151,3 +152,28 @@ def test_fastapi_uses_http_limits_from_settings() -> None:
     assert limits.max_keepalive_connections == 16
     assert captured["timeout"] is None
     assert captured["verify"] is True
+
+
+@pytest.mark.asyncio
+async def test_async_persistent_client_round_trip(tmp_path: Path) -> None:
+    client = await chromadb.AsyncPersistentClient(path=tmp_path)
+    collection = await client.create_collection("async_persist")
+
+    await collection.add(ids=["a"], embeddings=[[0.1, 0.2]])
+    result = await collection.get(ids=["a"], include=["embeddings"])
+
+    assert result["ids"] == ["a"]
+    assert result["embeddings"][0] == pytest.approx([0.1, 0.2])
+
+    client._system.stop()
+    client.clear_system_cache()
+
+    client2 = await chromadb.AsyncPersistentClient(path=tmp_path)
+    collection2 = await client2.get_collection("async_persist")
+    result2 = await collection2.get(ids=["a"], include=["embeddings"])
+
+    assert result2["ids"] == ["a"]
+    assert result2["embeddings"][0] == pytest.approx([0.1, 0.2])
+
+    client2._system.stop()
+    client2.clear_system_cache()
