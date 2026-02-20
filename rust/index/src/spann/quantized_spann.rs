@@ -47,6 +47,10 @@ pub const PREFIX_VERSION: &str = "version";
 // Key for singleton values (center, next_cluster_id)
 pub const SINGLETON_KEY: u32 = 0;
 
+/// Maximum recursion depth for balance → split/merge → reassign → balance chains.
+/// Beyond this depth, oversized clusters are deferred to the next top-level insert.
+const MAX_BALANCE_DEPTH: u32 = 4;
+
 /// In-memory staging for a quantized cluster head.
 #[derive(Clone)]
 struct QuantizedDelta {
@@ -159,7 +163,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Balance a cluster: scrub then trigger split/merge if needed.
-    async fn balance(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    /// `depth` tracks recursion depth through balance → split/merge → reassign → balance chains.
+    async fn balance(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
+        if depth > MAX_BALANCE_DEPTH {
+            return Ok(());
+        }
+
         if !self.balancing.insert(cluster_id) {
             return Ok(());
         }
@@ -179,9 +188,9 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .unwrap_or(default_merge_threshold()) as usize;
 
         if len > split_threshold {
-            self.split(cluster_id).await?;
+            self.split(cluster_id, depth).await?;
         } else if len > 0 && len < merge_threshold {
-            self.merge(cluster_id).await?;
+            self.merge(cluster_id, depth).await?;
         }
 
         self.balancing.remove(&cluster_id);
@@ -233,7 +242,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         let rng_cluster_ids = self.rng_select(&candidates).keys;
 
         for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
-            Box::pin(self.balance(cluster_id)).await?;
+            Box::pin(self.balance(cluster_id, 0)).await?;
         }
 
         Ok(())
@@ -317,7 +326,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Merge a small cluster into a nearby cluster.
-    async fn merge(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    async fn merge(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
         let Some(source_center) = self.centroid(cluster_id) else {
             return Ok(());
         };
@@ -357,10 +366,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     .append(nearest_cluster_id, *id, *version, code)
                     .is_none()
                 {
-                    self.reassign(cluster_id, *id, *version, embedding).await?;
+                    self.reassign(cluster_id, *id, *version, embedding, depth)
+                        .await?;
                 };
             } else {
-                self.reassign(cluster_id, *id, *version, embedding).await?;
+                self.reassign(cluster_id, *id, *version, embedding, depth)
+                    .await?;
             }
         }
 
@@ -374,13 +385,14 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))
     }
 
-    /// Reassign a vector to new clusters via RNG query
+    /// Reassign a vector to new clusters via RNG query.
     async fn reassign(
         &self,
         from_cluster_id: u32,
         id: u32,
         version: u32,
         embedding: Arc<[f32]>,
+        depth: u32,
     ) -> Result<(), QuantizedSpannError> {
         if !self.is_valid(id, version) {
             return Ok(());
@@ -398,10 +410,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         }
 
-        // TODO(sicheng): We should recursively balance here. We are not doing this right now because
-        // some data distribution will cause aggressive recursion. We need to address the root cause
-        // and then enable recursive balancing
-        self.register(id, embedding, &rng_cluster_ids)?;
+        for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
+            Box::pin(self.balance(cluster_id, depth + 1)).await?;
+        }
+
         Ok(())
     }
 
@@ -562,7 +574,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Split a large cluster into two smaller clusters using 2-means clustering.
-    async fn split(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    async fn split(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
         let Some(delta) = self.drop(cluster_id).await? else {
             return Ok(());
         };
@@ -635,7 +647,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let old_dist = self.distance(embedding, &old_center);
             let new_dist = self.distance(embedding, &left_center);
             if new_dist > old_dist {
-                self.reassign(left_cluster_id, *id, *version, embedding.clone())
+                self.reassign(left_cluster_id, *id, *version, embedding.clone(), depth)
                     .await?;
             }
         }
@@ -649,7 +661,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let old_dist = self.distance(embedding, &old_center);
             let new_dist = self.distance(embedding, &right_center);
             if new_dist > old_dist {
-                self.reassign(right_cluster_id, *id, *version, embedding.clone())
+                self.reassign(right_cluster_id, *id, *version, embedding.clone(), depth)
                     .await?;
             }
         }
@@ -790,7 +802,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) else {
                 continue;
             };
-            self.reassign(from_cluster_id, id, version, embedding)
+            self.reassign(from_cluster_id, id, version, embedding, depth)
                 .await?;
         }
 
@@ -2260,7 +2272,7 @@ mod tests {
 
         // Trigger balance on the mixed cluster - should split into 2
         writer
-            .balance(mixed_cluster_id)
+            .balance(mixed_cluster_id, 0)
             .await
             .expect("balance failed");
 
@@ -2325,7 +2337,7 @@ mod tests {
 
         // Trigger balance - should scrub (remove invalid) then merge (below threshold)
         writer
-            .balance(isolated_cluster_id)
+            .balance(isolated_cluster_id, 0)
             .await
             .expect("balance failed");
 
