@@ -442,6 +442,82 @@ impl ArrowUnorderedBlockfileWriter {
     pub(crate) fn id(&self) -> Uuid {
         self.id
     }
+
+    /// Get a value from the blockfile without copying.
+    /// The closure `f` is called with a reference to the stored value if it exists.
+    /// This allows zero-copy access to stored data.
+    pub async fn get<K: ArrowWriteableKey, V: ArrowWriteableValue, R>(
+        &self,
+        prefix: &str,
+        key: K,
+        f: impl FnOnce(Option<&V>) -> R,
+    ) -> Result<R, Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), key.clone());
+        let (_guard, target_block_id) = loop {
+            // Get the target block id for the key
+            let target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+
+            // Lock the delta for the target block id
+            let delta_guard = self.deltas_mutex.lock(&target_block_id).await;
+
+            // Recheck if the target block id is still the same. Otherwise, someone concurrently
+            // modified the root and we need to restart.
+            let new_target_block_id = self.root.sparse_index.get_target_block_id(&search_key);
+            // Someone concurrently converted the block to delta and/or split it so restart all over.
+            if new_target_block_id != target_block_id {
+                continue;
+            }
+            break (delta_guard, target_block_id);
+        };
+
+        let delta = {
+            let deltas = self.block_deltas.lock();
+            deltas.get(&target_block_id).cloned()
+        };
+
+        Ok(match delta {
+            None => {
+                let block = match self
+                    .block_manager
+                    .get(
+                        &self.root.prefix_path,
+                        &target_block_id,
+                        StorageRequestPriority::P0,
+                    )
+                    .await
+                {
+                    Ok(Some(block)) => block,
+                    Ok(None) => {
+                        return Err(Box::new(ArrowBlockfileError::BlockNotFound));
+                    }
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                let new_delta = match self
+                    .block_manager
+                    .fork::<K, V, UnorderedBlockDelta>(&block.id, &self.root.prefix_path)
+                    .await
+                {
+                    Ok(delta) => delta,
+                    Err(e) => {
+                        return Err(Box::new(e));
+                    }
+                };
+                // Access the value using the zero-copy method
+                let result = new_delta.with_value::<K, V, R>(prefix, key, f);
+                // Insert to delta first and then make it visible through the sparse index to
+                // prevent dangling references.
+                let mut deltas = self.block_deltas.lock();
+                deltas.insert(new_delta.id, new_delta.clone());
+                self.root
+                    .sparse_index
+                    .replace_block(target_block_id, new_delta.id);
+                result
+            }
+            Some(delta) => delta.with_value::<K, V, R>(prefix, key, f),
+        })
+    }
 }
 
 #[derive(Clone)]
@@ -2964,5 +3040,64 @@ mod tests {
         assert_eq!(reader.root.sparse_index.len(), 2);
         assert_eq!(reader.root.max_block_size_bytes, max_block_size_bytes);
         assert_eq!(reader.count().await.unwrap(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_zero_copy_get() {
+        // Test the new zero-copy get() API
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::Local(LocalStorage::new(tmp_dir.path().to_str().unwrap()));
+        let block_cache = new_cache_for_test();
+        let sparse_index_cache = new_cache_for_test();
+        let blockfile_provider = ArrowBlockfileProvider::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            block_cache,
+            sparse_index_cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let prefix_path = String::from("");
+        let writer = blockfile_provider
+            .write::<&str, String>(BlockfileWriterOptions::new(prefix_path.clone()))
+            .await
+            .unwrap();
+
+        // Set some values
+        writer.set("", "key1", "value1".to_string()).await.unwrap();
+        writer.set("", "key2", "value2".to_string()).await.unwrap();
+        writer.set("", "key3", "value3".to_string()).await.unwrap();
+
+        // Test zero-copy get - should find existing keys
+        let result = writer
+            .get::<&str, String, Option<String>>("", "key1", |v| v.cloned())
+            .await
+            .unwrap();
+        assert_eq!(result, Some("value1".to_string()));
+
+        let result = writer
+            .get::<&str, String, Option<String>>("", "key2", |v| v.cloned())
+            .await
+            .unwrap();
+        assert_eq!(result, Some("value2".to_string()));
+
+        // Test zero-copy get - should not find non-existent key
+        let result = writer
+            .get::<&str, String, Option<String>>("", "nonexistent", |v| v.cloned())
+            .await
+            .unwrap();
+        assert_eq!(result, None);
+
+        // Test zero-copy get that just checks existence
+        let exists = writer
+            .get::<&str, String, bool>("", "key1", |v| v.is_some())
+            .await
+            .unwrap();
+        assert!(exists);
+
+        let exists = writer
+            .get::<&str, String, bool>("", "nonexistent", |v| v.is_some())
+            .await
+            .unwrap();
+        assert!(!exists);
     }
 }
