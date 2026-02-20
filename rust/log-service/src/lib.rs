@@ -1368,7 +1368,7 @@ impl LogServer {
     }
 
     /// Roll up the S3 dirty log independently of topology roll-ups.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), name = "roll_dirty_log")]
     async fn roll_dirty_log_s3_cycle(&self) -> Result<(), Error> {
         let _guard = self.rolling_up_s3.lock().await;
         match self.roll_dirty_log_s3().await {
@@ -1389,7 +1389,7 @@ impl LogServer {
     }
 
     /// Roll up all topology dirty logs independently of S3 roll-ups.
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self), name = "roll_dirty_log")]
     async fn roll_dirty_log_repl_cycle(&self) -> Result<(), Error> {
         let _guard = self.rolling_up_repl.lock().await;
         let mut futures = vec![];
