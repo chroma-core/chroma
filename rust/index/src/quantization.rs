@@ -153,8 +153,34 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         let correction_a = self.correction();
         let correction_b = code.correction();
 
+        // 3.2 Constructing an Unbiased Estimator for Distance Estimation
+        // The key achievement is estimating the product of the data and query vectors:
+        //     ⟨o, q⟩ in the paper and ⟨d_a, d_b⟩ in our code.
+        // Theorem 3.2:
+        //     ⟨o, q⟩ = E[⟨o¯, q⟩ / ⟨o¯, o⟩]
+        //
+        //     Where the error is bounded by O(1/√D) with high probability.
+        //     Namely, as D → ∞, the error approaches 0.
+        //     The constant factor of O depends on the norms of the data and query vectors.
+        // Error sources
+        // - Angular displacement caused by mapping o to the nearest hypercube vertex.
+        // - Norm of the data and query vectors being non-unit.
+        // How they are corrected:
+        // - The division by ⟨ō, o⟩ corrects on average (in expectation) for
+        //     the angular displacement caused by mapping o to the nearest hypercube vertex.
+        //     - Without the division, ⟨ō, q⟩ underestimates ⟨o, q⟩ because ⟨ō, o⟩ is less than 1 — the quantization rotated ō away from o, attenuating the signal. Dividing by ⟨ō, o⟩ undoes that attenuation, recovering ⟨o, q⟩ from the signal term.
+        // - The error that remains after the correction is the noise term ⟨ō, q⊥⟩ divided by ⟨ō, o⟩
+        //     (which is bounded by O(1/√D))
         let g_a_dot_g_b = if BITS == 1 {
-            // ⟨g_a, g_b⟩ = 0.25 * (D - 2 * hamming(a, b))
+            // For BITS=1, each g[i] is either +0.5 or -0.5.
+            // The dot product ⟨g_a, g_b⟩ counts where the two codes agree vs. disagree.
+            //     When both bits match: (+0.5)(+0.5) or (-0.5)(-0.5) = +0.25
+            //     When bits differ: (+0.5)(-0.5) or (-0.5)(+0.5) = -0.25
+            // So ⟨g_a, g_b⟩ = 0.25 · (agreements − disagreements).
+            //     And since agreements + disagreements = D, we get
+            //     agreements − disagreements = D − 2·hamming.
+            // Hence:
+            //     ⟨g_a, g_b⟩ = 0.25 · (D − 2 · hamming(a, b))
             let hamming = hamming_distance(self.packed(), code.packed());
             0.25 * (dim as f32 - 2.0 * hamming as f32)
         } else {
@@ -202,7 +228,22 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         let correction = self.correction();
 
         let g_dot_r_q = if BITS == 1 {
-            // ⟨g, r_q⟩ = 0.5 * (2 * masked_sum - Σr_q)
+            // For BITS=1, g[i] is +0.5 when bit=1 and -0.5 when bit=0.
+            // ⟨g, r_q⟩ = Σ g[i] · r_q[i]
+            //            Splitting the sum by bit value:
+            //          = Σ_{bit=1} (+0.5) · r_q[i]  +  Σ_{bit=0} (−0.5) · r_q[i]
+            //            Factoring out 0.5:
+            //          = (0.5 · Σ_{bit=1} r_q[i]) − (0.5 · Σ_{bit=0} r_q[i])
+            //          = 0.5 · S₁  −  0.5 · S₀
+            //            Substituting out S₀:
+            //          = 0.5 · S₁ − 0.5 · (total − S₁)
+            //          = 0.5 · (2·S₁ − total)
+            //          = 0.5 · (2 · masked_sum - total)
+            // where
+            //    - total = Σr_q[i] = S₁ + S₀
+            //    - S₁ = Σ_{bit=1} r_q[i] (i.e. masked_sum)
+            //    - S₀ = Σ_{bit=0} r_q[i]
+            //    - S₀ = total - S₁
             let total: f32 = r_q.iter().sum();
             let m_sum = masked_sum(self.packed(), r_q);
             0.5 * (2.0 * m_sum - total)
@@ -305,23 +346,86 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             return Self(bytes);
         }
 
-        // 1-bit: sign-based quantization (no ray-walk needed)
+        // 1-bit: sign-based quantization (no ray-walk needed). See section 3.1.3 of the paper.
+        // The embedding is already rotated, so we only need to take the sign
+        // of each bit.
+        //
+        // Computing the Quantized Codes of Data Vectors
+        // - normalize the data vector -> o'
+        // - Have a "codebook" of unit vectors. Stored as a rotation matrix P
+        // - Find the nearest the nearest unrotated unit vector
+        //     1. Apply P⁻¹ to the data vector (unrotate).
+        //         - P⁻¹ = Pᵀ for orthonormal matrices
+        //         - since we only ever use P⁻¹, that's what we store in index.rotation
+        //         - We do this instead of rotating the data vector because it's faster and equivalent: Equation 8 in the paper: ⟨o,P xˉ⟩=⟨P−1 o, xˉ⟩
+        //         - The inner product between the data vector o and a rotated codebook entry Px̄, equals the inner product between the inverse-rotated data vector P⁻¹o and the unrotated codebook entry x̄.
+        //     2. Take the sign of each bit of the inverse-rotated data vector.
+        //         - This gives the nearest unrotated unit vector.
+        //         - we can do this instead of rotating all 2^D vectors in C, because x̄ ∈ C has entries ±1/√D, the argmax over C is just the sign of each component of P⁻¹o:
+        //         - xˉ[i] = sign((P⁻¹o)[i]) / √D,
+        //     - The whole point of the "de-rotate the data instead of rotating the codebook" trick is precisely that you never need Px̄ (AKA ō) explicitly (because Px̄ is expensive to store and compute with, it's not binary-valued) — you just keep everything in the P⁻¹-rotated coordinate frame, where x̄ is just a sign vector and inner products can be computed with popcount.
+        //
+        // Notation:
+        // TODO align with notation above
+        // o — the normalized data vector (in the original space, after subtracting centroid and normalizing to unit length)
+        // ō - the rotated, quantized data vector (Px̄)
+        // P — the random orthogonal rotation matrix used to construct the randomized codebook C_rand
+        // x̄ — a candidate vector from the unrotated codebook C = {±1/√D}^D (axis-aligned, bi-valued)
+        // Px̄ — the rotated codebook vector, i.e., the candidate from C_rand (the actual quantized vector ō lives here)
+        // P⁻¹ — the inverse rotation (which equals Pᵀ since P is orthogonal)
+        // P⁻¹o — the data vector inversely transformed into the unrotated codebook space
+
         if BITS == 1 {
+            // Build packed codes: [sign_bits]
+            // Pack sign bits branchlessly, 8 floats → 1 byte at a time.
+            // For each f32, the IEEE-754 sign bit is bit 31: 1 = negative, 0 = positive.
+            // We want the packed bit to be 1 when val >= 0, so we invert the sign bit.
+            // Processing a full chunk per byte eliminates all i/8 and i%8 index arithmetic
+            // as used previously: `packed[i / 8] |= 1 << (i % 8);`
             let mut packed = vec![0u8; Self::packed_len(dim)];
-            let mut abs_sum = 0.0f32;
-            for (i, &val) in r.iter().enumerate() {
-                if val >= 0.0 {
-                    packed[i / 8] |= 1 << (i % 8);
+            for (byte_ref, chunk) in packed.iter_mut().zip(r.chunks(8)) {
+                let mut byte = 0u8;
+                for (j, &val) in chunk.iter().enumerate() {
+                    let sign = (val.to_bits() >> 31) as u8; // 1 if negative, 0 if non-negative
+                    byte |= (sign ^ 1) << j;
                 }
-                abs_sum += val.abs();
+                *byte_ref = byte;
             }
-            // correction = ⟨g, n⟩ = 0.5 * Σ|r[i]| / ‖r‖
+
+            // abs_sum is computed in its own loop so rustc/LLVM can auto-vectorize it
+            // with VABSPS + VADDPS (or equivalent).
+            //
+            // auto-vectorization can happen when a loop body has:
+            // - No cross-iteration dependencies
+            // - Pure float operations (abs + add)
+            // - Sequential memory access over a contiguous slice
+            //
+            // So this line will get converted into:
+            // - Load 8 floats at once into a 256-bit AVX register (YMM register)
+            // - Apply VABSPS — "Vector ABSolute value Packed Single" — to all 8 lanes simultaneously (this is literally just masking off the sign bit on each f32 in parallel)
+            // - Accumulate into a running sum register with VADDPS — "Vector ADD Packed Single"
+            // - At the end, do a horizontal reduction across the 8 lanes to collapse into a single f32
+            //
+            // For a 1024-dimensional vector that's 128 iterations instead of 1024 scalar operations.
+            let abs_sum: f32 = r.iter().map(|v| v.abs()).sum();
+
+            // correction = ⟨g, n⟩
+            //            = ⟨g, r⟩ / ‖r‖
+            //            = Σ g[i] * r[i] / ‖r‖
+            //               - for BITS=1, g[i] always has the same sign as r[i]
+            //                  g[i] = +0.5   if r[i] >= 0
+            //                  g[i] = -0.5   if r[i] <  0
+            //               - Therefore g[i] * r[i] = sign(r[i]) * 0.5 * r[i] = 0.5 * |r[i]|
+            //            = Σ 0.5 * |r[i]| / ‖r‖
+            //            = 0.5 * Σ|r[i]| / ‖r‖
+            //            = GRID_OFFSET * abs_sum / norm
             let correction = Self::GRID_OFFSET * abs_sum / norm;
             let header = CodeHeader {
                 correction,
                 norm,
                 radial,
             };
+            // Build output: [header][packed_codes]
             let mut bytes = Vec::with_capacity(Self::size(dim));
             bytes.extend_from_slice(bytemuck::bytes_of(&header));
             bytes.extend_from_slice(&packed);
