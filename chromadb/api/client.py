@@ -1,4 +1,5 @@
 from typing import Optional, Sequence
+from types import TracebackType
 from uuid import UUID
 
 from overrides import override
@@ -55,6 +56,7 @@ class Client(SharedSystemClient, ClientAPI):
     _server: ServerAPI
     # An internal admin client for verifying that databases and tenants exist
     _admin_client: AdminAPI
+    _closed: bool = False
 
     # region Initialization
     def __init__(
@@ -64,43 +66,52 @@ class Client(SharedSystemClient, ClientAPI):
         settings: Settings = Settings(),
     ) -> None:
         super().__init__(settings=settings)
-        if tenant is not None:
-            self.tenant = tenant
-        if database is not None:
-            self.database = database
+        try:
+            if tenant is not None:
+                self.tenant = tenant
+            if database is not None:
+                self.database = database
 
-        # Get the root system component we want to interact with
-        self._server = self._system.instance(ServerAPI)
+            # Get the root system component we want to interact with
+            self._server = self._system.instance(ServerAPI)
 
-        user_identity = self.get_user_identity()
+            user_identity = self.get_user_identity()
 
-        maybe_tenant, maybe_database = maybe_set_tenant_and_database(
-            user_identity,
-            overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
-            user_provided_tenant=tenant,
-            user_provided_database=database,
-        )
-
-        # this should not happen unless types are invalidated
-        if maybe_tenant is None and tenant is None:
-            raise ChromaAuthError(
-                "Could not determine a tenant from the current authentication method. Please provide a tenant."
-            )
-        if maybe_database is None and database is None:
-            raise ChromaAuthError(
-                "Could not determine a database name from the current authentication method. Please provide a database name."
+            maybe_tenant, maybe_database = maybe_set_tenant_and_database(
+                user_identity,
+                overwrite_singleton_tenant_database_access_from_auth=settings.chroma_overwrite_singleton_tenant_database_access_from_auth,
+                user_provided_tenant=tenant,
+                user_provided_database=database,
             )
 
-        if maybe_tenant:
-            self.tenant = maybe_tenant
-        if maybe_database:
-            self.database = maybe_database
+            # this should not happen unless types are invalidated
+            if maybe_tenant is None and tenant is None:
+                raise ChromaAuthError(
+                    "Could not determine a tenant from the current authentication method. Please provide a tenant."
+                )
+            if maybe_database is None and database is None:
+                raise ChromaAuthError(
+                    "Could not determine a database name from the current authentication method. Please provide a database name."
+                )
 
-        # Create an admin client for verifying that databases and tenants exist
-        self._admin_client = AdminClient.from_system(self._system)
-        self._validate_tenant_database(tenant=self.tenant, database=self.database)
+            if maybe_tenant:
+                self.tenant = maybe_tenant
+            if maybe_database:
+                self.database = maybe_database
 
-        self._submit_client_start_event()
+            # Create an admin client for verifying that databases and tenants exist
+            self._admin_client = AdminClient.from_system(self._system)
+            self._validate_tenant_database(tenant=self.tenant, database=self.database)
+
+            self._submit_client_start_event()
+        except Exception:
+            # If init fails after refcount was incremented, release references
+            # to avoid a resource leak (the caller never receives the object to
+            # call close() on it).
+            if hasattr(self, "_admin_client"):
+                SharedSystemClient._release_system(self._admin_client._identifier)
+            SharedSystemClient._release_system(self._identifier)
+            raise
 
     @classmethod
     @override
@@ -532,6 +543,55 @@ class Client(SharedSystemClient, ClientAPI):
     def set_database(self, database: str) -> None:
         self._validate_tenant_database(tenant=self.tenant, database=database)
         self.database = database
+
+    def close(self) -> None:
+        """Close the client and release all resources.
+
+        This method decrements the reference count for the underlying System.
+        When the last client using a shared System calls close(), the System
+        is stopped and all resources (database connections, etc.) are released.
+
+        This is particularly important for PersistentClient to avoid SQLite
+        file locking issues.
+
+        Note: If multiple clients share the same System (e.g., multiple PersistentClient
+        instances with the same path), the System will only be stopped when the last
+        client is closed. This allows safe use of context managers with multiple clients.
+
+        Example:
+            >>> client = chromadb.PersistentClient(path="./chroma_db")
+            >>> # ... use client ...
+            >>> client.close()
+
+            Or using context manager:
+            >>> with chromadb.PersistentClient(path="./chroma_db") as client:
+            ...     # ... use client ...
+        """
+        # Make close() idempotent - a second call is a safe no-op
+        if self._closed:
+            return
+        self._closed = True
+
+        # Release the internal admin client's reference first, since it also
+        # incremented the refcount for the shared system on creation.
+        if hasattr(self, "_admin_client"):
+            SharedSystemClient._release_system(self._admin_client._identifier)
+
+        # Release our own reference; stops system if this was the last client
+        SharedSystemClient._release_system(self._identifier)
+
+    def __enter__(self) -> "Client":
+        """Context manager entry."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
+    ) -> None:
+        """Context manager exit."""
+        self.close()
 
     def _validate_tenant_database(self, tenant: str, database: str) -> None:
         try:
