@@ -71,6 +71,45 @@ impl LocalStorage {
         Err(StorageError::NotImplemented)
     }
 
+    /// Fetch a byte range from local storage.
+    pub async fn get_range(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
+        use std::io::{Read, Seek, SeekFrom};
+
+        let file_path = self.path_for_key(key);
+        if !file_path.exists() {
+            return Err(StorageError::NotFound {
+                path: file_path
+                    .to_str()
+                    .expect("File path should be valid string")
+                    .to_string(),
+                source: Arc::new(LocalStoraegError),
+            });
+        }
+
+        let mut file = std::fs::File::open(&file_path).map_err(|e| StorageError::Generic {
+            source: Arc::new(e),
+        })?;
+
+        file.seek(SeekFrom::Start(start))
+            .map_err(|e| StorageError::Generic {
+                source: Arc::new(e),
+            })?;
+
+        let len = (end - start) as usize;
+        let mut buf = vec![0u8; len];
+        file.read_exact(&mut buf)
+            .map_err(|e| StorageError::Generic {
+                source: Arc::new(e),
+            })?;
+
+        Ok(Arc::new(buf))
+    }
+
     pub async fn put_bytes(
         &self,
         key: &str,
