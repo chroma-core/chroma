@@ -1432,7 +1432,6 @@ impl LogServer {
             rollups.insert((Some(topology.name.clone()), collection_id), rollup);
         }
         let mut backpressure = vec![];
-        self.enrich_dirty_log(&mut rollups).await?;
         for ((_, collection_id), rollup) in rollups.iter() {
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
                 backpressure.push(*collection_id);

@@ -131,7 +131,7 @@ schema = Schema()
 
 # Configure vector index with custom embedding function
 embedding_function = OpenAIEmbeddingFunction(
-    api_key="your-api-key",
+    api_key_env_var="OPENAI_API_KEY",
     model_name="text-embedding-3-small"
 )
 
@@ -149,7 +149,7 @@ const schema = new Schema();
 
 // Configure vector index with custom embedding function
 const embeddingFunction = new OpenAIEmbeddingFunction({
-  apiKey: "your-api-key",
+  apiKeyEnvVar: "OPENAI_API_KEY",
   modelName: "text-embedding-3-small"
 });
 
