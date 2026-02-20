@@ -398,10 +398,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         }
 
-        for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
-            Box::pin(self.balance(cluster_id)).await?;
-        }
-
+        // TODO(sicheng): We should recursively balance here. We are not doing this right now because
+        // some data distribution will cause aggressive recursion. We need to address the root cause
+        // and then enable recursive balancing
+        self.register(id, embedding, &rng_cluster_ids)?;
         Ok(())
     }
 
