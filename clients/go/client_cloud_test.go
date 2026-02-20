@@ -674,7 +674,7 @@ func TestCloudClientSearch(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("cats"), WithKnnLimit(10)),
-				WithPage(PageLimit(3)),
+				NewPage(Limit(3)),
 				WithSelect(KID, KDocument, KScore, KMetadata),
 			),
 		)
@@ -737,7 +737,7 @@ func TestCloudClientSearch(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
-				WithPage(PageLimit(10)),
+				NewPage(Limit(10)),
 				WithSelect(KID, KDocument, KScore),
 			),
 			WithReadLevel(ReadLevelIndexAndWAL),
@@ -767,7 +767,7 @@ func TestCloudClientSearch(t *testing.T) {
 		results, err := collection.Search(ctx,
 			NewSearchRequest(
 				WithKnnRank(KnnQueryText("animals"), WithKnnLimit(10)),
-				WithPage(PageLimit(10)),
+				NewPage(Limit(10)),
 				WithSelect(KID, KDocument, KScore),
 			),
 			WithReadLevel(ReadLevelIndexOnly),
@@ -979,6 +979,27 @@ func TestCloudClientSchema(t *testing.T) {
 		require.NotNil(t, searchResults)
 	})
 
+	t.Run("Create collection with SPANN quantize in user schema should fail", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_schema_spann_quantize-" + uuid.New().String()
+
+		schema, err := NewSchema(
+			WithDefaultVectorIndex(NewVectorIndexConfig(
+				WithSpace(SpaceL2),
+				WithSpann(NewSpannConfig(
+					WithSpannQuantize(SpannQuantizationFourBitRabitQWithUSearch),
+				)),
+			)),
+		)
+		require.NoError(t, err)
+
+		_, err = client.CreateCollection(ctx, collectionName, WithSchemaCreate(schema))
+		require.Error(t, err)
+		errMsg := strings.ToLower(err.Error())
+		require.True(t, strings.Contains(errMsg, "quantize"),
+			"expected quantize-related error, got: %v", err)
+	})
+
 	t.Run("Create collection with WithVectorIndexCreate", func(t *testing.T) {
 		ctx := context.Background()
 		collectionName := "test_schema_convenience-" + uuid.New().String()
@@ -1163,6 +1184,59 @@ func TestCloudClientSchema(t *testing.T) {
 		results, err := collection.Query(ctx, WithQueryTexts("pets"), WithNResults(2))
 		require.NoError(t, err)
 		require.NotEmpty(t, results.GetDocumentsGroups())
+	})
+
+	t.Run("Create collection with disabled document FTS", func(t *testing.T) {
+		ctx := context.Background()
+		collectionName := "test_schema_disabled_fts-" + uuid.New().String()
+
+		schema, err := NewSchema(
+			WithDefaultVectorIndex(NewVectorIndexConfig(WithSpace(SpaceL2))),
+			DisableFtsIndex(DocumentKey),
+		)
+		require.NoError(t, err)
+
+		collection, err := client.CreateCollection(ctx, collectionName, WithSchemaCreate(schema))
+		require.NoError(t, err)
+		require.NotNil(t, collection)
+		t.Cleanup(func() {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if deleteErr := client.DeleteCollection(cleanupCtx, collectionName); deleteErr != nil {
+				t.Logf("Warning: failed to delete collection '%s': %v", collectionName, deleteErr)
+			}
+		})
+
+		err = collection.Add(ctx,
+			WithIDs("1", "2", "3"),
+			WithTexts(
+				"cats are fluffy pets that purr",
+				"dogs are loyal companions that bark",
+				"lions are big wild cats in Africa",
+			),
+		)
+		require.NoError(t, err)
+
+		require.Eventually(t, func() bool {
+			results, queryErr := collection.Query(ctx, WithQueryTexts("pets"), WithNResults(2))
+			if queryErr != nil {
+				return false
+			}
+			return len(results.GetDocumentsGroups()) > 0
+		}, 20*time.Second, 500*time.Millisecond, "expected query results after indexing")
+
+		_, err = collection.Search(ctx,
+			NewSearchRequest(
+				WithKnnRank(KnnQueryText("pets"), WithKnnLimit(10)),
+				WithFilter(DocumentContains("fluffy")),
+				WithLimit(5),
+				WithSelect(KID, KDocument, KScore),
+			),
+		)
+		require.Error(t, err)
+		errMsg := strings.ToLower(err.Error())
+		require.True(t, strings.Contains(errMsg, "fts") || strings.Contains(errMsg, "full-text"),
+			"expected FTS-related error, got: %v", err)
 	})
 
 	t.Run("Comprehensive schema test", func(t *testing.T) {

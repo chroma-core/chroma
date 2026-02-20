@@ -197,6 +197,7 @@ func TestSpannConfig_Options(t *testing.T) {
 		WithSpannEfConstruction(200),
 		WithSpannEfSearch(200),
 		WithSpannMaxNeighbors(64),
+		WithSpannQuantize(SpannQuantizationNone),
 	)
 
 	assert.Equal(t, uint(64), config.SearchNprobe)
@@ -215,6 +216,7 @@ func TestSpannConfig_Options(t *testing.T) {
 	assert.Equal(t, uint(200), config.EfConstruction)
 	assert.Equal(t, uint(200), config.EfSearch)
 	assert.Equal(t, uint(64), config.MaxNeighbors)
+	assert.Equal(t, SpannQuantizationNone, config.Quantize)
 }
 
 func TestVectorIndexConfig_Options(t *testing.T) {
@@ -267,6 +269,7 @@ func TestSpannConfig_Defaults(t *testing.T) {
 	assert.Equal(t, uint(200), config.EfConstruction)
 	assert.Equal(t, uint(200), config.EfSearch)
 	assert.Equal(t, uint(64), config.MaxNeighbors)
+	assert.Empty(t, config.Quantize)
 }
 
 func TestSpannConfig_DefaultsWithOverride(t *testing.T) {
@@ -302,6 +305,10 @@ func TestSpannConfig_ValidationRejectsInvalid(t *testing.T) {
 
 	// NReplicaCount > 8 should fail
 	_, err = NewSpannConfigWithDefaults(WithSpannNReplicaCount(10))
+	assert.Error(t, err)
+
+	// Unknown quantization value should fail
+	_, err = NewSpannConfigWithDefaults(WithSpannQuantize(SpannQuantization("invalid")))
 	assert.Error(t, err)
 }
 
@@ -405,6 +412,11 @@ func TestSpaceConstants(t *testing.T) {
 	assert.Equal(t, Space("ip"), SpaceIP)
 }
 
+func TestSpannQuantizationConstantAliases(t *testing.T) {
+	assert.Equal(t, SpannQuantization("four_bit_rabit_q_with_u_search"), SpannQuantizationFourBitRabitQWithUSearch)
+	assert.Equal(t, SpannQuantizationFourBitRabitQWithUSearch, SpannQuantizationFourBitRabbitQWithUSearch)
+}
+
 func TestReservedKeyConstants(t *testing.T) {
 	assert.Equal(t, "#document", DocumentKey)
 	assert.Equal(t, "#embedding", EmbeddingKey)
@@ -461,10 +473,15 @@ func TestDisableFtsIndex(t *testing.T) {
 	assert.False(t, vt.String.FtsIndex.Enabled)
 }
 
-func TestDisableFtsIndex_CannotDisableDocument(t *testing.T) {
-	_, err := NewSchema(DisableFtsIndex(DocumentKey))
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "cannot disable FTS index on reserved key")
+func TestDisableFtsIndex_DocumentKey(t *testing.T) {
+	schema, err := NewSchema(DisableFtsIndex(DocumentKey))
+	require.NoError(t, err)
+
+	vt, ok := schema.GetKey(DocumentKey)
+	assert.True(t, ok)
+	require.NotNil(t, vt.String)
+	require.NotNil(t, vt.String.FtsIndex)
+	assert.False(t, vt.String.FtsIndex.Enabled)
 }
 
 func TestDisableFtsIndex_CannotDisableEmbedding(t *testing.T) {
@@ -543,10 +560,77 @@ func TestDisableDefaultBoolIndex(t *testing.T) {
 	assert.False(t, schema.Defaults().Bool.BoolInvertedIndex.Enabled)
 }
 
+func TestDisableDocumentFtsIndex(t *testing.T) {
+	schema, err := NewSchema(DisableDocumentFtsIndex())
+	require.NoError(t, err)
+
+	vt, ok := schema.GetKey(DocumentKey)
+	assert.True(t, ok)
+	require.NotNil(t, vt.String)
+	require.NotNil(t, vt.String.FtsIndex)
+	assert.False(t, vt.String.FtsIndex.Enabled)
+}
+
 func TestDisableDefaultFtsIndex(t *testing.T) {
 	schema, err := NewSchema(DisableDefaultFtsIndex())
 	require.NoError(t, err)
+
+	vt, ok := schema.GetKey(DocumentKey)
+	assert.True(t, ok)
+	require.NotNil(t, vt.String)
+	require.NotNil(t, vt.String.FtsIndex)
+	assert.False(t, vt.String.FtsIndex.Enabled)
+	require.NotNil(t, schema.Defaults().String)
+	require.NotNil(t, schema.Defaults().String.FtsIndex)
 	assert.False(t, schema.Defaults().String.FtsIndex.Enabled)
+}
+
+func TestSchemaIsFtsEnabled_DefaultsToTrue(t *testing.T) {
+	var nilSchema *Schema
+	assert.True(t, nilSchema.IsFtsEnabled())
+
+	schema, err := NewSchema()
+	require.NoError(t, err)
+	assert.True(t, schema.IsFtsEnabled())
+}
+
+func TestSchemaIsFtsEnabled_LegacyDefaultsFallback(t *testing.T) {
+	schema := &Schema{
+		defaults: &ValueTypes{
+			String: &StringValueType{
+				FtsIndex: &FtsIndexType{
+					Enabled: false,
+					Config:  &FtsIndexConfig{},
+				},
+			},
+		},
+		keys: map[string]*ValueTypes{},
+	}
+	assert.False(t, schema.IsFtsEnabled())
+}
+
+func TestSchemaIsFtsEnabled_DocumentKeyPrecedence(t *testing.T) {
+	schema := &Schema{
+		defaults: &ValueTypes{
+			String: &StringValueType{
+				FtsIndex: &FtsIndexType{
+					Enabled: false,
+					Config:  &FtsIndexConfig{},
+				},
+			},
+		},
+		keys: map[string]*ValueTypes{
+			DocumentKey: {
+				String: &StringValueType{
+					FtsIndex: &FtsIndexType{
+						Enabled: true,
+						Config:  &FtsIndexConfig{},
+					},
+				},
+			},
+		},
+	}
+	assert.True(t, schema.IsFtsEnabled())
 }
 
 func TestDisableIndex_EmptyKey(t *testing.T) {

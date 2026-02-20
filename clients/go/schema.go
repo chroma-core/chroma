@@ -179,24 +179,36 @@ func WithResizeFactor(factor float64) HnswOption {
 	}
 }
 
+// SpannQuantization represents supported quantization implementations for SPANN.
+type SpannQuantization string
+
+const (
+	SpannQuantizationNone SpannQuantization = "none"
+	// RaBitQ naming follows upstream Chroma and the wire value.
+	SpannQuantizationFourBitRabitQWithUSearch SpannQuantization = "four_bit_rabit_q_with_u_search"
+	// Deprecated: Use [SpannQuantizationFourBitRabitQWithUSearch] instead.
+	SpannQuantizationFourBitRabbitQWithUSearch = SpannQuantizationFourBitRabitQWithUSearch
+)
+
 // SpannIndexConfig represents SPANN algorithm configuration for Chroma Cloud
 type SpannIndexConfig struct {
-	SearchNprobe          uint    `json:"search_nprobe,omitempty" default:"64" validate:"omitempty,min=1,max=128"`
-	SearchRngFactor       float64 `json:"search_rng_factor,omitempty" default:"1.0"`
-	SearchRngEpsilon      float64 `json:"search_rng_epsilon,omitempty" default:"10.0" validate:"omitempty,min=5.0,max=10.0"`
-	NReplicaCount         uint    `json:"nreplica_count,omitempty" default:"8" validate:"omitempty,min=1,max=8"`
-	WriteRngFactor        float64 `json:"write_rng_factor,omitempty" default:"1.0"`
-	WriteRngEpsilon       float64 `json:"write_rng_epsilon,omitempty" default:"5.0" validate:"omitempty,min=5.0,max=10.0"`
-	SplitThreshold        uint    `json:"split_threshold,omitempty" default:"50" validate:"omitempty,min=50,max=200"`
-	NumSamplesKmeans      uint    `json:"num_samples_kmeans,omitempty" default:"1000" validate:"omitempty,min=1,max=1000"`
-	InitialLambda         float64 `json:"initial_lambda,omitempty" default:"100.0"`
-	ReassignNeighborCount uint    `json:"reassign_neighbor_count,omitempty" default:"64" validate:"omitempty,min=1,max=64"`
-	MergeThreshold        uint    `json:"merge_threshold,omitempty" default:"25" validate:"omitempty,min=25,max=100"`
-	NumCentersToMergeTo   uint    `json:"num_centers_to_merge_to,omitempty" default:"8" validate:"omitempty,min=1,max=8"`
-	WriteNprobe           uint    `json:"write_nprobe,omitempty" default:"32" validate:"omitempty,min=1,max=64"`
-	EfConstruction        uint    `json:"ef_construction,omitempty" default:"200" validate:"omitempty,min=1,max=200"`
-	EfSearch              uint    `json:"ef_search,omitempty" default:"200" validate:"omitempty,min=1,max=200"`
-	MaxNeighbors          uint    `json:"max_neighbors,omitempty" default:"64" validate:"omitempty,min=1,max=64"`
+	SearchNprobe          uint              `json:"search_nprobe,omitempty" default:"64" validate:"omitempty,min=1,max=128"`
+	SearchRngFactor       float64           `json:"search_rng_factor,omitempty" default:"1.0"`
+	SearchRngEpsilon      float64           `json:"search_rng_epsilon,omitempty" default:"10.0" validate:"omitempty,min=5.0,max=10.0"`
+	NReplicaCount         uint              `json:"nreplica_count,omitempty" default:"8" validate:"omitempty,min=1,max=8"`
+	WriteRngFactor        float64           `json:"write_rng_factor,omitempty" default:"1.0"`
+	WriteRngEpsilon       float64           `json:"write_rng_epsilon,omitempty" default:"5.0" validate:"omitempty,min=5.0,max=10.0"`
+	SplitThreshold        uint              `json:"split_threshold,omitempty" default:"50" validate:"omitempty,min=50,max=200"`
+	NumSamplesKmeans      uint              `json:"num_samples_kmeans,omitempty" default:"1000" validate:"omitempty,min=1,max=1000"`
+	InitialLambda         float64           `json:"initial_lambda,omitempty" default:"100.0"`
+	ReassignNeighborCount uint              `json:"reassign_neighbor_count,omitempty" default:"64" validate:"omitempty,min=1,max=64"`
+	MergeThreshold        uint              `json:"merge_threshold,omitempty" default:"25" validate:"omitempty,min=25,max=100"`
+	NumCentersToMergeTo   uint              `json:"num_centers_to_merge_to,omitempty" default:"8" validate:"omitempty,min=1,max=8"`
+	WriteNprobe           uint              `json:"write_nprobe,omitempty" default:"32" validate:"omitempty,min=1,max=64"`
+	EfConstruction        uint              `json:"ef_construction,omitempty" default:"200" validate:"omitempty,min=1,max=200"`
+	EfSearch              uint              `json:"ef_search,omitempty" default:"200" validate:"omitempty,min=1,max=200"`
+	MaxNeighbors          uint              `json:"max_neighbors,omitempty" default:"64" validate:"omitempty,min=1,max=64"`
+	Quantize              SpannQuantization `json:"quantize,omitempty" validate:"omitempty,oneof=none four_bit_rabit_q_with_u_search"`
 }
 
 // SpannOption configures a SpannIndexConfig
@@ -320,6 +332,12 @@ func WithSpannEfSearch(ef uint) SpannOption {
 func WithSpannMaxNeighbors(m uint) SpannOption {
 	return func(c *SpannIndexConfig) {
 		c.MaxNeighbors = m
+	}
+}
+
+func WithSpannQuantize(q SpannQuantization) SpannOption {
+	return func(c *SpannIndexConfig) {
+		c.Quantize = q
 	}
 }
 
@@ -959,7 +977,7 @@ func DisableFtsIndex(key string) SchemaOption {
 		if key == "" {
 			return errors.New("key cannot be empty")
 		}
-		if key == DocumentKey || key == EmbeddingKey {
+		if key == EmbeddingKey {
 			return errors.Errorf("cannot disable FTS index on reserved key: %s", key)
 		}
 		if s.keys[key] == nil {
@@ -976,7 +994,14 @@ func DisableFtsIndex(key string) SchemaOption {
 	}
 }
 
-// Disable default options - disable indexes globally
+// DisableDocumentFtsIndex disables full-text search for the reserved [DocumentKey].
+// Chroma applies FTS on [DocumentKey], not on schema defaults.
+func DisableDocumentFtsIndex() SchemaOption {
+	return DisableFtsIndex(DocumentKey)
+}
+
+// Disable default options - disable indexes globally.
+// Note: FTS is controlled on [DocumentKey] as required by Chroma.
 
 func DisableDefaultStringIndex() SchemaOption {
 	return func(s *Schema) error {
@@ -1030,6 +1055,11 @@ func DisableDefaultBoolIndex() SchemaOption {
 	}
 }
 
+// DisableDefaultFtsIndex disables FTS on defaults and [DocumentKey].
+// This keeps backward compatibility for callers inspecting schema defaults.
+// Note: this also adds/updates a [DocumentKey] override and may change serialized schema keys.
+//
+// Deprecated: Use [DisableDocumentFtsIndex] or [DisableFtsIndex] with [DocumentKey] instead.
 func DisableDefaultFtsIndex() SchemaOption {
 	return func(s *Schema) error {
 		if s.defaults.String == nil {
@@ -1039,7 +1069,7 @@ func DisableDefaultFtsIndex() SchemaOption {
 			Enabled: false,
 			Config:  &FtsIndexConfig{},
 		}
-		return nil
+		return DisableDocumentFtsIndex()(s)
 	}
 }
 
@@ -1063,6 +1093,23 @@ func WithCmek(cmek *Cmek) SchemaOption {
 // Defaults returns the default value types configuration
 func (s *Schema) Defaults() *ValueTypes {
 	return s.defaults
+}
+
+// IsFtsEnabled reports whether FTS is enabled, preferring [DocumentKey] overrides
+// and falling back to defaults for backward compatibility with legacy schemas.
+func (s *Schema) IsFtsEnabled() bool {
+	if s == nil {
+		return true
+	}
+	if s.keys != nil {
+		if vt, ok := s.keys[DocumentKey]; ok && vt != nil && vt.String != nil && vt.String.FtsIndex != nil {
+			return vt.String.FtsIndex.Enabled
+		}
+	}
+	if s.defaults != nil && s.defaults.String != nil && s.defaults.String.FtsIndex != nil {
+		return s.defaults.String.FtsIndex.Enabled
+	}
+	return true
 }
 
 // Keys returns all keys with overrides
