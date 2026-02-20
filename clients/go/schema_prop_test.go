@@ -49,6 +49,11 @@ func SpannConfigStrategy() gopter.Gen {
 		"EfConstruction":        gen.UIntRange(1, 200),
 		"EfSearch":              gen.UIntRange(1, 200),
 		"MaxNeighbors":          gen.UIntRange(1, 64),
+		"Quantize": gen.OneConstOf(
+			SpannQuantization(""),
+			SpannQuantizationNone,
+			SpannQuantizationFourBitRabitQWithUSearch,
+		),
 	})
 }
 
@@ -415,11 +420,15 @@ func TestSchemaConstraintProperties(t *testing.T) {
 		},
 	))
 
-	properties.Property("document key fts protection", prop.ForAll(
+	properties.Property("document key fts disable allowed", prop.ForAll(
 		func() bool {
-			_, err := NewSchema(DisableFtsIndex(DocumentKey))
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "cannot disable FTS index on reserved key")
+			schema, err := NewSchema(DisableFtsIndex(DocumentKey))
+			require.NoError(t, err)
+			vt, ok := schema.GetKey(DocumentKey)
+			require.True(t, ok)
+			require.NotNil(t, vt.String)
+			require.NotNil(t, vt.String.FtsIndex)
+			require.False(t, vt.String.FtsIndex.Enabled)
 			return true
 		},
 	))
