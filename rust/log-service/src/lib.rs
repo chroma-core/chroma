@@ -932,7 +932,7 @@ impl RollupPerCollection {
             .expect("time never moves to before epoch")
             .as_micros()
             .saturating_sub(self.initial_insertion_epoch_us as u128);
-        self.reinsert_count >= reinsert_threshold * 2 && time_on_log >= timeout_us as u128 * 2
+        self.reinsert_count >= reinsert_threshold * 2 || time_on_log >= timeout_us as u128 * 2
     }
 }
 
