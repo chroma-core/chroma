@@ -23,6 +23,16 @@ pub struct CollectionRecord {
     pub collection_logical_size_bytes: u64,
 }
 
+/// Result from `scout_logs` containing the next insertion offset and optional fragment paths.
+#[derive(Clone, Debug, Default)]
+pub struct ScoutLogsResult {
+    /// The offset of the next record to be inserted into the log.
+    pub first_uninserted_record_offset: u64,
+    /// Storage paths of all fragments needed to read the log.
+    /// Only populated when `include_fragment_paths` was set in the request.
+    pub fragment_paths: Vec<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum GarbageCollectError {
     #[error("garbage collect error: {0}")]
@@ -77,7 +87,8 @@ impl Log {
         }
     }
 
-    // ScoutLogs returns the offset of the next record to be inserted into the log.
+    // ScoutLogs returns the offset of the next record to be inserted into the log,
+    // and optionally the storage paths of all fragments needed to read the log.
     #[tracing::instrument(skip(self), err(Display))]
     pub async fn scout_logs(
         &mut self,
@@ -85,14 +96,20 @@ impl Log {
         database_name: DatabaseName,
         collection_id: CollectionUuid,
         starting_offset: u64,
-    ) -> Result<u64, Box<dyn ChromaError>> {
+        include_fragment_paths: bool,
+    ) -> Result<ScoutLogsResult, Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(log) => log
                 .scout_logs(collection_id, starting_offset as i64)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
-                .scout_logs(database_name, collection_id, starting_offset)
+                .scout_logs(
+                    database_name,
+                    collection_id,
+                    starting_offset,
+                    include_fragment_paths,
+                )
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(log) => log
