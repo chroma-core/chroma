@@ -1,5 +1,4 @@
 import type {
-  EmbeddingFunctionConfiguration,
   HnswIndexConfig as ApiHnswIndexConfig,
   Schema as InternalSchema,
   Space,
@@ -9,8 +8,10 @@ import type {
 import {
   AnyEmbeddingFunction,
   EmbeddingFunction,
+  type EmbeddingFunctionConfiguration,
   getEmbeddingFunction,
   getSparseEmbeddingFunction,
+  resolveEmbeddingFunctionName,
   SparseEmbeddingFunction,
 } from "./embedding-function";
 import { Key } from "./execution";
@@ -340,6 +341,30 @@ export type IndexConfig =
 type ValueTypesJson = ApiValueTypes;
 
 type JsonDict = Record<string, any>;
+type IndexConfigWithEmbedding =
+  | VectorIndexConfig
+  | SparseVectorIndexConfig;
+
+const rawEmbeddingFunctionConfigStore = new WeakMap<
+  IndexConfigWithEmbedding,
+  EmbeddingFunctionConfiguration
+>();
+
+const setRawEmbeddingFunctionConfig = (
+  config: IndexConfigWithEmbedding,
+  value: EmbeddingFunctionConfiguration | null,
+) => {
+  if (value == null) {
+    rawEmbeddingFunctionConfigStore.delete(config);
+    return;
+  }
+  rawEmbeddingFunctionConfigStore.set(config, cloneObject(value));
+};
+
+const getRawEmbeddingFunctionConfig = (
+  config: IndexConfigWithEmbedding,
+): EmbeddingFunctionConfiguration | null =>
+  rawEmbeddingFunctionConfigStore.get(config) ?? null;
 
 const cloneObject = <T>(value: T): T => {
   if (value === null || value === undefined) {
@@ -358,24 +383,6 @@ const cloneObject = <T>(value: T): T => {
     ) as T);
 };
 
-const resolveEmbeddingFunctionName = (
-  fn: AnyEmbeddingFunction | null | undefined,
-): string | undefined => {
-  if (!fn) return undefined;
-  if (typeof (fn as any).name === "function") {
-    try {
-      const value = (fn as any).name();
-      return typeof value === "string" ? value : undefined;
-    } catch (_err) {
-      return undefined;
-    }
-  }
-  if (typeof (fn as any).name === "string") {
-    return (fn as any).name;
-  }
-  return undefined;
-};
-
 const prepareEmbeddingFunctionConfig = (
   fn: AnyEmbeddingFunction | null | undefined,
 ): EmbeddingFunctionConfiguration => {
@@ -389,7 +396,19 @@ const prepareEmbeddingFunctionConfig = (
   const buildFromConfig = (fn.constructor as any)?.buildFromConfig;
 
   if (!name || !getConfig || typeof buildFromConfig !== "function") {
-    return { type: "legacy" };
+    // Capture whatever partial info is available for legacy EFs
+    const legacy: EmbeddingFunctionConfiguration = { type: "legacy" };
+    if (name) {
+      legacy.name = name;
+    }
+    if (getConfig) {
+      try {
+        legacy.config = getConfig();
+      } catch (_err) {
+        // getConfig() threw — omit config
+      }
+    }
+    return legacy;
   }
 
   const config = getConfig();
@@ -698,15 +717,20 @@ export class Schema {
     const currentDefaultsVector =
       defaultsFloatList.vectorIndex ??
       new VectorIndexType(false, new VectorIndexConfig());
+    const nextDefaultsVectorConfig = new VectorIndexConfig({
+      space: config.space ?? null,
+      embeddingFunction: config.embeddingFunction,
+      sourceKey: config.sourceKey ?? null,
+      hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
+      spann: config.spann ? cloneObject(config.spann) : null,
+    });
+    setRawEmbeddingFunctionConfig(
+      nextDefaultsVectorConfig,
+      getRawEmbeddingFunctionConfig(config),
+    );
     defaultsFloatList.vectorIndex = new VectorIndexType(
       currentDefaultsVector.enabled,
-      new VectorIndexConfig({
-        space: config.space ?? null,
-        embeddingFunction: config.embeddingFunction,
-        sourceKey: config.sourceKey ?? null,
-        hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
-        spann: config.spann ? cloneObject(config.spann) : null,
-      }),
+      nextDefaultsVectorConfig,
     );
 
     const embeddingValueTypes = ensureValueTypes(this.keys[EMBEDDING_KEY]);
@@ -720,15 +744,20 @@ export class Schema {
       );
     const preservedSourceKey =
       currentOverrideVector.config.sourceKey ?? DOCUMENT_KEY;
+    const nextOverrideVectorConfig = new VectorIndexConfig({
+      space: config.space ?? null,
+      embeddingFunction: config.embeddingFunction,
+      sourceKey: preservedSourceKey,
+      hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
+      spann: config.spann ? cloneObject(config.spann) : null,
+    });
+    setRawEmbeddingFunctionConfig(
+      nextOverrideVectorConfig,
+      getRawEmbeddingFunctionConfig(config),
+    );
     overrideFloatList.vectorIndex = new VectorIndexType(
       currentOverrideVector.enabled,
-      new VectorIndexConfig({
-        space: config.space ?? null,
-        embeddingFunction: config.embeddingFunction,
-        sourceKey: preservedSourceKey,
-        hnsw: config.hnsw ? cloneObject(config.hnsw) : null,
-        spann: config.spann ? cloneObject(config.spann) : null,
-      }),
+      nextOverrideVectorConfig,
     );
   }
 
@@ -1073,7 +1102,13 @@ export class Schema {
   private serializeVectorConfig(config: VectorIndexConfig): JsonDict {
     const serialized: JsonDict = {};
     const embeddingFunction = config.embeddingFunction;
-    const efConfig = prepareEmbeddingFunctionConfig(embeddingFunction);
+    const rawEmbeddingFunctionConfig = getRawEmbeddingFunctionConfig(config);
+    const efConfig =
+      embeddingFunction != null
+        ? prepareEmbeddingFunctionConfig(embeddingFunction)
+        : rawEmbeddingFunctionConfig
+          ? cloneObject(rawEmbeddingFunctionConfig)
+          : prepareEmbeddingFunctionConfig(embeddingFunction);
     serialized["embedding_function"] = efConfig;
 
     let resolvedSpace = config.space ?? null;
@@ -1118,8 +1153,13 @@ export class Schema {
   ): JsonDict {
     const serialized: JsonDict = {};
     const embeddingFunction = config.embeddingFunction;
+    const rawEmbeddingFunctionConfig = getRawEmbeddingFunctionConfig(config);
     serialized["embedding_function"] =
-      prepareEmbeddingFunctionConfig(embeddingFunction);
+      embeddingFunction != null
+        ? prepareEmbeddingFunctionConfig(embeddingFunction)
+        : rawEmbeddingFunctionConfig
+          ? cloneObject(rawEmbeddingFunctionConfig)
+          : prepareEmbeddingFunctionConfig(embeddingFunction);
 
     if (config.sourceKey) {
       serialized.source_key = config.sourceKey;
@@ -1277,17 +1317,21 @@ export class Schema {
     json: Record<string, any>,
     client: ChromaClient,
   ): Promise<VectorIndexConfig> {
+    const rawEmbeddingFunctionConfig =
+      (json.embedding_function as EmbeddingFunctionConfiguration | undefined) ??
+      null;
     const config = new VectorIndexConfig({
       space: (json.space as Space | null | undefined) ?? null,
       sourceKey: (json.source_key as string | null | undefined) ?? null,
       hnsw: json.hnsw ? cloneObject(json.hnsw) : null,
       spann: json.spann ? cloneObject(json.spann) : null,
     });
+    setRawEmbeddingFunctionConfig(config, rawEmbeddingFunctionConfig);
 
     config.embeddingFunction = await getEmbeddingFunction({
       collectionName: "schema deserialization",
       client,
-      efConfig: json.embedding_function as EmbeddingFunctionConfiguration,
+      efConfig: rawEmbeddingFunctionConfig ?? undefined,
     });
     if (!config.space && config.embeddingFunction?.defaultSpace) {
       config.space = config.embeddingFunction.defaultSpace();
@@ -1300,16 +1344,20 @@ export class Schema {
     json: Record<string, any>,
     client: ChromaClient,
   ): Promise<SparseVectorIndexConfig> {
+    const rawEmbeddingFunctionConfig =
+      (json.embedding_function as EmbeddingFunctionConfiguration | undefined) ??
+      null;
     const config = new SparseVectorIndexConfig({
       sourceKey: (json.source_key as string | null | undefined) ?? null,
       bm25: typeof json.bm25 === "boolean" ? json.bm25 : null,
     });
+    setRawEmbeddingFunctionConfig(config, rawEmbeddingFunctionConfig);
 
     const embeddingFunction =
       (await getSparseEmbeddingFunction(
         "schema deserialization",
         client,
-        json.embedding_function as EmbeddingFunctionConfiguration,
+        rawEmbeddingFunctionConfig ?? undefined,
       )) ??
       (config.embeddingFunction as
         | SparseEmbeddingFunction

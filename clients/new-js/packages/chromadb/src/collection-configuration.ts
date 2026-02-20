@@ -1,12 +1,12 @@
 import { ChromaValueError } from "./errors";
 import {
-  EmbeddingFunctionConfiguration,
   HnswConfiguration as ApiHnswConfiguration,
   SpannConfiguration,
   UpdateCollectionConfiguration as ApiUpdateCollectionConfiguration,
 } from "./api";
 import {
   EmbeddingFunction,
+  type EmbeddingFunctionConfiguration,
   EmbeddingFunctionSpace,
   getDefaultEFConfig,
   getEmbeddingFunction,

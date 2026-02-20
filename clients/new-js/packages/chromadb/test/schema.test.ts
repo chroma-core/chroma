@@ -6,6 +6,9 @@ import {
   registerSparseEmbeddingFunction,
   EmbeddingFunction,
   SparseEmbeddingFunction,
+  serializeEmbeddingFunction,
+  getEmbeddingFunction,
+  getSparseEmbeddingFunction,
 } from "../src/embedding-function";
 import {
   DOCUMENT_KEY,
@@ -1966,5 +1969,116 @@ describe("Schema", () => {
     // Deserialize
     const deserialized = await Schema.deserializeFromJSON(json, client);
     expect(deserialized?.cmek).toBeNull();
+  });
+
+  describe("legacy embedding function preservation", () => {
+    it("EF with name but no getConfig/buildFromConfig serializes as legacy with name", () => {
+      const ef: EmbeddingFunction = {
+        name: "my-ef",
+        async generate(texts: string[]) {
+          return texts.map(() => [1, 2, 3]);
+        },
+      };
+
+      const result = serializeEmbeddingFunction({ embeddingFunction: ef });
+      expect(result).toEqual({ type: "legacy", name: "my-ef" });
+    });
+
+    it("null/undefined EF still produces { type: 'legacy' } with no extra fields (backward compat)", () => {
+      const schema = new Schema();
+      const json = schema.serializeToJSON();
+
+      // Default schema has null embedding functions, which should serialize as plain legacy
+      const defaultsEf =
+        json.defaults["float_list"]!["vector_index"]!.config!
+          .embedding_function;
+      expect(defaultsEf).toEqual({ type: "legacy" });
+    });
+
+    it("deserialization of legacy with name/config returns undefined and warns", async () => {
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = await getEmbeddingFunction({
+        collectionName: "test-collection",
+        client,
+        efConfig: {
+          type: "legacy",
+          name: "mock_embedding",
+          config: { modelName: "reconstructed_model" },
+        },
+      });
+
+      expect(result).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining("Legacy embedding function metadata found"),
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it("sparse deserialization of legacy with known name/config returns undefined", async () => {
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+
+      const result = await getSparseEmbeddingFunction(
+        "test-collection",
+        client,
+        {
+          type: "legacy",
+          name: "mock_sparse",
+          config: { identifier: "reconstructed_sparse" },
+        },
+      );
+
+      expect(result).toBeUndefined();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "Legacy sparse embedding function metadata found",
+        ),
+      );
+
+      warnSpy.mockRestore();
+    });
+
+    it("schema deserialize/serialize preserves server legacy name/config without instantiating EF", async () => {
+      const schema = new Schema();
+      const json = schema.serializeToJSON();
+      const vectorLegacy = {
+        type: "legacy",
+        name: "server_legacy_vector",
+        config: { model: "v1", nested: { size: 384 } },
+      };
+      const sparseLegacy = {
+        type: "legacy",
+        name: "server_legacy_sparse",
+        config: { analyzer: "bm25" },
+      };
+      (json.defaults.float_list!.vector_index!.config as any).embedding_function =
+        vectorLegacy;
+      (json.defaults.sparse_vector!.sparse_vector_index!.config as any).embedding_function =
+        sparseLegacy;
+
+      const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+      const deserialized = await Schema.deserializeFromJSON(json, client);
+      warnSpy.mockRestore();
+
+      expect(deserialized).toBeDefined();
+      expect(
+        deserialized!.defaults.floatList!.vectorIndex!.config.embeddingFunction,
+      ).toBeUndefined();
+      expect(
+        deserialized!.defaults.sparseVector!.sparseVectorIndex!.config
+          .embeddingFunction,
+      ).toBeNull();
+
+      const reserialized = deserialized!.serializeToJSON();
+      expect(
+        (reserialized.defaults.float_list!.vector_index!.config as any)
+          .embedding_function,
+      ).toEqual(vectorLegacy);
+      expect(
+        (reserialized.defaults.sparse_vector!.sparse_vector_index!.config as any)
+          .embedding_function,
+      ).toEqual(sparseLegacy);
+    });
   });
 });

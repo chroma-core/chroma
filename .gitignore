@@ -45,3 +45,6 @@ target/
 
 # Rapid test data
 testdata
+
+# SQLite artifact from JS/Rust integration test config
+/chroma_integration_test_tmp_dir/

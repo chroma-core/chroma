@@ -1,7 +1,22 @@
-import { EmbeddingFunctionConfiguration, SparseVector } from "./api";
+import {
+  EmbeddingFunctionConfiguration as ApiEmbeddingFunctionConfiguration,
+  SparseVector,
+} from "./api";
 import { ChromaValueError } from "./errors";
 import { DefaultEmbeddingFunction } from "@chroma-core/default-embed";
 import { ChromaClient } from "./chroma-client";
+
+/**
+ * Extended EmbeddingFunctionConfiguration that adds optional `name` and `config`
+ * to the `legacy` variant so we can preserve partial info about embedding
+ * functions that don't fully implement the known-EF protocol.
+ *
+ * The generated API type only has `{ type: 'legacy' }` with no extra fields.
+ * We extend it here so the client can round-trip whatever metadata is available.
+ */
+export type EmbeddingFunctionConfiguration =
+  | { type: "legacy"; name?: string; config?: unknown }
+  | Exclude<ApiEmbeddingFunctionConfiguration, { type: "legacy" }>;
 
 /**
  * Supported vector space types.
@@ -238,6 +253,13 @@ export const getEmbeddingFunction = async (args: {
   }
 
   if (efConfig.type === "legacy") {
+    if (efConfig.name || efConfig.config !== undefined) {
+      console.warn(
+        `Legacy embedding function metadata found for collection ${collectionName}. Legacy configs are preserved for roundtrip serialization but are not instantiated in the JS/TS SDK. 'add' and 'query' will fail unless you provide embeddings directly.`,
+      );
+      return undefined;
+    }
+
     console.warn(
       `No embedding function configuration found for collection ${collectionName}. 'add' and 'query' will fail unless you provide them embeddings directly.`,
     );
@@ -320,6 +342,13 @@ export const getSparseEmbeddingFunction = async (
   }
 
   if (efConfig.type === "legacy") {
+    if (efConfig.name || efConfig.config !== undefined) {
+      console.warn(
+        `Legacy sparse embedding function metadata found for collection ${collectionName}. Legacy configs are preserved for roundtrip serialization but are not instantiated in the JS/TS SDK.`,
+      );
+      return undefined;
+    }
+
     return undefined;
   }
 
@@ -376,6 +405,30 @@ export const getSparseEmbeddingFunction = async (
 };
 
 /**
+ * Resolves the name of an embedding function, handling both string
+ * properties and name() methods.
+ * @param fn - The embedding function to resolve the name from
+ * @returns The resolved name string, or undefined if not available
+ */
+export const resolveEmbeddingFunctionName = (
+  fn: AnyEmbeddingFunction | null | undefined,
+): string | undefined => {
+  if (!fn) return undefined;
+  if (typeof (fn as any).name === "function") {
+    try {
+      const value = (fn as any).name();
+      return typeof value === "string" ? value : undefined;
+    } catch (_err) {
+      return undefined;
+    }
+  }
+  if (typeof (fn as any).name === "string") {
+    return (fn as any).name;
+  }
+  return undefined;
+};
+
+/**
  * Serializes an embedding function to configuration format.
  * @param embeddingFunction - User provided embedding function
  * @param configEmbeddingFunction - Collection config embedding function
@@ -404,7 +457,20 @@ export const serializeEmbeddingFunction = ({
     !ef.name ||
     !(ef.constructor as EmbeddingFunctionClass).buildFromConfig
   ) {
-    return { type: "legacy" };
+    // Capture whatever partial info is available for legacy EFs
+    const legacy: EmbeddingFunctionConfiguration = { type: "legacy" };
+    const name = resolveEmbeddingFunctionName(ef);
+    if (name) {
+      legacy.name = name;
+    }
+    if (typeof ef.getConfig === "function") {
+      try {
+        legacy.config = ef.getConfig();
+      } catch (_err) {
+        // getConfig() threw — omit config
+      }
+    }
+    return legacy;
   }
 
   if (ef.validateConfig) ef.validateConfig(ef.getConfig());
