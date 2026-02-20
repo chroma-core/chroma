@@ -1379,12 +1379,13 @@ impl LogServer {
                 }
                 self.merge_and_set_backpressure();
                 self.record_dirty_log_metrics();
+                Ok(())
             }
             Err(err) => {
                 tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
+                Err(err)
             }
         }
-        Ok(())
     }
 
     /// Roll up all topology dirty logs independently of S3 roll-ups.
