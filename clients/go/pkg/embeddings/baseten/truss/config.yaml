@@ -1,0 +1,35 @@
+# Baseten BEI (Baseten Embeddings Inference) Configuration
+# This config deploys the all-MiniLM-L6-v2 model, a lightweight and fast embedding model.
+#
+# Prerequisites:
+#   1. Install Truss: pip install truss
+#   2. Authenticate: truss login (requires BASETEN_API_KEY)
+#
+# Deploy:
+#   truss push --publish --promote
+#
+# After deployment, your endpoint will be:
+#   https://model-<MODEL_ID>.api.baseten.co/environments/production/sync
+# (The embedding function automatically appends /v1/embeddings)
+#
+# For more info: https://docs.baseten.co/engines/bei/overview
+
+model_name: BEI-all-MiniLM-L6-v2
+
+resources:
+  accelerator: H100_40GB
+  cpu: "1"
+  memory: 10Gi
+  use_gpu: true
+
+trt_llm:
+  build:
+    base_model: encoder_bert
+    num_builder_gpus: 4
+    checkpoint_repository:
+      repo: sentence-transformers/all-MiniLM-L6-v2
+      revision: main
+      source: HF
+    quantization_type: no_quant
+  runtime:
+    webserver_default_route: /v1/embeddings
