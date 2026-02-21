@@ -52,6 +52,7 @@ impl ManifestManager {
                 "acc_bytes",
                 "writer",
                 "enumeration_offset",
+                "ignore_dirty",
             ],
             &[
                 &log_id.to_string(),
@@ -59,6 +60,7 @@ impl ManifestManager {
                 &(manifest.acc_bytes as i64),
                 &"spanner init",
                 &(enum_offset.offset() as i64),
+                &false,
             ],
         )];
         let initial_offset = manifest
@@ -347,6 +349,7 @@ impl ManifestManager {
             WHERE manifest_regions.region = @region
                 AND (manifest_regions.intrinsic_cursor IS NULL
                     OR manifest_regions.intrinsic_cursor < manifests.enumeration_offset)
+                AND manifests.ignore_dirty = false
             ",
         );
         stmt.add_param("region", &region);
@@ -1016,6 +1019,7 @@ mod tests {
     };
     use google_cloud_gax::conn::Environment;
     use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
+    use google_cloud_spanner::mutation::update;
     use google_cloud_spanner::session::SessionConfig;
     use setsum::Setsum;
     use uuid::Uuid;
@@ -2093,6 +2097,127 @@ mod tests {
         );
 
         println!("test_k8s_mcmr_integration_compute_garbage: passed");
+    }
+
+    // ==================== get_dirty_logs tests ====================
+
+    // Test that get_dirty_logs returns a log with uncompacted data.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_dirty_logs_returns_uncompacted() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+
+        // Publish a fragment to create a spread between intrinsic_cursor and enumeration_offset.
+        let pointer = FragmentUuid::generate();
+        manager
+            .publish_fragment(
+                &pointer,
+                "path/frag.parquet",
+                10,
+                100,
+                make_setsum(1),
+                &["dummy".to_string()],
+            )
+            .await
+            .expect("publish failed");
+
+        let dirty_logs = ManifestManager::get_dirty_logs(&client, "dummy")
+            .await
+            .expect("get_dirty_logs failed");
+
+        let found = dirty_logs.iter().any(|(id, _, _)| *id == log_id);
+        assert!(
+            found,
+            "get_dirty_logs should return the log with uncompacted data, log_id={}, dirty_logs={:?}",
+            log_id, dirty_logs
+        );
+
+        println!(
+            "test_k8s_mcmr_integration_get_dirty_logs_returns_uncompacted: found log_id={} in {} dirty logs",
+            log_id,
+            dirty_logs.len()
+        );
+    }
+
+    // Test that get_dirty_logs excludes a log with ignore=true.
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_get_dirty_logs_ignores_ignored() {
+        let Some(client) = setup_spanner_client().await else {
+            panic!("Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let log_id = Uuid::new_v4();
+        let manifest = make_empty_manifest();
+        ManifestManager::init(vec!["dummy".to_string()], &client, log_id, &manifest)
+            .await
+            .expect("init failed");
+
+        let manager = ManifestManager::new(Arc::new(client.clone()), "dummy".to_string(), log_id);
+
+        // Publish a fragment to create a spread between intrinsic_cursor and enumeration_offset.
+        let pointer = FragmentUuid::generate();
+        manager
+            .publish_fragment(
+                &pointer,
+                "path/frag.parquet",
+                10,
+                100,
+                make_setsum(1),
+                &["dummy".to_string()],
+            )
+            .await
+            .expect("publish failed");
+
+        // Verify the log appears in dirty logs before setting ignore.
+        let dirty_before = ManifestManager::get_dirty_logs(&client, "dummy")
+            .await
+            .expect("get_dirty_logs failed");
+        let found_before = dirty_before.iter().any(|(id, _, _)| *id == log_id);
+        assert!(
+            found_before,
+            "log should appear in dirty logs before ignore is set"
+        );
+
+        // Set ignore=true on the manifest.
+        client
+            .read_write_transaction(|tx| {
+                let log_id_str = log_id.to_string();
+                Box::pin(async move {
+                    tx.buffer_write(vec![update(
+                        "manifests",
+                        &["log_id", "ignore_dirty"],
+                        &[&log_id_str, &true],
+                    )]);
+                    Ok::<_, google_cloud_spanner::session::SessionError>(())
+                })
+            })
+            .await
+            .expect("failed to set ignore=true");
+
+        // Verify the log no longer appears in dirty logs.
+        let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy")
+            .await
+            .expect("get_dirty_logs failed");
+        let found_after = dirty_after.iter().any(|(id, _, _)| *id == log_id);
+        assert!(
+            !found_after,
+            "get_dirty_logs should exclude log with ignore=true, log_id={}, dirty_logs={:?}",
+            log_id, dirty_after
+        );
+
+        println!(
+            "test_k8s_mcmr_integration_get_dirty_logs_ignores_ignored: log_id={} correctly excluded",
+            log_id
+        );
     }
 
     // ==================== Setsum consistency tests ====================
