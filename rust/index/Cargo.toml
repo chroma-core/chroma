@@ -73,3 +73,7 @@ harness = false
 [[bench]]
 name = "fts_regex"
 harness = false
+
+[[bench]]
+name = "quantization"
+harness = false

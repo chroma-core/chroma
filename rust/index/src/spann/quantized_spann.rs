@@ -1037,6 +1037,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Create centroid indexes
@@ -1210,6 +1211,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Step 1: Open centroid indexes
@@ -1413,6 +1415,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 expansion_add: ef_construction,
                 expansion_search: ef_search,
                 quantization_center: None,
+                quantization_bits: 4,
             };
 
             // Rebuild raw centroid index
