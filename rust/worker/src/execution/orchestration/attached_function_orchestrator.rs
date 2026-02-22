@@ -771,6 +771,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             pulled_log_offset: message.collection.log_position,
             hnsw_index_uuid,
             schema: message.collection.schema.clone(),
+            original_segment_flush_infos: Vec::new(),
         };
 
         if self
