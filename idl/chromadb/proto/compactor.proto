@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package chroma;
 
+import "chromadb/proto/chroma.proto";
+
 message CollectionIds {
   repeated string ids = 1;
 }
@@ -16,6 +18,8 @@ message CompactResponse {
 
 message RebuildRequest {
   CollectionIds ids = 1;
+  // Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+  repeated SegmentScope segment_scopes = 2;
 }
 
 message RebuildResponse {

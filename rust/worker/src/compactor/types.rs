@@ -1,4 +1,6 @@
-use chroma_types::{CollectionUuid, DatabaseName, JobId};
+use std::collections::HashSet;
+
+use chroma_types::{CollectionUuid, DatabaseName, JobId, SegmentScope};
 use tokio::sync::oneshot;
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -18,6 +20,8 @@ pub struct OneOffCompactMessage {
 #[derive(Clone, Debug)]
 pub struct RebuildMessage {
     pub collection_ids: Vec<CollectionUuid>,
+    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+    pub segment_scopes: HashSet<SegmentScope>,
 }
 
 #[derive(Debug)]

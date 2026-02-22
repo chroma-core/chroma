@@ -16,7 +16,7 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{JobId, Schema, SchemaError, SegmentFlushInfo, SegmentUuid};
+use chroma_types::{JobId, Schema, SchemaError, SegmentFlushInfo, SegmentScope, SegmentUuid};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -208,7 +208,13 @@ impl ApplyLogsOrchestrator {
 
         let writers = self.context.get_segment_writers()?;
 
-        {
+        // If apply_segment_scopes is non-empty, only apply to the specified scopes.
+        // Empty set means apply to all segments (backwards compatibility with when
+        // apply_segment_scopes was absent).
+        let scopes = self.context.apply_segment_scopes.clone();
+        let should_apply = |scope: &SegmentScope| scopes.is_empty() || scopes.contains(scope);
+
+        if should_apply(&SegmentScope::RECORD) {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.record_writer.id)
                 .and_modify(|v| {
@@ -239,7 +245,7 @@ impl ApplyLogsOrchestrator {
             tasks_to_run.push((task, Some(span)));
         }
 
-        {
+        if should_apply(&SegmentScope::METADATA) {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.metadata_writer.id)
                 .and_modify(|v| {
@@ -274,7 +280,7 @@ impl ApplyLogsOrchestrator {
             tasks_to_run.push((task, Some(span)));
         }
 
-        {
+        if should_apply(&SegmentScope::VECTOR) {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.vector_writer.get_id())
                 .and_modify(|v| {
@@ -364,6 +370,9 @@ impl ApplyLogsOrchestrator {
             }
         };
         let collection = collection_info.collection.clone();
+        // During rebuild (full or selective), all logs are replayed from offset 0,
+        // so the delta IS the total collection logical size (accumulated from scratch).
+        // During normal compaction, the delta is relative to the existing size.
         let collection_logical_size_bytes = if self.context.is_rebuild {
             match u64::try_from(self.collection_logical_size_delta_bytes) {
                 Ok(size_bytes) => size_bytes,
@@ -384,10 +393,23 @@ impl ApplyLogsOrchestrator {
                 .saturating_add_signed(self.collection_logical_size_delta_bytes)
         };
 
-        let flush_results = std::mem::take(&mut self.flush_results);
+        let mut flush_results = std::mem::take(&mut self.flush_results);
+
+        // During selective rebuild, non-rebuilt segments are skipped (no apply/commit/flush),
+        // so they won't appear in flush_results. Include their original file paths from sysdb
+        // so the version file and sysdb registration contain all segments.
+        if !self.context.apply_segment_scopes.is_empty() {
+            let flushed_ids: std::collections::HashSet<_> =
+                flush_results.iter().map(|f| f.segment_id).collect();
+            for original in &collection_info.original_segment_flush_infos {
+                if !flushed_ids.contains(&original.segment_id) {
+                    flush_results.push(original.clone());
+                }
+            }
+        }
+
         let total_records_post_compaction = collection.total_records_post_compaction;
         let job_id = collection.collection_id.into();
-        // let collection_logical_size_delta_bytes = self.collection_logical_size_delta_bytes;
         self.terminate_with_result(
             Ok(ApplyLogsOrchestratorResponse::new(
                 job_id,

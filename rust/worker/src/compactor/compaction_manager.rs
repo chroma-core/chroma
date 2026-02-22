@@ -206,7 +206,12 @@ impl CompactionManager {
             let future = self
                 .context
                 .clone()
-                .compact(job.collection_id, job.database_name.clone(), false)
+                .compact(
+                    job.collection_id,
+                    job.database_name.clone(),
+                    false,
+                    HashSet::new(),
+                )
                 .instrument(instrumented_span);
             if let Err(e) = compact_awaiter_channel
                 .send(CompactionTask {
@@ -225,14 +230,20 @@ impl CompactionManager {
     }
 
     #[instrument(name = "CompactionManager::rebuild_batch", skip(self))]
-    pub(crate) async fn rebuild_batch(&mut self, collection_ids: &[CollectionUuid]) {
+    pub(crate) async fn rebuild_batch(
+        &mut self,
+        collection_ids: &[CollectionUuid],
+        segment_scopes: &HashSet<chroma_types::SegmentScope>,
+    ) {
         // TODO(tanujnay112): Implement this for MCMR by accepting a database/topo name on this method.
         let _ = collection_ids
             .iter()
             .map(|id| {
                 let database_name =
                     chroma_types::DatabaseName::new("default").expect("default should be valid");
-                self.context.clone().compact(*id, database_name, true)
+                self.context
+                    .clone()
+                    .compact(*id, database_name, true, segment_scopes.clone())
             })
             .collect::<FuturesUnordered<_>>()
             .collect::<Vec<_>>()
@@ -374,6 +385,7 @@ impl CompactionManagerContext {
         collection_id: CollectionUuid,
         database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
+        apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
     ) -> Result<CompactionResponse, Box<dyn ChromaError>> {
         tracing::info!("Compacting collection: {}", collection_id);
         let dispatcher = match self.dispatcher {
@@ -393,6 +405,7 @@ impl CompactionManagerContext {
             collection_id,
             database_name,
             is_rebuild,
+            apply_segment_scopes,
             self.fetch_log_batch_size,
             self.fetch_log_concurrency,
             self.max_compaction_size,
@@ -704,10 +717,12 @@ impl Handler<RebuildMessage> for CompactionManager {
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         tracing::info!(
-            "Rebuild started for collections: {:?}",
-            message.collection_ids
+            "Rebuild started for collections: {:?}, segment_scopes: {:?}",
+            message.collection_ids,
+            message.segment_scopes
         );
-        self.rebuild_batch(&message.collection_ids).await;
+        self.rebuild_batch(&message.collection_ids, &message.segment_scopes)
+            .await;
         tracing::info!(
             "Rebuild completed for collections: {:?}",
             message.collection_ids
