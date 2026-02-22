@@ -15,7 +15,7 @@ use chroma_system::{
     wrap, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System,
     TaskError,
 };
-use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentUuid};
+use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid};
 use opentelemetry::metrics::Counter;
 use thiserror::Error;
 
@@ -104,6 +104,9 @@ pub struct CollectionCompactInfo {
     pub pulled_log_offset: i64,
     pub hnsw_index_uuid: Option<IndexUuid>,
     pub schema: Option<Schema>,
+    /// Original segment flush info from sysdb (before file paths are cleared during rebuild).
+    /// During selective rebuild, non-rebuilt segments use these to appear in the version file.
+    pub(crate) original_segment_flush_infos: Vec<SegmentFlushInfo>,
 }
 
 #[derive(Debug)]
@@ -166,6 +169,12 @@ impl Clone for CompactionContext {
 }
 
 impl CompactionContext {
+    /// Returns true if the given segment scope should be applied to.
+    /// Empty `apply_segment_scopes` means all scopes (backward compatibility).
+    pub fn scope_is_active(&self, scope: &chroma_types::SegmentScope) -> bool {
+        self.apply_segment_scopes.is_empty() || self.apply_segment_scopes.contains(scope)
+    }
+
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
     fn clone_for_new_collection(&self) -> Self {
@@ -1296,7 +1305,7 @@ mod tests {
             .expect("Collection create should be successful");
         let mut in_memory_log = InMemoryLog::new();
         add_delete_generator
-            .generate_vec(1..=50)
+            .generate_vec(1..=120)
             .into_iter()
             .for_each(|log| {
                 in_memory_log.add_log(
@@ -1339,6 +1348,17 @@ mod tests {
             .await
             .expect("Collection and segment information should be present");
 
+        // Query data before rebuild
+        let old_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            test_segments.blockfile_provider.clone(),
+            log.clone(),
+            old_cas.clone(),
+        )
+        .await;
+        assert!(!old_records.is_empty());
+
         // Rebuild ONLY the vector segment
         let vector_only_scopes = HashSet::from([chroma_types::SegmentScope::VECTOR]);
         let rebuild_result = Box::pin(compact(
@@ -1351,7 +1371,7 @@ mod tests {
             10,
             10000,
             1000,
-            log,
+            log.clone(),
             sysdb.clone(),
             test_segments.blockfile_provider.clone(),
             test_segments.hnsw_provider.clone(),
@@ -1371,7 +1391,27 @@ mod tests {
         // Collection version should increment
         assert_eq!(new_cas.collection.version, old_cas.collection.version + 1);
 
-        // Vector segment should be rebuilt (new file path)
+        // Version file path should be updated
+        let version_suffix_re = Regex::new(r"/\d+$").unwrap();
+        let expected_version_file = version_suffix_re
+            .replace(&old_cas.collection.version_file_path.clone().unwrap(), "/2")
+            .to_string();
+        assert_eq!(
+            new_cas.collection.version_file_path,
+            Some(expected_version_file)
+        );
+
+        // Record count and size should be preserved
+        assert_eq!(
+            new_cas.collection.total_records_post_compaction,
+            old_cas.collection.total_records_post_compaction
+        );
+        assert_eq!(
+            new_cas.collection.size_bytes_post_compaction,
+            old_cas.collection.size_bytes_post_compaction
+        );
+
+        // Vector segment should be rebuilt (new file paths)
         assert_ne!(
             new_cas.vector_segment.file_path,
             old_cas.vector_segment.file_path
@@ -1391,6 +1431,17 @@ mod tests {
         assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
         assert_eq!(new_cas.record_segment.id, old_cas.record_segment.id);
         assert_eq!(new_cas.vector_segment.id, old_cas.vector_segment.id);
+
+        // Data should still be queryable and identical after selective rebuild
+        let new_records = get_all_records(
+            &system,
+            &dispatcher_handle,
+            test_segments.blockfile_provider.clone(),
+            log,
+            new_cas,
+        )
+        .await;
+        assert_eq!(new_records, old_records);
     }
 
     #[tokio::test]

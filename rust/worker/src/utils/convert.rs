@@ -37,7 +37,14 @@ impl TryFrom<chroma_proto::RebuildRequest> for RebuildMessage {
         let segment_scopes = value
             .segment_scopes
             .into_iter()
-            .map(|s| SegmentScope::try_from(s).map_err(|_| ConversionError::DecodeError))
+            .map(|s| {
+                let scope = SegmentScope::try_from(s).map_err(|_| ConversionError::DecodeError)?;
+                // Only METADATA and VECTOR are valid rebuild targets.
+                match scope {
+                    SegmentScope::METADATA | SegmentScope::VECTOR => Ok(scope),
+                    _ => Err(ConversionError::DecodeError),
+                }
+            })
             .collect::<Result<_, _>>()?;
 
         Ok(Self {

@@ -72,7 +72,7 @@ impl CompactionClient {
             CompactionCommand::Rebuild { id, segment_scopes } => {
                 let mut client = self.grpc_client().await?;
                 // Convert CLI strings to proto SegmentScope i32 values
-                let proto_scopes: Vec<i32> = segment_scopes
+                let mut proto_scopes: Vec<i32> = segment_scopes
                     .iter()
                     .map(|scope| match scope.as_str() {
                         "metadata" => SegmentScope::Metadata as i32,
@@ -80,6 +80,8 @@ impl CompactionClient {
                         _ => unreachable!(), // value_parser guarantees valid values
                     })
                     .collect();
+                proto_scopes.sort();
+                proto_scopes.dedup();
 
                 let response = client
                     .rebuild(RebuildRequest {
