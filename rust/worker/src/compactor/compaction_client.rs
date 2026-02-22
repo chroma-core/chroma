@@ -1,6 +1,6 @@
 use chroma_types::chroma_proto::{
     compactor_client::CompactorClient, CollectionIds, CompactRequest, ListDeadJobsRequest,
-    RebuildRequest,
+    RebuildRequest, SegmentScope,
 };
 use clap::{Parser, Subcommand};
 use thiserror::Error;
@@ -40,6 +40,10 @@ pub enum CompactionCommand {
         /// Specify Uuids of the collections to rebuild
         #[arg(short, long)]
         id: Vec<Uuid>,
+        /// Specify which segment scopes to rebuild (metadata, vector)
+        /// Can be specified multiple times. If not specified, rebuilds all segments.
+        #[arg(long = "segment", value_parser = ["metadata", "vector"])]
+        segment_scopes: Vec<String>,
     },
     /// List all dead jobs (collections with failed compactions)
     ListDeadJobs,
@@ -65,13 +69,24 @@ impl CompactionClient {
                     return Err(CompactionClientError::Compactor(status.to_string()));
                 }
             }
-            CompactionCommand::Rebuild { id } => {
+            CompactionCommand::Rebuild { id, segment_scopes } => {
                 let mut client = self.grpc_client().await?;
+                // Convert CLI strings to proto SegmentScope i32 values
+                let proto_scopes: Vec<i32> = segment_scopes
+                    .iter()
+                    .map(|scope| match scope.as_str() {
+                        "metadata" => SegmentScope::Metadata as i32,
+                        "vector" => SegmentScope::Vector as i32,
+                        _ => unreachable!(), // value_parser guarantees valid values
+                    })
+                    .collect();
+
                 let response = client
                     .rebuild(RebuildRequest {
                         ids: Some(CollectionIds {
                             ids: id.iter().map(ToString::to_string).collect(),
                         }),
+                        segment_scopes: proto_scopes,
                     })
                     .await;
                 if let Err(status) = response {

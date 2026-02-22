@@ -308,6 +308,7 @@ impl LogFetchOrchestrator {
     ) -> Self {
         let context = CompactionContext::new(
             is_rebuild,
+            std::collections::HashSet::new(),
             fetch_log_batch_size,
             fetch_log_concurrency,
             max_compaction_size,

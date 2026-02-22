@@ -127,6 +127,8 @@ pub struct CompactionContext {
     pub dispatcher: ComponentHandle<Dispatcher>,
     pub orchestrator_context: OrchestratorContext,
     pub is_rebuild: bool,
+    /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
+    pub apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
     pub fetch_log_batch_size: u32,
     pub fetch_log_concurrency: usize,
     pub max_compaction_size: usize,
@@ -150,6 +152,7 @@ impl Clone for CompactionContext {
             dispatcher: self.dispatcher.clone(),
             orchestrator_context,
             is_rebuild: self.is_rebuild,
+            apply_segment_scopes: self.apply_segment_scopes.clone(),
             fetch_log_batch_size: self.fetch_log_batch_size,
             fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
@@ -177,6 +180,7 @@ impl CompactionContext {
             dispatcher: self.dispatcher.clone(),
             orchestrator_context,
             is_rebuild: self.is_rebuild,
+            apply_segment_scopes: self.apply_segment_scopes.clone(),
             fetch_log_batch_size: self.fetch_log_batch_size,
             fetch_log_concurrency: self.fetch_log_concurrency,
             max_compaction_size: self.max_compaction_size,
@@ -274,6 +278,7 @@ impl CompactionContext {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         is_rebuild: bool,
+        apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
         fetch_log_batch_size: u32,
         fetch_log_concurrency: usize,
         max_compaction_size: usize,
@@ -290,6 +295,7 @@ impl CompactionContext {
         CompactionContext {
             collection_info: OnceCell::new(),
             is_rebuild,
+            apply_segment_scopes,
             fetch_log_batch_size,
             fetch_log_concurrency,
             max_compaction_size,
@@ -908,6 +914,7 @@ pub async fn compact(
     collection_id: CollectionUuid,
     database_name: chroma_types::DatabaseName,
     is_rebuild: bool,
+    apply_segment_scopes: HashSet<chroma_types::SegmentScope>,
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
     max_compaction_size: usize,
@@ -923,6 +930,7 @@ pub async fn compact(
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
         is_rebuild,
+        apply_segment_scopes,
         fetch_log_batch_size,
         fetch_log_concurrency,
         max_compaction_size,
@@ -953,7 +961,7 @@ mod tests {
         add_delete_net_zero_generator, upsert_generator, TEST_EMBEDDING_DIMENSION,
     };
     use chroma_types::DatabaseName;
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::{Path, PathBuf};
     use tokio::fs;
 
@@ -1103,6 +1111,7 @@ mod tests {
             collection_id,
             database_name.clone(),
             false,
+            HashSet::new(),
             50,
             10,
             1000,
@@ -1183,6 +1192,7 @@ mod tests {
             collection_id,
             database_name,
             true,
+            HashSet::new(),
             5000,
             10,
             10000,
@@ -1251,6 +1261,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rebuild_vector_only() {
+        let config = RootConfig::default();
+        let system = System::default();
+        let registry = Registry::new();
+        let dispatcher = Dispatcher::try_from_config(&config.query_service.dispatcher, &registry)
+            .await
+            .expect("Should be able to initialize dispatcher");
+        let dispatcher_handle = system.start_component(dispatcher);
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        let test_segments = TestDistributedSegment::new().await;
+        let collection_id = test_segments.collection.collection_id;
+        let database_name =
+            chroma_types::DatabaseName::new(test_segments.collection.database.clone())
+                .expect("database name should be valid");
+        sysdb
+            .create_collection(
+                test_segments.collection.tenant,
+                database_name.clone(),
+                collection_id,
+                test_segments.collection.name,
+                vec![
+                    test_segments.record_segment.clone(),
+                    test_segments.metadata_segment.clone(),
+                    test_segments.vector_segment.clone(),
+                ],
+                None,
+                None,
+                None,
+                test_segments.collection.dimension,
+                false,
+            )
+            .await
+            .expect("Collection create should be successful");
+        let mut in_memory_log = InMemoryLog::new();
+        add_delete_generator
+            .generate_vec(1..=50)
+            .into_iter()
+            .for_each(|log| {
+                in_memory_log.add_log(
+                    collection_id,
+                    InternalLogRecord {
+                        collection_id,
+                        log_offset: log.log_offset - 1,
+                        log_ts: log.log_offset,
+                        record: log,
+                    },
+                )
+            });
+        let log = Log::InMemory(in_memory_log);
+
+        // Initial compaction to create segments
+        let compact_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name.clone(),
+            false,
+            HashSet::new(),
+            50,
+            10,
+            1000,
+            50,
+            log.clone(),
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+        ))
+        .await;
+        assert!(compact_result.is_ok());
+
+        let old_cas = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        // Rebuild ONLY the vector segment
+        let vector_only_scopes = HashSet::from([chroma_types::SegmentScope::VECTOR]);
+        let rebuild_result = Box::pin(compact(
+            system.clone(),
+            collection_id,
+            database_name,
+            true,
+            vector_only_scopes,
+            5000,
+            10,
+            10000,
+            1000,
+            log,
+            sysdb.clone(),
+            test_segments.blockfile_provider.clone(),
+            test_segments.hnsw_provider.clone(),
+            test_segments.spann_provider.clone(),
+            dispatcher_handle.clone(),
+            false,
+            None,
+        ))
+        .await;
+        assert!(rebuild_result.is_ok());
+
+        let new_cas = sysdb
+            .get_collection_with_segments(None, collection_id)
+            .await
+            .expect("Collection and segment information should be present");
+
+        // Collection version should increment
+        assert_eq!(new_cas.collection.version, old_cas.collection.version + 1);
+
+        // Vector segment should be rebuilt (new file path)
+        assert_ne!(
+            new_cas.vector_segment.file_path,
+            old_cas.vector_segment.file_path
+        );
+
+        // Metadata and record segments should NOT be rebuilt (same file paths)
+        assert_eq!(
+            new_cas.metadata_segment.file_path,
+            old_cas.metadata_segment.file_path
+        );
+        assert_eq!(
+            new_cas.record_segment.file_path,
+            old_cas.record_segment.file_path
+        );
+
+        // Segment IDs should remain the same
+        assert_eq!(new_cas.metadata_segment.id, old_cas.metadata_segment.id);
+        assert_eq!(new_cas.record_segment.id, old_cas.record_segment.id);
+        assert_eq!(new_cas.vector_segment.id, old_cas.vector_segment.id);
+    }
+
+    #[tokio::test]
     async fn test_rebuild_empty_filepath() {
         let config = RootConfig::default();
         let system = System::default();
@@ -1292,6 +1435,7 @@ mod tests {
             collection_id,
             database_name,
             true,
+            HashSet::new(),
             5000,
             10,
             10000,
@@ -1476,6 +1620,7 @@ mod tests {
             collection_uuid,
             database_name,
             false,
+            HashSet::new(),
             5000,
             10,
             10000,
@@ -1674,6 +1819,7 @@ mod tests {
             collection_uuid,
             database_name,
             false,
+            HashSet::new(),
             5000,
             10,
             10000,
@@ -1873,6 +2019,7 @@ mod tests {
             collection_uuid,
             database_name.clone(),
             false,
+            HashSet::new(),
             5000,
             10,
             10000,
@@ -1909,6 +2056,7 @@ mod tests {
             collection_uuid,
             database_name,
             false,
+            HashSet::new(),
             5000,
             10,
             10000,
@@ -2143,10 +2291,11 @@ mod tests {
             collection_uuid,
             database_name,
             false, // walrus_enabled
-            50,    // min_compaction_size
-            10,    // fetch_log_concurrency
-            1000,  // max_compaction_size
-            50,    // max_partition_size
+            HashSet::new(),
+            50,   // min_compaction_size
+            10,   // fetch_log_concurrency
+            1000, // max_compaction_size
+            50,   // max_partition_size
             log.clone(),
             sysdb.clone(),
             blockfile_provider.clone(),
@@ -2360,10 +2509,11 @@ mod tests {
             collection_uuid,
             database_name.clone(),
             false, // walrus_enabled
-            50,    // min_compaction_size
-            10,    // fetch_log_concurrency
-            1000,  // max_compaction_size
-            50,    // max_partition_size
+            HashSet::new(),
+            50,   // min_compaction_size
+            10,   // fetch_log_concurrency
+            1000, // max_compaction_size
+            50,   // max_partition_size
             log.clone(),
             sysdb.clone(),
             blockfile_provider.clone(),
@@ -2446,10 +2596,11 @@ mod tests {
             collection_uuid,
             database_name,
             false, // walrus_enabled
-            50,    // min_compaction_size
-            10,    // fetch_log_concurrency
-            1000,  // max_compaction_size
-            50,    // max_partition_size
+            HashSet::new(),
+            50,   // min_compaction_size
+            10,   // fetch_log_concurrency
+            1000, // max_compaction_size
+            50,   // max_partition_size
             log.clone(),
             sysdb.clone(),
             blockfile_provider.clone(),
@@ -2698,6 +2849,7 @@ mod tests {
         // Compaction 1: Start with run_get_logs only
         let mut compaction_context_1 = CompactionContext::new(
             false,
+            HashSet::new(),
             50,
             10,
             1000,
@@ -2749,6 +2901,7 @@ mod tests {
         // This ensures both compactions work with the same initial state
         let _ = CompactionContext::new(
             false,
+            HashSet::new(),
             50,
             10,
             1000,
@@ -2771,10 +2924,11 @@ mod tests {
             collection_uuid,
             database_name,
             false, // walrus_enabled
-            50,    // min_compaction_size
-            10,    // fetch_log_concurrency
-            1000,  // max_compaction_size
-            50,    // max_partition_size
+            HashSet::new(),
+            50,   // min_compaction_size
+            10,   // fetch_log_concurrency
+            1000, // max_compaction_size
+            50,   // max_partition_size
             log.clone(),
             sysdb.clone(),
             blockfile_provider.clone(),
@@ -3026,6 +3180,7 @@ mod tests {
             collection_id,
             database_name.clone(),
             false, // not a rebuild
+            HashSet::new(),
             50,
             10,
             1000,
@@ -3112,6 +3267,7 @@ mod tests {
             collection_id,
             database_name.clone(),
             false, // not a rebuild
+            HashSet::new(),
             50,
             10,
             1000,
@@ -3172,6 +3328,7 @@ mod tests {
             collection_id,
             database_name,
             true, // is_rebuild = true
+            HashSet::new(),
             5000,
             10,
             10000,

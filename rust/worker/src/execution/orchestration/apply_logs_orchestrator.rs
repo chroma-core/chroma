@@ -16,7 +16,7 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{JobId, Schema, SchemaError, SegmentFlushInfo, SegmentUuid};
+use chroma_types::{JobId, Schema, SchemaError, SegmentFlushInfo, SegmentScope, SegmentUuid};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -208,7 +208,13 @@ impl ApplyLogsOrchestrator {
 
         let writers = self.context.get_segment_writers()?;
 
-        {
+        // If apply_segment_scopes is non-empty, only apply to the specified scopes.
+        // Empty set means apply to all segments (backwards compatibility with when
+        // apply_segment_scopes was absent).
+        let scopes = self.context.apply_segment_scopes.clone();
+        let should_apply = |scope: &SegmentScope| scopes.is_empty() || scopes.contains(scope);
+
+        if should_apply(&SegmentScope::RECORD) {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.record_writer.id)
                 .and_modify(|v| {
@@ -239,7 +245,7 @@ impl ApplyLogsOrchestrator {
             tasks_to_run.push((task, Some(span)));
         }
 
-        {
+        if should_apply(&SegmentScope::METADATA) {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.metadata_writer.id)
                 .and_modify(|v| {
@@ -274,7 +280,7 @@ impl ApplyLogsOrchestrator {
             tasks_to_run.push((task, Some(span)));
         }
 
-        {
+        if should_apply(&SegmentScope::VECTOR) {
             self.num_uncompleted_tasks_by_segment
                 .entry(writers.vector_writer.get_id())
                 .and_modify(|v| {
