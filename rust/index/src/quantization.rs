@@ -543,6 +543,48 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 
 /// Sums `values[i]` for each `i` where bit `i` is set in `packed`.
 ///
+/// # SIMD strategy
+///
+/// **Step 1 — bit expansion (constant shifts).**
+/// Each byte is expanded into 8 `f32` masks (0.0 or 1.0) using shifts 0..7,
+/// which are all compile-time constants. LLVM fully unrolls the inner body and
+/// can vectorize the outer loop over bytes with VPMOVSXBD + integer-to-float
+/// conversions.
+///
+/// **Step 2 — dot product (simsimd).**
+/// The expanded masks and the value chunk are fed into `f32::dot`, which uses
+/// simsimd's platform-optimized VMULPS + VADDPS (or AVX-512 FMA) kernel.
+///
+/// To avoid heap allocation the expansion is done into a 256-byte stack buffer
+/// (8 bytes × 8 floats × 4 bytes = 256 bytes), processed 64 floats at a time.
+fn masked_sum(packed: &[u8], values: &[f32]) -> f32 {
+    // 8 bytes per chunk → 64 bits → 64 f32 masks (256 bytes on the stack).
+    const CHUNK: usize = 8;
+    let mut masks = [0.0f32; CHUNK * 8];
+    let mut sum = 0.0f32;
+
+    for (packed_chunk, val_chunk) in packed.chunks(CHUNK).zip(values.chunks(CHUNK * 8)) {
+        let n = val_chunk.len();
+        for (i, &byte) in packed_chunk.iter().enumerate() {
+            let base = i * 8;
+            // All shift amounts are constants — LLVM can fully unroll and
+            // vectorize this block across multiple outer-loop iterations.
+            masks[base]     = ((byte >> 0) & 1) as f32;
+            masks[base + 1] = ((byte >> 1) & 1) as f32;
+            masks[base + 2] = ((byte >> 2) & 1) as f32;
+            masks[base + 3] = ((byte >> 3) & 1) as f32;
+            masks[base + 4] = ((byte >> 4) & 1) as f32;
+            masks[base + 5] = ((byte >> 5) & 1) as f32;
+            masks[base + 6] = ((byte >> 6) & 1) as f32;
+            masks[base + 7] = ((byte >> 7) & 1) as f32;
+        }
+        sum += f32::dot(&masks[..n], val_chunk).unwrap_or(0.0) as f32;
+    }
+    sum
+}
+
+/// Sums `values[i]` for each `i` where bit `i` is set in `packed`.
+///
 /// # Notes on SIMD optimization:
 ///
 /// Branchless but not auto-vectorizable as written.
@@ -559,7 +601,8 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 /// To actually vectorize this we need to explicitly expand packed bits into a
 /// float mask. Or use a library (pulp).
 /// TODO: use AVX-512 mask registers (_mm512_mask_add_ps)
-fn masked_sum(packed: &[u8], values: &[f32]) -> f32 {
+#[allow(unused)]
+fn masked_sum_old(packed: &[u8], values: &[f32]) -> f32 {
     let mut sum = 0.0f32;
     for (i, &val) in values.iter().enumerate() {
         let bit = (packed[i / 8] >> (i % 8)) & 1;

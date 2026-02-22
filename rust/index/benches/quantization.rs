@@ -4,8 +4,8 @@
 //! - Distance estimation throughput: code-vs-code and code-vs-query (bytes/s, varying dimension)
 //! - Primitive kernel throughput: hamming_distance, masked_sum
 //! - Thread scaling: parallel quantization and distance estimation
-//! - Error distribution: for a fixed K, what fraction of true top-K is
-//!   recovered at various rerank factors (decides how much to rerank)
+//! - Rerank budget: for a fixed K, what rerank factor guarantees the true
+//!   top-K is in the candidate set (accuracy analysis, printed to stdout)
 //!
 //! Run with:
 //!   # All benchmarks
@@ -32,7 +32,7 @@ use rayon::prelude::*;
 
 // ── Dimensions from the description: 128-dim (small), 1024-dim (target),
 //    4096-dim (maximum stated in the doc: "up to 4096dim embeddings")
-const DIMS: &[usize] = &[128, 256, 512, 1024, 4096];
+const DIMS: &[usize] = &[128, 1024, 4096];
 
 // Number of code-pairs / query pairs per benchmark iteration.
 const BATCH: usize = 512;
@@ -172,17 +172,32 @@ fn bench_distance_code(c: &mut Criterion) {
 }
 
 // ── 3. distance_query throughput (code vs full-precision query) ───────────────
+//
+// Two variants with deliberately different memory access patterns:
+//
+//   "1bit/<dim>" / "4bit/<dim>"  — cold-query variant
+//     BATCH=512 (code, query) pairs, each with a distinct r_q.
+//     The query vector is never cache-warm between iterations; this models
+//     the worst-case where every lookup touches a fresh query.
+//
+//   "cluster_scan_1bit" / "cluster_scan_4bit"  — hot-query variant (dim=1024)
+//     N=2048 codes scored against a single fixed query.  The query vector
+//     stays hot in L1/registers while the codes stream through cache.  This
+//     is the actual hot-path pattern: one query probing one posting list
+//     (cluster) of ~2048 vectors.  Throughput here is what matters most for
+//     end-to-end query latency.
 
 fn bench_distance_query(c: &mut Criterion) {
     let mut group = c.benchmark_group("distance_query");
     let df = DistanceFunction::Euclidean;
 
+    // Cold-query variant: BATCH pairs each with a distinct r_q.
     for &dim in DIMS {
         let (centroid, codes_1, queries_1) = make_codes::<1>(dim, BATCH);
         let (_, codes_4, queries_4) = make_codes::<4>(dim, BATCH);
         let cn = c_norm(&centroid);
 
-        // Throughput = code_bytes + query_bytes (f32) read per call.
+        // Throughput = (code_bytes + query_bytes) * BATCH per iteration.
         let code_bytes_1 = Code::<&[u8], 1>::size(dim);
         let query_bytes = dim * 4;
         let code_bytes_4 = Code::<&[u8], 4>::size(dim);
@@ -214,6 +229,56 @@ fn bench_distance_query(c: &mut Criterion) {
                     let qn = q_norm(&centroid, r_q);
                     black_box(code.distance_query(&df, r_q, cn, cdq, qn));
                 }
+            });
+        });
+    }
+
+    // Hot-query / cluster-scan variant: one fixed query, N=2048 codes, dim=1024.
+    // This matches what query_quantized_cluster does per probed cluster.
+    {
+        const SCAN_DIM: usize = 1024;
+        const SCAN_N: usize = 2048;
+
+        let mut rng = make_rng();
+        let centroid = random_vec(&mut rng, SCAN_DIM);
+        let r_q: Vec<f32> = {
+            let query = random_vec(&mut rng, SCAN_DIM);
+            query.iter().zip(&centroid).map(|(q, c)| q - c).collect()
+        };
+        let cdq = c_dot_q(&centroid, &r_q);
+        let qn = q_norm(&centroid, &r_q);
+        let cn = c_norm(&centroid);
+
+        let (_, codes_1, _) = make_codes::<1>(SCAN_DIM, SCAN_N);
+        let (_, codes_4, _) = make_codes::<4>(SCAN_DIM, SCAN_N);
+
+        // Throughput = code_bytes * N (the query is reused and stays in L1).
+        let code_bytes_1 = Code::<&[u8], 1>::size(SCAN_DIM);
+        let code_bytes_4 = Code::<&[u8], 4>::size(SCAN_DIM);
+
+        group.throughput(Throughput::Bytes(SCAN_N as u64 * code_bytes_1 as u64));
+        group.bench_function("cluster_scan_1bit", |b| {
+            b.iter(|| {
+                let _: f32 = codes_1
+                    .iter()
+                    .map(|cb| {
+                        let code = Code::<&[u8], 1>::new(cb.as_slice());
+                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
+                    })
+                    .sum();
+            });
+        });
+
+        group.throughput(Throughput::Bytes(SCAN_N as u64 * code_bytes_4 as u64));
+        group.bench_function("cluster_scan_4bit", |b| {
+            b.iter(|| {
+                let _: f32 = codes_4
+                    .iter()
+                    .map(|cb| {
+                        let code = Code::<&[u8], 4>::new(cb.as_slice());
+                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
+                    })
+                    .sum();
             });
         });
     }
@@ -330,60 +395,48 @@ fn bench_thread_scaling(c: &mut Criterion) {
     group.finish();
 }
 
-// ── 5. Error distribution / rerank budget ────────────────────────────────────
+// ── 5. Rerank budget analysis ─────────────────────────────────────────────────
 //
-// For a ground-truth top-K by true Euclidean distance, we ask:
+// This is a recall/accuracy analysis, not a throughput benchmark.
+//
+// For a ground-truth top-K ranked by true Euclidean distance, we ask:
 // "At what rerank factor R does the estimated top-(K*R) always contain the
-//  true top-K?" This directly answers the description question:
+//  true top-K?"  The answer tells you how large to make the candidate set
+//  before re-scoring with full-precision distances.
 //
-// This is not a micro-benchmark of raw speed; it runs under criterion's
-// timing harness but the result we care about is printed to stdout.
-// Criterion will report ns/iter for the scoring loop itself.
+// The result is printed as a table to stdout when `cargo bench` runs.
+// No criterion timings are registered here.
 
+/// Returns true if the estimated top-(k * rerank_factor) candidate set
+/// covers all of the true top-k vectors.
 fn rerank_factor_needed(
-    true_distances: &[f32],   // sorted ascending, length N
-    est_distances: &[(usize, f32)], // (original_idx, estimated_dist) unsorted
+    true_distances: &[f32],         // true distance for each data point by index
+    est_distances: &[(usize, f32)], // (original_idx, estimated_dist), unsorted
     k: usize,
     rerank_factor: usize,
 ) -> bool {
-    // Take top-(k * rerank_factor) by estimated distance.
+    // Candidate set: top-(k * rerank_factor) by estimated distance.
     let mut est_sorted: Vec<(usize, f32)> = est_distances.to_vec();
     est_sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     let candidate_ids: std::collections::HashSet<usize> =
         est_sorted.iter().take(k * rerank_factor).map(|&(i, _)| i).collect();
 
-    // True top-K are indices 0..k of `true_distances` — but we need the
-    // actual indices sorted by true distance.
-    // Re-derive from the original index list (passed in as est_distances indices).
-    let mut true_sorted_idx: Vec<usize> =
-        est_distances.iter().map(|&(i, _)| i).collect();
-    // Sort by true distance via the pre-sorted true_distances slice.
-    // true_distances[i] is the true distance for the i-th data point.
+    // Recover which indices are the true top-K.
+    let mut true_sorted_idx: Vec<usize> = est_distances.iter().map(|&(i, _)| i).collect();
     true_sorted_idx.sort_by(|&a, &b| {
-        true_distances[a]
-            .partial_cmp(&true_distances[b])
-            .unwrap()
+        true_distances[a].partial_cmp(&true_distances[b]).unwrap()
     });
 
-    // Check all true top-K are in the candidate set.
-    true_sorted_idx
-        .iter()
-        .take(k)
-        .all(|idx| candidate_ids.contains(idx))
+    // All true top-K indices must appear in the candidate set.
+    true_sorted_idx.iter().take(k).all(|idx| candidate_ids.contains(idx))
 }
 
-// bench_error_distribution benchmarks the error distribution and rerank budget.
-//
-// score_all_1bit benchmarks the inner loop that a real query would run across
-// a single posting list (cluster).
-// Concretely, it measures this operation: given one fixed query and 2048
-// pre-quantized 1-bit codes (simulating one cluster's worth of vectors),
-// call distance_query on every code and sum the results. That's exactly what
-// query_quantized_cluster in utils.rs does per probed cluster.
-fn bench_error_distribution(c: &mut Criterion) {
+/// Builds test data, scores with both 1-bit and 4-bit estimated distances,
+/// and prints the rerank-budget table to stdout.
+fn print_rerank_budget() {
     const DIM: usize = 1024;
-    const N: usize = 2048; // data vectors per cluster
-    const K: usize = 100;  // true top-K to recover (from description: K=100)
+    const N: usize = 2048;
+    const K: usize = 100;
     const RERANK_FACTORS: &[usize] = &[1, 2, 4, 8];
 
     let mut rng = make_rng();
@@ -391,116 +444,66 @@ fn bench_error_distribution(c: &mut Criterion) {
     let query = random_vec(&mut rng, DIM);
     let embeddings: Vec<Vec<f32>> = (0..N).map(|_| random_vec(&mut rng, DIM)).collect();
 
-    let cn = c_norm(&centroid);
     let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
     let cdq: f32 = centroid.iter().zip(&query).map(|(c, q)| c * q).sum();
     let qn: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let cn = c_norm(&centroid);
     let df = DistanceFunction::Euclidean;
 
-    // True distances.
     let true_distances: Vec<f32> = embeddings
         .iter()
-        .map(|emb| {
-            emb.iter()
-                .zip(&query)
-                .map(|(e, q)| (e - q).powi(2))
-                .sum::<f32>()
-        })
+        .map(|emb| emb.iter().zip(&query).map(|(e, q)| (e - q).powi(2)).sum::<f32>())
         .collect();
 
-    // Quantize all embeddings for both bit widths.
     let codes_1: Vec<Vec<u8>> = embeddings
         .iter()
-        .map(|emb| {
-            Code::<Vec<u8>, 1>::quantize(emb, &centroid)
-                .as_ref()
-                .to_vec()
-        })
+        .map(|emb| Code::<Vec<u8>, 1>::quantize(emb, &centroid).as_ref().to_vec())
         .collect();
-
     let codes_4: Vec<Vec<u8>> = embeddings
         .iter()
-        .map(|emb| {
-            Code::<Vec<u8>, 4>::quantize(emb, &centroid)
-                .as_ref()
-                .to_vec()
-        })
+        .map(|emb| Code::<Vec<u8>, 4>::quantize(emb, &centroid).as_ref().to_vec())
         .collect();
 
-    // Estimated distances.
-    let est_1: Vec<(usize, f32)> = codes_1
-        .iter()
-        .enumerate()
-        .map(|(i, cb)| {
-            let code = Code::<&[u8], 1>::new(cb.as_slice());
-            (i, code.distance_query(&df, &r_q, cn, cdq, qn))
-        })
-        .collect();
+    let score = |codes: &[Vec<u8>], bits: u8| -> Vec<(usize, f32)> {
+        codes
+            .iter()
+            .enumerate()
+            .map(|(i, cb)| {
+                let dist = if bits == 1 {
+                    Code::<&[u8], 1>::new(cb.as_slice()).distance_query(&df, &r_q, cn, cdq, qn)
+                } else {
+                    Code::<&[u8], 4>::new(cb.as_slice()).distance_query(&df, &r_q, cn, cdq, qn)
+                };
+                (i, dist)
+            })
+            .collect()
+    };
 
-    let est_4: Vec<(usize, f32)> = codes_4
-        .iter()
-        .enumerate()
-        .map(|(i, cb)| {
-            let code = Code::<&[u8], 4>::new(cb.as_slice());
-            (i, code.distance_query(&df, &r_q, cn, cdq, qn))
-        })
-        .collect();
+    let est_1 = score(&codes_1, 1);
+    let est_4 = score(&codes_4, 4);
 
-    // Print the rerank budget table to stdout before benchmarking.
     println!("\n=== Rerank budget (dim={DIM}, N={N}, K={K}) ===");
-    println!(
-        "{:<10} {:<8} {:<12} {:<12}",
-        "bits", "factor", "candidates", "top-K covered"
-    );
+    println!("{:<10} {:<8} {:<12} {:<12}", "bits", "factor", "candidates", "top-K covered");
     for &rf in RERANK_FACTORS {
-        let covered_1 = rerank_factor_needed(&true_distances, &est_1, K, rf);
-        let covered_4 = rerank_factor_needed(&true_distances, &est_4, K, rf);
-        println!(
-            "{:<10} {:<8} {:<12} {:<12}",
-            "1",
-            rf,
-            K * rf,
-            if covered_1 { "YES" } else { "NO" }
-        );
-        println!(
-            "{:<10} {:<8} {:<12} {:<12}",
-            "4",
-            rf,
-            K * rf,
-            if covered_4 { "YES" } else { "NO" }
-        );
+        for (label, est) in [("1", &est_1), ("4", &est_4)] {
+            let covered = rerank_factor_needed(&true_distances, est, K, rf);
+            println!(
+                "{:<10} {:<8} {:<12} {:<12}",
+                label, rf, K * rf,
+                if covered { "YES" } else { "NO" }
+            );
+        }
     }
     println!();
+}
 
-    // Benchmark the scoring loop itself (not the analysis).
-    let mut group = c.benchmark_group("error_distribution");
-
-    group.throughput(Throughput::Elements(N as u64));
-    group.bench_function("score_all_1bit", |b| {
-        b.iter(|| {
-            let _: f32 = codes_1
-                .iter()
-                .map(|cb| {
-                    let code = Code::<&[u8], 1>::new(cb.as_slice());
-                    black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
-                })
-                .sum();
-        });
-    });
-
-    group.bench_function("score_all_4bit", |b| {
-        b.iter(|| {
-            let _: f32 = codes_4
-                .iter()
-                .map(|cb| {
-                    let code = Code::<&[u8], 4>::new(cb.as_slice());
-                    black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
-                })
-                .sum();
-        });
-    });
-
-    group.finish();
+/// Criterion entry-point that triggers the rerank-budget analysis.  No
+/// benchmarks are registered; this exists solely so `print_rerank_budget`
+/// runs once as part of `cargo bench`, placing the accuracy table in the
+/// output alongside the timing results.
+fn bench_rerank_budget(c: &mut Criterion) {
+    let _ = c;
+    print_rerank_budget();
 }
 
 // ── 6. SIMD primitive kernels ─────────────────────────────────────────────────
@@ -586,7 +589,7 @@ criterion_group!(
     bench_distance_code,
     bench_distance_query,
     bench_thread_scaling,
-    bench_error_distribution,
+    bench_rerank_budget,
     bench_primitives,
 );
 criterion_main!(benches);
