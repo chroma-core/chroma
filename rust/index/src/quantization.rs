@@ -119,7 +119,7 @@ impl<T, const BITS: u8> Code<T, BITS> {
     /// For BITS=1, pads to u64 boundary (64) for efficient popcount.
     ///     We don't need to pad to 256 because we are using bit-level
     ///     operations instead of unpacking the grid. i.e. hamming_distance and
-    ///     masked_sum and not BitPacker8x decompression.
+    ///     hamming_distance and signed_dot, not BitPacker8x decompression.
     /// For BITS≥2, pads to BitPacker8x block size (256).
     fn padded_dim(dim: usize) -> usize {
         if BITS == 1 {
@@ -228,25 +228,16 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         let correction = self.correction();
 
         let g_dot_r_q = if BITS == 1 {
-            // For BITS=1, g[i] is +0.5 when bit=1 and -0.5 when bit=0.
+            // For BITS=1, g[i] is +0.5 when bit=1 and −0.5 when bit=0.
             // ⟨g, r_q⟩ = Σ g[i] · r_q[i]
-            //            Splitting the sum by bit value:
-            //          = Σ_{bit=1} (+0.5) · r_q[i]  +  Σ_{bit=0} (−0.5) · r_q[i]
-            //            Factoring out 0.5:
-            //          = (0.5 · Σ_{bit=1} r_q[i]) − (0.5 · Σ_{bit=0} r_q[i])
-            //          = 0.5 · S₁  −  0.5 · S₀
-            //            Substituting out S₀:
-            //          = 0.5 · S₁ − 0.5 · (total − S₁)
-            //          = 0.5 · (2·S₁ − total)
-            //          = 0.5 · (2 · masked_sum - total)
+            //           = 0.5 · Σ_{bit=1} r_q[i]  −  0.5 · Σ_{bit=0} r_q[i]
+            //           = 0.5 · Σ sign(g[i]) · r_q[i]
+            //
             // where
-            //    - total = Σr_q[i] = S₁ + S₀
-            //    - S₁ = Σ_{bit=1} r_q[i] (i.e. masked_sum)
-            //    - S₀ = Σ_{bit=0} r_q[i]
-            //    - S₀ = total - S₁
-            let total: f32 = r_q.iter().sum();
-            let m_sum = masked_sum(self.packed(), r_q);
-            0.5 * (2.0 * m_sum - total)
+            // - sign(g[i]) = +1 when bit=1, −1 when bit=0.
+            // - S₁ = Σ_{bit=1} r_q[i]
+            // - S₀ = Σ_{bit=0} r_q[i]
+            0.5 * signed_dot(self.packed(), r_q)
         } else {
             let g = self.unpack_grid(r_q.len());
             f32::dot(&g, r_q).unwrap_or(0.0) as f32
@@ -417,7 +408,7 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             //                  g[i] = -0.5   if r[i] <  0
             //               - Therefore g[i] * r[i] = sign(r[i]) * 0.5 * r[i] = 0.5 * |r[i]|
             //            = Σ 0.5 * |r[i]| / ‖r‖
-            //            = 0.5 * Σ|r[i]| / ‖r‖
+            //            = 0.5 * Σ |r[i]| / ‖r‖
             //            = GRID_OFFSET * abs_sum / norm
             let correction = Self::GRID_OFFSET * abs_sum / norm;
             let header = CodeHeader {
@@ -541,75 +532,67 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     count
 }
 
-/// Sums `values[i]` for each `i` where bit `i` is set in `packed`.
+/// Computes `Σ sign[i] · values[i]` where sign[i] = +1.0 if bit i is set
+/// in `packed`, −1.0 otherwise.
+///
+/// This is the hot kernel for the 1-bit `distance_query` path.  The caller
+/// multiplies the result by 0.5 to recover `⟨g, r_q⟩`.
 ///
 /// # SIMD strategy
 ///
-/// **Step 1 — bit expansion (constant shifts).**
-/// Each byte is expanded into 8 `f32` masks (0.0 or 1.0) using shifts 0..7,
-/// which are all compile-time constants. LLVM fully unrolls the inner body and
-/// can vectorize the outer loop over bytes with VPMOVSXBD + integer-to-float
-/// conversions.
+/// **Step 1 — sign expansion (integer bit trick).**
+/// +1.0f32 and −1.0f32 differ only in bit 31 of their IEEE 754 representation
+/// (0x3F800000 vs 0xBF800000).  For each extracted bit b ∈ {0, 1}:
+///
+/// ```text
+///   sign_bit = (b ^ 1) & 1      // 1 when b=0 (want −1), 0 when b=1 (want +1)
+///   f32_bits = 0x3F800000 | (sign_bit << 31)
+/// ```
+///
+/// All shift amounts are compile-time constants (0..7), so LLVM fully unrolls
+/// the 8-element inner body.  The operations are pure integer (XOR, AND, OR,
+/// shift) until the final `f32::from_bits` reinterpretation — no
+/// integer-to-float conversion or arithmetic is required.
 ///
 /// **Step 2 — dot product (simsimd).**
-/// The expanded masks and the value chunk are fed into `f32::dot`, which uses
-/// simsimd's platform-optimized VMULPS + VADDPS (or AVX-512 FMA) kernel.
+/// The sign array and the value chunk are passed to `f32::dot`, which
+/// dispatches to the platform's best FMA kernel (AVX2, AVX-512, etc.).
 ///
-/// To avoid heap allocation the expansion is done into a 256-byte stack buffer
-/// (8 bytes × 8 floats × 4 bytes = 256 bytes), processed 64 floats at a time.
-fn masked_sum(packed: &[u8], values: &[f32]) -> f32 {
-    // 8 bytes per chunk → 64 bits → 64 f32 masks (256 bytes on the stack).
-    const CHUNK: usize = 8;
-    let mut masks = [0.0f32; CHUNK * 8];
+/// The expansion uses a 256-byte stack buffer (8 bytes × 8 floats × 4 bytes)
+/// and is processed 64 floats at a time to avoid heap allocation.
+fn signed_dot(packed: &[u8], values: &[f32]) -> f32 {
+    const CHUNK: usize = 8; // bytes per outer iteration → 64 floats
+    let mut signs = [0.0f32; CHUNK * 8];
     let mut sum = 0.0f32;
 
     for (packed_chunk, val_chunk) in packed.chunks(CHUNK).zip(values.chunks(CHUNK * 8)) {
         let n = val_chunk.len();
         for (i, &byte) in packed_chunk.iter().enumerate() {
             let base = i * 8;
-            // All shift amounts are constants — LLVM can fully unroll and
-            // vectorize this block across multiple outer-loop iterations.
-            masks[base]     = ((byte >> 0) & 1) as f32;
-            masks[base + 1] = ((byte >> 1) & 1) as f32;
-            masks[base + 2] = ((byte >> 2) & 1) as f32;
-            masks[base + 3] = ((byte >> 3) & 1) as f32;
-            masks[base + 4] = ((byte >> 4) & 1) as f32;
-            masks[base + 5] = ((byte >> 5) & 1) as f32;
-            masks[base + 6] = ((byte >> 6) & 1) as f32;
-            masks[base + 7] = ((byte >> 7) & 1) as f32;
+            let b = byte as u32;
+            // Constant shifts → LLVM fully unrolls this block.
+            signs[base]     = f32::from_bits(0x3F800000 | (((b >> 0) & 1) ^ 1) << 31);
+            signs[base + 1] = f32::from_bits(0x3F800000 | (((b >> 1) & 1) ^ 1) << 31);
+            signs[base + 2] = f32::from_bits(0x3F800000 | (((b >> 2) & 1) ^ 1) << 31);
+            signs[base + 3] = f32::from_bits(0x3F800000 | (((b >> 3) & 1) ^ 1) << 31);
+            signs[base + 4] = f32::from_bits(0x3F800000 | (((b >> 4) & 1) ^ 1) << 31);
+            signs[base + 5] = f32::from_bits(0x3F800000 | (((b >> 5) & 1) ^ 1) << 31);
+            signs[base + 6] = f32::from_bits(0x3F800000 | (((b >> 6) & 1) ^ 1) << 31);
+            signs[base + 7] = f32::from_bits(0x3F800000 | (((b >> 7) & 1) ^ 1) << 31);
         }
-        sum += f32::dot(&masks[..n], val_chunk).unwrap_or(0.0) as f32;
+        sum += f32::dot(&signs[..n], val_chunk).unwrap_or(0.0) as f32;
     }
     sum
 }
 
 /// Sums `values[i]` for each `i` where bit `i` is set in `packed`.
 ///
+/// Kept as an isolated primitive for benchmarking.  The actual hot path in
+/// `distance_query` uses `signed_dot` instead, which avoids a separate
+/// total-sum pass.
+///
 /// # Notes on SIMD optimization:
 ///
-/// Branchless but not auto-vectorizable as written.
-///
-/// The bit as f32 * val multiply-by-zero-or-one is branchless by design,
-/// which is necessary for vectorization.
-///
-/// But the bit extraction — (packed[i / 8] >> (i % 8)) & 1 — is a problem.
-/// Every 8 consecutive floats share the same source byte, but the shift amount
-/// changes per element (i % 8 = 0,1,2,...,7). The compiler's auto-vectorizer
-/// generally can't see through this non-uniform indexing pattern and will fall
-/// back to scalar.
-///
-/// To actually vectorize this we need to explicitly expand packed bits into a
-/// float mask. Or use a library (pulp).
-/// TODO: use AVX-512 mask registers (_mm512_mask_add_ps)
-#[allow(unused)]
-fn masked_sum_old(packed: &[u8], values: &[f32]) -> f32 {
-    let mut sum = 0.0f32;
-    for (i, &val) in values.iter().enumerate() {
-        let bit = (packed[i / 8] >> (i % 8)) & 1;
-        sum += bit as f32 * val;
-    }
-    sum
-}
 
 #[cfg(test)]
 mod tests {
@@ -889,24 +872,6 @@ mod tests {
         assert_eq!(hamming_distance(&a, &c), 1);
     }
 
-    #[test]
-    fn test_masked_sum() {
-        let values = [1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        // packed byte 0b10101010 = bits set at positions 1, 3, 5, 7
-        let packed = [0b10101010u8];
-        let result = masked_sum(&packed, &values);
-        assert_eq!(result, 2.0 + 4.0 + 6.0 + 8.0);
-
-        // All bits set
-        let packed_all = [0xFFu8];
-        let result_all = masked_sum(&packed_all, &values);
-        assert_eq!(result_all, 36.0);
-
-        // No bits set
-        let packed_none = [0x00u8];
-        let result_none = masked_sum(&packed_none, &values);
-        assert_eq!(result_none, 0.0);
-    }
 
     /// BITS=1: P95 relative error bound 8.0%, observed ~5% (code), ~3.5% (query)
     #[test]

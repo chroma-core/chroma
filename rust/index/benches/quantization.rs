@@ -2,7 +2,7 @@
 //!
 //! - Quantization throughput (bytes/s, varying dimension)
 //! - Distance estimation throughput: code-vs-code and code-vs-query (bytes/s, varying dimension)
-//! - Primitive kernel throughput: hamming_distance, masked_sum
+//! - Primitive kernel throughput: hamming_distance, signed_dot (1bit_kernel)
 //! - Thread scaling: parallel quantization and distance estimation
 //! - Rerank budget: for a fixed K, what rerank factor guarantees the true
 //!   top-K is in the candidate set (accuracy analysis, printed to stdout)
@@ -539,11 +539,14 @@ fn bench_primitives(c: &mut Criterion) {
             });
         });
 
-        // masked_sum: reads bytes (packed) + dim*4 (f32 values) per call.
+        // 1bit_kernel: exercises signed_dot, the hot kernel for 1-bit distance_query.
+        // Throughput = packed bytes + f32 values read per call.
         group.throughput(Throughput::Bytes((bytes + padded * 4) as u64));
-        group.bench_with_input(BenchmarkId::new("masked_sum", dim), &dim, |b_cr, _| {
+        group.bench_with_input(BenchmarkId::new("1bit_kernel", dim), &dim, |b_cr, _| {
             b_cr.iter(|| {
-                // Exercise via distance_query: build a 1-bit code and call it.
+                // signed_dot is private; exercise it via distance_query on a
+                // pre-built 1-bit code with a zero centroid so the code
+                // reflects the raw embedding signs.
                 let mut rng2 = make_rng();
                 let centroid = vec![0.0f32; padded];
                 let embedding: Vec<f32> = (0..padded)
