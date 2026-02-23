@@ -68,7 +68,7 @@ Learn about all features on our [Docs](https://docs.trychroma.com)
 - __Integrations__: [`🦜️🔗 LangChain`](https://blog.langchain.dev/langchain-chroma/) (python and js), [`🦙 LlamaIndex`](https://twitter.com/atroyn/status/1628557389762007040) and more soon
 - __Dev, Test, Prod__: the same API that runs in your python notebook, scales to your cluster
 - __Feature-rich__: Queries, filtering, regex and more
-- __Free & Open Source__: Apache 2.0 Licensed
+- __Free & Open Source__: Apache 2.0 Licensed 
 
 ## Use case: ChatGPT for ______
 
