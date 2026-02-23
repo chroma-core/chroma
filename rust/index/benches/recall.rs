@@ -252,7 +252,7 @@ fn run_recall(
                     .iter()
                     .map(|cb| {
                         Code::<&[u8], 1>::new(cb.as_slice())
-                            .distance_query_bitwise(&df, &qq)
+                            .distance_query_bitwise(&df, &qq, DIM)
                     })
                     .collect()
             }),

@@ -271,7 +271,7 @@ fn bench_distance_query(c: &mut Criterion) {
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
                     let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                    black_box(code.distance_query_bitwise(&df, &qq));
+                    black_box(code.distance_query_bitwise(&df, &qq, dim));
                 }
             });
         });
@@ -366,7 +366,7 @@ fn bench_distance_query(c: &mut Criterion) {
                     .iter()
                     .map(|cb| {
                         let code = Code::<&[u8], 1>::new(cb.as_slice());
-                        black_box(code.distance_query_bitwise(&df, &qq))
+                        black_box(code.distance_query_bitwise(&df, &qq, SCAN_DIM))
                     })
                     .sum();
             });
@@ -528,7 +528,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                                 let cdq = c_dot_q(&centroid, r_q);
                                 let qn = q_norm(&centroid, r_q);
                                 let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                                black_box(code.distance_query_bitwise(&df, &qq));
+                                black_box(code.distance_query_bitwise(&df, &qq, DIM));
                             },
                         );
                     });
@@ -795,7 +795,7 @@ fn print_error_analysis() {
 
             let d4  = c4.distance_query(&df, &r_q, cn, cdq, qn);
             let df1 = c1.distance_query(&df, &r_q, cn, cdq, qn);
-            let db  = c1.distance_query_bitwise(&df, &qq);
+            let db  = c1.distance_query_bitwise(&df, &qq, DIM);
             let dl  = luts.distance_query(&c1, &df);
 
             // Relative error: positive = overestimate, negative = underestimate.
