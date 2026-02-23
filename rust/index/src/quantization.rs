@@ -78,12 +78,24 @@ use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
 
 /// Header for quantized code containing metadata.
+///
+/// # Precomputed signed sum (BITS=1 only)
+///
+/// `signed_sum` stores `2·popcount(x_b) − dim` — the signed sum of the binary
+/// code, i.e. Σ sign[i] where sign[i] = +1 when bit=1 and −1 when bit=0.
+/// This is the `factor_ppc` numerator from the original RaBitQ reference
+/// implementation (gaoj0017).  Pre-computing it at index time saves a full
+/// popcount pass over the packed bits on every distance estimate, replacing a
+/// loop of 16 `popcnt` instructions (for 1024-d codes) with a single f32
+/// read.  For BITS≥2 the field is always 0.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct CodeHeader {
     correction: f32,
     norm: f32,
     radial: f32,
+    /// `2·popcount(packed) − dim`.  BITS=1 only; 0 for other bit widths.
+    signed_sum: i32,
 }
 
 /// Quantized representation of a data residual.
@@ -93,8 +105,8 @@ struct CodeHeader {
 /// the number of bits per quantization code.
 ///
 /// Byte layout:
-/// - `[0..12]` CodeHeader (correction, norm, radial as f32)
-/// - `[12..]` packed codes
+/// - `[0..16]` CodeHeader (correction, norm, radial as f32; signed_sum as i32)
+/// - `[16..]`  packed codes
 pub struct Code<T, const BITS: u8 = 4>(T);
 
 impl<T, const BITS: u8> Code<T, BITS> {
@@ -285,6 +297,16 @@ impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
         self.header().radial
     }
 
+    /// Returns `2·popcount(x_b) − dim`, precomputed at index time.
+    ///
+    /// For BITS=1 this is the signed sum Σ sign[i] over all packed bits
+    /// (sign[i] = +1 when bit=1, −1 when bit=0).  Used in bitwise distance
+    /// estimation to avoid recomputing popcount at query time.  Always 0 for
+    /// BITS≥2.
+    pub fn signed_sum(&self) -> i32 {
+        self.header().signed_sum
+    }
+
     /// Returns the size of buffer in bytes.
     pub fn size(dim: usize) -> usize {
         size_of::<CodeHeader>() + Self::packed_len(dim)
@@ -330,6 +352,7 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
                 correction: 1.0,
                 norm,
                 radial,
+                signed_sum: 0,
             };
             let mut bytes = Vec::with_capacity(Self::size(dim));
             bytes.extend_from_slice(bytemuck::bytes_of(&header));
@@ -411,10 +434,19 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             //            = 0.5 * Σ |r[i]| / ‖r‖
             //            = GRID_OFFSET * abs_sum / norm
             let correction = Self::GRID_OFFSET * abs_sum / norm;
+
+            // Precompute signed sum: Σ sign[i] = 2·popcount(x_b) − dim.
+            // Padded bits are 0 (initialized to zero above), which do not
+            // contribute to popcount, so we subtract the true dim (not
+            // padded_dim) to keep the signed sum over only real dimensions.
+            let popcount: i32 = packed.iter().map(|b| b.count_ones() as i32).sum();
+            let signed_sum = 2 * popcount - dim as i32;
+
             let header = CodeHeader {
                 correction,
                 norm,
                 radial,
+                signed_sum,
             };
             // Build output: [header][packed_codes]
             let mut bytes = Vec::with_capacity(Self::size(dim));
@@ -493,6 +525,7 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             correction,
             norm,
             radial,
+            signed_sum: 0, // not used for BITS≥2
         };
         let mut bytes = Vec::with_capacity(Self::size(dim));
         bytes.extend_from_slice(bytemuck::bytes_of(&header));
@@ -692,7 +725,6 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
         &self,
         distance_function: &DistanceFunction,
         qq: &QuantizedQuery,
-        dim: usize,
     ) -> f32 {
         let norm = self.norm();
         let radial = self.radial();
@@ -713,16 +745,6 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
             xb_dot_qu += plane_pop << j;
         }
 
-        // popcount(x_b) = number of set bits in the data code
-        let popcount_xb = {
-            let mut count = 0u32;
-            for i in (0..packed.len()).step_by(8) {
-                let word = u64::from_le_bytes(packed[i..i + 8].try_into().unwrap());
-                count += word.count_ones();
-            }
-            count
-        };
-
         // Recover ⟨g, r_q⟩ from the quantized inner product.
         //
         // g[i] = +0.5 when bit=1, −0.5 when bit=0
@@ -735,9 +757,9 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
         // Σ sign[i] · q_u[i] = 2 · ⟨x_b, q_u⟩ − Σ q_u[i]
         //     (because sign[i] = 2·x_b[i] − 1, so sign[i]·q_u[i] = 2·x_b[i]·q_u[i] − q_u[i])
         //
-        // Σ sign[i] = 2 · popcount(x_b) − dim
+        // Σ sign[i] = 2 · popcount(x_b) − dim  ← precomputed at index time as signed_sum
         let signed_dot_qu = 2.0 * xb_dot_qu as f32 - qq.sum_q_u as f32;
-        let signed_sum = 2.0 * popcount_xb as f32 - dim as f32;
+        let signed_sum = self.signed_sum() as f32;
 
         let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
 
@@ -848,19 +870,19 @@ impl BatchQueryLuts {
         let packed = code.packed();
 
         // ⟨x_b, q_u⟩ via LUT: iterate over nibbles of packed data.
+        // ⟨x_b, q_u⟩ via nibble LUT.  Σ sign[i] is read from the precomputed
+        // signed_sum field rather than recomputing popcount over the code.
         let mut xb_dot_qu = 0u32;
-        let mut popcount_xb = 0u32;
 
         for (nib_idx, lut) in self.luts.iter().enumerate() {
             let byte_idx = nib_idx / 2;
             let byte = if byte_idx < packed.len() { packed[byte_idx] } else { 0 };
             let nibble = if nib_idx % 2 == 0 { byte & 0x0F } else { byte >> 4 };
             xb_dot_qu += lut[nibble as usize] as u32;
-            popcount_xb += nibble.count_ones();
         }
 
         let signed_dot_qu = 2.0 * xb_dot_qu as f32 - self.sum_q_u as f32;
-        let signed_sum = 2.0 * popcount_xb as f32 - self.dim as f32;
+        let signed_sum = code.signed_sum() as f32;
 
         let g_dot_r_q = 0.5 * (self.delta * signed_dot_qu + self.v_l * signed_sum);
 
@@ -919,17 +941,18 @@ mod tests {
 
     #[test]
     fn test_size() {
+        // Header is 16 bytes: correction(f32) + norm(f32) + radial(f32) + signed_sum(i32)
         // Exactly one block (256)
         assert_eq!(Code::<Vec<u8>>::packed_len(256), 256 * 4 / 8); // 128 bytes
-        assert_eq!(Code::<Vec<u8>>::size(256), 12 + 128); // 3 floats + packed
+        assert_eq!(Code::<Vec<u8>>::size(256), 16 + 128);
 
         // Non-aligned (300) - should pad to 512
         assert_eq!(Code::<Vec<u8>>::packed_len(300), 512 * 4 / 8); // 256 bytes
-        assert_eq!(Code::<Vec<u8>>::size(300), 12 + 256);
+        assert_eq!(Code::<Vec<u8>>::size(300), 16 + 256);
 
         // Two blocks (512)
         assert_eq!(Code::<Vec<u8>>::packed_len(512), 512 * 4 / 8); // 256 bytes
-        assert_eq!(Code::<Vec<u8>>::size(512), 12 + 256);
+        assert_eq!(Code::<Vec<u8>>::size(512), 16 + 256);
     }
 
     #[test]
@@ -1038,21 +1061,22 @@ mod tests {
 
     #[test]
     fn test_1bit_size() {
+        // Header is now 16 bytes: correction(f32) + norm(f32) + radial(f32) + signed_sum(i32)
         // 64-aligned (256 dims)
         assert_eq!(Code::<Vec<u8>, 1>::packed_len(256), 256 / 8); // 32 bytes
-        assert_eq!(Code::<Vec<u8>, 1>::size(256), 12 + 32);
+        assert_eq!(Code::<Vec<u8>, 1>::size(256), 16 + 32);
 
         // Non-aligned (300) - should pad to 320 (5 * 64)
         assert_eq!(Code::<Vec<u8>, 1>::packed_len(300), 320 / 8); // 40 bytes
-        assert_eq!(Code::<Vec<u8>, 1>::size(300), 12 + 40);
+        assert_eq!(Code::<Vec<u8>, 1>::size(300), 16 + 40);
 
         // 1024 dims
         assert_eq!(Code::<Vec<u8>, 1>::packed_len(1024), 128);
-        assert_eq!(Code::<Vec<u8>, 1>::size(1024), 12 + 128);
+        assert_eq!(Code::<Vec<u8>, 1>::size(1024), 16 + 128);
 
         // 4096 dims
         assert_eq!(Code::<Vec<u8>, 1>::packed_len(4096), 512);
-        assert_eq!(Code::<Vec<u8>, 1>::size(4096), 12 + 512);
+        assert_eq!(Code::<Vec<u8>, 1>::size(4096), 16 + 512);
     }
 
     #[test]
@@ -1185,7 +1209,7 @@ mod tests {
             let code = Code::<&[u8], 1>::new(code_owned.as_ref());
 
             let float_dist = code.distance_query(&df, &r_q, c_norm, c_dot_q, q_norm);
-            let bitwise_dist = code.distance_query_bitwise(&df, &qq, dim);
+            let bitwise_dist = code.distance_query_bitwise(&df, &qq);
             let lut_dist = luts.distance_query(&code, &df);
 
             let tol = float_dist.abs() * 0.05 + 1.0;
