@@ -59,6 +59,7 @@ regex = { workspace = true }
 rayon = { workspace = true }
 criterion = { workspace = true }
 proptest = { workspace = true }
+serde_json = { workspace = true }
 [target.'cfg(not(target_env = "msvc"))'.dependencies]
 tikv-jemallocator = { workspace = true }
 
@@ -76,4 +77,8 @@ harness = false
 
 [[bench]]
 name = "quantization"
+harness = false
+
+[[bench]]
+name = "recall"
 harness = false

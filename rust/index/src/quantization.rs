@@ -519,6 +519,7 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
 /// _mm512_popcnt_epi64 — popcounting 8 u64 lanes simultaneously. That
 /// processes 512 bits instead of 64 per iteration. So for 1024-dim vectors
 /// we're doing 2 iterations.
+// TODO use simsimd?
 fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len() % 8, 0);
