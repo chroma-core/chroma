@@ -1,46 +1,53 @@
 //! Benchmarks for RaBitQ quantization performance characteristics.
 //!
-//! - Quantization throughput (bytes/s, varying dimension)
-//! - Distance estimation throughput: code-vs-code and code-vs-query (bytes/s, varying dimension)
-//! - Primitive kernel throughput: hamming_distance, signed_dot (1bit_kernel)
-//! - Thread scaling: parallel quantization and distance estimation
-//! - Rerank budget: for a fixed K, what rerank factor guarantees the true
-//!   top-K is in the candidate set (accuracy analysis, printed to stdout)
+//! Groups:
+//!   quantize         — encoding throughput (1-bit, 4-bit) vs dim
+//!   distance_code    — code-vs-code distance (1-bit, 4-bit) vs dim
+//!   distance_query   — code-vs-query distance, all implementations and dims:
+//!                        cold (BATCH=512 distinct queries):
+//!                          1bit_float, 1bit_bitwise, 1bit_lut, 4bit_float
+//!                        hot / cluster-scan (1 query × N=2048 codes, dim=1024):
+//!                          cluster_scan_1bit_float, _bitwise, _lut, _4bit_float
+//!   thread_scaling   — parallel quantize and distance_query vs thread count
+//!   primitives       — raw kernel throughput: hamming_distance, 1bit_kernel, vec_sub
+//!   rerank_budget    — accuracy table (not a timing benchmark; printed to stdout)
+//!
+//! Implementations compared in distance_query:
+//!   float   — signed_dot: expand bits to ±1.0 f32, simsimd dot product
+//!   bitwise — paper §3.3.1: quantize query to B_q bits, AND + popcount
+//!   lut     — paper §3.3.2: precompute nibble LUTs, table lookup
 //!
 //! Run with:
-//!   # All benchmarks
 //!   cargo bench -p chroma-index --bench quantization
+//!   cargo bench -p chroma-index --bench quantization -- distance_query
+//!   cargo bench -p chroma-index --bench quantization -- "1bit_float/1024"
 //!
-//!   # Just one group
-//!   cargo bench -p chroma-index --bench quantization -- quantize
-//!
-//!   # Just 1-bit at dim=1024
-//!   cargo bench -p chroma-index --bench quantization -- "1bit/1024"
-//!
-//! For native CPU (enables POPCNT, AVX2, etc.):
+//! For native CPU (POPCNT, AVX2, etc.):
 //!   RUSTFLAGS="-C target-cpu=native" cargo bench -p chroma-index --bench quantization
 
 use std::hint::black_box;
 
 use chroma_distance::DistanceFunction;
-use chroma_index::quantization::Code;
-use criterion::{
-    criterion_group, criterion_main, BenchmarkId, Criterion, Throughput,
-};
+use chroma_index::quantization::{BatchQueryLuts, Code, QuantizedQuery};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 
-// ── Dimensions from the description: 128-dim (small), 1024-dim (target),
-//    4096-dim (maximum stated in the doc: "up to 4096dim embeddings")
-const DIMS: &[usize] = &[128, 1024, 4096];
+/// Print a one-line description of the benchmark that follows.
+/// Appears immediately before criterion's own "Benchmarking …" line.
+macro_rules! desc {
+    ($id:expr, $text:expr) => {
+        println!("  [{:48}] {}", $id, $text);
+    };
+}
 
-// Number of code-pairs / query pairs per benchmark iteration.
+const DIMS: &[usize] = &[1024];
+// const DIMS: &[usize] = &[128, 1024, 4096];
 const BATCH: usize = 512;
+const THREAD_COUNTS: &[usize] = &[1, 8];
+// const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8];
 
-// Number of threads to test for thread-scaling.
-const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8];
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn make_rng() -> StdRng {
     StdRng::seed_from_u64(0xdeadbeef)
@@ -50,11 +57,7 @@ fn random_vec(rng: &mut impl Rng, dim: usize) -> Vec<f32> {
     (0..dim).map(|_| rng.gen_range(-1.0_f32..1.0)).collect()
 }
 
-/// Pre-build a batch of codes and query residuals for a given dim and BITS.
-fn make_codes<const BITS: u8>(
-    dim: usize,
-    n: usize,
-) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32>>) {
+fn make_codes<const BITS: u8>(dim: usize, n: usize) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32>>) {
     let mut rng = make_rng();
     let centroid = random_vec(&mut rng, dim);
     let codes: Vec<Vec<u8>> = (0..n)
@@ -78,17 +81,12 @@ fn c_norm(centroid: &[f32]) -> f32 {
     centroid.iter().map(|x| x * x).sum::<f32>().sqrt()
 }
 
-fn c_dot_q(centroid: &[f32], query_residual: &[f32]) -> f32 {
-    centroid
-        .iter()
-        .zip(query_residual)
-        .map(|(c, r)| c * (r + c)) // r_q = q - c  =>  q = c + r_q
-        .sum()
+fn c_dot_q(centroid: &[f32], r_q: &[f32]) -> f32 {
+    centroid.iter().zip(r_q).map(|(c, r)| c * (r + c)).sum()
 }
 
-fn q_norm(centroid: &[f32], query_residual: &[f32]) -> f32 {
-    query_residual
-        .iter()
+fn q_norm(centroid: &[f32], r_q: &[f32]) -> f32 {
+    r_q.iter()
         .zip(centroid)
         .map(|(r, c)| (r + c) * (r + c))
         .sum::<f32>()
@@ -96,31 +94,42 @@ fn q_norm(centroid: &[f32], query_residual: &[f32]) -> f32 {
 }
 
 // ── 1. Quantization throughput ────────────────────────────────────────────────
+//
+// For each dimension, 1-bit and 4-bit are benchmarked back-to-back so their
+// times appear adjacent in criterion's output.
 
 fn bench_quantize(c: &mut Criterion) {
     let mut group = c.benchmark_group("quantize");
+    // Throughput = f32 input bytes read per iteration (same for both BITS).
+    // This makes GiB/s comparable across bit widths at the same dim.
 
     for &dim in DIMS {
         let mut rng = make_rng();
         let centroid = random_vec(&mut rng, dim);
-        let embeddings: Vec<Vec<f32>> =
-            (0..BATCH).map(|_| random_vec(&mut rng, dim)).collect();
+        let embeddings: Vec<Vec<f32>> = (0..BATCH).map(|_| random_vec(&mut rng, dim)).collect();
 
-        // Throughput = BATCH * dim * 4 bytes (f32 input) per iteration.
         group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
 
-        group.bench_with_input(BenchmarkId::new("1bit", dim), &dim, |b, _| {
-            b.iter(|| {
-                for emb in &embeddings {
-                    black_box(Code::<Vec<u8>, 1>::quantize(emb, &centroid));
-                }
-            });
-        });
-
+        desc!(
+            format!("quantize/4bit/{dim}"),
+            format!("{BATCH} embeddings → 4-bit ray-walk codes")
+        );
         group.bench_with_input(BenchmarkId::new("4bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for emb in &embeddings {
                     black_box(Code::<Vec<u8>, 4>::quantize(emb, &centroid));
+                }
+            });
+        });
+
+        desc!(
+            format!("quantize/1bit/{dim}"),
+            format!("{BATCH} embeddings → sign-bit codes")
+        );
+        group.bench_with_input(BenchmarkId::new("1bit", dim), &dim, |b, _| {
+            b.iter(|| {
+                for emb in &embeddings {
+                    black_box(Code::<Vec<u8>, 1>::quantize(emb, &centroid));
                 }
             });
         });
@@ -129,23 +138,25 @@ fn bench_quantize(c: &mut Criterion) {
     group.finish();
 }
 
-// ── 2. distance_code throughput (code vs code) ───────────────────────────────
+// ── 2. distance_code throughput (code vs code) ────────────────────────────────
 
 fn bench_distance_code(c: &mut Criterion) {
     let mut group = c.benchmark_group("distance_code");
     let df = DistanceFunction::Euclidean;
+    let pairs = (BATCH / 2) as u64;
 
     for &dim in DIMS {
         let (centroid, codes_1, _) = make_codes::<1>(dim, BATCH);
         let (_, codes_4, _) = make_codes::<4>(dim, BATCH);
         let cn = c_norm(&centroid);
-
-        // Input bytes = BATCH * code_size (the data being read per iteration).
         let code_bytes_1 = Code::<&[u8], 1>::size(dim);
         let code_bytes_4 = Code::<&[u8], 4>::size(dim);
-        let pairs = (BATCH / 2) as u64;
 
         group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_1 as u64));
+        desc!(
+            format!("distance_code/1bit/{dim}"),
+            format!("{pairs} pairs; XOR + popcount")
+        );
         group.bench_with_input(BenchmarkId::new("1bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in (0..BATCH).step_by(2) {
@@ -157,6 +168,10 @@ fn bench_distance_code(c: &mut Criterion) {
         });
 
         group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_4 as u64));
+        desc!(
+            format!("distance_code/4bit/{dim}"),
+            format!("{pairs} pairs; nibble unpack + dot")
+        );
         group.bench_with_input(BenchmarkId::new("4bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in (0..BATCH).step_by(2) {
@@ -171,41 +186,66 @@ fn bench_distance_code(c: &mut Criterion) {
     group.finish();
 }
 
-// ── 3. distance_query throughput (code vs full-precision query) ───────────────
+// ── 3. distance_query: all implementations in one group ──────────────────────
 //
-// Two variants with deliberately different memory access patterns:
+// All three 1-bit implementations and the 4-bit baseline appear together per
+// dimension, so criterion's output lets you compare them at a glance.
 //
-//   "1bit/<dim>" / "4bit/<dim>"  — cold-query variant
-//     BATCH=512 (code, query) pairs, each with a distinct r_q.
-//     The query vector is never cache-warm between iterations; this models
-//     the worst-case where every lookup touches a fresh query.
+// Implementations:
+//   1bit_float   — signed_dot: expand bit vector to ±1.0 signs, simsimd dot
+//   1bit_bitwise — paper §3.3.1: quantize query to B_q bits, AND + popcount
+//   1bit_lut     — paper §3.3.2: precompute nibble LUTs, table lookup
+//   4bit_float   — grid unpack + f32 dot product (reference quality ceiling)
 //
-//   "cluster_scan_1bit" / "cluster_scan_4bit"  — hot-query variant (dim=1024)
-//     N=2048 codes scored against a single fixed query.  The query vector
-//     stays hot in L1/registers while the codes stream through cache.  This
-//     is the actual hot-path pattern: one query probing one posting list
-//     (cluster) of ~2048 vectors.  Throughput here is what matters most for
-//     end-to-end query latency.
+// Access patterns:
+//   cold (BATCH=512 distinct queries) — each iteration touches a fresh query
+//     vector; models worst-case where every lookup has a cache-cold query.
+//     Query quantization / LUT build cost is paid for every call.
+//   hot / cluster-scan (N=2048 codes, 1 fixed query, dim=1024) — the query
+//     stays in L1 while codes stream through cache.  Query setup is paid
+//     once before the iter loop, so only the inner scoring loop is timed.
+//     This is the realistic hot path: one query probing one cluster.
 
 fn bench_distance_query(c: &mut Criterion) {
     let mut group = c.benchmark_group("distance_query");
     let df = DistanceFunction::Euclidean;
 
-    // Cold-query variant: BATCH pairs each with a distinct r_q.
+    // ── Cold-query variant ────────────────────────────────────────────────────
     for &dim in DIMS {
         let (centroid, codes_1, queries_1) = make_codes::<1>(dim, BATCH);
         let (_, codes_4, queries_4) = make_codes::<4>(dim, BATCH);
         let cn = c_norm(&centroid);
-
-        // Throughput = (code_bytes + query_bytes) * BATCH per iteration.
         let code_bytes_1 = Code::<&[u8], 1>::size(dim);
-        let query_bytes = dim * 4;
         let code_bytes_4 = Code::<&[u8], 4>::size(dim);
+        let query_bytes = dim * 4;
+        let padded_bytes = Code::<&[u8], 1>::packed_len(dim);
 
-        group.throughput(Throughput::Bytes(
-            BATCH as u64 * (code_bytes_1 + query_bytes) as u64,
-        ));
-        group.bench_with_input(BenchmarkId::new("1bit", dim), &dim, |b, _| {
+        // All 1-bit variants use the same throughput so GiB/s is comparable.
+        let throughput_1bit = BATCH as u64 * (code_bytes_1 + query_bytes) as u64;
+        let throughput_4bit = BATCH as u64 * (code_bytes_4 + query_bytes) as u64;
+
+        group.throughput(Throughput::Bytes(throughput_4bit));
+        desc!(
+            format!("distance_query/4bit_float/{dim}"),
+            format!("cold {BATCH} queries; grid unpack + f32 dot (reference quality ceiling)")
+        );
+        group.bench_with_input(BenchmarkId::new("4bit_float", dim), &dim, |b, _| {
+            b.iter(|| {
+                for i in 0..BATCH {
+                    let code = Code::<&[u8], 4>::new(codes_4[i].as_slice());
+                    let r_q = &queries_4[i];
+                    let cdq = c_dot_q(&centroid, r_q);
+                    let qn = q_norm(&centroid, r_q);
+                    black_box(code.distance_query(&df, r_q, cn, cdq, qn));
+                }
+            });
+        });
+        group.throughput(Throughput::Bytes(throughput_1bit));
+        desc!(
+            format!("distance_query/1bit_float/{dim}"),
+            format!("cold {BATCH} queries; signed_dot (bits→±1.0 f32, simsimd dot)")
+        );
+        group.bench_with_input(BenchmarkId::new("1bit_float", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
                     let code = Code::<&[u8], 1>::new(codes_1[i].as_slice());
@@ -217,24 +257,46 @@ fn bench_distance_query(c: &mut Criterion) {
             });
         });
 
-        group.throughput(Throughput::Bytes(
-            BATCH as u64 * (code_bytes_4 + query_bytes) as u64,
-        ));
-        group.bench_with_input(BenchmarkId::new("4bit", dim), &dim, |b, _| {
+        group.throughput(Throughput::Bytes(throughput_1bit));
+        desc!(
+            format!("distance_query/1bit_bitwise/{dim}"),
+            format!("cold {BATCH} queries; QuantizedQuery build + AND+popcount (§3.3.1)")
+        );
+        group.bench_with_input(BenchmarkId::new("1bit_bitwise", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code::<&[u8], 4>::new(codes_4[i].as_slice());
-                    let r_q = &queries_4[i];
+                    let code = Code::<&[u8], 1>::new(codes_1[i].as_slice());
+                    let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
-                    black_box(code.distance_query(&df, r_q, cn, cdq, qn));
+                    let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
+                    black_box(code.distance_query_bitwise(&df, &qq, dim));
+                }
+            });
+        });
+
+        group.throughput(Throughput::Bytes(throughput_1bit));
+        desc!(
+            format!("distance_query/1bit_lut/{dim}"),
+            format!("cold {BATCH} queries; BatchQueryLuts build + nibble lookup (§3.3.2)")
+        );
+        group.bench_with_input(BenchmarkId::new("1bit_lut", dim), &dim, |b, _| {
+            b.iter(|| {
+                for i in 0..BATCH {
+                    let code = Code::<&[u8], 1>::new(codes_1[i].as_slice());
+                    let r_q = &queries_1[i];
+                    let cdq = c_dot_q(&centroid, r_q);
+                    let qn = q_norm(&centroid, r_q);
+                    let luts = BatchQueryLuts::new(r_q, cn, cdq, qn);
+                    black_box(luts.distance_query(&code, &df));
                 }
             });
         });
     }
 
-    // Hot-query / cluster-scan variant: one fixed query, N=2048 codes, dim=1024.
-    // This matches what query_quantized_cluster does per probed cluster.
+    // ── Hot-query / cluster-scan variant ─────────────────────────────────────
+    // Query setup (QuantizedQuery / BatchQueryLuts build) is done once outside
+    // the iter loop, so only the inner per-code scoring loop is timed.
     {
         const SCAN_DIM: usize = 1024;
         const SCAN_N: usize = 2048;
@@ -251,13 +313,35 @@ fn bench_distance_query(c: &mut Criterion) {
 
         let (_, codes_1, _) = make_codes::<1>(SCAN_DIM, SCAN_N);
         let (_, codes_4, _) = make_codes::<4>(SCAN_DIM, SCAN_N);
+        let padded_bytes = Code::<&[u8], 1>::packed_len(SCAN_DIM);
 
-        // Throughput = code_bytes * N (the query is reused and stays in L1).
-        let code_bytes_1 = Code::<&[u8], 1>::size(SCAN_DIM);
-        let code_bytes_4 = Code::<&[u8], 4>::size(SCAN_DIM);
+        // Throughput counts code bytes only; the query is amortized and stays in L1.
+        let tput_1bit = SCAN_N as u64 * Code::<&[u8], 1>::size(SCAN_DIM) as u64;
+        let tput_4bit = SCAN_N as u64 * Code::<&[u8], 4>::size(SCAN_DIM) as u64;
 
-        group.throughput(Throughput::Bytes(SCAN_N as u64 * code_bytes_1 as u64));
-        group.bench_function("cluster_scan_1bit", |b| {
+        group.throughput(Throughput::Bytes(tput_4bit));
+        desc!(
+            "distance_query/cluster_scan_4bit_float",
+            format!("hot {SCAN_N} codes @ dim={SCAN_DIM}; grid unpack + f32 dot (quality ceiling)")
+        );
+        group.bench_function("cluster_scan_4bit_float", |b| {
+            b.iter(|| {
+                let _: f32 = codes_4
+                    .iter()
+                    .map(|cb| {
+                        let code = Code::<&[u8], 4>::new(cb.as_slice());
+                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
+                    })
+                    .sum();
+            });
+        });
+
+        group.throughput(Throughput::Bytes(tput_1bit));
+        desc!(
+            "distance_query/cluster_scan_1bit_float",
+            format!("hot {SCAN_N} codes @ dim={SCAN_DIM}; signed_dot; query in L1 (baseline)")
+        );
+        group.bench_function("cluster_scan_1bit_float", |b| {
             b.iter(|| {
                 let _: f32 = codes_1
                     .iter()
@@ -269,14 +353,37 @@ fn bench_distance_query(c: &mut Criterion) {
             });
         });
 
-        group.throughput(Throughput::Bytes(SCAN_N as u64 * code_bytes_4 as u64));
-        group.bench_function("cluster_scan_4bit", |b| {
+        group.throughput(Throughput::Bytes(tput_1bit));
+        desc!(
+            "distance_query/cluster_scan_1bit_bitwise",
+            format!("hot {SCAN_N} codes @ dim={SCAN_DIM}; QuantizedQuery built once, AND+popcount (§3.3.1)")
+        );
+        group.bench_function("cluster_scan_1bit_bitwise", |b| {
+            let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
             b.iter(|| {
-                let _: f32 = codes_4
+                let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code::<&[u8], 4>::new(cb.as_slice());
-                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
+                        let code = Code::<&[u8], 1>::new(cb.as_slice());
+                        black_box(code.distance_query_bitwise(&df, &qq, SCAN_DIM))
+                    })
+                    .sum();
+            });
+        });
+
+        group.throughput(Throughput::Bytes(tput_1bit));
+        desc!(
+            "distance_query/cluster_scan_1bit_lut",
+            format!("hot {SCAN_N} codes @ dim={SCAN_DIM}; BatchQueryLuts built once, nibble lookup (§3.3.2)")
+        );
+        group.bench_function("cluster_scan_1bit_lut", |b| {
+            let luts = BatchQueryLuts::new(&r_q, cn, cdq, qn);
+            b.iter(|| {
+                let _: f32 = codes_1
+                    .iter()
+                    .map(|cb| {
+                        let code = Code::<&[u8], 1>::new(cb.as_slice());
+                        black_box(luts.distance_query(&code, &df))
                     })
                     .sum();
             });
@@ -288,14 +395,12 @@ fn bench_distance_query(c: &mut Criterion) {
 
 // ── 4. Thread scaling ─────────────────────────────────────────────────────────
 //
-// We measure parallel quantization and parallel distance_query to see whether
-// throughput scales linearly with thread count (cache-friendly) or flattens
-// (LLC thrashing).
+// Parallel quantization and distance_query at dim=1024.  Shows whether
+// throughput scales linearly (compute-bound) or flattens (LLC / memory-bound).
 
 fn bench_thread_scaling(c: &mut Criterion) {
-    // Use a fixed 1024-dim (the primary target dimension).
     const DIM: usize = 1024;
-    const N: usize = 1024; // larger batch so parallelism is meaningful
+    const N: usize = 1024;
 
     let mut rng = make_rng();
     let centroid: Vec<f32> = random_vec(&mut rng, DIM);
@@ -305,6 +410,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
     let (_, codes_4, queries_4) = make_codes::<4>(DIM, N);
     let cn = c_norm(&centroid);
     let df = DistanceFunction::Euclidean;
+    let padded_bytes = Code::<&[u8], 1>::packed_len(DIM);
 
     let mut group = c.benchmark_group("thread_scaling");
 
@@ -314,23 +420,12 @@ fn bench_thread_scaling(c: &mut Criterion) {
             .build()
             .unwrap();
 
-        // 1-bit quantize
         group.throughput(Throughput::Bytes((N * DIM * 4) as u64));
-        group.bench_with_input(
-            BenchmarkId::new("quantize_1bit", threads),
-            &threads,
-            |b, _| {
-                b.iter(|| {
-                    pool.install(|| {
-                        embeddings.par_iter().for_each(|emb| {
-                            black_box(Code::<Vec<u8>, 1>::quantize(emb, &centroid));
-                        });
-                    });
-                });
-            },
-        );
 
-        // 4-bit quantize
+        desc!(
+            format!("thread_scaling/quantize_4bit/{threads}"),
+            format!("{N} embeddings → 4-bit, {threads} thread(s)")
+        );
         group.bench_with_input(
             BenchmarkId::new("quantize_4bit", threads),
             &threads,
@@ -345,10 +440,58 @@ fn bench_thread_scaling(c: &mut Criterion) {
             },
         );
 
-        // 1-bit distance_query
+        desc!(
+            format!("thread_scaling/quantize_1bit/{threads}"),
+            format!("{N} embeddings → 1-bit, {threads} thread(s)")
+        );
+        group.bench_with_input(
+            BenchmarkId::new("quantize_1bit", threads),
+            &threads,
+            |b, _| {
+                b.iter(|| {
+                    pool.install(|| {
+                        embeddings.par_iter().for_each(|emb| {
+                            black_box(Code::<Vec<u8>, 1>::quantize(emb, &centroid));
+                        });
+                    });
+                });
+            },
+        );
+
+
+
+        group.throughput(Throughput::Bytes(
+            (N * (Code::<&[u8], 4>::size(DIM) + DIM * 4)) as u64,
+        ));
+        desc!(
+            format!("thread_scaling/distance_query_4bit/{threads}"),
+            format!("{N} cold 4-bit queries, {threads} thread(s)")
+        );
+        group.bench_with_input(
+            BenchmarkId::new("distance_query_4bit", threads),
+            &threads,
+            |b, _| {
+                b.iter(|| {
+                    pool.install(|| {
+                        codes_4.par_iter().zip(queries_4.par_iter()).for_each(
+                            |(code_bytes, r_q)| {
+                                let code = Code::<&[u8], 4>::new(code_bytes.as_slice());
+                                let cdq = c_dot_q(&centroid, r_q);
+                                let qn = q_norm(&centroid, r_q);
+                                black_box(code.distance_query(&df, r_q, cn, cdq, qn));
+                            },
+                        );
+                    });
+                });
+            },
+        );
         group.throughput(Throughput::Bytes(
             (N * (Code::<&[u8], 1>::size(DIM) + DIM * 4)) as u64,
         ));
+        desc!(
+            format!("thread_scaling/distance_query_1bit/{threads}"),
+            format!("{N} cold 1-bit queries, {threads} thread(s)")
+        );
         group.bench_with_input(
             BenchmarkId::new("distance_query_1bit", threads),
             &threads,
@@ -368,22 +511,47 @@ fn bench_thread_scaling(c: &mut Criterion) {
             },
         );
 
-        // 4-bit distance_query
-        group.throughput(Throughput::Bytes(
-            (N * (Code::<&[u8], 4>::size(DIM) + DIM * 4)) as u64,
-        ));
+        desc!(
+            format!("thread_scaling/distance_query_1bit_bitwise/{threads}"),
+            format!("{N} cold 1-bit queries (AND+popcount §3.3.1), {threads} thread(s)")
+        );
         group.bench_with_input(
-            BenchmarkId::new("distance_query_4bit", threads),
+            BenchmarkId::new("distance_query_1bit_bitwise", threads),
             &threads,
             |b, _| {
                 b.iter(|| {
                     pool.install(|| {
-                        codes_4.par_iter().zip(queries_4.par_iter()).for_each(
+                        codes_1.par_iter().zip(queries_1.par_iter()).for_each(
                             |(code_bytes, r_q)| {
-                                let code = Code::<&[u8], 4>::new(code_bytes.as_slice());
+                                let code = Code::<&[u8], 1>::new(code_bytes.as_slice());
                                 let cdq = c_dot_q(&centroid, r_q);
                                 let qn = q_norm(&centroid, r_q);
-                                black_box(code.distance_query(&df, r_q, cn, cdq, qn));
+                                let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
+                                black_box(code.distance_query_bitwise(&df, &qq, DIM));
+                            },
+                        );
+                    });
+                });
+            },
+        );
+
+        desc!(
+            format!("thread_scaling/distance_query_1bit_lut/{threads}"),
+            format!("{N} cold 1-bit queries (nibble LUT §3.3.2), {threads} thread(s)")
+        );
+        group.bench_with_input(
+            BenchmarkId::new("distance_query_1bit_lut", threads),
+            &threads,
+            |b, _| {
+                b.iter(|| {
+                    pool.install(|| {
+                        codes_1.par_iter().zip(queries_1.par_iter()).for_each(
+                            |(code_bytes, r_q)| {
+                                let code = Code::<&[u8], 1>::new(code_bytes.as_slice());
+                                let cdq = c_dot_q(&centroid, r_q);
+                                let qn = q_norm(&centroid, r_q);
+                                let luts = BatchQueryLuts::new(r_q, cn, cdq, qn);
+                                black_box(luts.distance_query(&code, &df));
                             },
                         );
                     });
@@ -391,48 +559,38 @@ fn bench_thread_scaling(c: &mut Criterion) {
             },
         );
     }
-
     group.finish();
 }
 
 // ── 5. Rerank budget analysis ─────────────────────────────────────────────────
 //
-// This is a recall/accuracy analysis, not a throughput benchmark.
-//
-// For a ground-truth top-K ranked by true Euclidean distance, we ask:
-// "At what rerank factor R does the estimated top-(K*R) always contain the
-//  true top-K?"  The answer tells you how large to make the candidate set
-//  before re-scoring with full-precision distances.
-//
-// The result is printed as a table to stdout when `cargo bench` runs.
-// No criterion timings are registered here.
+// Accuracy analysis (not a timing benchmark).  For a ground-truth top-K ranked
+// by true Euclidean distance, asks: "At what rerank factor R does the estimated
+// top-(K*R) always contain the true top-K?"  Printed as a table to stdout.
 
-/// Returns true if the estimated top-(k * rerank_factor) candidate set
-/// covers all of the true top-k vectors.
 fn rerank_factor_needed(
-    true_distances: &[f32],         // true distance for each data point by index
-    est_distances: &[(usize, f32)], // (original_idx, estimated_dist), unsorted
+    true_distances: &[f32],
+    est_distances: &[(usize, f32)],
     k: usize,
     rerank_factor: usize,
 ) -> bool {
-    // Candidate set: top-(k * rerank_factor) by estimated distance.
     let mut est_sorted: Vec<(usize, f32)> = est_distances.to_vec();
     est_sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    let candidate_ids: std::collections::HashSet<usize> =
-        est_sorted.iter().take(k * rerank_factor).map(|&(i, _)| i).collect();
+    let candidate_ids: std::collections::HashSet<usize> = est_sorted
+        .iter()
+        .take(k * rerank_factor)
+        .map(|&(i, _)| i)
+        .collect();
 
-    // Recover which indices are the true top-K.
     let mut true_sorted_idx: Vec<usize> = est_distances.iter().map(|&(i, _)| i).collect();
-    true_sorted_idx.sort_by(|&a, &b| {
-        true_distances[a].partial_cmp(&true_distances[b]).unwrap()
-    });
+    true_sorted_idx.sort_by(|&a, &b| true_distances[a].partial_cmp(&true_distances[b]).unwrap());
 
-    // All true top-K indices must appear in the candidate set.
-    true_sorted_idx.iter().take(k).all(|idx| candidate_ids.contains(idx))
+    true_sorted_idx
+        .iter()
+        .take(k)
+        .all(|idx| candidate_ids.contains(idx))
 }
 
-/// Builds test data, scores with both 1-bit and 4-bit estimated distances,
-/// and prints the rerank-budget table to stdout.
 fn print_rerank_budget() {
     const DIM: usize = 1024;
     const N: usize = 2048;
@@ -489,7 +647,9 @@ fn print_rerank_budget() {
             let covered = rerank_factor_needed(&true_distances, est, K, rf);
             println!(
                 "{:<10} {:<8} {:<12} {:<12}",
-                label, rf, K * rf,
+                label,
+                rf,
+                K * rf,
                 if covered { "YES" } else { "NO" }
             );
         }
@@ -497,10 +657,6 @@ fn print_rerank_budget() {
     println!();
 }
 
-/// Criterion entry-point that triggers the rerank-budget analysis.  No
-/// benchmarks are registered; this exists solely so `print_rerank_budget`
-/// runs once as part of `cargo bench`, placing the accuracy table in the
-/// output alongside the timing results.
 fn bench_rerank_budget(c: &mut Criterion) {
     let _ = c;
     print_rerank_budget();
@@ -512,7 +668,6 @@ fn bench_primitives(c: &mut Criterion) {
     let mut group = c.benchmark_group("primitives");
 
     for &dim in DIMS {
-        // Build packed byte slices (length = dim/8, padded to multiple of 8).
         let padded = dim.div_ceil(64) * 64;
         let bytes = padded / 8;
         let mut rng = make_rng();
@@ -520,38 +675,35 @@ fn bench_primitives(c: &mut Criterion) {
         let b: Vec<u8> = (0..bytes).map(|_| rng.gen()).collect();
         let values: Vec<f32> = (0..padded).map(|_| rng.gen_range(-1.0f32..1.0)).collect();
 
-        // hamming_distance: reads 2 * bytes per call.
         group.throughput(Throughput::Bytes(2 * bytes as u64));
+        desc!(
+            format!("primitives/hamming_distance/{dim}"),
+            "XOR + popcount over two packed bit vectors"
+        );
         group.bench_with_input(BenchmarkId::new("hamming_distance", dim), &dim, |b_cr, _| {
             b_cr.iter(|| {
-                // hamming_distance is private so we exercise it via distance_code.
-                // Build two trivial 1-bit codes around the raw packed bytes.
-                let header = [0u8; 12]; // correction=0, norm=0, radial=0
+                let header = [0u8; 12];
                 let mut code_a = header.to_vec();
                 code_a.extend_from_slice(&a);
                 let mut code_b = header.to_vec();
                 code_b.extend_from_slice(&b);
                 let ca = Code::<&[u8], 1>::new(code_a.as_slice());
                 let cb_code = Code::<&[u8], 1>::new(code_b.as_slice());
-                // distance_code with correction=0 gives NaN/inf — we only care
-                // about timing the XOR+popcount path, not the result.
                 black_box(ca.distance_code(&DistanceFunction::InnerProduct, &cb_code, 0.0, padded));
             });
         });
 
-        // 1bit_kernel: exercises signed_dot, the hot kernel for 1-bit distance_query.
-        // Throughput = packed bytes + f32 values read per call.
         group.throughput(Throughput::Bytes((bytes + padded * 4) as u64));
+        desc!(
+            format!("primitives/1bit_kernel/{dim}"),
+            "signed_dot: bits → ±1.0 f32, simsimd dot product"
+        );
         group.bench_with_input(BenchmarkId::new("1bit_kernel", dim), &dim, |b_cr, _| {
             b_cr.iter(|| {
-                // signed_dot is private; exercise it via distance_query on a
-                // pre-built 1-bit code with a zero centroid so the code
-                // reflects the raw embedding signs.
                 let mut rng2 = make_rng();
                 let centroid = vec![0.0f32; padded];
-                let embedding: Vec<f32> = (0..padded)
-                    .map(|_| rng2.gen_range(-1.0f32..1.0))
-                    .collect();
+                let embedding: Vec<f32> =
+                    (0..padded).map(|_| rng2.gen_range(-1.0f32..1.0)).collect();
                 let code_owned = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
                 let code = Code::<&[u8], 1>::new(code_owned.as_ref());
                 black_box(code.distance_query(
@@ -564,18 +716,16 @@ fn bench_primitives(c: &mut Criterion) {
             });
         });
 
-        // vector subtraction (residual computation: r = embedding - centroid)
-        // This is the first step of quantize.
         let embedding: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0f32..1.0)).collect();
         let centroid: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0f32..1.0)).collect();
         group.throughput(Throughput::Bytes(2 * dim as u64 * 4));
+        desc!(
+            format!("primitives/vec_sub/{dim}"),
+            "r = embedding − centroid (residual formation, first step of quantize)"
+        );
         group.bench_with_input(BenchmarkId::new("vec_sub", dim), &dim, |b_cr, _| {
             b_cr.iter(|| {
-                let r: Vec<f32> = embedding
-                    .iter()
-                    .zip(&centroid)
-                    .map(|(e, c)| e - c)
-                    .collect();
+                let r: Vec<f32> = embedding.iter().zip(&centroid).map(|(e, c)| e - c).collect();
                 black_box(r);
             });
         });
