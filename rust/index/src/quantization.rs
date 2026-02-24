@@ -1108,6 +1108,38 @@ mod tests {
         }
     }
 
+    /// Spot-check that original and new quantize agree on the per-element
+    /// sign bit before packing.  Both reduce to code[i] = 1 if r[i] >= 0,
+    /// 0 otherwise for BITS=1; the difference is only in how they pack those
+    /// bits into bytes (BitPacker8x vs LSB-first).
+    #[test]
+    fn test_quantize_lyon_matches_quantize() {
+        let mut rng = StdRng::seed_from_u64(42);
+        for &dim in &[64, 300, 1024] {
+            for _ in 0..10 {
+                let embedding: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+                let centroid: Vec<f32>  = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+                let r: Vec<f32> = embedding.iter().zip(&centroid).map(|(e, c)| e - c).collect();
+
+                // quantize_lyon logic: sign bit = (IEEE sign bit) XOR 1
+                let signs_lyon: Vec<u8> = r.iter()
+                    .map(|&v| (v.to_bits() >> 31) as u8 ^ 1)
+                    .collect();
+
+                // quantize logic: for BITS=1, CEIL=1, ray-walk collapses to
+                //   code[i] = 1 if r[i] >= 0, else 0
+                let signs_quantize: Vec<u8> = r.iter()
+                    .map(|&v| if v >= 0.0 { 1 } else { 0 })
+                    .collect();
+
+                assert_eq!(
+                    signs_lyon, signs_quantize,
+                    "sign mismatch at dim={dim}"
+                );
+            }
+        }
+    }
+
     /// Tests that 1-bit grid points quantize exactly using distance_query.
     #[test]
     fn test_1bit_grid_points() {

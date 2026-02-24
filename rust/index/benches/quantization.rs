@@ -42,8 +42,8 @@ macro_rules! desc {
     };
 }
 
-// const DIMS: &[usize] = &[1024];
-const DIMS: &[usize] = &[128, 1024, 4096];
+const DIMS: &[usize] = &[1024];
+// const DIMS: &[usize] = &[128, 1024, 4096];
 const BATCH: usize = 512;
 const THREAD_COUNTS: &[usize] = &[1, 8];
 // const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8];
@@ -563,106 +563,6 @@ fn bench_thread_scaling(c: &mut Criterion) {
     group.finish();
 }
 
-// ── 5. Rerank budget analysis ─────────────────────────────────────────────────
-//
-// Accuracy analysis (not a timing benchmark).  For a ground-truth top-K ranked
-// by true Euclidean distance, asks: "At what rerank factor R does the estimated
-// top-(K*R) always contain the true top-K?"  Printed as a table to stdout.
-
-fn rerank_factor_needed(
-    true_distances: &[f32],
-    est_distances: &[(usize, f32)],
-    k: usize,
-    rerank_factor: usize,
-) -> bool {
-    let mut est_sorted: Vec<(usize, f32)> = est_distances.to_vec();
-    est_sorted.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
-    let candidate_ids: std::collections::HashSet<usize> = est_sorted
-        .iter()
-        .take(k * rerank_factor)
-        .map(|&(i, _)| i)
-        .collect();
-
-    let mut true_sorted_idx: Vec<usize> = est_distances.iter().map(|&(i, _)| i).collect();
-    true_sorted_idx.sort_by(|&a, &b| true_distances[a].partial_cmp(&true_distances[b]).unwrap());
-
-    true_sorted_idx
-        .iter()
-        .take(k)
-        .all(|idx| candidate_ids.contains(idx))
-}
-
-fn print_rerank_budget() {
-    const DIM: usize = 1024;
-    const N: usize = 2048;
-    const K: usize = 100;
-    const RERANK_FACTORS: &[usize] = &[1, 2, 4, 8];
-
-    let mut rng = make_rng();
-    let centroid = random_vec(&mut rng, DIM);
-    let query = random_vec(&mut rng, DIM);
-    let embeddings: Vec<Vec<f32>> = (0..N).map(|_| random_vec(&mut rng, DIM)).collect();
-
-    let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
-    let cdq: f32 = centroid.iter().zip(&query).map(|(c, q)| c * q).sum();
-    let qn: f32 = query.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let cn = c_norm(&centroid);
-    let df = DistanceFunction::Euclidean;
-
-    let true_distances: Vec<f32> = embeddings
-        .iter()
-        .map(|emb| emb.iter().zip(&query).map(|(e, q)| (e - q).powi(2)).sum::<f32>())
-        .collect();
-
-    let codes_1: Vec<Vec<u8>> = embeddings
-        .iter()
-        .map(|emb| Code::<Vec<u8>, 1>::quantize(emb, &centroid).as_ref().to_vec())
-        .collect();
-    let codes_4: Vec<Vec<u8>> = embeddings
-        .iter()
-        .map(|emb| Code::<Vec<u8>, 4>::quantize(emb, &centroid).as_ref().to_vec())
-        .collect();
-
-    let score = |codes: &[Vec<u8>], bits: u8| -> Vec<(usize, f32)> {
-        codes
-            .iter()
-            .enumerate()
-            .map(|(i, cb)| {
-                let dist = if bits == 1 {
-                    Code::<&[u8], 1>::new(cb.as_slice()).distance_query(&df, &r_q, cn, cdq, qn)
-                } else {
-                    Code::<&[u8], 4>::new(cb.as_slice()).distance_query(&df, &r_q, cn, cdq, qn)
-                };
-                (i, dist)
-            })
-            .collect()
-    };
-
-    let est_1 = score(&codes_1, 1);
-    let est_4 = score(&codes_4, 4);
-
-    println!("\n=== Rerank budget (dim={DIM}, N={N}, K={K}) ===");
-    println!("{:<10} {:<8} {:<12} {:<12}", "bits", "factor", "candidates", "top-K covered");
-    for &rf in RERANK_FACTORS {
-        for (label, est) in [("1", &est_1), ("4", &est_4)] {
-            let covered = rerank_factor_needed(&true_distances, est, K, rf);
-            println!(
-                "{:<10} {:<8} {:<12} {:<12}",
-                label,
-                rf,
-                K * rf,
-                if covered { "YES" } else { "NO" }
-            );
-        }
-    }
-    println!();
-}
-
-fn bench_rerank_budget(c: &mut Criterion) {
-    let _ = c;
-    print_rerank_budget();
-}
-
 // ── 6. Error distribution analysis ───────────────────────────────────────────
 //
 // Not a timing benchmark.  Measures how accurately each implementation
@@ -737,7 +637,7 @@ fn print_error_analysis() {
     const DIM: usize = 1024;
     const N: usize = 2048;       // codes per cluster
     const N_QUERIES: usize = 64; // queries to average over
-    const N_BINS: usize = 40;    // histogram bins
+    const N_BINS: usize = 20;    // histogram bins
     const BAR_W: usize = 48;     // max histogram bar width in chars
 
     let mut rng = make_rng();
@@ -762,6 +662,12 @@ fn print_error_analysis() {
     let mut err_1float = Vec::with_capacity(total);
     let mut err_1bitw  = Vec::with_capacity(total);
     let mut err_1lut   = Vec::with_capacity(total);
+    // distance_code: both the data vector and the query are quantized codes.
+    // This stacks the error from quantizing both sides, isolating the combined
+    // code-vs-code estimation error vs. the one-sided code-vs-query methods.
+    let mut err_code4  = Vec::with_capacity(total);
+    let mut err_code1  = Vec::with_capacity(total);
+
     // Absolute errors collected in parallel; E[abs] ≈ 0 per the paper's
     // unbiasedness claim.  Comparing against the relative-error means above
     // shows that the non-zero relative mean is a metric artefact, not a bug.
@@ -769,6 +675,8 @@ fn print_error_analysis() {
     let mut abs_1float = Vec::with_capacity(total);
     let mut abs_1bitw  = Vec::with_capacity(total);
     let mut abs_1lut   = Vec::with_capacity(total);
+    let mut abs_code4  = Vec::with_capacity(total);
+    let mut abs_code1  = Vec::with_capacity(total);
 
     for _ in 0..N_QUERIES {
         let query = random_vec(&mut rng, DIM);
@@ -778,6 +686,11 @@ fn print_error_analysis() {
         // QuantizedQuery and LUTs are built once per query, amortized over all N codes.
         let qq   = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
         let luts = BatchQueryLuts::new(&r_q, cn, cdq, qn);
+        // Quantize the query itself so distance_code can treat it as another data code.
+        let cq1_bytes = Code::<Vec<u8>, 1>::quantize(&query, &centroid).as_ref().to_vec();
+        let cq4_bytes = Code::<Vec<u8>, 4>::quantize(&query, &centroid).as_ref().to_vec();
+        let cq1 = Code::<&[u8], 1>::new(cq1_bytes.as_slice());
+        let cq4 = Code::<&[u8], 4>::new(cq4_bytes.as_slice());
 
         for i in 0..N {
             // True squared Euclidean distance from original unquantized embedding.
@@ -797,17 +710,24 @@ fn print_error_analysis() {
             let df1 = c1.distance_query(&df, &r_q, cn, cdq, qn);
             let db  = c1.distance_query_bitwise(&df, &qq, DIM);
             let dl  = luts.distance_query(&c1, &df);
+            // distance_code: both vectors quantized; error comes from both sides.
+            let dc4 = c4.distance_code(&df, &cq4, cn, DIM);
+            let dc1 = c1.distance_code(&df, &cq1, cn, DIM);
 
             // Relative error: positive = overestimate, negative = underestimate.
             err_4bit.push((d4  - d_true) / d_true);
             err_1float.push((df1 - d_true) / d_true);
             err_1bitw.push((db  - d_true) / d_true);
             err_1lut.push((dl  - d_true) / d_true);
+            err_code4.push((dc4 - d_true) / d_true);
+            err_code1.push((dc1 - d_true) / d_true);
 
             abs_4bit.push(d4  - d_true);
             abs_1float.push(df1 - d_true);
             abs_1bitw.push(db  - d_true);
             abs_1lut.push(dl  - d_true);
+            abs_code4.push(dc4 - d_true);
+            abs_code1.push(dc1 - d_true);
         }
     }
 
@@ -829,18 +749,35 @@ fn print_error_analysis() {
                 p75: pct(0.75), p95: pct(0.95) }
     };
 
-    let s4 = compute_stats(&mut err_4bit);
-    let sf = compute_stats(&mut err_1float);
-    let sb = compute_stats(&mut err_1bitw);
-    let sl = compute_stats(&mut err_1lut);
+    let s4  = compute_stats(&mut err_4bit);
+    let sf  = compute_stats(&mut err_1float);
+    let sb  = compute_stats(&mut err_1bitw);
+    let sl  = compute_stats(&mut err_1lut);
+    let sc4 = compute_stats(&mut err_code4);
+    let sc1 = compute_stats(&mut err_code1);
 
     let hr  = "═".repeat(92);
     let sep = "─".repeat(92);
+
+    // Per-method descriptions printed in the header for quick reference.
+    let methods_desc: &[(&str, &str)] = &[
+        ("4bit_float",   "distance_query, 4-bit data code, raw f32 query (most accurate)"),
+        ("1bit_float",   "distance_query, 1-bit data code, raw f32 query"),
+        ("1bit_bitwise", "distance_query_bitwise, 1-bit data + 4-bit quantized query (QuantizedQuery)"),
+        ("1bit_lut",     "BatchQueryLuts::distance_query, 1-bit data + nibble LUT query"),
+        ("4bit_code",    "distance_code, 4-bit data code vs 4-bit query code (both sides quantized)"),
+        ("1bit_code",    "distance_code, 1-bit data code vs 1-bit query code (both sides quantized)"),
+    ];
 
     println!("\n{hr}");
     println!("  Error analysis: relative_error = (d_est − d_true) / d_true");
     println!("  dim={DIM}, N={N} codes, {N_QUERIES} queries, {} samples/method", N * N_QUERIES);
     println!("  d_true = true squared L2 between original embedding and query");
+    println!("{sep}");
+    println!("  Methods:");
+    for (name, desc) in methods_desc {
+        println!("    {:<20} {}", name, desc);
+    }
     println!("{sep}");
     println!("  {:<20} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8} {:>8}",
              "method", "mean", "std", "RMSE", "p5", "p25", "p50", "p75", "p95");
@@ -854,6 +791,9 @@ fn print_error_analysis() {
     row("1bit_float",   &sf);
     row("1bit_bitwise", &sb);
     row("1bit_lut",     &sl);
+    println!("{sep}");
+    row("4bit_code",    &sc4);
+    row("1bit_code",    &sc1);
 
     // ── Absolute error summary ────────────────────────────────────────────────
     // See the block comment above the function for a full explanation of why
@@ -880,6 +820,8 @@ fn print_error_analysis() {
     abs_row("1bit_float",   &abs_1float);
     abs_row("1bit_bitwise", &abs_1bitw);
     abs_row("1bit_lut",     &abs_1lut);
+    abs_row("4bit_code",    &abs_code4);
+    abs_row("1bit_code",    &abs_code1);
 
     // ── Histograms ────────────────────────────────────────────────────────────
     // All four methods share the same bin edges and the same bar scale
@@ -898,9 +840,11 @@ fn print_error_analysis() {
             abs[idx]
         };
         let max_p99 = p99_abs(&err_4bit)
-            .max(p99_abs(&err_1float))
-            .max(p99_abs(&err_1bitw))
-            .max(p99_abs(&err_1lut));
+            // .max(p99_abs(&err_1float))
+            // .max(p99_abs(&err_1bitw))
+            // .max(p99_abs(&err_1lut))
+            .max(p99_abs(&err_code4))
+            .max(p99_abs(&err_code1));
         // Round up to nearest 0.01 so bin edges are clean numbers.
         ((max_p99 / 0.01).ceil() * 0.01).clamp(0.01, 1.0)
     };
@@ -922,12 +866,15 @@ fn print_error_analysis() {
         counts
     };
 
-    let h4 = make_hist(&err_4bit);
-    let hf = make_hist(&err_1float);
-    let hb = make_hist(&err_1bitw);
-    let hl = make_hist(&err_1lut);
+    let h4  = make_hist(&err_4bit);
+    let hf  = make_hist(&err_1float);
+    let hb  = make_hist(&err_1bitw);
+    let hl  = make_hist(&err_1lut);
+    let hc4 = make_hist(&err_code4);
+    let hc1 = make_hist(&err_code1);
 
     let global_max = h4.iter().chain(&hf).chain(&hb).chain(&hl)
+        .chain(&hc4).chain(&hc1)
         .copied().max().unwrap_or(1);
 
     let bar = |count: usize| -> String {
@@ -944,6 +891,8 @@ fn print_error_analysis() {
         ("1bit_float",   &hf),
         ("1bit_bitwise", &hb),
         ("1bit_lut",     &hl),
+        ("4bit_code",    &hc4),
+        ("1bit_code",    &hc1),
     ];
 
     for (name, hist) in methods {
@@ -1046,7 +995,6 @@ criterion_group!(
     bench_distance_code,
     bench_distance_query,
     bench_thread_scaling,
-    bench_rerank_budget,
     bench_error_analysis,
     bench_primitives,
 );
