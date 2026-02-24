@@ -190,12 +190,12 @@ fn create_client(base_url: &str) -> Result<ChromaHttpClient, Box<dyn std::error:
 
 /// Generates a deterministic collection name from the index.
 fn collection_name(index: usize) -> String {
-    format!("loadgen_collection_{:06}", index)
+    format!("loadgen_collection2_{:06}", index)
 }
 
 /// Returns the path to the collection cache file.
 fn cache_file_path(num_collections: usize) -> String {
-    format!("loadgen_collections_{}.json", num_collections)
+    format!("loadgen_collections2_{}.json", num_collections)
 }
 
 /// Cached collection data for dehydration/rehydration.
