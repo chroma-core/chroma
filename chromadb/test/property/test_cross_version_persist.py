@@ -86,7 +86,7 @@ def _patch_telemetry_client(
 ) -> None:
     # chroma 0.4.14 added OpenTelemetry, distinct from ProductTelemetry. Before 0.4.14
     # ProductTelemetry was simply called Telemetry.
-    settings.chroma_telemetry_impl = "chromadb.telemetry.product.ProductTelemetryClient"
+    settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
 
 
 version_patches: List[
@@ -337,7 +337,7 @@ def test_cycle_versions(
     invariants.log_size_below_max(system, [coll], True)
 
     # Should be able to add embeddings
-    coll.add(**embeddings_strategy)  # type: ignore
+    coll.add(**embeddings_strategy)
 
     invariants.count(coll, embeddings_strategy)
     invariants.metadatas_match(coll, embeddings_strategy)

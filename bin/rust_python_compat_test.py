@@ -1,14 +1,9 @@
 import json
 import multiprocessing
-import os
-import packaging
 import re
 import shutil
-import subprocess
-import sys
 import tempfile
 import tqdm
-import urllib
 
 from chromadb import RustClient
 from chromadb.config import Settings
@@ -41,7 +36,7 @@ def versions() -> List[str]:
     return versions
 
 
-def persist_with_old_version(ver: str, path: str):
+def persist_with_old_version(ver: str, path: str) -> None:
     print(f"Installing ChromaDB {ver}")
     install_version(ver, {})
     old_modules = switch_to_version(ver, ["pydantic", "numpy", "tokenizers"])
@@ -58,9 +53,7 @@ def persist_with_old_version(ver: str, path: str):
         persist_directory=path,
     )
     if version.Version(ver) <= version.Version("0.4.14"):
-        settings.chroma_telemetry_impl = (
-            "chromadb.telemetry.product.ProductTelemetryClient"
-        )
+        settings.chroma_telemetry_impl = "chromadb.telemetry.posthog.Posthog"
     system = old_modules.config.System(settings)
     api = system.instance(api_import_for_version(old_modules, ver))
     system.start()
@@ -92,7 +85,7 @@ def persist_with_old_version(ver: str, path: str):
         )
 
 
-def verify_collection_content(path: str):
+def verify_collection_content(path: str) -> None:
     print("Loading collection from rust client")
     client = RustClient(path=path)
     coll = client.get_collection(collection_name)
@@ -102,7 +95,9 @@ def verify_collection_content(path: str):
     records = coll.get(include=["documents", "embeddings", "metadatas"])
     assert records["ids"] == [str(i) for i in range(persist_size)]
     assert records["documents"] == [f"DOC-{i}" for i in range(persist_size)]
-    assert all(emb[0] == emb[1] == i for i, emb in enumerate(records["embeddings"]))
+    embeddings = records["embeddings"]
+    assert embeddings is not None
+    assert all(emb[0] == emb[1] == i for i, emb in enumerate(embeddings))
 
 
 if __name__ == "__main__":
