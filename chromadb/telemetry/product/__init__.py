@@ -1,5 +1,5 @@
 from typing import ClassVar, Dict, Any
-
+from typing_extensions import override
 from chromadb.config import Component
 from enum import Enum
 
@@ -35,5 +35,11 @@ class ProductTelemetryEvent:
 class ProductTelemetryClient(Component):
     SERVER_CONTEXT: ServerContext = ServerContext.NONE
 
+    def capture(self, event: ProductTelemetryEvent) -> None:
+        pass
+
+
+class NoOpProductTelemetryClient(ProductTelemetryClient):
+    @override
     def capture(self, event: ProductTelemetryEvent) -> None:
         pass
