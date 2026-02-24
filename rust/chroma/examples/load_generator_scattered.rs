@@ -13,7 +13,7 @@
 //! # Usage
 //!
 //! ```bash
-//! cargo run --example load_generator -- --collections 10 --duration 600 --tasks 4 --batch-size 100
+//! cargo run --example load_generator_scattered -- --collections 10 --duration 600 --tasks 4 --batch-size 100
 //! ```
 //!
 //! # Environment Variables
