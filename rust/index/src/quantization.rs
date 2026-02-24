@@ -73,7 +73,6 @@
 use std::mem::size_of;
 
 use bitpacking::{BitPacker, BitPacker8x};
-use rand::Rng;
 use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
@@ -341,6 +340,32 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
         // 1-bit: sign-based quantization (no ray-walk needed). See section 3.1.3 of the paper.
         // The embedding is already rotated, so we only need to take the sign
         // of each bit.
+        //
+        // Computing the Quantized Codes of Data Vectors
+        // - normalize the data vector -> o'
+        // - Have a "codebook" of unit vectors. Stored as a rotation matrix P
+        // - Find the nearest the nearest unrotated unit vector
+        //     1. Apply P⁻¹ to the data vector (unrotate).
+        //         - P⁻¹ = Pᵀ for orthonormal matrices
+        //         - since we only ever use P⁻¹, that's what we store in index.rotation
+        //         - We do this instead of rotating the data vector because it's faster and equivalent: Equation 8 in the paper: ⟨o,P xˉ⟩=⟨P−1 o, xˉ⟩
+        //         - The inner product between the data vector o and a rotated codebook entry Px̄, equals the inner product between the inverse-rotated data vector P⁻¹o and the unrotated codebook entry x̄.
+        //     2. Take the sign of each bit of the inverse-rotated data vector.
+        //         - This gives the nearest unrotated unit vector.
+        //         - we can do this instead of rotating all 2^D vectors in C, because x̄ ∈ C has entries ±1/√D, the argmax over C is just the sign of each component of P⁻¹o:
+        //         - xˉ[i] = sign((P⁻¹o)[i]) / √D,
+        //     - The whole point of the "de-rotate the data instead of rotating the codebook" trick is precisely that you never need Px̄ (AKA ō) explicitly (because Px̄ is expensive to store and compute with, it's not binary-valued) — you just keep everything in the P⁻¹-rotated coordinate frame, where x̄ is just a sign vector and inner products can be computed with popcount.
+        //
+        // Notation:
+        // TODO align with notation above
+        // o — the normalized data vector (in the original space, after subtracting centroid and normalizing to unit length)
+        // ō - the rotated, quantized data vector (Px̄)
+        // P — the random orthogonal rotation matrix used to construct the randomized codebook C_rand
+        // x̄ — a candidate vector from the unrotated codebook C = {±1/√D}^D (axis-aligned, bi-valued)
+        // Px̄ — the rotated codebook vector, i.e., the candidate from C_rand (the actual quantized vector ō lives here)
+        // P⁻¹ — the inverse rotation (which equals Pᵀ since P is orthogonal)
+        // P⁻¹o — the data vector inversely transformed into the unrotated codebook space
+
         if BITS == 1 {
             // Build packed codes: [sign_bits]
             // Pack sign bits branchlessly, 8 floats → 1 byte at a time.
@@ -602,60 +627,30 @@ pub struct QuantizedQuery {
 }
 
 impl QuantizedQuery {
-    /// Section 3.3.1 of the paper.
     /// Quantize a query residual r_q into B_q-bit unsigned integers and
     /// decompose into bit planes for AND+popcount inner products.
     ///
     /// `b_q` is the number of bits per query element (paper recommends 4).
     /// `padded_bytes` is the byte length of the packed data codes (for alignment).
-    pub fn new(
-        r_q: &[f32],
-        b_q: u8,
-        padded_bytes: usize,
-        c_norm: f32,
-        c_dot_q: f32,
-        q_norm: f32,
-    ) -> Self {
-        Self::new_with_rng(r_q, b_q, padded_bytes, c_norm, c_dot_q, q_norm, &mut rand::thread_rng())
-    }
-
-    /// Same as `new` but uses the provided RNG for randomized rounding.
-    /// Use this for reproducible tests.
-    pub fn new_with_rng(
-        r_q: &[f32],
-        b_q: u8,
-        padded_bytes: usize,
-        c_norm: f32,
-        c_dot_q: f32,
-        q_norm: f32,
-        rng: &mut impl Rng,
-    ) -> Self {
+    pub fn new(r_q: &[f32], b_q: u8, padded_bytes: usize, c_norm: f32, c_dot_q: f32, q_norm: f32) -> Self {
         let max_val = (1u32 << b_q) - 1;
 
-        let v_min = r_q.iter().copied().fold(f32::INFINITY, f32::min);
-        let v_max = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
-        let range = v_max - v_min;
+        let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
+        let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+        let range = v_r - v_l;
         let delta = if range > f32::EPSILON { range / max_val as f32 } else { 1.0 };
 
-        // Quantize each element to a B_q-bit unsigned integer using randomized
-        // rounding (paper Eq. 18): q̄_u[i] := floor((q'[i] − v_l)/Δ + u_i) where
-        // u_i ~ Uniform[0, 1]. This makes the quantization error unbiased in
-        // expectation, preserving the theoretical guarantee.
-        let q_u: Vec<u32> = r_q
-            .iter()
-            .map(|&v| {
-                let x = (v - v_min) / delta;
-                let u: f32 = rng.gen();
-                ((x + u).floor() as u32).min(max_val)
-            })
-            .collect();
+        // Quantize each element to a B_q-bit unsigned integer (deterministic
+        // rounding — we skip the randomized rounding from the paper since the
+        // accuracy difference is negligible at B_q=4).
+        let q_u: Vec<u32> = r_q.iter().map(|&v| {
+            (((v - v_l) / delta).round() as u32).min(max_val)
+        }).collect();
 
         let sum_q_u: u32 = q_u.iter().sum();
 
         // Decompose into bit planes.  bit_planes[j][byte] holds the j-th bit
         // of q_u[i] for i in [byte*8 .. byte*8+8], packed LSB-first.
-        // TODO: justify this extra computation is worth the 2X space savings
-        // (at B=4) for q.
         let mut bit_planes = vec![vec![0u8; padded_bytes]; b_q as usize];
         for (i, &qu) in q_u.iter().enumerate() {
             for j in 0..b_q as usize {
@@ -665,8 +660,7 @@ impl QuantizedQuery {
             }
         }
 
-        // TODO need sum_x_bar_b? Equation 20.
-        Self { bit_planes, v_l: v_min, delta, sum_q_u, b_q, c_norm, c_dot_q, q_norm }
+        Self { bit_planes, v_l, delta, sum_q_u, b_q, c_norm, c_dot_q, q_norm }
     }
 }
 
@@ -799,17 +793,6 @@ impl BatchQueryLuts {
     /// For each of the 16 possible nibble values, we precompute the partial
     /// sum of q_u[i] for the bits that are set.
     pub fn new(r_q: &[f32], c_norm: f32, c_dot_q: f32, q_norm: f32) -> Self {
-        Self::new_with_rng(r_q, c_norm, c_dot_q, q_norm, &mut rand::thread_rng())
-    }
-
-    /// Same as `new` but uses the provided RNG for randomized rounding.
-    pub fn new_with_rng(
-        r_q: &[f32],
-        c_norm: f32,
-        c_dot_q: f32,
-        q_norm: f32,
-        rng: &mut impl Rng,
-    ) -> Self {
         let dim = r_q.len();
         let max_val = 15u32; // B_q = 4
 
@@ -818,14 +801,9 @@ impl BatchQueryLuts {
         let range = v_r - v_l;
         let delta = if range > f32::EPSILON { range / max_val as f32 } else { 1.0 };
 
-        let q_u: Vec<u32> = r_q
-            .iter()
-            .map(|&v| {
-                let x = (v - v_l) / delta;
-                let u: f32 = rng.gen();
-                ((x + u).floor() as u32).min(max_val)
-            })
-            .collect();
+        let q_u: Vec<u32> = r_q.iter().map(|&v| {
+            (((v - v_l) / delta).round() as u32).min(max_val)
+        }).collect();
 
         let sum_q_u: u32 = q_u.iter().sum();
 
@@ -1229,8 +1207,8 @@ mod tests {
         let q_norm = (f32::dot(&query, &query).unwrap_or(0.0) as f32).sqrt();
 
         let padded_bytes = Code::<Vec<u8>, 1>::packed_len(dim);
-        let qq = QuantizedQuery::new_with_rng(&r_q, 4, padded_bytes, c_norm, c_dot_q, q_norm, &mut rng);
-        let luts = BatchQueryLuts::new_with_rng(&r_q, c_norm, c_dot_q, q_norm, &mut rng);
+        let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, c_norm, c_dot_q, q_norm);
+        let luts = BatchQueryLuts::new(&r_q, c_norm, c_dot_q, q_norm);
         let df = DistanceFunction::Euclidean;
 
         for _ in 0..100 {
@@ -1250,6 +1228,11 @@ mod tests {
             assert!(
                 (float_dist - lut_dist).abs() < tol,
                 "lut mismatch: float={float_dist}, lut={lut_dist}"
+            );
+            // bitwise and lut should agree exactly (same quantization)
+            assert!(
+                (bitwise_dist - lut_dist).abs() < f32::EPSILON * 100.0,
+                "bitwise vs lut: bitwise={bitwise_dist}, lut={lut_dist}"
             );
         }
     }
