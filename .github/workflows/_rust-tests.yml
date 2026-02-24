@@ -51,14 +51,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Check GCS credentials availability
+        id: check-creds
+        run: |
+          if [ -z '${{ secrets.TEST_CRED_GCS }}' ]; then
+            echo "available=false" >> $GITHUB_OUTPUT
+            echo "GCS credentials not available, skipping tests"
+          else
+            echo "available=true" >> $GITHUB_OUTPUT
+          fi
       - name: Setup
+        if: steps.check-creds.outputs.available == 'true'
         uses: ./.github/actions/rust
         with:
           github-token: ${{ github.token }}
       - name: Extract credentials
+        if: steps.check-creds.outputs.available == 'true'
         run: |
           echo '${{ secrets.TEST_CRED_GCS }}' > ${{ github.workspace }}/cred_gcs.json
       - name: Test
+        if: steps.check-creds.outputs.available == 'true'
         run: cargo nextest run --profile storage_gcs
         env:
           GOOGLE_APPLICATION_CREDENTIALS: ${{ github.workspace }}/cred_gcs.json
