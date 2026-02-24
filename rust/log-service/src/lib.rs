@@ -906,6 +906,34 @@ impl RollupPerCollection {
             .saturating_sub(self.start_log_position.offset())
             >= threshold
     }
+
+    /// Whether this rollup should be selected for compaction given the provided thresholds.
+    fn should_compact(
+        &self,
+        min_compaction_size: u64,
+        reinsert_threshold: u64,
+        timeout_us: u64,
+    ) -> bool {
+        let time_on_log = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros()
+            .saturating_sub(self.initial_insertion_epoch_us as u128);
+        (self.limit_log_position >= self.start_log_position
+            && self.limit_log_position - self.start_log_position >= min_compaction_size)
+            || self.reinsert_count >= reinsert_threshold
+            || time_on_log >= timeout_us as u128
+    }
+
+    /// Whether this rollup likely needs a dirty log purge.
+    fn likely_needs_purge_dirty(&self, reinsert_threshold: u64, timeout_us: u64) -> bool {
+        let time_on_log = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .expect("time never moves to before epoch")
+            .as_micros()
+            .saturating_sub(self.initial_insertion_epoch_us as u128);
+        self.reinsert_count >= reinsert_threshold * 2 || time_on_log >= timeout_us as u128 * 2
+    }
 }
 
 ////////////////////////////////////////////// Rollups /////////////////////////////////////////////
@@ -1022,9 +1050,11 @@ pub struct LogServer {
     config: LogServerConfig,
     open_logs: Arc<StateHashTable<LogKey, LogStub>>,
     dirty_log: Option<Arc<dyn LogWriterTrait>>,
-    rolling_up: tokio::sync::Mutex<()>,
+    rolling_up_s3: tokio::sync::Mutex<()>,
+    rolling_up_repl: tokio::sync::Mutex<()>,
     backpressure: Mutex<Arc<HashSet<CollectionUuid>>>,
-    need_to_compact: Mutex<HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>>,
+    need_to_compact_s3: Mutex<HashMap<CollectionUuid, RollupPerCollection>>,
+    need_to_compact_repl: Mutex<HashMap<(TopologyName, CollectionUuid), RollupPerCollection>>,
     cache: Option<Arc<dyn chroma_cache::PersistentCache<String, CachedBytes>>>,
     metrics: Metrics,
     storages: Arc<MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>>,
@@ -1230,16 +1260,36 @@ impl LogServer {
                 .mark_dirty(LogPosition::from_offset(adjusted_log_offset as u64), 1usize)
                 .await;
         }
-        let mut need_to_compact = self.need_to_compact.lock();
-        if let Entry::Occupied(mut entry) = need_to_compact.entry((topology_name, collection_id)) {
-            let rollup = entry.get_mut();
-            rollup.start_log_position = std::cmp::max(
-                rollup.start_log_position,
-                LogPosition::from_offset(adjusted_log_offset as u64),
-            );
-            rollup.reinsert_count = 0;
-            if rollup.is_empty() {
-                entry.remove();
+        match topology_name {
+            None => {
+                let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
+                if let Entry::Occupied(mut entry) = need_to_compact_s3.entry(collection_id) {
+                    let rollup = entry.get_mut();
+                    rollup.start_log_position = std::cmp::max(
+                        rollup.start_log_position,
+                        LogPosition::from_offset(adjusted_log_offset as u64),
+                    );
+                    rollup.reinsert_count = 0;
+                    if rollup.is_empty() {
+                        entry.remove();
+                    }
+                }
+            }
+            Some(topology_name) => {
+                let mut need_to_compact_repl = self.need_to_compact_repl.lock();
+                if let Entry::Occupied(mut entry) =
+                    need_to_compact_repl.entry((topology_name, collection_id))
+                {
+                    let rollup = entry.get_mut();
+                    rollup.start_log_position = std::cmp::max(
+                        rollup.start_log_position,
+                        LogPosition::from_offset(adjusted_log_offset as u64),
+                    );
+                    rollup.reinsert_count = 0;
+                    if rollup.is_empty() {
+                        entry.remove();
+                    }
+                }
             }
         }
         Ok(Response::new(UpdateCollectionLogOffsetResponse {}))
@@ -1254,27 +1304,41 @@ impl LogServer {
         const MAX_COLLECTION_INFO_NUMBER: usize = 10000;
         let mut selected_rollups = Vec::with_capacity(MAX_COLLECTION_INFO_NUMBER);
         let mut needs_purge_dirty = 0;
-        // Do a non-allocating pass here.
+        // Collect from the S3 map.
         {
-            let need_to_compact = self.need_to_compact.lock();
-            for (key, rollup) in need_to_compact.iter() {
-                let time_on_log = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .expect("time never moves to before epoch")
-                    .as_micros()
-                    .saturating_sub(rollup.initial_insertion_epoch_us as u128);
-                if (rollup.limit_log_position >= rollup.start_log_position
-                    && rollup.limit_log_position - rollup.start_log_position
-                        >= request.min_compaction_size)
-                    || rollup.reinsert_count >= self.config.reinsert_threshold
-                    || time_on_log >= self.config.timeout_us as u128
-                {
-                    if rollup.reinsert_count >= self.config.reinsert_threshold * 2
-                        && time_on_log >= self.config.timeout_us as u128 * 2
-                    {
+            let need_to_compact_s3 = self.need_to_compact_s3.lock();
+            for (collection_id, rollup) in need_to_compact_s3.iter() {
+                if rollup.should_compact(
+                    request.min_compaction_size,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    if rollup.likely_needs_purge_dirty(
+                        self.config.reinsert_threshold,
+                        self.config.timeout_us,
+                    ) {
                         needs_purge_dirty += 1;
                     }
-                    selected_rollups.push((key.clone(), *rollup));
+                    selected_rollups.push(((None, *collection_id), *rollup));
+                }
+            }
+        }
+        // Collect from the repl map.
+        {
+            let need_to_compact_repl = self.need_to_compact_repl.lock();
+            for ((topology_name, collection_id), rollup) in need_to_compact_repl.iter() {
+                if rollup.should_compact(
+                    request.min_compaction_size,
+                    self.config.reinsert_threshold,
+                    self.config.timeout_us,
+                ) {
+                    if rollup.likely_needs_purge_dirty(
+                        self.config.reinsert_threshold,
+                        self.config.timeout_us,
+                    ) {
+                        needs_purge_dirty += 1;
+                    }
+                    selected_rollups.push(((Some(topology_name.clone()), *collection_id), *rollup));
                 }
             }
         }
@@ -1303,63 +1367,98 @@ impl LogServer {
         }))
     }
 
-    /// Read a prefix of the dirty log, coalescing records as it goes.
-    ///
-    /// This will rewrite the dirty log's coalesced contents at the tail and adjust the cursor to
-    /// said position so that the next read is O(1) if there are no more writes.
-    #[tracing::instrument(skip(self))]
-    async fn roll_dirty_log(&self) -> Result<(), Error> {
-        // Ensure at most one request at a time.
-        let _guard = self.rolling_up.lock().await;
+    /// Roll up the S3 dirty log independently of topology roll-ups.
+    #[tracing::instrument(skip(self), name = "roll_dirty_log")]
+    async fn roll_dirty_log_s3_cycle(&self) -> Result<(), Error> {
+        let _guard = self.rolling_up_s3.lock().await;
+        match self.roll_dirty_log_s3().await {
+            Ok((_, _bp, mut ru)) => {
+                {
+                    let mut need_to_compact_s3 = self.need_to_compact_s3.lock();
+                    std::mem::swap(&mut *need_to_compact_s3, &mut ru);
+                }
+                self.merge_and_set_backpressure();
+                self.record_dirty_log_metrics();
+                Ok(())
+            }
+            Err(err) => {
+                tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
+                Err(err)
+            }
+        }
+    }
+
+    /// Roll up all topology dirty logs independently of S3 roll-ups.
+    #[tracing::instrument(skip(self), name = "roll_dirty_log")]
+    async fn roll_dirty_log_repl_cycle(&self) -> Result<(), Error> {
+        let _guard = self.rolling_up_repl.lock().await;
         let mut futures = vec![];
         for topology in self.storages.topologies.iter() {
             futures.push(self.roll_dirty_log_repl(topology));
         }
         // NOTE(rescrv):  Join all so that errors don't short circuit.
-        let results = futures::future::join_all(futures);
-        let dirty = self.roll_dirty_log_s3();
-        let (results, dirty) = tokio::join!(results, dirty);
-        let mut backpressure = vec![];
-        let mut rollups: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection> =
+        let results = futures::future::join_all(futures).await;
+        let mut rollups: HashMap<(TopologyName, CollectionUuid), RollupPerCollection> =
             HashMap::default();
-        let mut process_dirty =
-            |bp: Vec<CollectionUuid>,
-             ru: HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>| {
-                backpressure.extend(bp);
-                for (k, v) in ru.into_iter() {
-                    match rollups.entry(k) {
-                        Entry::Occupied(mut entry) => {
-                            entry.get_mut().merge_from(&v);
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(v);
+        for dirty in results {
+            match dirty {
+                Ok((topology_name, _bp, ru)) => {
+                    let topology_name = topology_name
+                        .expect("roll_dirty_log_repl always returns Some(topology_name)");
+                    for ((_, collection_id), v) in ru.into_iter() {
+                        match rollups.entry((topology_name.clone(), collection_id)) {
+                            Entry::Occupied(mut entry) => {
+                                entry.get_mut().merge_from(&v);
+                            }
+                            Entry::Vacant(entry) => {
+                                entry.insert(v);
+                            }
                         }
                     }
                 }
-            };
-        for dirty in results {
-            match dirty {
-                Ok((_, bp, ru)) => process_dirty(bp, ru),
                 Err(err) => {
                     tracing::event!(Level::ERROR, name = "could not roll dirty log for topology", error =? err);
                 }
             }
         }
-        match dirty {
-            Ok((_, bp, ru)) => process_dirty(bp, ru),
-            Err(err) => {
-                tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
+        {
+            let mut need_to_compact_repl = self.need_to_compact_repl.lock();
+            std::mem::swap(&mut *need_to_compact_repl, &mut rollups);
+        }
+        self.merge_and_set_backpressure();
+        self.record_dirty_log_metrics();
+        Ok(())
+    }
+
+    /// Merge backpressure from both S3 and repl maps and set it atomically.
+    fn merge_and_set_backpressure(&self) {
+        let mut backpressure = vec![];
+        {
+            let need_to_compact_s3 = self.need_to_compact_s3.lock();
+            for (collection_id, rollup) in need_to_compact_s3.iter() {
+                if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    backpressure.push(*collection_id);
+                }
             }
         }
+        {
+            let need_to_compact_repl = self.need_to_compact_repl.lock();
+            for ((_, collection_id), rollup) in need_to_compact_repl.iter() {
+                if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    backpressure.push(*collection_id);
+                }
+            }
+        }
+        self.set_backpressure(&backpressure);
+    }
+
+    /// Record the total dirty log collection count metric from both maps.
+    fn record_dirty_log_metrics(&self) {
+        let s3_count = self.need_to_compact_s3.lock().len();
+        let repl_count = self.need_to_compact_repl.lock().len();
         self.metrics
             .dirty_log_collections
-            .record(rollups.len() as u64, &[]);
-        self.set_backpressure(&backpressure);
-        {
-            let mut need_to_compact = self.need_to_compact.lock();
-            std::mem::swap(&mut *need_to_compact, &mut rollups);
-        }
-        Ok(())
+            .record((s3_count + repl_count) as u64, &[]);
     }
 
     async fn roll_dirty_log_s3(
@@ -1368,7 +1467,7 @@ impl LogServer {
         (
             Option<TopologyName>,
             Vec<CollectionUuid>,
-            HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+            HashMap<CollectionUuid, RollupPerCollection>,
         ),
         Error,
     > {
@@ -1379,9 +1478,6 @@ impl LogServer {
         let mut rollup = self.read_and_coalesce_dirty_log(&**dirty_log).await?;
         if rollup.rollups.is_empty() {
             tracing::info!("rollups is empty");
-            let mut need_to_compact = self.need_to_compact.lock();
-            let mut rollups = HashMap::new();
-            std::mem::swap(&mut *need_to_compact, &mut rollups);
             return Ok((None, Default::default(), Default::default()));
         };
         let collections = rollup.rollups.len();
@@ -1448,7 +1544,7 @@ impl LogServer {
         (
             Option<TopologyName>,
             Vec<CollectionUuid>,
-            HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
+            HashMap<CollectionUuid, RollupPerCollection>,
         ),
         Error,
     > {
@@ -1520,7 +1616,11 @@ impl LogServer {
                 cache.remove(&cache_key).await;
             }
         }
-        Ok((None, backpressure, after))
+        let after_s3: HashMap<CollectionUuid, RollupPerCollection> = after
+            .into_iter()
+            .map(|((_, collection_id), rollup)| (collection_id, rollup))
+            .collect();
+        Ok((None, backpressure, after_s3))
     }
 
     /// Read the entirety of a prefix of the dirty log.
@@ -1759,12 +1859,23 @@ impl LogServer {
         if self.config.is_read_only() {
             return;
         }
-        loop {
-            tokio::time::sleep(self.config.rollup_interval).await;
-            if let Err(err) = self.roll_dirty_log().await {
-                tracing::error!("could not roll up dirty log: {err:?}");
+        let s3_fut = async {
+            loop {
+                tokio::time::sleep(self.config.rollup_interval).await;
+                if let Err(err) = self.roll_dirty_log_s3_cycle().await {
+                    tracing::error!("could not roll up dirty log (s3): {err:?}");
+                }
             }
-        }
+        };
+        let repl_fut = async {
+            loop {
+                tokio::time::sleep(self.config.rollup_interval).await;
+                if let Err(err) = self.roll_dirty_log_repl_cycle().await {
+                    tracing::error!("could not roll up dirty log (repl): {err:?}");
+                }
+            }
+        };
+        tokio::join!(s3_fut, repl_fut);
     }
 
     async fn push_logs(
@@ -3207,18 +3318,22 @@ impl Configurable<LogServerConfig> for LogServer {
         .map_err(|err| -> Box<dyn ChromaError> { Box::new(err) as _ })?;
         let storages = Arc::new(storages);
         let dirty_log: Option<Arc<dyn LogWriterTrait>> = Some(Arc::new(dirty_log));
-        let rolling_up = tokio::sync::Mutex::new(());
+        let rolling_up_s3 = tokio::sync::Mutex::new(());
+        let rolling_up_repl = tokio::sync::Mutex::new(());
         let metrics = Metrics::new(opentelemetry::global::meter("chroma"));
         let backpressure = Mutex::new(Arc::new(HashSet::default()));
-        let need_to_compact = Mutex::new(HashMap::default());
+        let need_to_compact_s3 = Mutex::new(HashMap::default());
+        let need_to_compact_repl = Mutex::new(HashMap::default());
         Ok(Self {
             config: config.clone(),
             open_logs: Arc::new(StateHashTable::default()),
             storages,
             dirty_log,
-            rolling_up,
+            rolling_up_s3,
+            rolling_up_repl,
             backpressure,
-            need_to_compact,
+            need_to_compact_s3,
+            need_to_compact_repl,
             cache,
             metrics,
         })
@@ -4523,9 +4638,11 @@ mod tests {
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
                 open_logs: Default::default(),
-                rolling_up: Default::default(),
+                rolling_up_s3: Default::default(),
+                rolling_up_repl: Default::default(),
                 backpressure: Default::default(),
-                need_to_compact: Default::default(),
+                need_to_compact_s3: Default::default(),
+                need_to_compact_repl: Default::default(),
                 cache: Default::default(),
             }
         });
@@ -4610,9 +4727,11 @@ mod tests {
                 metrics: Metrics::new(meter("test-rust-log-service")),
                 config,
                 open_logs: Default::default(),
-                rolling_up: Default::default(),
+                rolling_up_s3: Default::default(),
+                rolling_up_repl: Default::default(),
                 backpressure: Default::default(),
-                need_to_compact: Default::default(),
+                need_to_compact_s3: Default::default(),
+                need_to_compact_repl: Default::default(),
                 cache: Default::default(),
             }
         });
@@ -4761,9 +4880,13 @@ mod tests {
         collection_ids: &[CollectionUuid],
     ) {
         server
-            .roll_dirty_log()
+            .roll_dirty_log_s3_cycle()
             .await
-            .expect("Roll Dirty Logs should not fail");
+            .expect("Roll S3 Dirty Logs should not fail");
+        server
+            .roll_dirty_log_repl_cycle()
+            .await
+            .expect("Roll Repl Dirty Logs should not fail");
         let dirty_collections = server
             .cached_get_all_collection_info_to_compact(GetAllCollectionInfoToCompactRequest {
                 min_compaction_size: 0,
@@ -5460,9 +5583,11 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storages: Arc::new(storages),
             dirty_log,
-            rolling_up: tokio::sync::Mutex::new(()),
+            rolling_up_s3: tokio::sync::Mutex::new(()),
+            rolling_up_repl: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
-            need_to_compact: Mutex::new(HashMap::default()),
+            need_to_compact_s3: Mutex::new(HashMap::default()),
+            need_to_compact_repl: Mutex::new(HashMap::default()),
             cache: None,
             metrics: Metrics::new(opentelemetry::global::meter("test")),
         };
@@ -5610,9 +5735,11 @@ mod tests {
             open_logs: Arc::new(StateHashTable::default()),
             storages: Arc::new(storages),
             dirty_log,
-            rolling_up: tokio::sync::Mutex::new(()),
+            rolling_up_s3: tokio::sync::Mutex::new(()),
+            rolling_up_repl: tokio::sync::Mutex::new(()),
             backpressure: Mutex::new(Arc::new(HashSet::default())),
-            need_to_compact: Mutex::new(HashMap::default()),
+            need_to_compact_s3: Mutex::new(HashMap::default()),
+            need_to_compact_repl: Mutex::new(HashMap::default()),
             cache: None,
             metrics: Metrics::new(opentelemetry::global::meter("test")),
         };
@@ -5642,22 +5769,22 @@ mod tests {
         .await
         .expect("Failed to initialize collection log");
 
-        // Manually insert an entry into need_to_compact with a non-zero reinsert_count
+        // Manually insert an entry into need_to_compact_s3 with a non-zero reinsert_count
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap()
             .as_micros() as u64;
         {
-            let mut need_to_compact = log_server.need_to_compact.lock();
+            let mut need_to_compact_s3 = log_server.need_to_compact_s3.lock();
             let mut rollup = RollupPerCollection::new(LogPosition::from_offset(10), 100, now);
             rollup.reinsert_count = 42;
-            need_to_compact.insert((None, collection_id), rollup);
+            need_to_compact_s3.insert(collection_id, rollup);
         }
 
         // Verify reinsert_count is non-zero before the call
         {
-            let need_to_compact = log_server.need_to_compact.lock();
-            let rollup = need_to_compact.get(&(None, collection_id)).unwrap();
+            let need_to_compact_s3 = log_server.need_to_compact_s3.lock();
+            let rollup = need_to_compact_s3.get(&collection_id).unwrap();
             assert_eq!(
                 42, rollup.reinsert_count,
                 "reinsert_count should be 42 before update"
@@ -5683,8 +5810,8 @@ mod tests {
 
         // Verify reinsert_count was reset to 0
         {
-            let need_to_compact = log_server.need_to_compact.lock();
-            let rollup = need_to_compact.get(&(None, collection_id)).unwrap();
+            let need_to_compact_s3 = log_server.need_to_compact_s3.lock();
+            let rollup = need_to_compact_s3.get(&collection_id).unwrap();
             assert_eq!(
                 0, rollup.reinsert_count,
                 "reinsert_count should be reset to 0 after update"
