@@ -393,6 +393,7 @@ def test_delete_orphaned_output_collection(basic_http_client: System) -> None:
         # Try to use the function - it should fail since it's detached
         client.get_collection("output_collection")
 
+
 def test_partial_attach_function_repair(
     basic_http_client: System,
 ) -> None:
@@ -551,6 +552,7 @@ def test_count_function_attach_and_detach_attach_attach(
     )
     assert created is False
     assert attached_fn is not None
+
 
 def test_attach_function_idempotency(basic_http_client: System) -> None:
     """Test that attach_function is idempotent - calling it twice with same params returns created=False"""

@@ -98,20 +98,23 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         num_bytes: 1044,
         data: vec![(position4, vec![40, 41, 42, 43])],
     };
-    log.cursors(CursorStoreOptions::default())
-        .await
-        .unwrap()
-        .init(
-            &CursorName::new("testing").unwrap(),
-            Cursor {
-                // Overridden with position2 below.
-                position: position3,
-                epoch_us: 0,
-                writer: "testing".to_string(),
-            },
-        )
-        .await
-        .unwrap();
+    wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "testing".to_string(),
+    )
+    .init(
+        &CursorName::new("testing").unwrap(),
+        Cursor {
+            // Overridden with position2 below.
+            position: position3,
+            epoch_us: 0,
+            writer: "testing".to_string(),
+        },
+    )
+    .await
+    .unwrap();
     let postconditions = [
         Condition::Manifest(ManifestCondition {
             acc_bytes: 4176,

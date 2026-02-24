@@ -307,7 +307,7 @@ export type GetUserIdentityResponse = {
 };
 
 export type HashMap = {
-  [key: string]: boolean | number | string | SparseVector | null;
+  [key: string]: boolean | number | string | SparseVector | Array<boolean> | Array<number> | Array<string> | null;
 };
 
 export type HeartbeatResponse = {
@@ -436,6 +436,11 @@ export type Key = 'Document' | 'Embedding' | 'Metadata' | 'Score' | {
     MetadataField: string;
 };
 
+/**
+ * Quantization implementation for SPANN vector index.
+ */
+export type Quantization = 'none' | 'four_bit_rabit_q_with_u_search';
+
 export type QueryRequestPayload = RawWhereFields & {
     ids?: Array<string> | null;
     include?: IncludeList;
@@ -549,6 +554,7 @@ export type SpannConfiguration = {
  * Configuration for SPANN vector index algorithm parameters
  */
 export type SpannIndexConfig = {
+    center_drift_threshold?: number | null;
     ef_construction?: number | null;
     ef_search?: number | null;
     initial_lambda?: number | null;
@@ -558,9 +564,9 @@ export type SpannIndexConfig = {
     num_centers_to_merge_to?: number | null;
     num_samples_kmeans?: number | null;
     /**
-     * Enable quantization for vector search (cloud-only feature)
+     * Quantization implementation for vector search (cloud-only feature)
      */
-    quantize?: boolean;
+    quantize?: Quantization;
     reassign_neighbor_count?: number | null;
     search_nprobe?: number | null;
     search_rng_epsilon?: number | null;

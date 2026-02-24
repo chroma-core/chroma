@@ -4,14 +4,19 @@ description: "Learn how to query and retrieve data from Chroma collections."
 ---
 import { Callout } from '/snippets/callout.mdx';
 
-<Callout>
-**New Search API Available**: Chroma Cloud users can now use the powerful [Search API](/cloud/search-api/overview) for advanced hybrid search capabilities with better filtering, ranking, and batch operations.
+<Callout title="New Search API Available">
+Dense vector search, hybrid search, and more are available in the new powerful [Search API](/cloud/search-api/overview) for Chroma Cloud databases.
 </Callout>
+
+The Query API enables nearest-neighbor similarity search over dense embeddings.
+Use the Get API when you want to retrieve records without similarity ranking.
 
 <Tabs>
 <Tab title="Python" icon="python">
 
-You can query a Chroma collection to run a similarity search using the `.query` method:
+## Query
+
+You can query a collection to run a similarity search using `.query`:
 
 ```python
 collection.query(
@@ -21,11 +26,13 @@ collection.query(
 
 Chroma will use the collection's [embedding function](../embeddings/embedding-functions) to embed your text queries, and use the output to run a vector similarity search against your collection.
 
-Instead of provided `query_texts`, you can provide query embeddings directly. You will be required to do so if you also [added](../collections/add-data) embeddings directly to your collection, instead of using its embedding function. If the provided query embeddings are not of the same dimensions as those in your collection, an exception will be raised.
+Instead of providing `query_texts`, you can provide `query_embeddings` directly. You will be required to do so if your collection does not have an embedding function attached to it. The dimension of your query embedding must match the dimension of the embeddings in your collection.
+
+Python also supports `query_images` and `query_uris` as query inputs.
 
 ```python
 collection.query(
-    query_embeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...]
+    query_embeddings=[[11.1, 12.1, 13.1], [1.1, 2.3, 3.2]]
 )
 ```
 
@@ -33,8 +40,8 @@ By default, Chroma will return 10 results per input query. You can modify this n
 
 ```python
 collection.query(
-    query_embeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
-    n_results=5
+    query_embeddings=[[11.1, 12.1, 13.1], [1.1, 2.3, 3.2]],
+    n_results=100
 )
 ```
 
@@ -42,80 +49,40 @@ The `ids` argument lets you constrain the search only to records with the IDs fr
 
 ```python
 collection.query(
-    query_embeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
-    n_results=5,
+    query_embeddings=[[11.1, 12.1, 13.1], [1.1, 2.3, 3.2]],
+    n_results=100,
     ids=["id1", "id2"]
 )
 ```
 
-You can also retrieve records from a collection by using the `.get` method. It supports the following arguments:
-
-- `ids` - get records with IDs from this list. If not provided, the first 100 records will be retrieved, in the order of their addition to the collection.
-- `limit` - the number of records to retrieve. The default value is 100.
-- `offset` - The offset to start returning results from. Useful for paging results with limit. The default value is 0.
-
-```python
-collection.get(ids=["id1", "ids2", ...])
-```
-
-Both `query` and `get` have the `where` argument for [metadata filtering](./metadata-filtering) and `where_document` for [full-text search and regex](./full-text-search):
+Both `query` and `get` support `where` for [metadata filtering](./metadata-filtering) and `where_document` for [full-text search and regex](./full-text-search):
 
 ```python
 collection.query(
-    query_embeddings=[[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...],
-    n_results=5,
+    query_embeddings=[[11.1, 12.1, 13.1], [1.1, 2.3, 3.2]],
+    n_results=100,
     where={"page": 10}, # query records with metadata field 'page' equal to 10
     where_document={"$contains": "search string"} # query records with the search string in the records' document
 )
 ```
 
-## Results Shape
+## Get
 
-Chroma returns `.query` and `.get` results in columnar form. You will get a results object containing lists of `ids`, `embeddings`, `documents`, and `metadatas` of the records that matched your `.query` or `get` requests. Embeddings are returned as 2D-numpy arrays.
-
-```python
-class QueryResult(TypedDict):
-    ids: List[IDs]
-    embeddings: Optional[List[Embeddings]],
-    documents: Optional[List[List[Document]]]
-    metadatas: Optional[List[List[Metadata]]]
-    distances: Optional[List[List[float]]]
-    included: Include
-
-class GetResult(TypedDict):
-    ids: List[ID]
-    embeddings: Optional[Embeddings],
-    documents: Optional[List[Document]],
-    metadatas: Optional[List[Metadata]]
-    included: Include
-```
-
-`.query` results also contain a list of `distances`. These are the distances of each of the results from your input queries. `.query` results are also indexed by each of your input queries. For example, `results["ids"][0]` contains the list of records IDs for the results of the first input query.
+Use `.get` to retrieve records by ID and/or filters without similarity ranking:
 
 ```python
-results = collection.query(query_texts=["first query", "second query"])
-```
+collection.get(ids=["id1", "id2"]) # by IDs
 
-## Choosing Which Data is Returned
-
-By default, `.query` and `.get` always return the `documents` and `metadatas`. You can use the `include` argument to modify what gets returned. `ids` are always returned:
-
-```python
-collection.query(query_texts=["my query"]) # 'ids', 'documents', and 'metadatas' are returned
-
-collection.get(include=["documents"]) # Only 'ids' and 'documents' are returned
-
-collection.query(
-    query_texts=["my query"],
-    include=["documents", "metadatas", "embeddings"]
-) # 'ids', 'documents', 'metadatas', and 'embeddings' are returned
+collection.get(limit=100, offset=0) # with pagination
 ```
 
 </Tab>
 
 <Tab title="TypeScript" icon="js">
 
-You can query a Chroma collection to run a similarity search using the `.query` method:
+## Query
+
+You can query a collection to run a similarity search using `.query`:
 
 ```typescript
 await collection.query({
@@ -125,128 +92,339 @@ await collection.query({
 
 Chroma will use the collection's [embedding function](../embeddings/embedding-functions) to embed your text queries, and use the output to run a vector similarity search against your collection.
 
-Instead of provided `queryTexts`, you can provide query embeddings directly. You will be required to do so if you also [added](../collections/add-data) embeddings directly to your collection, instead of using its embedding function. If the provided query embeddings are not of the same dimensions as those in your collection, an exception will be raised.
+Instead of providing `queryTexts`, you can provide `queryEmbeddings` directly. You will be required to do so if your collection does not have an embedding function attached to it. The dimension of your query embedding must match the dimension of the embeddings in your collection.
+
 
 ```typescript
 await collection.query({
-    queryEmbeddings: [[11.1, 12.1, 13.1],[1.1, 2.3, 3.2], ...]
-})
+  queryEmbeddings: [
+    [11.1, 12.1, 13.1],
+    [1.1, 2.3, 3.2],
+  ],
+});
 ```
 
 By default, Chroma will return 10 results per input query. You can modify this number using the `nResults` argument:
 
 ```typescript
 await collection.query({
-    queryEmbeddings: [[11.1, 12.1, 13.1], [1.1, 2.3, 3.2], ...],
-    nResults: 5
-})
+  queryEmbeddings: [
+    [11.1, 12.1, 13.1],
+    [1.1, 2.3, 3.2],
+  ],
+  nResults: 100,
+});
 ```
 
 The `ids` argument lets you constrain the search only to records with the IDs from the provided list:
 
 ```typescript
 await collection.query({
-    queryEmbeddings: [[11.1, 12.1, 13.1], [1.1, 2.3, 3.2], ...],
-    nResults: 5,
-    ids: ["id1", "id2"]
-})
-```
-
-You can also retrieve records from a collection by using the `.get` method. It supports the following arguments:
-
-- `ids` - get records with IDs from this list. If not provided, the first 100 records will be retrieved, in the order of their addition to the collection.
-- `limit` - the number of records to retrieve. The default value is 100.
-- `offset` - The offset to start returning results from. Useful for paging results with limit. The default value is 0.
-
-```typescript
-await collection.get({ids: ["id1", "ids2", ...]})
-```
-
-Both `query` and `get` have the `where` argument for [metadata filtering](./metadata-filtering) and `whereDocument` for [full-text search and regex](./full-text-search):
-
-```typescript
-await collection.query({
-    queryEmbeddings: [[11.1, 12.1, 13.1], [1.1, 2.3, 3.2], ...],
-    nResults: 5,
-    where: { page: 10 }, // query records with metadata field 'page' equal to 10
-    whereDocument: { "$contains": "search string" } // query records with the search string in the records' document
-})
-```
-
-## Results Shape
-
-Chroma returns `.query` and `.get` results in columnar form. You will get a results object containing lists of `ids`, `embeddings`, `documents`, and `metadatas` of the records that matched your `.query` or `get` requests.
-
-```typescript
-class QueryResult {
-  public readonly distances: (number | null)[][];
-  public readonly documents: (string | null)[][];
-  public readonly embeddings: (number[] | null)[][];
-  public readonly ids: string[][];
-  public readonly include: Include[];
-  public readonly metadatas: (Record<
-    string,
-    string | number | boolean
-  > | null)[][];
-}
-
-class GetResult {
-  public readonly documents: (string | null)[];
-  public readonly embeddings: number[][];
-  public readonly ids: string[];
-  public readonly include: Include[];
-  public readonly metadatas: (Record<
-    string,
-    string | number | boolean
-  > | null)[];
-}
-```
-
-`.query` results also contain a list of `distances`. These are the distances of each of the results from your input queries. `.query` results are also indexed by each of your input queries. For example, `results.ids[0]` contains the list of records IDs for the results of the first input query.
-
-```typescript
-const results = await collection.query({
-  queryTexts: ["first query", "second query"],
+  queryEmbeddings: [
+    [11.1, 12.1, 13.1],
+    [1.1, 2.3, 3.2],
+  ],
+  nResults: 100,
+  ids: ["id1", "id2"],
 });
 ```
 
-On `.query` and `.get` results, you can use the `.rows()` method, to get them in row-based format. That is, you will get an array of records, each with its `id`, `document`, `metdata` (etc.) fields.
+Both `query` and `get` support `where` for [metadata filtering](./metadata-filtering) and `whereDocument` for [full-text search and regex](./full-text-search):
 
 ```typescript
-const results = await collection.get({ ids: ["id1", "id2", ...]});
-const records = results.rows();
-records.forEach((record) => {
-    console.log(record.id, record.document);
-})
+await collection.query({
+  queryEmbeddings: [
+    [11.1, 12.1, 13.1],
+    [1.1, 2.3, 3.2],
+  ],
+  nResults: 5,
+  where: { page: 10 }, // metadata field 'page' equal to 10
+  whereDocument: { $contains: "search string" }, // documents containing "search string"
+});
 ```
 
-You can also pass to `.get` and `.query` type arguments for the shape of your metadata. This will give you type inferrence for you metadata objects:
+## Get
+
+Use `.get` to retrieve records by ID and/or filters without similarity ranking:
+
+```typescript
+await collection.get({ ids: ["id1", "id2"] }); // By IDs
+
+await collection.get({ limit: 100, offset: 0 }); // With pagination
+```
+
+## Type inference
+
+You can also pass type arguments to `.get` and `.query` for the shape of your metadata. This gives you type inference for your metadata objects:
 
 ```typescript
 const results = await collection.get<{page: number; title: string}>({
-    ids: ["id1", "id2", ...]
+  ids: ["id1", "id2"],
 });
 
-const records = results.rows();
-records.forEach((record) => {
-    console.log(record.id, record.metadata?.page);
-})
+const rows = results.rows();
+rows.forEach((row) => {
+  console.log(row.id, row.metadata?.page);
+});
 ```
 
-## Choosing Which Data is Returned
+</Tab>
 
-By default, `.query` and `.get` always return the `documents` and `metadatas`. You can use the `include` argument to modify what gets returned. `ids` are always returned:
+<Tab title="Rust" icon="rust">
 
-```typescript
-await collection.query({ queryTexts: ["my query"] }); // 'ids', 'documents', and 'metadatas' are returned
+## Query
 
-await collection.get({ include: ["documents"] }); // Only 'ids' and 'documents' are returned
+You can query a collection to run a similarity search using `.query`:
 
-await collection.query({
-  queryTexts: ["my query"],
-  include: ["documents", "metadatas", "embeddings"],
-}); // 'ids', 'documents', 'metadatas', and 'embeddings' are returned
+```rust
+use chroma_types::IncludeList;
+
+// pub async fn query(
+//    &self,
+//    query_embeddings: Vec<Vec<f32>>,
+//    n_results: Option<u32>,
+//    where: Option<Where>,
+//    ids: Option<Vec<String>>,
+//    include: Option<IncludeList>,
+// ) -> Result<QueryResponse, ChromaHttpClientError>
+
+let results = collection
+    .query(
+        vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
+        None,
+        None,
+        None,
+        None,
+    )
+    .await?;
+```
+
+Embeddings must be provided directly to the Rust client.
+
+By default, Chroma returns 10 results per input query. You can modify this number using `n_results`:
+
+```rust
+let results = collection
+    .query(
+        vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
+        Some(100), // n_results
+        None,
+        None,
+        None,
+    )
+    .await?;
+```
+
+The `ids` argument lets you constrain the search only to records with the IDs from the provided list:
+
+```rust
+let results = collection
+    .query(
+        vec![vec![11.1, 12.1, 13.1], vec![1.1, 2.3, 3.2]],
+        Some(5),
+        None,
+        Some(vec!["id1".to_string(), "id2".to_string()]), // ids
+        None,
+    )
+    .await?;
+```
+
+## Get
+
+Use `.get` to retrieve records by ID and/or filters without similarity ranking:
+
+```rust
+let response = collection
+    .get(
+        Some(vec!["id1".to_string(), "id2".to_string()]),
+        None,
+        Some(10),
+        Some(0),
+        Some(IncludeList::default_get()),
+    )
+    .await?;
 ```
 
 </Tab>
 </Tabs>
+
+## Results Shape
+
+Chroma returns `.query` and `.get` results in **column-major** form (arrays per field). `.query` results are grouped per input query; `.get` results are a flat list of records.
+
+<CodeGroup>
+```python Python
+class QueryResult(TypedDict):
+    ids: List[IDs]
+    embeddings: Optional[List[Embeddings]]
+    documents: Optional[List[List[Document]]]
+    uris: Optional[List[List[URI]]]
+    metadatas: Optional[List[List[Metadata]]]
+    distances: Optional[List[List[float]]]
+    included: Include
+
+class GetResult(TypedDict):
+    ids: List[ID]
+    embeddings: Optional[Embeddings]
+    documents: Optional[List[Document]]
+    uris: Optional[URIs]
+    metadatas: Optional[List[Metadata]]
+    included: Include
+```
+
+```typescript TypeScript
+class QueryResult {
+  public readonly ids: string[][];
+  public readonly distances: (number | null)[][];
+  public readonly documents: (string | null)[][];
+  public readonly embeddings: (number[] | null)[][];
+  public readonly metadatas: (Record<string, string | number | boolean> | null)[][];
+  public readonly uris: (string | null)[][];
+  public readonly include: Include[];
+}
+
+class GetResult {
+  public readonly ids: string[];
+  public readonly documents: (string | null)[];
+  public readonly embeddings: number[][];
+  public readonly metadatas: (Record<string, string | number | boolean> | null)[];
+  public readonly uris: (string | null)[];
+  public readonly include: Include[];
+}
+```
+
+```rust Rust
+pub struct QueryResponse {
+    pub ids: Vec<Vec<String>>,
+    pub embeddings: Option<Vec<Vec<Option<Vec<f32>>>>>,
+    pub documents: Option<Vec<Vec<Option<String>>>>,
+    pub uris: Option<Vec<Vec<Option<String>>>>,
+    pub metadatas: Option<Vec<Vec<Option<HashMap<String, MetadataValue>>>>>,
+    pub distances: Option<Vec<Vec<Option<f32>>>>,
+    pub include: Vec<Include>,
+}
+
+pub struct GetResponse {
+    pub ids: Vec<String>,
+    pub embeddings: Option<Vec<Vec<f32>>>,
+    pub documents: Option<Vec<Option<String>>>,
+    pub uris: Option<Vec<Option<String>>>,
+    pub metadatas: Option<Vec<Option<HashMap<String, MetadataValue>>>>,
+    pub include: Vec<Include>,
+}
+```
+</CodeGroup>
+
+In the results from the Get operation, corresponding elements in each array belong
+to the same document.
+
+<CodeGroup>
+```python Python
+result = collection.get(include=["documents", "metadatas"])
+for id, document, metadata in zip(result["ids"], result["documents"], result["metadatas"]):
+    print(id, document, metadata)
+```
+
+```typescript TypeScript
+const result = await collection.get();
+
+const first_document = {
+    id: result["ids"][0],
+    document: result["documents"][0],
+    metadatas: result["metadatas"][0]
+}
+
+// Use the .rows() function for easy iteration
+for (const row of result.rows()) {
+  console.log(row.id, row.document, row.metadata);
+}
+```
+
+```rust Rust
+let result = collection.get(None, None, None, None, None).await?;
+if let (Some(documents), Some(metadatas)) = (&result.documents, &result.metadatas) {
+    for i in 0..result.ids.len() {
+        let id = &result.ids[i];
+        let document = &documents[i];
+        let metadata = &metadatas[i];
+        println!("{id:?} {document:?} {metadata:?}");
+    }
+}
+```
+</CodeGroup>
+
+Query is a batch API and returns results grouped per input. A common pattern is to iterate over each query's “batch” of results, then iterate within that batch.
+
+<CodeGroup>
+```python Python
+result = collection.query(query_texts=["first query", "second query"])
+for ids, documents, metadatas in zip(result["ids"], result["documents"], result["metadatas"]):
+    for id, document, metadata in zip(ids, documents, metadatas):
+        print(id, document, metadata)
+```
+
+```typescript TypeScript
+const result = await collection.query({ queryTexts: ["first query", "second query"] });
+for (const batch of result.rows()) {
+  for (const row of batch) {
+    console.log(row.id, row.document, row.metadata, row.distance);
+  }
+}
+```
+
+```rust Rust
+let result = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], None, None, None, None)
+    .await?;
+
+if let (Some(doc_batches), Some(meta_batches)) = (&result.documents, &result.metadatas) {
+    for batch_i in 0..result.ids.len() {
+        let ids = &result.ids[batch_i];
+        let documents = &doc_batches[batch_i];
+        let metadatas = &meta_batches[batch_i];
+        for j in 0..ids.len() {
+            let id = &ids[j];
+            let document = &documents[j];
+            let metadata = &metadatas[j];
+            println!("{id:?} {document:?} {metadata:?}");
+        }
+    }
+}
+```
+</CodeGroup>
+
+## Choosing Which Data is Returned
+
+By default, Query returns `documents`, `metadatas`, and `distances`, and Get returns `documents` and `metadatas`.
+
+Use `include` to control what comes back. `ids` are always returned.
+
+<CodeGroup>
+```python Python
+collection.query(
+    query_texts=["my query"],
+    include=["documents", "metadatas", "embeddings"],
+)
+
+collection.get(include=["documents"])
+```
+
+```typescript TypeScript
+await collection.query({
+  queryTexts: ["my query"],
+  include: ["documents", "metadatas", "embeddings"],
+});
+
+await collection.get({ include: ["documents"] });
+```
+
+```rust Rust
+use chroma_types::{Include, IncludeList};
+
+let include = IncludeList(vec![Include::Document, Include::Metadata]);
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(5), None, None, Some(include))
+    .await?;
+```
+</CodeGroup>

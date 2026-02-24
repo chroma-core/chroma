@@ -12,9 +12,9 @@ use chroma_storage::{
 use chroma_types::Cmek;
 
 use crate::{
-    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
-    FragmentUuid, Garbage, GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness,
-    Snapshot, SnapshotPointer, StorageWrapper, ThrottleOptions,
+    CursorWitness, Error, Fragment, FragmentIdentifier, FragmentSeqNo, FragmentUuid, Garbage,
+    GarbageCollectionOptions, LogPosition, Manifest, ManifestAndWitness, Snapshot, SnapshotPointer,
+    StorageWrapper, ThrottleOptions,
 };
 
 pub mod batch_manager;
@@ -202,8 +202,6 @@ pub trait FragmentPublisher: Send + Sync + 'static {
 
     /// Reset the garbage on the preferred region.
     async fn reset_garbage(&self, options: &ThrottleOptions, e_tag: &ETag) -> Result<(), Error>;
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ///////////////////////////////////////// FragmentConsumer /////////////////////////////////////////
@@ -228,13 +226,17 @@ pub trait FragmentConsumer: Send + Sync + 'static {
         starting_log_position: LogPosition,
     ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
 
+    async fn parse_parquet_fast(
+        &self,
+        parquet: &[u8],
+        starting_log_position: LogPosition,
+    ) -> Result<(Vec<(LogPosition, Vec<u8>)>, u64, u64), Error>;
+
     async fn read_fragment(
         &self,
         path: &str,
         fragment_first_log_position: LogPosition,
     ) -> Result<Option<Fragment>, Error>;
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore;
 }
 
 ////////////////////////////////////// ManifestManagerFactory //////////////////////////////////////
@@ -353,6 +355,13 @@ pub trait ManifestPublisher<FP: FragmentPointer>: Send + Sync + 'static {
 
     /// Destroy the named manifest.
     async fn destroy(&self) -> Result<(), Error>;
+
+    /// Load the intrinsic cursor position.
+    ///
+    /// Returns `Ok(Some(position))` if an intrinsic cursor has been set, or `Ok(None)` if no
+    /// intrinsic cursor exists yet.  GC uses this to include the intrinsic cursor in the minimum
+    /// of all cursors.
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error>;
 }
 
 ///////////////////////////////////////// ManifestConsumer /////////////////////////////////////////
@@ -364,6 +373,26 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
     /// Manifest storers and accessors
     async fn manifest_head(&self, witness: &ManifestWitness) -> Result<bool, Error>;
     async fn manifest_load(&self) -> Result<Option<(Manifest, ManifestWitness)>, Error>;
+
+    /// Update the intrinsic cursor using an init-or-swap pattern.
+    ///
+    /// Loads the current cursor value, then either initializes (if absent) or conditionally
+    /// updates (if present) the cursor to the new position.  When `allow_rollback` is false and
+    /// the existing cursor is already ahead of `position`, the update is skipped and `Ok(None)` is
+    /// returned.  Otherwise returns `Ok(Some(witness))` with the resulting cursor witness.
+    async fn update_intrinsic_cursor(
+        &self,
+        position: LogPosition,
+        epoch_us: u64,
+        writer: &str,
+        allow_rollback: bool,
+    ) -> Result<Option<CursorWitness>, Error>;
+
+    /// Load the intrinsic cursor position.
+    ///
+    /// Returns `Ok(Some(position))` if an intrinsic cursor has been set, or `Ok(None)` if no
+    /// intrinsic cursor exists yet.
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error>;
 }
 
 /////////////////////////////////////////////// utils //////////////////////////////////////////////
@@ -383,6 +412,7 @@ pub trait ManifestConsumer<FP: FragmentPointer>: Send + Sync + 'static {
 #[allow(clippy::type_complexity)]
 pub fn checksum_parquet(
     parquet: &[u8],
+    compute_setsum: bool,
     starting_log_position: Option<LogPosition>,
 ) -> Result<(Setsum, Vec<(LogPosition, Vec<u8>)>, bool, u64), Error> {
     let builder = ParquetRecordBatchReaderBuilder::try_new(Bytes::copy_from_slice(parquet))
@@ -464,7 +494,13 @@ pub fn checksum_parquet(
             let body = body.value(i);
             // Use raw_offset for setsum to match how the writer computed it.
             // The writer uses the offset value that gets stored in the file (relative or absolute).
-            setsum.insert_vectored(&[&raw_offset.to_be_bytes(), &epoch_micros.to_be_bytes(), body]);
+            if compute_setsum {
+                setsum.insert_vectored(&[
+                    &raw_offset.to_be_bytes(),
+                    &epoch_micros.to_be_bytes(),
+                    body,
+                ]);
+            }
             // Use absolute_offset for returned positions so callers get correct log positions.
             records.push((LogPosition::from_offset(absolute_offset), body.to_vec()));
         }
@@ -526,7 +562,7 @@ mod tests {
 
         // Read with None starting_log_position
         let (setsum, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, Some(LogPosition::from_offset(42)))
+            checksum_parquet(&buffer, true, Some(LogPosition::from_offset(42)))
                 .expect("checksum_parquet should succeed");
 
         println!(
@@ -560,7 +596,7 @@ mod tests {
 
         // Read with a starting_log_position - positions should be translated
         let (setsum_from_reader, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, Some(starting_position))
+            checksum_parquet(&buffer, true, Some(starting_position))
                 .expect("checksum_parquet should succeed");
 
         println!(
@@ -614,7 +650,7 @@ mod tests {
 
         // Read with a different starting_log_position - should be ignored for absolute files
         let (setsum_from_reader, records, uses_relative_offsets, _) =
-            checksum_parquet(&buffer, None).expect("checksum_parquet should succeed");
+            checksum_parquet(&buffer, true, None).expect("checksum_parquet should succeed");
 
         println!(
             "checksum_parquet_ignores_starting_position_for_absolute_offset_files: \

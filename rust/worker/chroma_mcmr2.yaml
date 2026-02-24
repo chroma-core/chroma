@@ -85,6 +85,11 @@ query_service:
     permitted_parallelism: 180
   spann_provider:
     adaptive_search_nprobe: false
+    usearch_provider:
+      cache_config:
+        weighted_lru:
+          name: "usearch_cache"
+          capacity: 8192 # 8192 MiB = 8GB
   fetch_log_batch_size: 1000
 compaction_service:
   service_name: "compaction-service"
@@ -185,6 +190,11 @@ compaction_service:
     hnsw_garbage_collection:
       enabled: true
       policy: "full_rebuild"
+    usearch_provider:
+      cache_config:
+        weighted_lru:
+          name: "usearch_cache"
+          capacity: 8192 # 8192 MiB = 8GB
 log_service:
   num_records_before_backpressure: 100000
   reinsert_threshold: 0
@@ -365,20 +375,26 @@ rust-sysdb-migration:
   otel_filters:
     - crate_name: "spanner_migration"
       filter_level: "trace"
-  spanner:
-    emulator:
-      host: "spanner.chroma.svc.cluster.local"
-      grpc_port: 9010
-      rest_port: 9020
-      project: "local-project"
-      instance: "test-instance"
-      database: "local-sysdb-database"
-  logdb_spanner:
-    emulator:
-      host: "spanner.chroma.svc.cluster.local"
-      grpc_port: 9010
-      rest_port: 9020
-      project: "local-project"
-      instance: "test-instance"
-      database: "local-logdb-database"
+  topologies:
+    - name: tilt-spanning
+      regions:
+      - tilt-config-1
+      - tilt-config-2
+      config:
+        sysdb_spanner:
+          emulator:
+            host: "spanner.chroma.svc.cluster.local"
+            grpc_port: 9010
+            rest_port: 9020
+            project: "local-project"
+            instance: "test-instance"
+            database: "local-sysdb-database"
+        logdb_spanner:
+          emulator:
+            host: "spanner.chroma.svc.cluster.local"
+            grpc_port: 9010
+            rest_port: 9020
+            project: "local-project"
+            instance: "test-instance"
+            database: "local-logdb-database"
   migration_mode: "apply"

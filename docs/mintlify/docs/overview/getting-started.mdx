@@ -282,16 +282,27 @@ summary.
   <Step title="Create a Chroma Client">
     Run the Chroma backend:
 
-    ```bash Terminal CLI
-    chroma run --path ./getting-started
+    <CodeGroup>
+    ```bash npm
+    npx chroma run --path ./getting-started
     ```
-    ```bash Terminal Docker
+    ```bash pnpm
+    pnpm exec chroma run --path ./getting-started
+    ```
+    ```bash bun
+    bunx chroma run --path ./getting-started
+    ```
+    ```bash yarn
+    yarn chroma run --path ./getting-started
+    ```
+    ```bash docker
     docker pull chromadb/chroma
     docker run -p 8000:8000 chromadb/chroma
     ```
+    </CodeGroup>
 
     Then create a client which connects to it:
-
+    <CodeGroup>
     ```typescript TypeScript ESM
     import { ChromaClient } from "chromadb";
     const client = new ChromaClient();
@@ -301,6 +312,7 @@ summary.
     const { ChromaClient } = require("chromadb");
     const client = new ChromaClient();
     ```
+    </CodeGroup>
   </Step>
 
   <Step title="Create a collection">
@@ -405,6 +417,73 @@ summary.
 
 </Tab>
 <Tab title="Rust" icon="rust">
+
 Our Rust docs are hosted on [docs.rs](https://docs.rs/chroma/latest/chroma/)!
+
+## Install Manually
+
+```bash
+cargo add chroma
+```
+
+## Create a Chroma Client
+
+Run the Chroma backend:
+
+```bash
+chroma run --path ./getting-started
+```
+
+Then create a client which connects to it:
+
+```rust
+use chroma::ChromaHttpClient;
+
+let client = ChromaHttpClient::new(Default::default());
+```
+
+## Create a collection
+
+```rust
+let collection = client
+    .create_collection("my_collection", None, None)
+    .await?;
+```
+
+## Add some text documents to the collection
+
+The Rust client expects embeddings to be provided directly. Generate embeddings with your provider SDK, then pass them along with documents.
+
+```rust
+let embeddings = vec![vec![0.1, 0.2, 0.3], vec![0.4, 0.5, 0.6]];
+
+collection
+    .add(
+        vec!["id1".to_string(), "id2".to_string()],
+        embeddings,
+        Some(vec![
+            Some("This is a document about pineapple".to_string()),
+            Some("This is a document about oranges".to_string()),
+        ]),
+        None,
+        None,
+    )
+    .await?;
+```
+
+## Query the collection
+
+```rust
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(2), None, None, None)
+    .await?;
+```
+
+## Next steps
+
+- Read the Rust API docs on [docs.rs](https://docs.rs/chroma/latest/chroma/)
+- Learn how to [Deploy Chroma](/guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+
 </Tab>
 </Tabs>

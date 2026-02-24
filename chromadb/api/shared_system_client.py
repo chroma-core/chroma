@@ -1,5 +1,6 @@
 from typing import ClassVar, Dict, Optional
 import logging
+import threading
 import uuid
 from chromadb.api import ServerAPI
 from chromadb.api.base_http_client import BaseHTTPClient
@@ -12,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 class SharedSystemClient:
     _identifier_to_system: ClassVar[Dict[str, System]] = {}
+    _identifier_to_refcount: ClassVar[Dict[str, int]] = {}
+    _refcount_lock: ClassVar[threading.Lock] = threading.Lock()
     _identifier: str
 
     def __init__(
@@ -20,6 +23,7 @@ class SharedSystemClient:
     ) -> None:
         self._identifier = SharedSystemClient._get_identifier_from_settings(settings)
         SharedSystemClient._create_system_if_not_exists(self._identifier, settings)
+        SharedSystemClient._increment_refcount(self._identifier)
 
     @classmethod
     def _create_system_if_not_exists(
@@ -86,9 +90,43 @@ class SharedSystemClient:
         instance = cls(system.settings)
         return instance
 
+    @classmethod
+    def _increment_refcount(cls, identifier: str) -> None:
+        """Increment the reference count for a system identifier."""
+        with cls._refcount_lock:
+            if identifier not in cls._identifier_to_refcount:
+                cls._identifier_to_refcount[identifier] = 0
+            cls._identifier_to_refcount[identifier] += 1
+
+    @classmethod
+    def _decrement_refcount(cls, identifier: str) -> int:
+        """Decrement the reference count for a system identifier and return the new count."""
+        with cls._refcount_lock:
+            if identifier in cls._identifier_to_refcount:
+                cls._identifier_to_refcount[identifier] -= 1
+                count = cls._identifier_to_refcount[identifier]
+                if count <= 0:
+                    del cls._identifier_to_refcount[identifier]
+                return count
+            return 0
+
+    @classmethod
+    def _release_system(cls, identifier: str) -> None:
+        """Decrement refcount and stop the system if this was the last reference.
+
+        This consolidates the "decrement + conditional stop" pattern used in
+        both Client.close() and the Client.__init__ exception handler.
+        """
+        refcount = cls._decrement_refcount(identifier)
+        if refcount <= 0:
+            system = cls._identifier_to_system.pop(identifier, None)
+            if system is not None:
+                system.stop()
+
     @staticmethod
     def clear_system_cache() -> None:
         SharedSystemClient._identifier_to_system = {}
+        SharedSystemClient._identifier_to_refcount = {}
 
     @property
     def _system(self) -> System:

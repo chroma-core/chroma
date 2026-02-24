@@ -945,7 +945,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_heartbeat() {
+    async fn test_k8s_integration_heartbeat() {
         with_client(|client| async move {
             let heartbeat = client.heartbeat().await.unwrap();
             assert!(heartbeat.nanosecond_heartbeat > 0);
@@ -955,7 +955,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_auth_identity() {
+    async fn test_k8s_integration_get_auth_identity() {
         with_client(|client| async move {
             let identity = client.get_auth_identity().await.unwrap();
             assert!(!identity.tenant.is_empty());
@@ -1067,7 +1067,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_parses_error() {
+    async fn test_k8s_integration_parses_error() {
         with_client(|mut client| async move {
             let collection = client.new_collection("foo").await;
             let err = client
@@ -1088,7 +1088,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_list_collections() {
+    async fn test_k8s_integration_list_collections() {
         with_client(|mut client| async move {
             let first = client.new_collection("first").await;
             let second = client.new_collection("second").await;
@@ -1115,7 +1115,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_count_collections() {
+    async fn test_k8s_integration_count_collections() {
         with_client(|mut client| async move {
             let initial_count = client.count_collections().await.unwrap();
 
@@ -1132,7 +1132,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_create_collection() {
+    async fn test_k8s_integration_create_collection() {
         with_client(|mut client| async move {
             let schema = Schema::default_with_embedding_function(
                 EmbeddingFunctionConfiguration::Known(EmbeddingFunctionNewConfiguration {
@@ -1153,7 +1153,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_get_collection() {
+    async fn test_k8s_integration_get_collection() {
         with_client(|mut client| async move {
             let collection = client.new_collection("my_collection").await;
             let name = collection.name().to_string();
@@ -1165,7 +1165,7 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
-    async fn test_live_cloud_delete_collection() {
+    async fn test_k8s_integration_delete_collection() {
         with_client(|client| async move {
             let name = unique_collection_name("to_be_deleted");
 

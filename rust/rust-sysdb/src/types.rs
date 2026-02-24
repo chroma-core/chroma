@@ -67,6 +67,18 @@ fn convert_update_metadata_to_metadata(
                         "sparse vectors are not supported in collection metadata".to_string(),
                     ));
                 }
+                chroma_proto::update_metadata_value::Value::BoolListValue(v) => {
+                    MetadataValue::BoolArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::IntListValue(v) => {
+                    MetadataValue::IntArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::DoubleListValue(v) => {
+                    MetadataValue::FloatArray(v.values)
+                }
+                chroma_proto::update_metadata_value::Value::StringListValue(v) => {
+                    MetadataValue::StringArray(v.values)
+                }
             };
             metadata.insert(key, meta_value);
         }
@@ -153,8 +165,33 @@ impl TryFrom<chroma_proto::GetDatabaseRequest> for GetDatabaseRequest {
     }
 }
 
-/// Internal request for creating a collection.
+/// Internal request for listing databases.
 #[derive(Debug, Clone)]
+pub struct ListDatabasesRequest {
+    pub tenant_id: String,
+}
+
+impl TryFrom<chroma_proto::ListDatabasesRequest> for ListDatabasesRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::ListDatabasesRequest) -> Result<Self, Self::Error> {
+        // MCMR list_databases does not support limit/offset - pagination is handled client-side
+        if req.limit.is_some() || req.offset.unwrap_or(0) != 0 {
+            return Err(SysDbError::InvalidArgument(
+                "MCMR list_databases does not support limit or offset".to_string(),
+            ));
+        }
+        Ok(Self {
+            tenant_id: req.tenant,
+        })
+    }
+}
+
+/// Internal response for listing databases.
+pub type ListDatabasesResponse = Vec<Database>;
+
+/// Internal request for creating a collection.
+#[derive(Clone)]
 pub struct CreateCollectionRequest {
     pub id: CollectionUuid,
     pub name: String,
@@ -165,6 +202,18 @@ pub struct CreateCollectionRequest {
     pub get_or_create: bool,
     pub tenant_id: String,
     pub database_name: DatabaseName,
+}
+
+impl std::fmt::Debug for CreateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CreateCollectionRequest")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("tenant_id", &self.tenant_id)
+            .field("get_or_create", &self.get_or_create)
+            .field("database_name", &self.database_name)
+            .finish()
+    }
 }
 
 impl TryFrom<chroma_proto::CreateCollectionRequest> for CreateCollectionRequest {
@@ -409,15 +458,26 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
             filter = filter.limit(limit);
         }
         if let Some(offset) = req.offset {
-            if req.limit.is_none() {
-                return Err(SysDbError::InvalidArgument(
-                    "offset requires limit to be specified".to_string(),
-                ));
+            if offset < 0 {
+                return Err(SysDbError::InvalidArgument(format!(
+                    "offset must be non-negative, got {}",
+                    offset
+                )));
             }
-            let offset = u32::try_from(offset).map_err(|_| {
-                SysDbError::InvalidArgument(format!("offset must be non-negative, got {}", offset))
-            })?;
-            filter = filter.offset(offset);
+            if offset > 0 {
+                if req.limit.is_none() {
+                    return Err(SysDbError::InvalidArgument(
+                        "offset requires limit to be specified".to_string(),
+                    ));
+                }
+                let offset = u32::try_from(offset).map_err(|_| {
+                    SysDbError::InvalidArgument(format!(
+                        "offset must be non-negative, got {}",
+                        offset
+                    ))
+                })?;
+                filter = filter.offset(offset);
+            }
         }
 
         // Handle include_soft_deleted
@@ -459,8 +519,13 @@ impl TryFrom<chroma_proto::GetCollectionWithSegmentsRequest> for GetCollectionWi
     }
 }
 
-/// Internal request for updating a collection.
 #[derive(Debug, Clone)]
+pub struct UpdateCollectionCursor {
+    pub compaction_failure_count_increment: Option<u32>,
+}
+
+/// Internal request for updating a collection.
+#[derive(Clone)]
 pub struct UpdateCollectionRequest {
     /// The database containing the collection (required for routing)
     pub database_name: DatabaseName,
@@ -476,6 +541,21 @@ pub struct UpdateCollectionRequest {
     pub reset_metadata: bool,
     // New configuration to set (optional - None means don't change)
     pub new_configuration: Option<UpdateCollectionConfiguration>,
+    // Cursor updates (optional - None means don't change)
+    pub cursor_updates: Option<UpdateCollectionCursor>,
+    /// If true, mark the collection as soft deleted (for delete_collection operation)
+    pub is_deleted: Option<bool>,
+}
+
+impl std::fmt::Debug for UpdateCollectionRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UpdateCollectionRequest")
+            .field("database_name", &self.database_name)
+            .field("id", &self.id)
+            .field("reset_metadata", &self.reset_metadata)
+            .field("name", &self.name)
+            .finish()
+    }
 }
 
 impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest {
@@ -536,6 +616,8 @@ impl TryFrom<chroma_proto::UpdateCollectionRequest> for UpdateCollectionRequest 
             metadata,
             reset_metadata,
             new_configuration,
+            cursor_updates: None,
+            is_deleted: None, // Not supported in proto UpdateCollectionRequest
         })
     }
 }
@@ -550,6 +632,18 @@ impl TryFrom<UpdateCollectionResponse> for chroma_proto::UpdateCollectionRespons
     fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
         // The proto response is empty - it doesn't return the updated collection
         Ok(chroma_proto::UpdateCollectionResponse {})
+    }
+}
+
+// For delete_collection, we reuse UpdateCollectionResponse
+use chroma_types::chroma_proto::DeleteCollectionResponse;
+
+impl TryFrom<UpdateCollectionResponse> for DeleteCollectionResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: UpdateCollectionResponse) -> Result<Self, Self::Error> {
+        // The proto response is empty
+        Ok(DeleteCollectionResponse {})
     }
 }
 
@@ -589,6 +683,15 @@ impl Assignable for GetDatabaseRequest {
     fn assign(&self, factory: &BackendFactory) -> Backend {
         // Route by topology prefix in database name
         factory.backend_from_database_name(&self.name)
+    }
+}
+
+impl Assignable for ListDatabasesRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends with their topology names
+        factory.get_all_backends()
     }
 }
 
@@ -697,6 +800,36 @@ impl Runnable for GetDatabaseRequest {
 }
 
 #[async_trait::async_trait]
+impl Runnable for ListDatabasesRequest {
+    type Response = ListDatabasesResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut all_databases: Vec<Database> = Vec::new();
+
+        // Query each backend and collect all databases
+        for backend in backends {
+            let databases = backend.list_databases(&self.tenant_id).await?;
+            all_databases.extend(databases);
+        }
+
+        // Stable sort databases by topology prefix (the part before '+')
+        all_databases.sort_by(|a, b| {
+            let a_topo = DatabaseName::new(a.name.clone())
+                .map(|db| db.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string());
+            let b_topo = DatabaseName::new(b.name.clone())
+                .map(|db| db.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string());
+
+            a_topo.cmp(&b_topo)
+        });
+
+        Ok(all_databases)
+    }
+}
+
+#[async_trait::async_trait]
 impl Runnable for CreateCollectionRequest {
     type Response = CreateCollectionResponse;
     type Input = Backend;
@@ -713,6 +846,38 @@ impl Runnable for GetCollectionsRequest {
 
     async fn run(self, backend: Backend) -> Result<Self::Response, SysDbError> {
         backend.get_collections(self).await
+    }
+}
+
+impl Assignable for CountCollectionsRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Route by topology prefix in database name if available
+        if let Some(ref db_name) = self.database_name {
+            vec![factory.backend_from_database_name(db_name)]
+        } else {
+            // When no database filter, fan out to all backends to get total count
+            factory.get_all_backends()
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for CountCollectionsRequest {
+    type Response = CountCollectionsResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        let mut total = 0u64;
+
+        // Clone the request for each backend call
+        for backend in backends {
+            let count = backend.count_collections(self.clone()).await?.count;
+            total += count;
+        }
+
+        Ok(CountCollectionsResponse { count: total })
     }
 }
 
@@ -1259,6 +1424,49 @@ impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
     }
 }
 
+/// Internal request for counting collections.
+#[derive(Debug, Clone)]
+pub struct CountCollectionsRequest {
+    pub tenant_id: String,
+    pub database_name: Option<DatabaseName>,
+}
+
+impl TryFrom<chroma_proto::CountCollectionsRequest> for CountCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(req: chroma_proto::CountCollectionsRequest) -> Result<Self, Self::Error> {
+        let database_name = match req.database {
+            Some(db_str) if !db_str.is_empty() => {
+                let db_name = DatabaseName::new(&db_str).ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "database name must be at least 3 characters, got '{}'",
+                        db_str
+                    ))
+                })?;
+                Some(db_name)
+            }
+            _ => None,
+        };
+
+        Ok(Self {
+            tenant_id: req.tenant,
+            database_name,
+        })
+    }
+}
+
+/// Internal response for counting collections.
+#[derive(Debug, Clone)]
+pub struct CountCollectionsResponse {
+    pub count: u64,
+}
+
+impl From<CountCollectionsResponse> for chroma_proto::CountCollectionsResponse {
+    fn from(r: CountCollectionsResponse) -> Self {
+        chroma_proto::CountCollectionsResponse { count: r.count }
+    }
+}
+
 /// Internal response for getting a collection with its segments.
 #[derive(Debug, Clone)]
 pub struct GetCollectionWithSegmentsResponse {
@@ -1291,6 +1499,48 @@ pub struct UpdateTenantRequest {
 /// Internal response for updating tenant's last compaction time.
 #[derive(Debug, Clone)]
 pub struct UpdateTenantResponse {}
+
+/// Internal request for resetting the database state.
+#[derive(Debug, Clone)]
+pub struct ResetStateRequest {}
+
+/// Internal response for resetting the database state.
+#[derive(Debug, Clone)]
+pub struct ResetStateResponse {}
+
+// ============================================================================
+// Assignable Trait Implementations
+// ============================================================================
+
+impl Assignable for ResetStateRequest {
+    type Output = Vec<Backend>;
+
+    fn assign(&self, factory: &BackendFactory) -> Vec<Backend> {
+        // Fan out to all backends for reset
+        factory.get_all_backends()
+    }
+}
+
+#[async_trait::async_trait]
+impl Runnable for ResetStateRequest {
+    type Response = ResetStateResponse;
+    type Input = Vec<Backend>;
+
+    async fn run(self, backends: Vec<Backend>) -> Result<Self::Response, SysDbError> {
+        for backend in backends {
+            backend.reset().await?;
+        }
+        Ok(ResetStateResponse {})
+    }
+}
+
+impl TryFrom<ResetStateResponse> for chroma_proto::ResetStateResponse {
+    type Error = SysDbError;
+
+    fn try_from(_r: ResetStateResponse) -> Result<Self, Self::Error> {
+        Ok(chroma_proto::ResetStateResponse {})
+    }
+}
 
 /// Internal request for updating segments after compaction.
 #[derive(Debug, Clone)]

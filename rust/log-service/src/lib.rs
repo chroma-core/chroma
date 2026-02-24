@@ -10,7 +10,8 @@ use std::time::{Duration, Instant, SystemTime};
 
 use chroma_cache::CacheConfig;
 use chroma_config::helpers::{deserialize_duration_from_seconds, serialize_duration_to_seconds};
-use chroma_config::{spanner::SpannerConfig, Configurable};
+use chroma_config::spanner::{SpannerChannelConfig, SpannerConfig, SpannerSessionPoolConfig};
+use chroma_config::Configurable;
 use chroma_error::ChromaError;
 use chroma_log::config::GrpcLogConfig;
 use chroma_storage::config::StorageConfig;
@@ -37,7 +38,10 @@ use chroma_types::{MultiCloudMultiRegionConfiguration, ProviderRegion, RegionNam
 use figment::providers::{Env, Format, Yaml};
 use futures::stream::StreamExt;
 use google_cloud_gax::conn::Environment;
-use google_cloud_spanner::client::{Client as SpannerClient, ClientConfig as SpannerClientConfig};
+use google_cloud_spanner::client::{
+    ChannelConfig, Client as SpannerClient, ClientConfig as SpannerClientConfig,
+};
+use google_cloud_spanner::session::SessionConfig;
 use opentelemetry::metrics::Meter;
 use parking_lot::Mutex;
 use prost::Message;
@@ -53,13 +57,33 @@ use wal3::{
     Fragment, FragmentManagerFactory, GarbageCollectionOptions, Limits, LogPosition, LogReader,
     LogReaderOptions, LogReaderTrait, LogWriter, LogWriterOptions, LogWriterTrait, Manifest,
     ManifestAndWitness, MarkDirty as MarkDirtyTrait, ReplicatedFragmentOptions, Snapshot,
-    SnapshotCache, SnapshotPointer, StorageWrapper,
+    SnapshotCache, SnapshotPointer, StorageWrapper, INTRINSIC_CURSOR,
 };
 
 mod scrub;
 pub mod state_hash_table;
 
 use crate::state_hash_table::StateHashTable;
+
+///////////////////////////////////////////// helpers //////////////////////////////////////////////
+
+/// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
+fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
+    let mut config = SessionConfig::default();
+    config.session_get_timeout = Duration::from_secs(cfg.session_get_timeout_secs);
+    config.max_opened = cfg.max_opened;
+    config.min_opened = cfg.min_opened;
+    config
+}
+
+/// Converts a SpannerChannelConfig to the library's ChannelConfig.
+fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
+    ChannelConfig {
+        num_channels: cfg.num_channels,
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        timeout: Duration::from_secs(cfg.timeout_secs),
+    }
+}
 
 ///////////////////////////////////////////// constants ////////////////////////////////////////////
 
@@ -69,7 +93,6 @@ const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 // SAFETY(rescrv):  There's a test that this produces a valid type.
 static STABLE_PREFIX: CursorName = unsafe { CursorName::from_string_unchecked("stable_prefix") };
-static COMPACTION: CursorName = unsafe { CursorName::from_string_unchecked("compaction") };
 
 ////////////////////////////////////////////// Metrics /////////////////////////////////////////////
 
@@ -1034,6 +1057,18 @@ impl LogServer {
         }
     }
 
+    /// Returns a CursorStore for the dirty log.
+    fn dirty_log_cursors(&self) -> Result<CursorStore, Error> {
+        let storage = self.preferred_storage()?;
+        let prefix = MarkDirty::path_for_hostname(&self.config.my_member_id);
+        Ok(CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::new(storage.clone()),
+            prefix,
+            "dirty log".to_string(),
+        ))
+    }
+
     /// Creates a LogReader for the given database and collection.
     async fn make_log_reader(
         &self,
@@ -1151,50 +1186,30 @@ impl LogServer {
             )));
         }
         res.map_err(|err| Status::unknown(err.to_string()))?;
-        let cursor_name = &COMPACTION;
-        let cursor_store = log
-            .cursors(CursorStoreOptions::default())
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        let witness = log_reader
+            .update_intrinsic_cursor(
+                LogPosition::from_offset(adjusted_log_offset as u64),
+                epoch_us,
+                &self.config.my_member_id,
+                allow_rollback,
+            )
             .await
             .map_err(|err| {
                 Status::new(
                     err.code().into(),
-                    format!("Failed to create cursor store: {}", err),
+                    format!("Failed to update intrinsic cursor: {}", err),
                 )
             })?;
-        let witness = cursor_store.load(cursor_name).await.map_err(|err| {
-            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
-        })?;
-        let default = Cursor::default();
-        let cursor = witness.as_ref().map(|w| w.cursor()).unwrap_or(&default);
-        if !allow_rollback && cursor.position.offset() > adjusted_log_offset as u64 {
+        let Some(witness) = witness else {
             return Ok(Response::new(UpdateCollectionLogOffsetResponse {}));
-        }
-        let cursor = Cursor {
-            position: LogPosition::from_offset(adjusted_log_offset as u64),
-            epoch_us: SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .map_err(|_| wal3::Error::internal(file!(), line!()))
-                .unwrap()
-                .as_micros() as u64,
-            writer: self.config.my_member_id.clone(),
-        };
-        let witness = if let Some(witness) = witness.as_ref() {
-            cursor_store
-                .save(cursor_name, &cursor, witness)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to save cursor: {}", err))
-                })?
-        } else {
-            cursor_store
-                .init(cursor_name, cursor)
-                .await
-                .map_err(|err| {
-                    Status::new(err.code().into(), format!("Failed to init cursor: {}", err))
-                })?
         };
         if let Some(cache) = self.cache.as_ref() {
-            let cache_key = cache_key_for_cursor(collection_id, cursor_name);
+            let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
             match serde_json::to_string(&witness) {
                 Ok(json_witness) => {
                     let value = CachedBytes::new(Vec::from(json_witness));
@@ -1336,6 +1351,9 @@ impl LogServer {
                 tracing::event!(Level::ERROR, name = "could not roll dirty log for local", error =? err);
             }
         }
+        self.metrics
+            .dirty_log_collections
+            .record(rollups.len() as u64, &[]);
         self.set_backpressure(&backpressure);
         {
             let mut need_to_compact = self.need_to_compact.lock();
@@ -1371,9 +1389,6 @@ impl LogServer {
             tracing::Level::INFO,
             collections = ?collections,
         );
-        self.metrics
-            .dirty_log_collections
-            .record(collections as u64, &[]);
         self.enrich_dirty_log(&mut rollup.rollups).await?;
         self.save_dirty_log(rollup, &**dirty_log).await
     }
@@ -1406,12 +1421,10 @@ impl LogServer {
             .map(|d| d.as_micros() as u64)
             .unwrap_or(0);
         let mut rollups = HashMap::new();
-        for (log_id, enumeration_offset) in dirty_logs {
+        for (log_id, compaction_offset, enumeration_offset) in dirty_logs {
             let collection_id = CollectionUuid(log_id);
             let rollup = RollupPerCollection {
-                start_log_position: LogPosition::from_offset(
-                    enumeration_offset.offset().saturating_sub(1),
-                ),
+                start_log_position: compaction_offset,
                 limit_log_position: enumeration_offset,
                 reinsert_count: 0,
                 initial_insertion_epoch_us: now_us,
@@ -1419,7 +1432,6 @@ impl LogServer {
             rollups.insert((Some(topology.name.clone()), collection_id), rollup);
         }
         let mut backpressure = vec![];
-        self.enrich_dirty_log(&mut rollups).await?;
         for ((_, collection_id), rollup) in rollups.iter() {
             if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
                 backpressure.push(*collection_id);
@@ -1466,9 +1478,8 @@ impl LogServer {
             Err(err) => Err(err),
         }?;
         new_cursor.position = rollup.last_record_witnessed + 1u64;
-        let cursors = dirty_log
-            .cursors(CursorStoreOptions::default())
-            .await
+        let cursors = self
+            .dirty_log_cursors()
             .map_err(|_| Error::CouldNotGetDirtyLogCursors)?;
         tracing::info!(
             "Advancing dirty log cursor {:?} -> {:?}",
@@ -1505,7 +1516,7 @@ impl LogServer {
                 }
             }
             for collection_id in cache_collections_to_purge {
-                let cache_key = cache_key_for_cursor(collection_id, &COMPACTION);
+                let cache_key = cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR);
                 cache.remove(&cache_key).await;
             }
         }
@@ -1522,9 +1533,8 @@ impl LogServer {
         let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
             return Err(Error::CouldNotGetDirtyLogReader);
         };
-        let cursors = dirty_log
-            .cursors(CursorStoreOptions::default())
-            .await
+        let cursors = self
+            .dirty_log_cursors()
             .map_err(|_| Error::CouldNotGetDirtyLogCursors)?;
         let witness = cursors.load(&STABLE_PREFIX).await?;
         let default = Cursor::default();
@@ -1613,7 +1623,7 @@ impl LogServer {
             .collect::<Vec<_>>();
 
         let stream = futures::stream::iter(dirty_futures);
-        let mut buffered = stream.buffer_unordered(50);
+        let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
         while let Some(res) = buffered.next().await {
             if let Err(err) = res {
                 tracing::error!(error = ?err);
@@ -1644,12 +1654,16 @@ impl LogServer {
         &self,
         rollups: &mut HashMap<(Option<TopologyName>, CollectionUuid), RollupPerCollection>,
     ) -> Result<(), Error> {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(
+            self.config.rollup_concurrent_manifests.max(1),
+        ));
         let load_witness = |_this: &LogServer,
                             storage: Arc<Storage>,
                             topology: Option<TopologyName>,
                             collection_id: CollectionUuid| {
+            let semaphore = Arc::clone(&semaphore);
             async move {
-                let cursor = &COMPACTION;
+                let cursor = &INTRINSIC_CURSOR;
                 let cursor_store = CursorStore::new(
                     CursorStoreOptions::default(),
                     Arc::clone(&storage),
@@ -1665,8 +1679,7 @@ impl LogServer {
                         let witness: CursorWitness = serde_json::from_slice(&json_witness.bytes)?;
                         return Ok((Some(witness), None));
                     }
-                    let load_span = tracing::info_span!("cursor load");
-                    let res = cursor_store.load(cursor).instrument(load_span).await?;
+                    let res = cursor_store.load(cursor).await?;
                     if let Some(witness) = res.as_ref() {
                         let json_witness = serde_json::to_string(&witness)?;
                         let value = CachedBytes::new(Vec::from(json_witness));
@@ -1680,6 +1693,7 @@ impl LogServer {
                 // NOTE(rescrv):  This may turn out to be a bad idea, but do not load the manifest from
                 // cache in order to prevent a stale cache from perpetually returning a stale result.
                 let manifest = if witness.is_none() {
+                    let _permit = semaphore.acquire().await;
                     let reader = self
                         .make_log_reader(topology.as_ref(), collection_id)
                         .await?;
@@ -1730,12 +1744,12 @@ impl LogServer {
             });
         }
         if !futures.is_empty() {
-            for (collection_id, rollup) in futures::future::join_all(futures)
-                .await
-                .into_iter()
-                .flatten()
-            {
-                rollups.insert(collection_id, rollup);
+            let stream = futures::stream::iter(futures);
+            let mut buffered = stream.buffer_unordered(self.config.rollup_concurrency.max(1));
+            while let Some(result) = buffered.next().await {
+                if let Some((key, rollup)) = result {
+                    rollups.insert(key, rollup);
+                }
             }
         }
         Ok(())
@@ -1990,12 +2004,20 @@ impl LogServer {
             max_bytes: None,
             max_records: Some(pull_logs.batch_size as u64),
         };
-        Ok(log_reader
-            .scan(
-                LogPosition::from_offset(pull_logs.start_from_offset as u64),
-                limits,
-            )
-            .await?)
+        let from = LogPosition::from_offset(pull_logs.start_from_offset as u64);
+        if let Ok(Some(manifest_and_witness)) = log_reader.manifest_and_witness().await {
+            let fragments = scan_from_manifest(&manifest_and_witness.manifest, from, limits);
+            if let Some(cache) = self.cache.as_ref() {
+                let cache_key = cache_key_for_manifest_and_etag(collection_id);
+                if let Ok(bytes) = serde_json::to_vec(&manifest_and_witness) {
+                    cache.insert(cache_key, CachedBytes::new(bytes)).await;
+                }
+            }
+            if let Some(fragments) = fragments {
+                return Ok(fragments);
+            }
+        }
+        Ok(log_reader.scan(from, limits).await?)
     }
 
     async fn pull_logs(
@@ -2021,8 +2043,10 @@ impl LogServer {
             "Pulling logs",
         );
 
+        let read_fragments_span = tracing::info_span!("read_fragments");
         let fragments = match self
             .read_fragments(topology_name.as_ref(), collection_id, &pull_logs)
+            .instrument(read_fragments_span)
             .await
         {
             Ok(fragments) => fragments,
@@ -2031,7 +2055,7 @@ impl LogServer {
                 return Err(Status::new(err.code().into(), err.to_string()));
             }
         };
-        let futures = fragments
+        let fragment_futures = fragments
             .iter()
             .map(|fragment| {
                 let this = self;
@@ -2045,16 +2069,17 @@ impl LogServer {
                         let cache_key = cache_key_for_fragment(collection_id, &fragment.path);
                         if let Ok(Some(answer)) = cache.get(&cache_key).await {
                             if answer.version == Some(1) {
-                                let (_, records, _, _) = log_reader
-                                    .parse_parquet(&answer.bytes, fragment.start)
+                                let (records, _, _) = log_reader
+                                    .parse_parquet_fast(&answer.bytes, fragment.start)
                                     .await?;
                                 return Ok(records);
                             }
                         }
                         let bytes = log_reader.read_bytes(&fragment).await?;
                         let cache_value = CachedBytes::new((*bytes).clone());
-                        let (_, answer, _, _) =
-                            log_reader.parse_parquet(&bytes, fragment.start).await?;
+                        let (answer, _, _) = log_reader
+                            .parse_parquet_fast(&bytes, fragment.start)
+                            .await?;
                         cache.insert(cache_key, cache_value).await;
                         Ok(answer)
                     } else {
@@ -2064,10 +2089,19 @@ impl LogServer {
                 }
             })
             .collect::<Vec<_>>();
-        let record_batches = futures::future::try_join_all(futures)
-            .await
-            .map_err(|err: Error| Status::new(err.code().into(), err.to_string()))?;
+        let try_join_all_span = tracing::info_span!("join all");
+        let record_batches = if !fragment_futures.is_empty() {
+            futures::future::try_join_all(fragment_futures)
+                .instrument(try_join_all_span)
+                .await
+                .map_err(|err: Error| Status::new(err.code().into(), err.to_string()))?
+        } else {
+            tracing::warn!("empty futures");
+            vec![]
+        };
         let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
+        let record_batch_iter = tracing::info_span!("record_batch_iter");
+        let _guard = record_batch_iter.enter();
         for record_batch in record_batches.into_iter() {
             for (log_offset, record_bytes) in record_batch.into_iter() {
                 if log_offset.offset() < pull_logs.start_from_offset as u64
@@ -2115,13 +2149,6 @@ impl LogServer {
             .map(|t| TopologyName::new(&t))
             .transpose()
             .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
-        let source_prefix = source_collection_id.storage_prefix_for_log();
-        let storage = Arc::new(
-            self.preferred_storage()
-                .map_err(|e| Status::internal(e.to_string()))?
-                .clone(),
-        );
-
         // Extract CMEK from request
         let cmek = request.cmek.map(Cmek::try_from).transpose().map_err(|e| {
             tracing::error!("Failed to convert CMEK: {}", e);
@@ -2136,18 +2163,12 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), source_collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
-        let cursors = CursorStore::new(
-            CursorStoreOptions::default(),
-            Arc::clone(&storage),
-            source_prefix,
-            "copy task".to_string(),
-        );
-        let cursor_name = &COMPACTION;
-        let witness = cursors.load(cursor_name).await.map_err(|err| {
-            Status::new(err.code().into(), format!("Failed to load cursor: {}", err))
+        let cursor = log_reader.load_intrinsic_cursor().await.map_err(|err| {
+            Status::new(
+                err.code().into(),
+                format!("Failed to load intrinsic cursor: {}", err),
+            )
         })?;
-        // This is the existing compaction_offset, which is the next record to compact.
-        let cursor = witness.map(|x| x.cursor.position);
         tracing::event!(Level::INFO, offset = ?cursor);
 
         // Use FactoryCreationContext to handle both replicated and S3 targets
@@ -2208,7 +2229,24 @@ impl LogServer {
         }
 
         let cursor = cursor.unwrap_or(LogPosition::from_offset(1));
-        if cursor != max_offset {
+        // Ensure the target log's intrinsic cursor reflects the source compaction point.
+        // This prevents empty/fully-compacted forks from being reported as dirty on repl.
+        let epoch_us = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|_| wal3::Error::internal(file!(), line!()))
+            .unwrap()
+            .as_micros() as u64;
+        log_reader
+            .update_intrinsic_cursor(cursor, epoch_us, &self.config.my_member_id, false)
+            .await
+            .map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("Failed to update intrinsic cursor on fork target: {}", err),
+                )
+            })?;
+
+        if cursor != max_offset && topology_name.is_none() {
             let mark_dirty = MarkDirty {
                 collection_id: target_collection_id,
                 dirty_log: self.dirty_log.clone(),
@@ -2319,9 +2357,8 @@ impl LogServer {
         let Some(reader) = dirty_log.reader(LogReaderOptions::default()).await else {
             return Err(Status::unavailable("Failed to get dirty log reader"));
         };
-        let cursors = dirty_log
-            .cursors(CursorStoreOptions::default())
-            .await
+        let cursors = self
+            .dirty_log_cursors()
             .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
         let witness = match cursors.load(&STABLE_PREFIX).await {
             Ok(witness) => witness,
@@ -2420,7 +2457,7 @@ impl LogServer {
         }
         let mani = mani.map_err(|err| Status::unknown(err.to_string()))?;
 
-        let cursor_name = &COMPACTION;
+        let cursor_name = &INTRINSIC_CURSOR;
         let cursor_store = CursorStore::new(
             CursorStoreOptions::default(),
             Arc::new(
@@ -2546,7 +2583,7 @@ impl LogServer {
                 let collection_id = Uuid::parse_str(&x)
                     .map(CollectionUuid)
                     .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
-                Some(cache_key_for_cursor(collection_id, &COMPACTION))
+                Some(cache_key_for_cursor(collection_id, &INTRINSIC_CURSOR))
             }
             Some(EntryToEvict::ManifestForCollectionId(x)) => {
                 let collection_id = Uuid::parse_str(&x)
@@ -2924,6 +2961,10 @@ pub struct LogServerConfig {
     pub grpc_shutdown_grace_period: Duration,
     #[serde(default = "LogServerConfig::default_grpc_max_concurrent_streams")]
     pub grpc_max_concurrent_streams: u32,
+    #[serde(default = "LogServerConfig::default_rollup_concurrency")]
+    pub rollup_concurrency: usize,
+    #[serde(default = "LogServerConfig::default_rollup_concurrent_manifests")]
+    pub rollup_concurrent_manifests: usize,
     #[serde(default)]
     pub regions_and_topologies:
         Option<MultiCloudMultiRegionConfiguration<RegionalStorageConfig, TopologicalStorageConfig>>,
@@ -2996,6 +3037,24 @@ impl LogServerConfig {
     fn default_grpc_max_concurrent_streams() -> u32 {
         1000
     }
+
+    /// Maximum number of concurrent tokio tasks used to enrich dirty log rollup.
+    ///
+    /// Math used for this default:
+    /// 50k dirty collections on one log
+    /// 0.02s per cursor
+    /// To process all 50k in less than 2s requires 500.
+    fn default_rollup_concurrency() -> usize {
+        500
+    }
+
+    /// Maximum number of concurrent replicated manifest operations during dirty log rollup.
+    ///
+    /// This affects the number of spanner transactions that are outstanding concurrently.  A
+    /// single node can have 400 by default, so we give 1/8 of the throughput to this.
+    fn default_rollup_concurrent_manifests() -> usize {
+        50
+    }
 }
 
 impl Default for LogServerConfig {
@@ -3021,6 +3080,8 @@ impl Default for LogServerConfig {
             max_decoding_message_size: Self::default_max_decoding_message_size(),
             grpc_shutdown_grace_period: Self::default_grpc_shutdown_grace_period(),
             grpc_max_concurrent_streams: Self::default_grpc_max_concurrent_streams(),
+            rollup_concurrency: Self::default_rollup_concurrency(),
+            rollup_concurrent_manifests: Self::default_rollup_concurrent_manifests(),
             regions_and_topologies: None,
         }
     }
@@ -3078,18 +3139,27 @@ impl Configurable<LogServerConfig> for LogServer {
                 },
                 |t| async move {
                     let database_path = t.spanner.database_path().clone();
-                    let config = match t.spanner {
+                    let session_config = to_session_config(t.spanner.session_pool());
+                    let channel_config = to_channel_config(t.spanner.channel());
+                    let config = match &t.spanner {
                         SpannerConfig::Emulator(e) => SpannerClientConfig {
                             environment: Environment::Emulator(e.grpc_endpoint()),
+                            session_config,
+                            channel_config,
                             ..Default::default()
                         },
-                        SpannerConfig::Gcp(_) => SpannerClientConfig::default()
-                            .with_auth()
-                            .await
-                            .map_err(|e| -> Box<dyn ChromaError> {
-                            tracing::event!(Level::ERROR, name = "auth error", error =? e);
-                            Box::new(std::convert::Into::<Error>::into(e)) as _
-                        })?,
+                        SpannerConfig::Gcp(_) => {
+                            let mut config = SpannerClientConfig::default()
+                                .with_auth()
+                                .await
+                                .map_err(|e| -> Box<dyn ChromaError> {
+                                    tracing::event!(Level::ERROR, name = "auth error", error =? e);
+                                    Box::new(std::convert::Into::<Error>::into(e)) as _
+                                })?;
+                            config.session_config = session_config;
+                            config.channel_config = channel_config;
+                            config
+                        }
                     };
                     let repl = t.repl.clone();
                     Ok::<TopologicalStorage, Box<dyn ChromaError>>(TopologicalStorage {
@@ -4336,6 +4406,7 @@ mod tests {
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
             database: format!("local-logdb-{}", rand::thread_rng().gen::<u32>()),
+            ..Default::default()
         };
         let ctor_emulator = emulator.clone();
         let dtor_emulator = emulator;
@@ -4357,22 +4428,26 @@ mod tests {
                 ..Default::default()
             };
 
-            let database_path = ctor_emulator.database_path();
-            let spanner_config = SpannerClientConfig {
+            let spanner_cfg = SpannerConfig::Emulator(ctor_emulator.clone());
+            let database_path = spanner_cfg.database_path();
+            let spanner_client_config = SpannerClientConfig {
                 environment: Environment::Emulator(ctor_emulator.grpc_endpoint()),
+                session_config: to_session_config(spanner_cfg.session_pool()),
+                channel_config: to_channel_config(spanner_cfg.channel()),
                 ..Default::default()
             };
 
             spanner_migrations::run_migrations(
-                &SpannerConfig::Emulator(ctor_emulator.clone()),
+                &spanner_cfg,
                 None,
                 spanner_migrations::MigrationMode::Apply,
+                Some(TEST_TOPOLOGY_NAME),
             )
             .await
             .expect("spanner migrations to apply");
 
             // Connect to Spanner emulator. Panics if emulator not available.
-            let spanner = SpannerClient::new(database_path, spanner_config)
+            let spanner = SpannerClient::new(database_path, spanner_client_config)
                 .await
                 .expect("Failed to connect to Spanner emulator. Is Tilt running?");
 

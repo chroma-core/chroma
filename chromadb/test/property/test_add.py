@@ -8,6 +8,7 @@ import hypothesis.strategies as st
 from hypothesis import given, settings
 from chromadb.api import ClientAPI
 from chromadb.api.types import Embeddings, Metadatas
+from chromadb.test.conftest import multi_region_test
 from chromadb.test.conftest import (
     NOT_CLUSTER_ONLY,
     override_hypothesis_profile,
@@ -20,6 +21,7 @@ from chromadb.utils.batch_utils import create_batches
 
 
 collection_st = st.shared(strategies.collections(with_hnsw_params=True), key="coll")
+
 
 @given(
     collection=collection_st,
@@ -79,6 +81,7 @@ def test_add_small(
     _test_add(client, collection, record_set, should_compact)
 
 
+@multi_region_test
 @given(
     collection=collection_st,
     record_set=strategies.recordsets(
@@ -201,13 +204,13 @@ def create_large_recordset(
     metadatas = [{"some_key": f"{i}"} for i in range(size)]
     documents = [f"Document {i}" for i in range(size)]
     embeddings = [[1, 2, 3] for _ in range(size)]
-    record_set: Dict[str, List[Any]] = {
-        "ids": ids,
-        "embeddings": cast(Embeddings, embeddings),
-        "metadatas": metadatas,
-        "documents": documents,
-    }
-    return cast(strategies.RecordSet, record_set)
+    record_set = strategies.RecordSet(
+        ids=ids,
+        embeddings=cast(Embeddings, embeddings),
+        metadatas=metadatas,
+        documents=documents,
+    )
+    return record_set
 
 
 @given(collection=collection_st, should_compact=st.booleans())

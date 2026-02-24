@@ -15,16 +15,16 @@ use crate::hnsw_configuration::Space;
 use crate::metadata::{MetadataComparison, MetadataValueType, Where};
 use crate::operator::QueryVector;
 use crate::{
-    default_batch_size, default_construction_ef, default_construction_ef_spann,
-    default_initial_lambda, default_m, default_m_spann, default_merge_threshold,
-    default_nreplica_count, default_num_centers_to_merge_to, default_num_samples_kmeans,
-    default_num_threads, default_quantize, default_reassign_neighbor_count, default_resize_factor,
-    default_search_ef, default_search_ef_spann, default_search_nprobe, default_search_rng_epsilon,
-    default_search_rng_factor, default_space, default_split_threshold, default_sync_threshold,
-    default_write_nprobe, default_write_rng_epsilon, default_write_rng_factor, ConversionError,
-    HnswParametersFromSegmentError, InternalHnswConfiguration, InternalSpannConfiguration,
-    InternalUpdateCollectionConfiguration, KnnIndex, Segment, UpdateCollectionConfiguration,
-    CHROMA_KEY,
+    default_batch_size, default_center_drift_threshold, default_construction_ef,
+    default_construction_ef_spann, default_initial_lambda, default_m, default_m_spann,
+    default_merge_threshold, default_nreplica_count, default_num_centers_to_merge_to,
+    default_num_samples_kmeans, default_num_threads, default_reassign_neighbor_count,
+    default_resize_factor, default_search_ef, default_search_ef_spann, default_search_nprobe,
+    default_search_rng_epsilon, default_search_rng_factor, default_space, default_split_threshold,
+    default_sync_threshold, default_write_nprobe, default_write_rng_epsilon,
+    default_write_rng_factor, ConversionError, HnswParametersFromSegmentError,
+    InternalHnswConfiguration, InternalSpannConfiguration, InternalUpdateCollectionConfiguration,
+    KnnIndex, Segment, UpdateCollectionConfiguration, CHROMA_KEY,
 };
 
 impl ChromaError for SchemaError {
@@ -79,9 +79,7 @@ pub enum SchemaError {
 pub enum SchemaBuilderError {
     #[error("Vector index must be configured globally using create_index(None, config), not on specific key '{key}'")]
     VectorIndexMustBeGlobal { key: String },
-    #[error("FTS index must be configured globally using create_index(None, config), not on specific key '{key}'")]
-    FtsIndexMustBeGlobal { key: String },
-    #[error("Cannot modify special key '{key}' - it is managed automatically by the system. To customize vector search, modify the global vector config instead.")]
+    #[error("Cannot modify special key '{key}' - it is managed automatically by the system.")]
     SpecialKeyModificationNotAllowed { key: String },
     #[error("Sparse vector index requires a specific key. Use create_index(Some(\"key_name\"), config) instead of create_index(None, config)")]
     SparseVectorRequiresKey,
@@ -89,10 +87,16 @@ pub enum SchemaBuilderError {
     MultipleSparseVectorIndexes { existing_key: String },
     #[error("Vector index deletion not supported. The vector index is always enabled on #embedding. To disable vector search, disable the collection instead.")]
     VectorIndexDeletionNotSupported,
-    #[error("FTS index deletion not supported. The FTS index is always enabled on #document. To disable full-text search, use a different collection without FTS.")]
-    FtsIndexDeletionNotSupported,
     #[error("Sparse vector index deletion not supported yet. Sparse vector indexes cannot be removed once created.")]
     SparseVectorIndexDeletionNotSupported,
+    #[error(
+        "Key '{key}' cannot begin with '#'. Keys starting with '#' are reserved for system use."
+    )]
+    ReservedKeyPrefix { key: String },
+    #[error("FTS index deletion is only supported on #document key.")]
+    FtsIndexDeletionOnlyOnDocument,
+    #[error("FTS index can only be enabled on #document key. Use create_index(Some(\"#document\"), FtsIndexConfig) to enable FTS.")]
+    FtsIndexOnlyOnDocument,
 }
 
 #[derive(Debug, Error)]
@@ -104,6 +108,8 @@ pub enum FilterValidationError {
         key: String,
         value_type: MetadataValueType,
     },
+    #[error("Cannot filter using full-text search because FTS indexing is disabled")]
+    FtsDisabled,
     #[error(transparent)]
     Schema(#[from] SchemaError),
 }
@@ -118,6 +124,7 @@ impl ChromaError for FilterValidationError {
     fn code(&self) -> ErrorCodes {
         match self {
             FilterValidationError::IndexingDisabled { .. } => ErrorCodes::InvalidArgument,
+            FilterValidationError::FtsDisabled => ErrorCodes::InvalidArgument,
             FilterValidationError::Schema(_) => ErrorCodes::Internal,
         }
     }
@@ -414,6 +421,21 @@ impl Schema {
                 .is_some_and(|idx| idx.enabled)
         });
         defaults_enabled || key_enabled
+    }
+
+    pub fn is_fts_enabled(&self) -> bool {
+        // Check key-specific override first, then fall back to global defaults
+        self.keys
+            .get(DOCUMENT_KEY)
+            .and_then(|vt| vt.string.as_ref())
+            .and_then(|s| s.fts_index.as_ref())
+            .or_else(|| {
+                self.defaults
+                    .string
+                    .as_ref()
+                    .and_then(|s| s.fts_index.as_ref())
+            })
+            .is_none_or(|idx| idx.enabled)
     }
 }
 
@@ -792,7 +814,8 @@ impl Schema {
                         ef_construction: Some(default_construction_ef_spann()),
                         ef_search: Some(default_search_ef_spann()),
                         max_neighbors: Some(default_m_spann()),
-                        quantize: default_quantize(),
+                        center_drift_threshold: None,
+                        quantize: Quantization::None,
                     }),
                 },
             },
@@ -886,7 +909,8 @@ impl Schema {
                                 ef_construction: Some(default_construction_ef_spann()),
                                 ef_search: Some(default_search_ef_spann()),
                                 max_neighbors: Some(default_m_spann()),
-                                quantize: default_quantize(),
+                                center_drift_threshold: None,
+                                quantize: Quantization::None,
                             }),
                         },
                     },
@@ -920,6 +944,30 @@ impl Schema {
         }
     }
 
+    pub fn get_spann_config(&self) -> Option<(SpannIndexConfig, Space)> {
+        let extract = |vector_index: &VectorIndexType| {
+            let space = vector_index.config.space.clone().unwrap_or_default();
+            vector_index
+                .config
+                .spann
+                .clone()
+                .map(|config| (config, space))
+        };
+
+        self.keys
+            .get(EMBEDDING_KEY)
+            .and_then(|value_types| value_types.float_list.as_ref())
+            .and_then(|float_list| float_list.vector_index.as_ref())
+            .and_then(extract)
+            .or_else(|| {
+                self.defaults
+                    .float_list
+                    .as_ref()
+                    .and_then(|float_list| float_list.vector_index.as_ref())
+                    .and_then(extract)
+            })
+    }
+
     pub fn get_internal_spann_config(&self) -> Option<InternalSpannConfiguration> {
         let to_internal = |vector_index: &VectorIndexType| {
             let space = vector_index.config.space.clone();
@@ -951,8 +999,7 @@ impl Schema {
                 .config
                 .spann
                 .as_ref()
-                .map(|config| config.quantize)
-                .unwrap_or(false)
+                .is_some_and(|config| !matches!(config.quantize, Quantization::None))
         };
 
         self.keys
@@ -994,6 +1041,38 @@ impl Schema {
         }
 
         None
+    }
+
+    /// Set the quantization variant and apply impl-specific SPANN config defaults.
+    /// Note: this intentionally skips `SpannIndexConfig::validate()` because the
+    /// hardcoded quantization defaults (e.g. split_threshold=512) exceed the
+    /// user-facing validation ranges. Those ranges gate user input only;
+    /// programmatic defaults set here are known-good constants.
+    pub fn quantize(&mut self, variant: Quantization) {
+        if let Some(spann_config) = self.get_spann_config_mut() {
+            *spann_config = match variant {
+                Quantization::None => SpannIndexConfig {
+                    quantize: variant,
+                    ..*spann_config
+                },
+                Quantization::FourBitRabitQWithUSearch => SpannIndexConfig {
+                    search_nprobe: Some(64),
+                    nreplica_count: Some(2),
+                    write_rng_factor: Some(4.0),
+                    write_rng_epsilon: Some(8.0),
+                    split_threshold: Some(512),
+                    reassign_neighbor_count: Some(32),
+                    merge_threshold: Some(128),
+                    write_nprobe: Some(64),
+                    ef_construction: Some(256),
+                    ef_search: Some(128),
+                    max_neighbors: Some(24),
+                    center_drift_threshold: Some(0.125),
+                    quantize: variant,
+                    ..*spann_config
+                },
+            };
+        }
     }
 
     pub fn get_internal_hnsw_config(&self) -> Option<InternalHnswConfiguration> {
@@ -1620,10 +1699,12 @@ impl Schema {
     ) -> Result<Option<SpannIndexConfig>, SchemaError> {
         match (default_spann, user_spann) {
             (Some(default), Some(user)) => {
-                // Validate that quantize is always false (should only be set programmatically by frontend)
-                if user.quantize != default_quantize() || default.quantize != default_quantize() {
+                // Validate that quantize is always None (should only be set programmatically by frontend)
+                if !matches!(user.quantize, Quantization::None)
+                    || !matches!(default.quantize, Quantization::None)
+                {
                     return Err(SchemaError::InvalidUserInput {
-                        reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                        reason: "quantize field cannot be set in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
                 }
                 Ok(Some(SpannIndexConfig {
@@ -1647,23 +1728,26 @@ impl Schema {
                     ef_construction: user.ef_construction.or(default.ef_construction),
                     ef_search: user.ef_search.or(default.ef_search),
                     max_neighbors: user.max_neighbors.or(default.max_neighbors),
-                    quantize: default_quantize(), // Always false - quantization is set programmatically
+                    center_drift_threshold: user
+                        .center_drift_threshold
+                        .or(default.center_drift_threshold),
+                    quantize: Quantization::None, // Always None - quantization is set programmatically
                 }))
             }
             (Some(default), None) => {
-                // Validate default is also false
-                if default.quantize != default_quantize() {
+                // Validate default is also None
+                if !matches!(default.quantize, Quantization::None) {
                     return Err(SchemaError::InvalidUserInput {
-                        reason: "quantize field cannot be set to true in default schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                        reason: "quantize field cannot be set in default schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
                 }
                 Ok(Some(default.clone()))
             }
             (None, Some(user)) => {
-                // Validate user is false
-                if user.quantize != default_quantize() {
+                // Validate user is None
+                if !matches!(user.quantize, Quantization::None) {
                     return Err(SchemaError::InvalidUserInput {
-                        reason: "quantize field cannot be set to true in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
+                        reason: "quantize field cannot be set in user schema. Quantization can only be enabled via frontend configuration.".to_string(),
                     });
                 }
                 Ok(Some(user.clone()))
@@ -2101,6 +2185,19 @@ impl Schema {
                     }),
                 },
             },
+            // Array types use the same indexes as their scalar counterparts
+            MetadataValueType::BoolArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Bool)
+            }
+            MetadataValueType::IntArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Int)
+            }
+            MetadataValueType::FloatArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Float)
+            }
+            MetadataValueType::StringArray => {
+                self.is_metadata_type_index_enabled(key, MetadataValueType::Str)
+            }
         }
     }
 
@@ -2115,11 +2212,17 @@ impl Schema {
                 }
                 Ok(())
             }
-            Where::Document(_) => Ok(()),
+            Where::Document(_) => {
+                if !self.is_fts_enabled() {
+                    return Err(FilterValidationError::FtsDisabled);
+                }
+                Ok(())
+            }
             Where::Metadata(expression) => {
                 let value_type = match &expression.comparison {
                     MetadataComparison::Primitive(_, value) => value.value_type(),
                     MetadataComparison::Set(_, set_value) => set_value.value_type(),
+                    MetadataComparison::ArrayContains(_, value) => value.value_type(),
                 };
                 let is_enabled = self
                     .is_metadata_type_index_enabled(expression.key.as_str(), value_type)
@@ -2197,6 +2300,31 @@ impl Schema {
                     return true;
                 }
             }
+            // Array types use the same indexes as their scalar counterparts
+            MetadataValueType::BoolArray => {
+                if value_types.boolean.is_none() {
+                    value_types.boolean = self.defaults.boolean.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::IntArray => {
+                if value_types.int.is_none() {
+                    value_types.int = self.defaults.int.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::FloatArray => {
+                if value_types.float.is_none() {
+                    value_types.float = self.defaults.float.clone();
+                    return true;
+                }
+            }
+            MetadataValueType::StringArray => {
+                if value_types.string.is_none() {
+                    value_types.string = self.defaults.string.clone();
+                    return true;
+                }
+            }
         }
         false
     }
@@ -2245,40 +2373,51 @@ impl Schema {
         key: Option<&str>,
         config: IndexConfig,
     ) -> Result<Self, SchemaBuilderError> {
-        // Handle special cases: Vector and FTS (global configs only)
-        match (&key, &config) {
-            (None, IndexConfig::Vector(cfg)) => {
+        // 1. Handle special index types: Vector, FTS, SparseVector
+        match &config {
+            IndexConfig::Vector(cfg) => {
+                // Vector is global only (no key allowed)
+                if let Some(k) = key {
+                    return Err(SchemaBuilderError::VectorIndexMustBeGlobal { key: k.to_string() });
+                }
                 self._set_vector_index_config_builder(cfg.clone());
                 return Ok(self);
             }
-            (None, IndexConfig::Fts(cfg)) => {
-                self._set_fts_index_config_builder(cfg.clone());
-                return Ok(self);
+            IndexConfig::Fts(_) => {
+                // FTS is only allowed on #document key
+                if key != Some(DOCUMENT_KEY) {
+                    return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
+                }
+                // Falls through to dispatch
             }
-            (Some(k), IndexConfig::Vector(_)) => {
-                return Err(SchemaBuilderError::VectorIndexMustBeGlobal { key: k.to_string() });
-            }
-            (Some(k), IndexConfig::Fts(_)) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal { key: k.to_string() });
+            IndexConfig::SparseVector(_) => {
+                // SparseVector requires a specific key
+                if key.is_none() {
+                    return Err(SchemaBuilderError::SparseVectorRequiresKey);
+                }
+                // Falls through to dispatch
             }
             _ => {}
         }
 
-        // Validate special keys
+        // 2. Validate special keys
         if let Some(k) = key {
-            if k == DOCUMENT_KEY || k == EMBEDDING_KEY {
+            if k == EMBEDDING_KEY {
                 return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
                     key: k.to_string(),
                 });
             }
+            if k == DOCUMENT_KEY && !matches!(config, IndexConfig::Fts(_)) {
+                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
+                    key: k.to_string(),
+                });
+            }
+            if k.starts_with('#') && k != DOCUMENT_KEY {
+                return Err(SchemaBuilderError::ReservedKeyPrefix { key: k.to_string() });
+            }
         }
 
-        // Validate sparse vector requires key
-        if key.is_none() && matches!(config, IndexConfig::SparseVector(_)) {
-            return Err(SchemaBuilderError::SparseVectorRequiresKey);
-        }
-
-        // Dispatch to appropriate helper
+        // 3. Dispatch to appropriate helper
         match key {
             Some(k) => self._set_index_for_key_builder(k, config, true)?,
             None => self._set_index_in_defaults_builder(config, true)?,
@@ -2319,30 +2458,44 @@ impl Schema {
         key: Option<&str>,
         config: IndexConfig,
     ) -> Result<Self, SchemaBuilderError> {
-        // Validate special keys
-        if let Some(k) = key {
-            if k == DOCUMENT_KEY || k == EMBEDDING_KEY {
-                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
-                    key: k.to_string(),
-                });
-            }
-        }
-
-        // Disallow deleting vector, FTS, and sparse vector indexes (match Python restrictions)
+        // 1. Handle special index types: Vector, FTS, SparseVector
         match &config {
             IndexConfig::Vector(_) => {
+                // Vector deletion not supported
                 return Err(SchemaBuilderError::VectorIndexDeletionNotSupported);
             }
             IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexDeletionNotSupported);
+                // FTS deletion is only allowed on #document key
+                if key != Some(DOCUMENT_KEY) {
+                    return Err(SchemaBuilderError::FtsIndexDeletionOnlyOnDocument);
+                }
+                // Falls through to dispatch
             }
             IndexConfig::SparseVector(_) => {
+                // SparseVector deletion not supported
                 return Err(SchemaBuilderError::SparseVectorIndexDeletionNotSupported);
             }
             _ => {}
         }
 
-        // Dispatch to appropriate helper (enabled=false)
+        // 2. Validate special keys
+        if let Some(k) = key {
+            if k == EMBEDDING_KEY {
+                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
+                    key: k.to_string(),
+                });
+            }
+            if k == DOCUMENT_KEY && !matches!(config, IndexConfig::Fts(_)) {
+                return Err(SchemaBuilderError::SpecialKeyModificationNotAllowed {
+                    key: k.to_string(),
+                });
+            }
+            if k.starts_with('#') && k != DOCUMENT_KEY {
+                return Err(SchemaBuilderError::ReservedKeyPrefix { key: k.to_string() });
+            }
+        }
+
+        // 3. Dispatch to appropriate helper
         match key {
             Some(k) => self._set_index_for_key_builder(k, config, false)?,
             None => self._set_index_in_defaults_builder(config, false)?,
@@ -2452,10 +2605,14 @@ impl Schema {
                     key: key.to_string(),
                 });
             }
-            IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal {
-                    key: key.to_string(),
-                });
+            IndexConfig::Fts(cfg) => {
+                // FTS is validated in create_index/delete_index to only allow #document
+                if let Some(string) = value_types.string.as_mut() {
+                    if let Some(fts_index) = string.fts_index.as_mut() {
+                        fts_index.enabled = enabled;
+                        fts_index.config = cfg;
+                    }
+                }
             }
             IndexConfig::SparseVector(cfg) => {
                 value_types.sparse_vector = Some(SparseVectorValueType {
@@ -2521,9 +2678,8 @@ impl Schema {
                 });
             }
             IndexConfig::Fts(_) => {
-                return Err(SchemaBuilderError::FtsIndexMustBeGlobal {
-                    key: "defaults".to_string(),
-                });
+                // FTS is only allowed on #document, not globally
+                return Err(SchemaBuilderError::FtsIndexOnlyOnDocument);
             }
             IndexConfig::SparseVector(cfg) => {
                 self.defaults.sparse_vector = Some(SparseVectorValueType {
@@ -2665,6 +2821,20 @@ impl HnswIndexConfig {
     }
 }
 
+/// Quantization implementation for SPANN vector index.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum Quantization {
+    #[default]
+    None,
+    FourBitRabitQWithUSearch,
+}
+
+fn is_default_quantization(v: &Quantization) -> bool {
+    matches!(v, Quantization::None)
+}
+
 /// Configuration for SPANN vector index algorithm parameters
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Validate, Default)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -2718,13 +2888,12 @@ pub struct SpannIndexConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(max = 64))]
     pub max_neighbors: Option<usize>,
-    /// Enable quantization for vector search (cloud-only feature)
-    #[serde(default = "default_quantize", skip_serializing_if = "is_false")]
-    pub quantize: bool,
-}
-
-fn is_false(v: &bool) -> bool {
-    !*v
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.1, max = 1.0))]
+    pub center_drift_threshold: Option<f32>,
+    /// Quantization implementation for vector search (cloud-only feature)
+    #[serde(default, skip_serializing_if = "is_default_quantization")]
+    pub quantize: Quantization,
 }
 
 impl SpannIndexConfig {
@@ -2811,7 +2980,12 @@ impl SpannIndexConfig {
                 return false;
             }
         }
-        if self.quantize != default_quantize() {
+        if let Some(center_drift_threshold) = self.center_drift_threshold {
+            if center_drift_threshold != default_center_drift_threshold() {
+                return false;
+            }
+        }
+        if !matches!(self.quantize, Quantization::None) {
             return false;
         }
         true
@@ -2976,7 +3150,8 @@ impl TryFrom<&InternalCollectionConfiguration> for Schema {
                     ef_construction: Some(spann_config.ef_construction),
                     ef_search: Some(spann_config.ef_search),
                     max_neighbors: Some(spann_config.max_neighbors),
-                    quantize: default_quantize(),
+                    center_drift_threshold: None,
+                    quantize: Quantization::None,
                 }),
             },
         };
@@ -3346,7 +3521,8 @@ mod tests {
                         ef_construction: Some(50),
                         ef_search: Some(40),
                         max_neighbors: Some(20),
-                        quantize: false,
+                        center_drift_threshold: None,
+                        quantize: Quantization::None,
                     });
                 }
             }
@@ -3523,7 +3699,8 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
-            quantize: false,
+            center_drift_threshold: None,
+            quantize: Quantization::None,
         };
 
         let user_spann = SpannIndexConfig {
@@ -3543,7 +3720,8 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
-            quantize: false,
+            center_drift_threshold: None,
+            quantize: Quantization::None,
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann))
@@ -3581,7 +3759,8 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
-            quantize: false,
+            center_drift_threshold: None,
+            quantize: Quantization::None,
         };
 
         let user_spann_with_quantize = SpannIndexConfig {
@@ -3601,7 +3780,8 @@ mod tests {
             ef_construction: None,
             ef_search: None,
             max_neighbors: None,
-            quantize: true, // This should be rejected
+            center_drift_threshold: None,
+            quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
         };
 
         // Should reject user schema with quantize: true
@@ -3610,7 +3790,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(SchemaError::InvalidUserInput { reason }) => {
-                assert!(reason.contains("quantize field cannot be set to true"));
+                assert!(reason.contains("quantize field cannot be set"));
             }
             _ => panic!("Expected InvalidUserInput error"),
         }
@@ -3633,14 +3813,15 @@ mod tests {
             ef_construction: Some(100),
             ef_search: Some(10),
             max_neighbors: Some(16),
-            quantize: true, // This should be rejected
+            center_drift_threshold: None,
+            quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann_with_quantize), None);
         assert!(result.is_err());
         match result {
             Err(SchemaError::InvalidUserInput { reason }) => {
-                assert!(reason.contains("quantize field cannot be set to true"));
+                assert!(reason.contains("quantize field cannot be set"));
             }
             _ => panic!("Expected InvalidUserInput error"),
         }
@@ -3650,7 +3831,7 @@ mod tests {
         assert!(result.is_err());
         match result {
             Err(SchemaError::InvalidUserInput { reason }) => {
-                assert!(reason.contains("quantize field cannot be set to true"));
+                assert!(reason.contains("quantize field cannot be set"));
             }
             _ => panic!("Expected InvalidUserInput error"),
         }
@@ -3675,7 +3856,8 @@ mod tests {
             ef_construction: Some(180),
             ef_search: Some(170),
             max_neighbors: Some(32),
-            quantize: false,
+            center_drift_threshold: None,
+            quantize: Quantization::None,
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -3790,7 +3972,8 @@ mod tests {
                 ef_construction: None,
                 ef_search: None,
                 max_neighbors: None,
-                quantize: false,
+                center_drift_threshold: None,
+                quantize: Quantization::None,
             }), // Add SPANN config
         };
 
@@ -5642,14 +5825,20 @@ mod tests {
             SchemaBuilderError::VectorIndexMustBeGlobal { key } if key == "my_vectors"
         ));
 
-        // Error: FTS index on specific key (must be global)
+        // Error: FTS index on non-#document key
         let result = Schema::new_default(KnnIndex::Hnsw)
             .create_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
         assert!(result.is_err());
         assert!(matches!(
             result.unwrap_err(),
-            SchemaBuilderError::FtsIndexMustBeGlobal { key } if key == "my_text"
+            SchemaBuilderError::FtsIndexOnlyOnDocument
         ));
+
+        // Success: FTS index on #document key
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS on #document should succeed");
+        assert!(schema.is_fts_enabled());
 
         // Error: Cannot create index on special key #document
         let result = Schema::new_default(KnnIndex::Hnsw).create_index(
@@ -5759,14 +5948,11 @@ mod tests {
             SchemaBuilderError::VectorIndexDeletionNotSupported
         ));
 
-        // Error: Delete FTS index (not currently supported)
-        let result = Schema::new_default(KnnIndex::Hnsw)
-            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
-        assert!(result.is_err());
-        assert!(matches!(
-            result.unwrap_err(),
-            SchemaBuilderError::FtsIndexDeletionNotSupported
-        ));
+        // FTS index deletion is now supported (disables FTS)
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+        assert!(!schema.is_fts_enabled());
 
         // Error: Delete sparse vector index (not currently supported)
         let result = Schema::new_default(KnnIndex::Hnsw)
@@ -5792,6 +5978,144 @@ mod tests {
             result.unwrap_err(),
             SchemaBuilderError::SparseVectorIndexDeletionNotSupported
         ));
+    }
+
+    #[test]
+    fn test_fts_create_global_without_key_rejected() {
+        // FTS create_index without key (global) should fail with FtsIndexOnlyOnDocument
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .create_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::FtsIndexOnlyOnDocument
+        ));
+    }
+
+    #[test]
+    fn test_fts_delete_global_without_key_rejected() {
+        // FTS delete_index without key (global) should fail with FtsIndexDeletionOnlyOnDocument
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(None, IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::FtsIndexDeletionOnlyOnDocument
+        ));
+    }
+
+    #[test]
+    fn test_fts_delete_on_custom_key_rejected() {
+        // FTS delete_index on a custom key (not #document) should fail
+        let result = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some("my_text"), IndexConfig::Fts(FtsIndexConfig {}));
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::FtsIndexDeletionOnlyOnDocument
+        ));
+    }
+
+    #[test]
+    fn test_reserved_key_prefix_create_index() {
+        // create_index with a key starting with # (not #document or #embedding) should fail
+        let result = Schema::new_default(KnnIndex::Hnsw).create_index(
+            Some("#custom_field"),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::ReservedKeyPrefix { key } if key == "#custom_field"
+        ));
+    }
+
+    #[test]
+    fn test_reserved_key_prefix_delete_index() {
+        // delete_index with a key starting with # (not #document or #embedding) should fail
+        let result = Schema::new_default(KnnIndex::Hnsw).delete_index(
+            Some("#custom_field"),
+            IndexConfig::StringInverted(StringInvertedIndexConfig {}),
+        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            SchemaBuilderError::ReservedKeyPrefix { key } if key == "#custom_field"
+        ));
+    }
+
+    #[test]
+    fn test_is_fts_enabled_backward_compatibility() {
+        // Default schema has FTS enabled (backward compatibility)
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+        assert!(schema.is_fts_enabled());
+
+        // Schema with no FTS config at all should default to enabled (is_none_or)
+        let empty_schema = Schema {
+            defaults: ValueTypes::default(),
+            keys: HashMap::new(),
+            cmek: None,
+            source_attached_function_id: None,
+        };
+        assert!(empty_schema.is_fts_enabled());
+    }
+
+    #[test]
+    fn test_is_fts_enabled_after_disable() {
+        // After disabling FTS on #document, is_fts_enabled should return false
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+        assert!(!schema.is_fts_enabled());
+    }
+
+    #[test]
+    fn test_is_fts_enabled_after_reenable() {
+        // After disabling then re-enabling FTS on #document, is_fts_enabled should return true
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed")
+            .create_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS creation should succeed");
+        assert!(schema.is_fts_enabled());
+    }
+
+    #[test]
+    fn test_fts_disabled_blocks_where_document_validation() {
+        use crate::{DocumentExpression, DocumentOperator};
+
+        // Create schema with FTS disabled
+        let schema = Schema::new_default(KnnIndex::Hnsw)
+            .delete_index(Some(DOCUMENT_KEY), IndexConfig::Fts(FtsIndexConfig {}))
+            .expect("FTS deletion should succeed");
+
+        // Where::Document query should be rejected
+        let where_clause = Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "test query".to_string(),
+        });
+        let result = schema.is_metadata_where_indexing_enabled(&where_clause);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            FilterValidationError::FtsDisabled
+        ));
+    }
+
+    #[test]
+    fn test_fts_enabled_allows_where_document_validation() {
+        use crate::{DocumentExpression, DocumentOperator};
+
+        // Default schema has FTS enabled
+        let schema = Schema::new_default(KnnIndex::Hnsw);
+
+        // Where::Document query should be allowed
+        let where_clause = Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "test query".to_string(),
+        });
+        let result = schema.is_metadata_where_indexing_enabled(&where_clause);
+        assert!(result.is_ok());
     }
 
     #[test]
@@ -6170,7 +6494,8 @@ mod tests {
                         ef_construction,
                         ef_search,
                         max_neighbors,
-                        quantize: false,
+                        center_drift_threshold: None,
+                        quantize: Quantization::None,
                     },
                 )
         }
@@ -6355,7 +6680,8 @@ mod tests {
                         ef_construction: Some(spann_config.ef_construction),
                         ef_search: Some(spann_config.ef_search),
                         max_neighbors: Some(spann_config.max_neighbors),
-                        quantize: false,
+                        center_drift_threshold: None,
+                        quantize: Quantization::None,
                     }),
                 },
             }
@@ -6520,7 +6846,8 @@ mod tests {
                 ef_construction: Some(config.ef_construction),
                 ef_search: Some(config.ef_search),
                 max_neighbors: Some(config.max_neighbors),
-                quantize: false,
+                center_drift_threshold: None,
+                quantize: Quantization::None,
             })
         }
 

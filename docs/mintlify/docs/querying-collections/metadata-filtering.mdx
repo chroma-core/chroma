@@ -19,6 +19,20 @@ await collection.query({
   where: { page: 10 },
 });
 ```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "page".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Int(10),
+    ),
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
+```
 </CodeGroup>
 
 In order to filter on metadata, you must supply a `where` filter dictionary to the query. The dictionary must have the following structure:
@@ -38,6 +52,16 @@ In order to filter on metadata, you must supply a `where` filter dictionary to t
         <Operator>: <Value>
     }
 }
+```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "metadata_field".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Str("value".to_string()),
+    ),
+});
 ```
 </CodeGroup>
 
@@ -71,6 +95,16 @@ Using the `$eq` operator is equivalent to using the metadata field directly in y
     }
 }
 ```
+
+```rust Rust
+let direct = Where::Metadata(MetadataExpression {
+    key: "metadata_field".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::Equal,
+        MetadataValue::Str("search_string".to_string()),
+    ),
+});
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is greater than 10:
@@ -88,6 +122,20 @@ await collection.query({
   queryTexts: ["first query", "second query"],
   where: { page: { $gt: 10 } },
 });
+```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "page".to_string(),
+    comparison: MetadataComparison::Primitive(
+        PrimitiveOperator::GreaterThan,
+        MetadataValue::Int(10),
+    ),
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
 ```
 </CodeGroup>
 
@@ -127,6 +175,28 @@ An `$and` operator will return results that match all the filters in the list.
     ]
 }
 ```
+
+```rust Rust
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::And,
+    children: vec![
+        Where::Metadata(MetadataExpression {
+            key: "metadata_field".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::GreaterThanOrEqual,
+                MetadataValue::Int(5),
+            ),
+        }),
+        Where::Metadata(MetadataExpression {
+            key: "metadata_field".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::LessThanOrEqual,
+                MetadataValue::Int(10),
+            ),
+        }),
+    ],
+});
+```
 </CodeGroup>
 
 For example, here we query all records whose `page` metadata field is between 5 and 10:
@@ -151,6 +221,32 @@ await collection.query({
     $and: [{ page: { $gte: 5 } }, { page: { $lte: 10 } }],
   },
 });
+```
+
+```rust Rust
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::And,
+    children: vec![
+        Where::Metadata(MetadataExpression {
+            key: "page".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::GreaterThanOrEqual,
+                MetadataValue::Int(5),
+            ),
+        }),
+        Where::Metadata(MetadataExpression {
+            key: "page".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::LessThanOrEqual,
+                MetadataValue::Int(10),
+            ),
+        }),
+    ],
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
 ```
 </CodeGroup>
 
@@ -186,6 +282,28 @@ An `$or` operator will return results that match any of the filters in the list.
     ]
 }
 ```
+
+```rust Rust
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::Or,
+    children: vec![
+        Where::Metadata(MetadataExpression {
+            key: "metadata_field".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("value1".to_string()),
+            ),
+        }),
+        Where::Metadata(MetadataExpression {
+            key: "metadata_field".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("value2".to_string()),
+            ),
+        }),
+    ],
+});
+```
 </CodeGroup>
 
 For example, here we get all records whose `color` metadata field is `red` or `blue`:
@@ -208,6 +326,32 @@ await collection.get({
     or: [{ color: "red" }, { color: "blue" }],
   },
 });
+```
+
+```rust Rust
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::Or,
+    children: vec![
+        Where::Metadata(MetadataExpression {
+            key: "color".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("red".to_string()),
+            ),
+        }),
+        Where::Metadata(MetadataExpression {
+            key: "color".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("blue".to_string()),
+            ),
+        }),
+    ],
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
 ```
 </CodeGroup>
 
@@ -236,6 +380,20 @@ An `$in` operator will return results where the metadata attribute is part of a 
     }
 }
 ```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "metadata_field".to_string(),
+    comparison: MetadataComparison::Set(
+        SetOperator::In,
+        MetadataSetValue::Str(vec![
+            "value1".to_string(),
+            "value2".to_string(),
+            "value3".to_string(),
+        ]),
+    ),
+});
+```
 </CodeGroup>
 
 An `$nin` operator will return results where the metadata attribute is not part of a provided list (or the attribute's key is not present):
@@ -255,6 +413,20 @@ An `$nin` operator will return results where the metadata attribute is not part 
         "$nin": ["value1", "value2", "value3"]
     }
 }
+```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "metadata_field".to_string(),
+    comparison: MetadataComparison::Set(
+        SetOperator::NotIn,
+        MetadataSetValue::Str(vec![
+            "value1".to_string(),
+            "value2".to_string(),
+            "value3".to_string(),
+        ]),
+    ),
+});
 ```
 </CodeGroup>
 
@@ -276,7 +448,197 @@ await collection.get({
   },
 });
 ```
+
+```rust Rust
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "author".to_string(),
+    comparison: MetadataComparison::Set(
+        SetOperator::In,
+        MetadataSetValue::Str(vec![
+            "Rowling".to_string(),
+            "Fitzgerald".to_string(),
+            "Herbert".to_string(),
+        ]),
+    ),
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+```
 </CodeGroup>
+
+## Using Array Metadata
+
+Chroma supports storing arrays of values in metadata fields. You can use the `$contains` and `$not_contains` operators to filter records based on whether an array field includes a specific value.
+
+### Adding Array Metadata
+
+Metadata arrays can contain strings, integers, floats, or booleans. All elements in an array must be the same type.
+
+<CodeGroup>
+```python Python
+collection.add(
+    ids=["m1", "m2", "m3"],
+    embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    metadatas=[
+        {"genres": ["action", "comedy"], "year": 2020},
+        {"genres": ["drama"], "year": 2021},
+        {"genres": ["action", "thriller"], "year": 2022},
+    ],
+)
+```
+
+```typescript TypeScript
+await collection.add({
+    ids: ["m1", "m2", "m3"],
+    embeddings: [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+    metadatas: [
+        { genres: ["action", "comedy"], year: 2020 },
+        { genres: ["drama"], year: 2021 },
+        { genres: ["action", "thriller"], year: 2022 },
+    ],
+});
+```
+
+```rust Rust
+use chroma::types::{Metadata, MetadataValue};
+
+let mut m = Metadata::new();
+m.insert(
+    "genres".into(),
+    MetadataValue::StringArray(vec!["action".to_string(), "comedy".to_string()]),
+);
+m.insert("year".into(), MetadataValue::Int(2020));
+
+// Also supports IntArray, FloatArray, and BoolArray
+let mut m2 = Metadata::new();
+m2.insert("scores".into(), MetadataValue::IntArray(vec![10, 20, 30]));
+m2.insert("ratings".into(), MetadataValue::FloatArray(vec![4.5, 3.8]));
+m2.insert("flags".into(), MetadataValue::BoolArray(vec![true, false]));
+```
+</CodeGroup>
+
+### Filtering with `$contains` and `$not_contains`
+
+Use `$contains` to check if a metadata array includes a specific scalar value, and `$not_contains` to check that it does not.
+
+<CodeGroup>
+```python Python
+# Get all records where genres contains "action"
+collection.get(
+    where={"genres": {"$contains": "action"}}
+)
+
+# Get all records where genres does NOT contain "action"
+collection.get(
+    where={"genres": {"$not_contains": "action"}}
+)
+
+# Works with integer arrays too
+collection.get(
+    where={"scores": {"$contains": 20}}
+)
+
+# Combine with other filters
+collection.get(
+    where={
+        "$and": [
+            {"genres": {"$contains": "action"}},
+            {"year": {"$gte": 2021}},
+        ]
+    }
+)
+```
+
+```typescript TypeScript
+// Get all records where genres contains "action"
+await collection.get({
+    where: { genres: { $contains: "action" } }
+});
+
+// Get all records where genres does NOT contain "action"
+await collection.get({
+    where: { genres: { $not_contains: "action" } }
+});
+
+// Works with integer arrays too
+await collection.get({
+    where: { scores: { $contains: 20 } }
+});
+
+// Combine with other filters
+await collection.get({
+    where: {
+        $and: [
+            { genres: { $contains: "action" } },
+            { year: { $gte: 2021 } },
+        ]
+    }
+});
+```
+
+```rust Rust
+use chroma::types::{
+    ContainsOperator, MetadataComparison, MetadataExpression, MetadataValue, Where,
+};
+
+// Get all records where genres contains "action"
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "genres".to_string(),
+    comparison: MetadataComparison::ArrayContains(
+        ContainsOperator::Contains,
+        MetadataValue::Str("action".to_string()),
+    ),
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+
+// Get all records where genres does NOT contain "action"
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "genres".to_string(),
+    comparison: MetadataComparison::ArrayContains(
+        ContainsOperator::NotContains,
+        MetadataValue::Str("action".to_string()),
+    ),
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+
+// Works with integer arrays too
+let where_clause = Where::Metadata(MetadataExpression {
+    key: "scores".to_string(),
+    comparison: MetadataComparison::ArrayContains(
+        ContainsOperator::Contains,
+        MetadataValue::Int(20),
+    ),
+});
+
+let results = collection
+    .get(None, Some(where_clause), None, None, None)
+    .await?;
+```
+</CodeGroup>
+
+### Supported Array Types
+
+| Type | Python | TypeScript | Rust |
+|------|--------|------------|------|
+| String | `["a", "b"]` | `["a", "b"]` | `MetadataValue::StringArray(...)` |
+| Integer | `[1, 2, 3]` | `[1, 2, 3]` | `MetadataValue::IntArray(...)` |
+| Float | `[1.5, 2.5]` | `[1.5, 2.5]` | `MetadataValue::FloatArray(...)` |
+| Boolean | `[true, false]` | `[true, false]` | `MetadataValue::BoolArray(...)` |
+
+**Constraints:**
+
+- All elements in an array must be the same type.
+- Empty arrays are not allowed.
+- Nested arrays (arrays of arrays) are not supported.
+- The `$contains` value must be a scalar that matches the array's element type.
 
 ## Combining with Document Search
 
@@ -299,5 +661,33 @@ await collection.query({
     where: { metadata_field: "is_equal_to_this" },
     whereDocument: { "$contains": "search_string" }
 })
+```
+
+```rust Rust
+use chroma::types::{
+    BooleanOperator, CompositeExpression, DocumentExpression, DocumentOperator,
+    MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
+};
+
+let where_clause = Where::Composite(CompositeExpression {
+    operator: BooleanOperator::And,
+    children: vec![
+        Where::Metadata(MetadataExpression {
+            key: "metadata_field".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("is_equal_to_this".to_string()),
+            ),
+        }),
+        Where::Document(DocumentExpression {
+            operator: DocumentOperator::Contains,
+            pattern: "search_string".to_string(),
+        }),
+    ],
+});
+
+let results = collection
+    .query(vec![vec![0.1, 0.2, 0.3]], Some(10), Some(where_clause), None, None)
+    .await?;
 ```
 </CodeGroup>

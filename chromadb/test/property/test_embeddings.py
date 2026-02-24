@@ -138,18 +138,20 @@ class EmbeddingStateMachineBase(RuleBasedStateMachine):
             # Partially apply the non-duplicative records to the state
             new_ids = list(set(normalized_record_set["ids"]).difference(intersection))
             indices = [normalized_record_set["ids"].index(id) for id in new_ids]
-            filtered_record_set: strategies.NormalizedRecordSet = {
-                "ids": [normalized_record_set["ids"][i] for i in indices],
-                "metadatas": [normalized_record_set["metadatas"][i] for i in indices]
-                if normalized_record_set["metadatas"]
-                else None,
-                "documents": [normalized_record_set["documents"][i] for i in indices]
-                if normalized_record_set["documents"]
-                else None,
-                "embeddings": [normalized_record_set["embeddings"][i] for i in indices]
-                if normalized_record_set["embeddings"]
-                else None,
-            }
+            filtered_record_set: strategies.NormalizedRecordSet = (
+                strategies.NormalizedRecordSet(
+                    ids=[normalized_record_set["ids"][i] for i in indices],
+                    metadatas=[normalized_record_set["metadatas"][i] for i in indices]
+                    if normalized_record_set["metadatas"]
+                    else None,
+                    documents=[normalized_record_set["documents"][i] for i in indices]
+                    if normalized_record_set["documents"]
+                    else None,
+                    embeddings=[normalized_record_set["embeddings"][i] for i in indices]
+                    if normalized_record_set["embeddings"]
+                    else None,
+                )
+            )
             self.collection.add(**normalized_record_set)  # type: ignore[arg-type]
             self._upsert_embeddings(cast(strategies.RecordSet, filtered_record_set))
             return multiple(*filtered_record_set["ids"])

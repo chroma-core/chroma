@@ -21,9 +21,9 @@ Chroma Cloud charges **$2.50 per logical GiB** written via an add, update, or up
 
 ## Reads
 
-Read costs are based on both the amount of data scanned and the volume of data returned:
+Read costs are based on both the amount of data queried and the volume of data returned:
 
-- **$0.0075 per TiB scanned**
+- **$0.0075 per TiB queried**
 - **$0.09 per GiB returned**
 
 **How queries are counted:**
@@ -47,6 +47,23 @@ await collection.query({
     queryEmbeddings: [[1.0, 2.3, 1.1, ...]],
     whereDocument: { "$contains": "hello world" }
 });
+```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .r#where(Key::Document.contains("hello world"))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![1.0, 2.3, 1.1]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(10), 0);
+
+let results = collection.search(vec![search]).await?;
 ```
 </CodeGroup>
 

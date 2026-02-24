@@ -11,7 +11,7 @@ SPARSE_VECTOR_TYPE_VALUE: Final[str] = "sparse_vector"
 
 @dataclass
 class SparseVector:
-    """Represents a sparse vector using parallel arrays for indices and values.
+    """Sparse vector using parallel indices and values arrays.
 
     Attributes:
         indices: List of dimension indices (must be non-negative integers, sorted in strictly ascending order)
@@ -30,7 +30,7 @@ class SparseVector:
     labels: Optional[List[str]] = None
 
     def __post_init__(self) -> None:
-        """Validate the sparse vector structure."""
+        """Validate sparse vector structure."""
         if not isinstance(self.indices, list):
             raise ValueError(
                 f"Expected SparseVector indices to be a list, got {type(self.indices).__name__}"
@@ -85,7 +85,7 @@ class SparseVector:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to transport format with type tag.
-        
+
         Note: Uses 'tokens' as the wire format key name for compatibility
         with the protobuf schema, even though the Python attribute is 'labels'.
         """
@@ -101,7 +101,7 @@ class SparseVector:
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "SparseVector":
         """Deserialize from transport format (strict - requires #type field).
-        
+
         Note: Reads from 'tokens' key in the wire format for compatibility
         with the protobuf schema, mapping it to the 'labels' attribute.
         """
@@ -112,12 +112,17 @@ class SparseVector:
         return cls(
             indices=d["indices"],
             values=d["values"],
-            labels=d.get("tokens")  # Wire format uses 'tokens'
+            labels=d.get("tokens"),  # Wire format uses 'tokens'
         )
 
 
-Metadata = Mapping[str, Optional[Union[str, int, float, bool, SparseVector]]]
-UpdateMetadata = Mapping[str, Union[int, float, str, bool, SparseVector, None]]
+MetadataListValue = List[Union[str, int, float, bool]]
+Metadata = Mapping[
+    str, Optional[Union[str, int, float, bool, SparseVector, MetadataListValue]]
+]
+UpdateMetadata = Mapping[
+    str, Union[int, float, str, bool, SparseVector, MetadataListValue, None]
+]
 PyVector = Union[Sequence[float], Sequence[int]]
 Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
 # Metadata Query Grammar
@@ -132,9 +137,11 @@ WhereOperator = Union[
     Literal["$eq"],
 ]
 InclusionExclusionOperator = Union[Literal["$in"], Literal["$nin"]]
+ArrayContainsOperator = Union[Literal["$contains"], Literal["$not_contains"]]
 OperatorExpression = Union[
     Dict[Union[WhereOperator, LogicalOperator], LiteralValue],
     Dict[InclusionExclusionOperator, List[LiteralValue]],
+    Dict[ArrayContainsOperator, LiteralValue],
 ]
 
 Where = Dict[

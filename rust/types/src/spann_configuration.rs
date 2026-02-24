@@ -68,8 +68,8 @@ pub fn default_m_spann() -> usize {
     64
 }
 
-pub fn default_quantize() -> bool {
-    false
+pub fn default_center_drift_threshold() -> f32 {
+    0.125
 }
 
 fn default_space_spann() -> Space {

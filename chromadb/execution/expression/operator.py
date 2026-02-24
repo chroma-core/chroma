@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import Optional, List, Dict, Set, Any, Union, cast
 
+from chromadb.base_types import LiteralValue
+
 import numpy as np
 from numpy.typing import NDArray
 from chromadb.api.types import (
@@ -183,15 +185,15 @@ class Where:
                         )
                     return Key(field).not_in(value)
                 elif op == "$contains":
-                    if not isinstance(value, str):
+                    if not isinstance(value, (str, int, float, bool)):
                         raise TypeError(
-                            f"$contains requires a string, got {type(value).__name__}"
+                            f"$contains requires a str, int, float, or bool, got {type(value).__name__}"
                         )
                     return Key(field).contains(value)
                 elif op == "$not_contains":
-                    if not isinstance(value, str):
+                    if not isinstance(value, (str, int, float, bool)):
                         raise TypeError(
-                            f"$not_contains requires a string, got {type(value).__name__}"
+                            f"$not_contains requires a str, int, float, or bool, got {type(value).__name__}"
                         )
                     return Key(field).not_contains(value)
                 elif op == "$regex":
@@ -351,24 +353,24 @@ class Nin(Where):
 
 @dataclass
 class Contains(Where):
-    """Contains comparison for document content"""
+    """Contains comparison for document content or metadata array membership"""
 
     key: str
-    content: str
+    value: LiteralValue
 
     def to_dict(self) -> Dict[str, Any]:
-        return {self.key: {"$contains": self.content}}
+        return {self.key: {"$contains": self.value}}
 
 
 @dataclass
 class NotContains(Where):
-    """Not contains comparison for document content"""
+    """Not-contains comparison for document content or metadata array membership"""
 
     key: str
-    content: str
+    value: LiteralValue
 
     def to_dict(self) -> Dict[str, Any]:
-        return {self.key: {"$not_contains": self.content}}
+        return {self.key: {"$not_contains": self.value}}
 
 
 @dataclass
@@ -395,7 +397,7 @@ class NotRegex(Where):
 
 # Field proxy for building Where conditions
 class Key:
-    """Field proxy for building Where conditions with operator overloading.
+    """Field proxy for building Where filter expressions.
 
     The Key class allows for readable field references using either:
     1. Predefined constants for special fields: K.EMBEDDING, K.DOCUMENT, K.SCORE, etc.
@@ -486,13 +488,34 @@ class Key:
         """Field should not match regex: Key('field').not_regex('^pattern')"""
         return NotRegex(self.name, pattern)
 
-    def contains(self, content: str) -> Contains:
-        """Check if field contains text: Key('field').contains('text')"""
-        return Contains(self.name, content)
+    def contains(self, value: LiteralValue) -> Contains:
+        """Check if field contains a value.
 
-    def not_contains(self, content: str) -> NotContains:
-        """Check if field doesn't contain text: Key('field').not_contains('text')"""
-        return NotContains(self.name, content)
+        On Key.DOCUMENT: substring search (value must be a string).
+        On metadata fields: checks if the array field contains the scalar value.
+
+        Examples:
+            Key.DOCUMENT.contains("machine learning")  # document substring
+            Key("tags").contains("action")              # metadata array contains
+            Key("scores").contains(42)                  # metadata array contains
+        """
+        if self.name == "#document" and not isinstance(value, str):
+            raise TypeError("$contains on #document requires a string pattern")
+        return Contains(self.name, value)
+
+    def not_contains(self, value: LiteralValue) -> NotContains:
+        """Check if field does not contain a value.
+
+        On Key.DOCUMENT: excludes documents containing the substring.
+        On metadata fields: checks that the array field does not contain the scalar value.
+
+        Examples:
+            Key.DOCUMENT.not_contains("deprecated")  # document substring exclusion
+            Key("tags").not_contains("draft")         # metadata array not-contains
+        """
+        if self.name == "#document" and not isinstance(value, str):
+            raise TypeError("$not_contains on #document requires a string pattern")
+        return NotContains(self.name, value)
 
 
 # Initialize predefined key constants
@@ -596,7 +619,7 @@ class Projection:
 # Rank expression types for hybrid search
 @dataclass
 class Rank:
-    """Base class for Rank expressions (algebraic data type).
+    """Base class for rank expressions.
 
     Supports arithmetic operations for combining rank expressions:
         - Addition: rank1 + rank2, rank + 0.5
@@ -1018,7 +1041,7 @@ class Mul(Rank):
 
 @dataclass
 class Knn(Rank):
-    """KNN-based ranking
+    """KNN-based ranking expression.
 
     Args:
         query: The query for KNN search. Can be:
@@ -1120,7 +1143,7 @@ class Val(Rank):
 
 @dataclass
 class Rrf(Rank):
-    """Reciprocal Rank Fusion for combining multiple ranking strategies.
+    """Reciprocal Rank Fusion for combining ranking strategies.
 
     RRF formula: score = -sum(weight_i / (k + rank_i)) for each ranking strategy
     The negative is used because RRF produces higher scores for better results,

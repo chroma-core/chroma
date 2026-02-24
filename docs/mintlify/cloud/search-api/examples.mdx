@@ -184,6 +184,36 @@ for (const [i, product] of products.entries()) {
   console.log();
 }
 ```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .r#where(
+        Key::field("in_stock").eq(true)
+            & Key::field("category").eq("electronics")
+            & Key::field("price").gte(50)
+            & Key::field("price").lte(300),
+    )
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+        key: Key::Embedding,
+        limit: 20,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(20), 0)
+    .select([
+        Key::Document,
+        Key::Score,
+        Key::field("name"),
+        Key::field("price"),
+        Key::field("category"),
+        Key::field("rating"),
+    ]);
+
+let results = collection.search(vec![search]).await?;
+```
 </CodeGroup>
 
 Example output:

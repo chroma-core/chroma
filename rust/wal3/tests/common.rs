@@ -1,10 +1,14 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
-use chroma_config::spanner::SpannerEmulatorConfig;
+use chroma_config::spanner::{
+    SpannerChannelConfig, SpannerConfig, SpannerEmulatorConfig, SpannerSessionPoolConfig,
+};
 use chroma_storage::{admissioncontrolleds3::StorageRequestPriority, GetOptions, Storage};
 use google_cloud_gax::conn::Environment;
-use google_cloud_spanner::client::{Client, ClientConfig};
+use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
+use google_cloud_spanner::session::SessionConfig;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 
 extern crate wal3;
@@ -15,6 +19,22 @@ use wal3::{
 };
 
 //////////////////////////////////////////// Repl Utilities /////////////////////////////////////////
+
+fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
+    let mut config = SessionConfig::default();
+    config.session_get_timeout = Duration::from_secs(cfg.session_get_timeout_secs);
+    config.max_opened = cfg.max_opened;
+    config.min_opened = cfg.min_opened;
+    config
+}
+
+fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
+    ChannelConfig {
+        num_channels: cfg.num_channels,
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        timeout: Duration::from_secs(cfg.timeout_secs),
+    }
+}
 
 /// Returns the Spanner emulator configuration for tests.
 ///
@@ -28,6 +48,8 @@ pub fn emulator_config() -> SpannerEmulatorConfig {
         project: "local-project".to_string(),
         instance: "test-instance".to_string(),
         database: "local-logdb-database".to_string(),
+        session_pool: Default::default(),
+        channel: Default::default(),
     }
 }
 
@@ -37,8 +59,11 @@ pub fn emulator_config() -> SpannerEmulatorConfig {
 #[allow(dead_code)]
 pub async fn setup_spanner_client() -> Arc<Client> {
     let emulator = emulator_config();
+    let spanner_config = SpannerConfig::Emulator(emulator.clone());
     let client_config = ClientConfig {
         environment: Environment::Emulator(emulator.grpc_endpoint()),
+        session_config: to_session_config(spanner_config.session_pool()),
+        channel_config: to_channel_config(spanner_config.channel()),
         ..Default::default()
     };
     match Client::new(&emulator.database_path(), client_config).await {
@@ -60,6 +85,8 @@ pub fn default_repl_options() -> ReplicatedFragmentOptions {
         minimum_failures_to_exclude_replica: 100,
         decimation_interval_secs: 3600,
         slow_writer_tolerance_secs: 30,
+        enable_read_repair: false,
+        max_concurrent_read_repairs: 16,
     }
 }
 

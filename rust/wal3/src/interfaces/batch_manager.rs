@@ -11,10 +11,7 @@ use chroma_types::Cmek;
 
 use crate::backoff::ExponentialBackoff;
 use crate::interfaces::{FragmentPointer, FragmentPublisher, ManifestPublisher, UploadResult};
-use crate::{
-    CursorStore, CursorStoreOptions, Error, FragmentIdentifier, Garbage, LogPosition,
-    LogWriterOptions, ThrottleOptions,
-};
+use crate::{Error, FragmentIdentifier, Garbage, LogPosition, LogWriterOptions, ThrottleOptions};
 
 use super::FragmentUploader;
 
@@ -370,12 +367,6 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
         let empty = crate::Garbage::empty();
         self.write_garbage(options, Some(e_tag), &empty).await?;
         Ok(())
-    }
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
-        let storage = Arc::new(self.fragment_uploader.preferred_storage().await);
-        let prefix = self.fragment_uploader.preferred_prefix().await;
-        CursorStore::new(options, storage, prefix, "batch_manager".to_string())
     }
 }
 

@@ -1,7 +1,10 @@
 from typing import Dict, List
 from hypothesis import given
-from chromadb.test.conftest import ClientFactories
+from chromadb.test.conftest import (
+    ClientFactories,
+)
 import hypothesis.strategies as st
+from chromadb.test.conftest import MULTI_REGION_ENABLED
 
 
 def test_list_databases(client_factories: ClientFactories) -> None:
@@ -13,12 +16,16 @@ def test_list_databases(client_factories: ClientFactories) -> None:
         admin_client.create_database(f"test_list_databases_{i}")
 
     databases = admin_client.list_databases()
-    assert len(databases) == 11  # add 1 for the default_database
+    total_default_databases = 2 if MULTI_REGION_ENABLED else 1
+    assert len(databases) == 10 + total_default_databases
 
     for i in range(10):
         assert any(d["name"] == f"test_list_databases_{i}" for d in databases)
 
     assert any(d["name"] == "default_database" for d in databases)
+
+    if MULTI_REGION_ENABLED:
+        assert any(d["name"] == "tilt-spanning+default_database" for d in databases)
 
 
 @st.composite

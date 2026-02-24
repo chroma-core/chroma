@@ -1703,6 +1703,15 @@ async fn fork_collection(
             },
         )
         .await?;
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
+    if database_name.topology().is_some() {
+        return Err(ValidationError::InvalidArgument(
+            "multi-region databases do not support forking".to_string(),
+        )
+        .into());
+    }
     let _guard = server.scorecard_request(&[
         "op:fork_collection",
         format!("tenant:{}", tenant).as_str(),
@@ -3398,6 +3407,49 @@ mod tests {
         assert_eq!(
             response_json["error"],
             serde_json::Value::String("InvalidArgumentError".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn fork_collection_rejects_multi_region_database() {
+        let port = test_server(FrontendServerConfig::single_node_default()).await;
+
+        let client = reqwest::Client::new();
+        let collection_id = uuid::Uuid::new_v4().to_string();
+        let res = client
+            .post(format!(
+                "http://localhost:{}/api/v2/tenants/test_tenant/databases/topology+multiregiondb/collections/{}/fork",
+                port, collection_id
+            ))
+            .header("content-type", "application/json")
+            .body(
+                serde_json::to_string(&serde_json::json!({
+                    "new_name": "forked_collection"
+                }))
+                .unwrap(),
+            )
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(
+            res.status(),
+            reqwest::StatusCode::BAD_REQUEST,
+            "multi-region database fork should be rejected"
+        );
+        let response_json = res.json::<serde_json::Value>().await.unwrap();
+        assert_eq!(
+            response_json["error"],
+            serde_json::Value::String("InvalidArgumentError".to_string()),
+        );
+        println!("response_json: {:?}", response_json);
+        assert!(
+            response_json["message"]
+                .as_str()
+                .unwrap()
+                .contains("multi-region databases do not support forking"),
+            "expected multi-region error message, got: {:?}",
+            response_json["message"]
         );
     }
 }

@@ -13,9 +13,9 @@ use crate::interfaces::{ManifestPublisher, ManifestWitness};
 use crate::manifest::{Manifest, ManifestAndWitness, Snapshot, SnapshotPointer};
 use crate::writer::MarkDirty;
 use crate::{
-    unprefixed_fragment_path, Error, Fragment, FragmentIdentifier, FragmentSeqNo,
-    GarbageCollectionOptions, LogPosition, LogWriterOptions, SnapshotCache, SnapshotOptions,
-    SnapshotPointerOrFragmentIdentifier, ThrottleOptions,
+    unprefixed_fragment_path, CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier,
+    FragmentSeqNo, GarbageCollectionOptions, LogPosition, LogWriterOptions, SnapshotCache,
+    SnapshotOptions, SnapshotPointerOrFragmentIdentifier, ThrottleOptions, INTRINSIC_CURSOR,
 };
 
 ////////////////////////////////////////////// Staging /////////////////////////////////////////////
@@ -805,6 +805,17 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
     async fn destroy(&self) -> Result<(), Error> {
         crate::destroy::destroy_s3_manifest(&self.storage, &self.prefix).await
     }
+
+    async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&self.storage),
+            self.prefix.clone(),
+            self.writer.clone(),
+        );
+        let witness = cursor_store.load(&INTRINSIC_CURSOR).await?;
+        Ok(witness.map(|w| w.cursor.position))
+    }
 }
 
 /////////////////////////////////////////////// tests //////////////////////////////////////////////
@@ -813,6 +824,7 @@ impl ManifestPublisher<(FragmentSeqNo, LogPosition)> for ManifestManager {
 mod tests {
     use chroma_storage::s3_client_for_test_with_new_bucket;
 
+    use crate::interfaces::ManifestPublisher;
     use crate::*;
 
     use super::*;
@@ -1004,5 +1016,89 @@ mod tests {
             .await
             .unwrap();
         assert!(!result, "head should return false for non-matching etag");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_load_intrinsic_cursor_returns_none_when_absent() {
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-load-intrinsic-none";
+        ManifestManager::initialize(
+            &LogWriterOptions::default(),
+            &storage,
+            prefix,
+            "test-writer",
+        )
+        .await
+        .unwrap();
+        let manager = ManifestManager::new(
+            ThrottleOptions::default(),
+            SnapshotOptions::default(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        )
+        .await
+        .unwrap();
+
+        let result = manager.load_intrinsic_cursor().await.unwrap();
+        assert!(
+            result.is_none(),
+            "load_intrinsic_cursor should return None before any cursor is set"
+        );
+        println!("load_intrinsic_cursor_returns_none_when_absent: passed");
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_load_intrinsic_cursor_returns_position_after_update() {
+        let storage = Arc::new(s3_client_for_test_with_new_bucket().await);
+        let prefix = "test-load-intrinsic-after";
+        ManifestManager::initialize(
+            &LogWriterOptions::default(),
+            &storage,
+            prefix,
+            "test-writer",
+        )
+        .await
+        .unwrap();
+        let manager = ManifestManager::new(
+            ThrottleOptions::default(),
+            SnapshotOptions::default(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            "test-writer".to_string(),
+            Arc::new(()),
+            Arc::new(()),
+        )
+        .await
+        .unwrap();
+
+        // Set up the cursor via the CursorStore (same path update_intrinsic_cursor uses).
+        let cursor_store = CursorStore::new(
+            CursorStoreOptions::default(),
+            Arc::clone(&storage),
+            prefix.to_string(),
+            "test-writer".to_string(),
+        );
+        cursor_store
+            .init(
+                &CursorName::new("compaction").unwrap(),
+                Cursor {
+                    position: LogPosition::from_offset(77),
+                    epoch_us: 999,
+                    writer: "test-writer".to_string(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let result = manager.load_intrinsic_cursor().await.unwrap();
+        assert_eq!(
+            result,
+            Some(LogPosition::from_offset(77)),
+            "load_intrinsic_cursor should return the cursor position"
+        );
+        println!("load_intrinsic_cursor_returns_position_after_update: passed");
     }
 }

@@ -45,6 +45,12 @@ impl OperationRecord {
                             UpdateMetadataValue::SparseVector(v) => {
                                 size_of_val(&v.indices[..]) + size_of_val(&v.values[..])
                             }
+                            UpdateMetadataValue::BoolArray(arr) => size_of_val(&arr[..]),
+                            UpdateMetadataValue::IntArray(arr) => size_of_val(&arr[..]),
+                            UpdateMetadataValue::FloatArray(arr) => size_of_val(&arr[..]),
+                            UpdateMetadataValue::StringArray(arr) => {
+                                arr.iter().map(|s| s.len()).sum()
+                            }
                             UpdateMetadataValue::None => 0,
                         }
                 })

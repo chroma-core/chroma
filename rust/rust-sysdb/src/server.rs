@@ -1,6 +1,6 @@
 use crate::types::FlushCompactionRequest;
 use crate::types::SysDbError;
-use crate::types::{self as internal};
+use crate::types::{self as internal, validate_uuid};
 use crate::{
     backend::{Assignable, BackendFactory, Runnable},
     config::RootConfig,
@@ -11,8 +11,6 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_segment::version_file::{VersionFileManager, VersionFileType};
 use chroma_storage::Storage;
 use chroma_types::chroma_proto::collection_version_info::VersionChangeReason;
-use chroma_types::chroma_proto::DeleteDatabaseResponse;
-use chroma_types::chroma_proto::FinishDatabaseDeletionResponse;
 use chroma_types::chroma_proto::{
     sys_db_server::{SysDb, SysDbServer},
     AttachFunctionRequest, AttachFunctionResponse, BatchGetCollectionSoftDeleteStatusRequest,
@@ -24,11 +22,12 @@ use chroma_types::chroma_proto::{
     CreateDatabaseResponse, CreateSegmentRequest, CreateSegmentResponse, CreateTenantRequest,
     CreateTenantResponse, DeleteCollectionRequest, DeleteCollectionResponse,
     DeleteCollectionVersionRequest, DeleteCollectionVersionResponse, DeleteDatabaseRequest,
-    DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest, DetachFunctionResponse,
-    FinishAttachedFunctionDeletionRequest, FinishAttachedFunctionDeletionResponse,
-    FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
-    FinishCreateAttachedFunctionRequest, FinishCreateAttachedFunctionResponse,
-    FinishDatabaseDeletionRequest, FlushCollectionCompactionAndAttachedFunctionRequest,
+    DeleteDatabaseResponse, DeleteSegmentRequest, DeleteSegmentResponse, DetachFunctionRequest,
+    DetachFunctionResponse, FinishAttachedFunctionDeletionRequest,
+    FinishAttachedFunctionDeletionResponse, FinishCollectionDeletionRequest,
+    FinishCollectionDeletionResponse, FinishCreateAttachedFunctionRequest,
+    FinishCreateAttachedFunctionResponse, FinishDatabaseDeletionRequest,
+    FinishDatabaseDeletionResponse, FlushCollectionCompactionAndAttachedFunctionRequest,
     FlushCollectionCompactionAndAttachedFunctionResponse, FlushCollectionCompactionRequest,
     FlushCollectionCompactionResponse, ForkCollectionRequest, ForkCollectionResponse,
     GetAttachedFunctionsRequest, GetAttachedFunctionsResponse, GetAttachedFunctionsToGcRequest,
@@ -47,13 +46,14 @@ use chroma_types::chroma_proto::{
     SetTenantResourceNameResponse, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
-use chroma_types::Collection;
+use chroma_types::{Collection, CollectionUuid, DatabaseName};
 use thiserror::Error;
 use tokio::{
     select,
     signal::unix::{signal, SignalKind},
 };
 use tonic::{transport::Server, Request, Response, Status};
+use tracing::instrument;
 
 pub struct SysdbService {
     port: u16,
@@ -192,9 +192,28 @@ impl SysDb for SysdbService {
 
     async fn list_databases(
         &self,
-        _request: Request<ListDatabasesRequest>,
+        request: Request<ListDatabasesRequest>,
     ) -> Result<Response<ListDatabasesResponse>, Status> {
-        Err(Status::unimplemented("list_databases is not supported"))
+        let proto_req = request.into_inner();
+        let internal_req: internal::ListDatabasesRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await?;
+
+        // Convert internal Database to proto Database
+        // Names are already prefixed with topology (e.g., "tilt-spanning+my_db")
+        let databases: Vec<chroma_types::chroma_proto::Database> = internal_resp
+            .into_iter()
+            .map(|db| chroma_types::chroma_proto::Database {
+                id: db.id.to_string(),
+                name: db.name,
+                tenant: db.tenant,
+            })
+            .collect();
+
+        Ok(Response::new(ListDatabasesResponse { databases }))
     }
 
     async fn delete_database(
@@ -301,9 +320,65 @@ impl SysDb for SysdbService {
 
     async fn delete_collection(
         &self,
-        _request: Request<DeleteCollectionRequest>,
+        request: Request<DeleteCollectionRequest>,
     ) -> Result<Response<DeleteCollectionResponse>, Status> {
-        Err(Status::unimplemented("delete_collection is not supported"))
+        let proto_req = request.into_inner();
+
+        // Convert DeleteCollectionRequest to UpdateCollectionRequest for soft delete
+        let collection_id = validate_uuid(&proto_req.id)
+            .map_err(|e| Status::invalid_argument(format!("Invalid collection ID: {}", e)))?;
+
+        let database_name = DatabaseName::new(&proto_req.database)
+            .ok_or_else(|| Status::invalid_argument("database name is required"))?;
+
+        // First, get the current collection to retrieve its name
+        let backend_for_get = internal::GetCollectionWithSegmentsRequest {
+            database_name: database_name.clone(),
+            id: CollectionUuid(collection_id),
+        }
+        .assign(&self.backends);
+
+        let current_collection = internal::GetCollectionWithSegmentsRequest {
+            database_name: database_name.clone(),
+            id: CollectionUuid(collection_id),
+        }
+        .run(backend_for_get)
+        .await
+        .map_err(|e: SysDbError| Status::from(e))?;
+
+        // Generate new name with "_deleted_" prefix and collection ID
+        let deleted_new_name = format!(
+            "_deleted_{}_{}",
+            current_collection.collection.name, collection_id
+        );
+
+        // NOTE: This is not a TOCTOU because the transaction below checks to make sure
+        // the concerned collection is not soft deleted before proceeding.
+
+        // Create an UpdateCollectionRequest that marks the collection as deleted with the new name
+        let internal_req = internal::UpdateCollectionRequest {
+            database_name,
+            id: CollectionUuid(collection_id),
+            name: Some(deleted_new_name),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: None,
+            is_deleted: Some(true), // Mark as soft deleted
+        };
+
+        let backend = internal_req.assign(&self.backends);
+        let internal_resp = internal_req
+            .run(backend)
+            .await
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let proto_resp: DeleteCollectionResponse = internal_resp
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn finish_collection_deletion(
@@ -352,9 +427,19 @@ impl SysDb for SysdbService {
 
     async fn count_collections(
         &self,
-        _request: Request<CountCollectionsRequest>,
+        request: Request<CountCollectionsRequest>,
     ) -> Result<Response<CountCollectionsResponse>, Status> {
-        Err(Status::unimplemented("count_collections is not supported"))
+        let proto_req = request.into_inner();
+        let internal_req: internal::CountCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: SysDbError| Status::from(e))?;
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await?;
+
+        let proto_resp: CountCollectionsResponse = internal_resp.into();
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn get_collection_with_segments(
@@ -420,7 +505,14 @@ impl SysDb for SysdbService {
         &self,
         _request: Request<()>,
     ) -> Result<Response<ResetStateResponse>, Status> {
-        Err(Status::unimplemented("reset_state is not supported"))
+        let internal_req = internal::ResetStateRequest {};
+
+        let backends = internal_req.assign(&self.backends);
+        let internal_resp = internal_req.run(backends).await.map_err(Status::from)?;
+
+        let proto_resp: ResetStateResponse = internal_resp.try_into().map_err(Status::from)?;
+
+        Ok(Response::new(proto_resp))
     }
 
     async fn get_last_compaction_time_for_tenant(
@@ -655,7 +747,7 @@ impl SysDb for SysdbService {
         .retry(backoff)
         .when(|e: &SysDbError| {
             if matches!(e, SysDbError::CollectionEntryIsStale) {
-                tracing::info!(
+                tracing::warn!(
                     "Collection entry is stale, retrying flush collection compaction for collection_id: {}",
                     collection_id
                 );
@@ -716,16 +808,41 @@ impl SysDb for SysdbService {
 
     async fn increment_compaction_failure_count(
         &self,
-        _request: Request<IncrementCompactionFailureCountRequest>,
+        request: Request<IncrementCompactionFailureCountRequest>,
     ) -> Result<Response<IncrementCompactionFailureCountResponse>, Status> {
-        Err(Status::unimplemented(
-            "increment_compaction_failure_count is not supported",
-        ))
+        let proto_req = request.into_inner();
+
+        let internal_req = internal::UpdateCollectionRequest {
+            id: CollectionUuid(validate_uuid(&proto_req.collection_id)?),
+            database_name: proto_req
+                .database_name
+                .ok_or_else(|| Status::internal("database_name is required"))
+                .and_then(|db_name| {
+                    DatabaseName::new(db_name)
+                        .ok_or_else(|| Status::internal("a valid database_name is required"))
+                })?,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(internal::UpdateCollectionCursor {
+                compaction_failure_count_increment: Some(1),
+            }),
+            is_deleted: None,
+        };
+
+        // Execute the update
+        let backend = internal_req.assign(&self.backends);
+        let _internal_resp = internal_req.run(backend).await?;
+
+        Ok(Response::new(IncrementCompactionFailureCountResponse {}))
     }
 }
 
 impl SysdbService {
     /// Create a new version file in object storage
+    #[instrument(skip(self, storage, segments), level = "info", fields(collection_id = %collection.collection_id))]
     async fn create_new_version_file(
         &self,
         storage: &Storage,
@@ -749,6 +866,7 @@ impl SysdbService {
                         collection_id: collection.collection_id.to_string(),
                         collection_name: collection.name.clone(),
                         collection_creation_secs: chrono::Utc::now().timestamp(),
+                        database_name: collection.database.clone(),
                         ..Default::default()
                     },
                 ),
@@ -758,18 +876,47 @@ impl SysdbService {
             },
         };
 
+        // Handle empty segments like the Go sysdb - preserve existing segment info
+        let segments_to_use = if segments.is_empty() {
+            // If no new segments, preserve existing segment info from the latest version
+            version_file_pb
+                .version_history
+                .as_ref()
+                .and_then(|version_history| {
+                    version_history
+                        .versions
+                        .last()
+                        .and_then(|last_version| last_version.segment_info.as_ref())
+                        .map(|segment_info| segment_info.segment_compaction_info.clone())
+                })
+                .unwrap_or_else(|| segments.clone())
+        } else {
+            segments
+        };
+
+        let new_version_file_path = version_file_manager.generate_file_path(
+            collection,
+            new_version,
+            version_file_type.clone(),
+        );
+        let ts_secs = chrono::Utc::now().timestamp();
         let new_version_info = chroma_types::chroma_proto::CollectionVersionInfo {
             version: new_version,
             segment_info: Some(chroma_types::chroma_proto::CollectionSegmentInfo {
-                segment_compaction_info: segments.clone(),
+                segment_compaction_info: segments_to_use,
             }),
-            collection_info_mutable: None,
-            created_at_secs: chrono::Utc::now().timestamp(),
+            collection_info_mutable: Some(chroma_types::chroma_proto::CollectionInfoMutable {
+                current_log_position: collection.log_position,
+                current_collection_version: collection.version as i64,
+                updated_at_secs: ts_secs,
+                dimension: 0, // Default value - not used in Go version
+                last_compaction_time_secs: collection.last_compaction_time_secs as i64,
+            }),
+            created_at_secs: ts_secs,
             version_change_reason: VersionChangeReason::DataCompaction as i32,
-            version_file_name: String::new(),
+            version_file_name: new_version_file_path.clone(),
             marked_for_deletion: false,
         };
-
         if let Some(ref mut version_history) = version_file_pb.version_history {
             version_history.versions.push(new_version_info);
         } else {
@@ -778,23 +925,26 @@ impl SysdbService {
                     versions: vec![new_version_info],
                 });
         }
-
-        let generated_file_path = version_file_manager
-            .upload(&version_file_pb, collection, version_file_type, new_version)
+        version_file_manager
+            .upload(
+                &new_version_file_path,
+                &version_file_pb,
+                collection,
+                new_version,
+            )
             .await
             .map_err(|e| {
                 tracing::error!("Failed to upload version file: {}", e);
                 e
             })?;
-
-        Ok((version_file_pb, generated_file_path))
+        Ok((version_file_pb, new_version_file_path))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::{Backend, BackendFactory};
+    use crate::backend::{Assignable, Backend, BackendFactory};
     use crate::spanner::SpannerBackend;
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
@@ -808,8 +958,8 @@ mod tests {
         FlushSegmentCompactionInfo,
     };
     use chroma_types::{
-        CollectionUuid, DatabaseName, Schema, Segment, SegmentScope, SegmentType, SegmentUuid,
-        TopologyName,
+        CollectionUuid, Database, DatabaseName, Schema, Segment, SegmentScope, SegmentType,
+        SegmentUuid, TopologyName,
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -859,11 +1009,24 @@ mod tests {
 
         // Create segment info for segments that will actually exist
         // Create all three required segments (metadata, record, vector)
-        let segment_uuid = Uuid::new_v4();
-        vec![FlushSegmentCompactionInfo {
-            segment_id: segment_uuid.to_string(),
-            file_paths,
-        }]
+        let metadata_uuid = Uuid::new_v4();
+        let record_uuid = Uuid::new_v4();
+        let vector_uuid = Uuid::new_v4();
+
+        vec![
+            FlushSegmentCompactionInfo {
+                segment_id: metadata_uuid.to_string(),
+                file_paths: file_paths.clone(),
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: record_uuid.to_string(),
+                file_paths: file_paths.clone(),
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: vector_uuid.to_string(),
+                file_paths,
+            },
+        ]
     }
 
     async fn setup_test_service(backend: SpannerBackend) -> (SysdbService, TempDir) {
@@ -897,9 +1060,52 @@ mod tests {
         let collection_id = CollectionUuid(Uuid::new_v4());
 
         // Create collection with segments
-        let segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+        let metadata_segment_id = SegmentUuid(Uuid::new_v4());
+        let record_segment_id = SegmentUuid(Uuid::new_v4());
+        let vector_segment_id = SegmentUuid(Uuid::new_v4());
+
+        // Create segment_compaction_info using the same IDs
+        let segment_compaction_info = vec![
+            FlushSegmentCompactionInfo {
+                segment_id: metadata_segment_id.0.to_string(),
+                file_paths: {
+                    let mut file_paths = HashMap::new();
+                    file_paths.insert(
+                        "data".to_string(),
+                        FilePaths {
+                            paths: vec!["new/path1.bin".to_string()],
+                        },
+                    );
+                    file_paths
+                },
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: record_segment_id.0.to_string(),
+                file_paths: {
+                    let mut file_paths = HashMap::new();
+                    file_paths.insert(
+                        "data".to_string(),
+                        FilePaths {
+                            paths: vec!["new/path2.bin".to_string()],
+                        },
+                    );
+                    file_paths
+                },
+            },
+            FlushSegmentCompactionInfo {
+                segment_id: vector_segment_id.0.to_string(),
+                file_paths: {
+                    let mut file_paths = HashMap::new();
+                    file_paths.insert(
+                        "data".to_string(),
+                        FilePaths {
+                            paths: vec!["new/path3.bin".to_string()],
+                        },
+                    );
+                    file_paths
+                },
+            },
+        ];
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -910,7 +1116,7 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: metadata_segment_id,
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -918,7 +1124,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: record_segment_id,
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -926,7 +1132,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: vector_segment_id,
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1008,6 +1214,87 @@ mod tests {
         assert!(version_file_path.contains("versionfiles/"));
         assert!(version_file_path.contains(&format!("/{:06}", collection.version)));
         assert!(version_file_path.contains("_flush"));
+
+        // Read and validate the version file contents
+        let version_file_manager =
+            VersionFileManager::new(service.local_region_object_storage.clone());
+        let version_file = version_file_manager
+            .fetch(collection)
+            .await
+            .expect("Failed to fetch version file after flush");
+
+        // Verify version file structure
+        assert!(
+            version_file.collection_info_immutable.is_some(),
+            "Collection immutable info should be set"
+        );
+        let collection_info_immutable = version_file.collection_info_immutable.as_ref().unwrap();
+        assert_eq!(
+            collection_info_immutable.collection_id,
+            collection_id.0.to_string()
+        );
+        assert_eq!(collection_info_immutable.collection_name, "test_collection");
+        assert_eq!(collection_info_immutable.tenant_id, tenant_id);
+        assert_eq!(
+            collection_info_immutable.database_id,
+            database_name.as_ref().to_string()
+        );
+
+        // Verify version history
+        assert!(
+            version_file.version_history.is_some(),
+            "Version history should be set"
+        );
+        let version_history = version_file.version_history.as_ref().unwrap();
+        assert_eq!(
+            version_history.versions.len(),
+            1,
+            "Should have exactly one version after flush"
+        );
+
+        // Verify the version details
+        let version_info = &version_history.versions[0];
+        assert_eq!(version_info.version, 1, "Version should be 1");
+        assert!(
+            !version_info.marked_for_deletion,
+            "Version should not be marked for deletion"
+        );
+        assert_eq!(
+            version_info.version_change_reason,
+            VersionChangeReason::DataCompaction as i32
+        );
+
+        // Verify segment info is preserved
+        assert!(
+            version_info.segment_info.is_some(),
+            "Segment info should be set"
+        );
+        let segment_info = version_info.segment_info.as_ref().unwrap();
+        assert_eq!(
+            segment_info.segment_compaction_info.len(),
+            3,
+            "Should have 3 segments"
+        );
+
+        // Verify collection mutable info
+        assert!(
+            version_info.collection_info_mutable.is_some(),
+            "Collection mutable info should be set"
+        );
+        let mutable_info = version_info.collection_info_mutable.as_ref().unwrap();
+        assert_eq!(
+            mutable_info.current_collection_version,
+            current_version as i64
+        );
+        assert_eq!(mutable_info.current_log_position, 0);
+        assert!(
+            mutable_info.updated_at_secs > 0,
+            "Updated timestamp should be set"
+        );
+        assert_eq!(
+            mutable_info.last_compaction_time_secs, 0,
+            "Last compaction time should be default value"
+        );
     }
 
     #[tokio::test]
@@ -1132,8 +1419,9 @@ mod tests {
 
         // Create collection with segments in US region
         let segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+        let metadata_uuid = Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap();
+        let record_uuid = Uuid::parse_str(&segment_compaction_info[1].segment_id).unwrap();
+        let vector_uuid = Uuid::parse_str(&segment_compaction_info[2].segment_id).unwrap();
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -1144,7 +1432,7 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(metadata_uuid),
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -1152,7 +1440,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(record_uuid),
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -1160,7 +1448,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: SegmentUuid(vector_uuid),
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1463,8 +1751,9 @@ mod tests {
 
         // Create collection with segments
         let segment_compaction_info = create_test_segment_compaction_info();
-        let segment_uuid =
-            SegmentUuid(Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap());
+        let metadata_uuid = Uuid::parse_str(&segment_compaction_info[0].segment_id).unwrap();
+        let record_uuid = Uuid::parse_str(&segment_compaction_info[1].segment_id).unwrap();
+        let vector_uuid = Uuid::parse_str(&segment_compaction_info[2].segment_id).unwrap();
 
         let create_collection_req = CreateCollectionRequest {
             id: collection_id,
@@ -1475,7 +1764,7 @@ mod tests {
             metadata: Some(HashMap::new()),
             segments: vec![
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(metadata_uuid),
                     r#type: SegmentType::BlockfileMetadata,
                     scope: SegmentScope::METADATA,
                     collection: collection_id,
@@ -1483,7 +1772,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: SegmentUuid(Uuid::new_v4()),
+                    id: SegmentUuid(record_uuid),
                     r#type: SegmentType::BlockfileRecord,
                     scope: SegmentScope::RECORD,
                     collection: collection_id,
@@ -1491,7 +1780,7 @@ mod tests {
                     metadata: None,
                 },
                 Segment {
-                    id: segment_uuid,
+                    id: SegmentUuid(vector_uuid),
                     r#type: SegmentType::HnswDistributed,
                     scope: SegmentScope::VECTOR,
                     collection: collection_id,
@@ -1612,6 +1901,297 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_empty_segments_preserves_existing(
+    ) {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        // Create collection with initial segments
+        let initial_segment_compaction_info = create_test_segment_compaction_info();
+
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![
+                Segment {
+                    id: SegmentUuid(
+                        initial_segment_compaction_info[0]
+                            .segment_id
+                            .parse()
+                            .unwrap(),
+                    ),
+                    r#type: SegmentType::BlockfileMetadata,
+                    scope: SegmentScope::METADATA,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: SegmentUuid(
+                        initial_segment_compaction_info[1]
+                            .segment_id
+                            .parse()
+                            .unwrap(),
+                    ),
+                    r#type: SegmentType::BlockfileRecord,
+                    scope: SegmentScope::RECORD,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+                Segment {
+                    id: SegmentUuid(
+                        initial_segment_compaction_info[2]
+                            .segment_id
+                            .parse()
+                            .unwrap(),
+                    ),
+                    r#type: SegmentType::HnswDistributed,
+                    scope: SegmentScope::VECTOR,
+                    collection: collection_id,
+                    file_path: HashMap::new(),
+                    metadata: None,
+                },
+            ],
+            index_schema: Default::default(),
+            get_or_create: false,
+        };
+
+        let _: crate::types::CreateCollectionResponse = backend
+            .create_collection(create_collection_req)
+            .await
+            .expect("Failed to create collection");
+
+        // First flush with segments to establish version history
+        let proto_req_first = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: vec![
+                initial_segment_compaction_info[0].clone(),
+                initial_segment_compaction_info[1].clone(),
+                initial_segment_compaction_info[2].clone(),
+            ],
+            log_position: 100,
+            collection_version: 0,
+            total_records_post_compaction: 1000,
+            size_bytes_post_compaction: 5000,
+            schema_str: None,
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+
+        let request_first = Request::new(proto_req_first);
+        let response_first: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request_first).await;
+
+        assert!(
+            response_first.is_ok(),
+            "First flush should succeed: {:?}",
+            response_first.err()
+        );
+
+        // Second flush with EMPTY segments - should preserve existing segment info
+        let proto_req_empty = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: vec![], // Empty segments!
+            log_position: 200,
+            collection_version: 1, // Updated version
+            total_records_post_compaction: 1500,
+            size_bytes_post_compaction: 6000,
+            schema_str: None,
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+
+        let request_empty = Request::new(proto_req_empty);
+        let response_empty: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request_empty).await;
+
+        assert!(
+            response_empty.is_ok(),
+            "Empty segments flush should succeed: {:?}",
+            response_empty.err()
+        );
+
+        // Verify the version file was created and preserves existing segment info
+        let version_file_manager =
+            VersionFileManager::new(service.local_region_object_storage.clone());
+
+        // Get the updated collection to fetch the correct version file path
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter {
+                ids: Some(vec![collection_id]),
+                database_name: Some(database_name.clone()),
+                name: None,
+                tenant_id: None,
+                include_soft_deleted: false,
+                limit: None,
+                offset: None,
+                topology_name: None,
+            },
+        };
+        let backend = Backend::Spanner(backend.clone());
+        let collection_response = get_collection_req
+            .run(backend)
+            .await
+            .expect("Failed to get collection after flush");
+        let updated_collection = collection_response.collections.first().unwrap();
+
+        let version_file = version_file_manager
+            .fetch(updated_collection)
+            .await
+            .expect("Failed to fetch version file");
+
+        // Verify the latest version contains the preserved segment info
+        let latest_version = version_file
+            .version_history
+            .as_ref()
+            .unwrap()
+            .versions
+            .last()
+            .unwrap();
+
+        assert_eq!(latest_version.version, 2, "Latest version should be 2");
+
+        let segment_info = latest_version.segment_info.as_ref().unwrap();
+        assert_eq!(
+            segment_info.segment_compaction_info.len(),
+            3,
+            "Should preserve the original segment info even with empty flush"
+        );
+
+        for (i, segment_compaction_info) in segment_info
+            .segment_compaction_info
+            .iter()
+            .enumerate()
+            .take(3)
+        {
+            assert_eq!(
+                segment_compaction_info.segment_id, initial_segment_compaction_info[i].segment_id,
+                "Should preserve the original segment ID"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_flush_collection_compaction_empty_segments_new_collection() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+        let collection_id = CollectionUuid(Uuid::new_v4());
+
+        // Create collection WITHOUT initial version history
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![],
+            index_schema: Default::default(),
+            get_or_create: false,
+        };
+
+        let _: crate::types::CreateCollectionResponse = backend
+            .create_collection(create_collection_req)
+            .await
+            .expect("Failed to create collection");
+
+        // Flush with EMPTY segments on new collection - should handle correctly by not updating segments
+        // in new version.
+        let proto_req_empty = FlushCollectionCompactionRequest {
+            tenant_id: tenant_id.clone(),
+            collection_id: collection_id.0.to_string(),
+            segment_compaction_info: vec![],
+            log_position: 100,
+            collection_version: 0,
+            total_records_post_compaction: 1000,
+            size_bytes_post_compaction: 5000,
+            schema_str: None,
+            database_name: Some(database_name.as_ref().to_string()),
+        };
+
+        let request_empty = Request::new(proto_req_empty);
+        let response_empty: Result<
+            Response<chroma_types::chroma_proto::FlushCollectionCompactionResponse>,
+            tonic::Status,
+        > = service.flush_collection_compaction(request_empty).await;
+
+        assert!(
+            response_empty.is_ok(),
+            "Empty segments flush on new collection should succeed: {:?}",
+            response_empty.err()
+        );
+
+        // Verify the version file was created with empty segment info (no history to preserve)
+        let version_file_manager =
+            VersionFileManager::new(service.local_region_object_storage.clone());
+
+        // Get the updated collection to fetch the correct version file path
+        let get_collection_req = GetCollectionsRequest {
+            filter: CollectionFilter {
+                ids: Some(vec![collection_id]),
+                database_name: Some(database_name.clone()),
+                name: None,
+                tenant_id: None,
+                include_soft_deleted: false,
+                limit: None,
+                offset: None,
+                topology_name: None,
+            },
+        };
+        let backend = Backend::Spanner(backend.clone());
+        let collection_response = get_collection_req
+            .run(backend)
+            .await
+            .expect("Failed to get collection after flush");
+        let updated_collection = collection_response.collections.first().unwrap();
+
+        let version_file = version_file_manager
+            .fetch(updated_collection)
+            .await
+            .expect("Failed to fetch version file");
+
+        // Verify the latest version contains empty segment info
+        let latest_version = version_file
+            .version_history
+            .as_ref()
+            .unwrap()
+            .versions
+            .last()
+            .unwrap();
+
+        assert_eq!(latest_version.version, 1, "Latest version should be 1");
+
+        let segment_info = latest_version.segment_info.as_ref().unwrap();
+        assert_eq!(
+            segment_info.segment_compaction_info.len(),
+            0,
+            "Should have empty segment info for new collection with empty flush"
+        );
+    }
+
+    #[tokio::test]
     async fn test_k8s_mcmr_integration_topology_name_routing_priority() {
         // Create a mock backend for testing
         let Some(mock_backend_us) = setup_test_backend_with_region("us").await else {
@@ -1641,7 +2221,6 @@ mod tests {
                 .database_name(DatabaseName::new("eu-west+mydb").unwrap())
                 .topology_name("us-east"), // Explicit topology should win
         };
-
         let backend = request_with_explicit_topology.assign(&factory);
         // Should route to us-east (explicit topology), not eu-west (from database)
         let Backend::Spanner(spanner_backend) = backend;
@@ -1689,5 +2268,408 @@ mod tests {
             matches!(backend, Backend::Spanner(_)),
             "Should route to default Spanner backend"
         );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup test data - create multiple databases
+        let (tenant_id, database_name1) = setup_tenant_and_database(&backend).await;
+        let database_name2 = DatabaseName::new("test_database_2").expect("Invalid database name");
+        let create_db_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: database_name2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_db_req2)
+            .await
+            .expect("Failed to create second database");
+
+        // Test the internal ListDatabasesRequest
+        let request = internal::ListDatabasesRequest {
+            tenant_id: tenant_id.clone(),
+        };
+
+        // Test the Runnable implementation
+        let backends = vec![Backend::Spanner(backend.clone())];
+        let result = request.run(backends).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to list databases: {:?}",
+            result.err()
+        );
+
+        let databases = result.unwrap();
+        assert!(databases.len() == 2, "Should return exactly two databases");
+
+        // Verify both databases we created are in the results
+        let db_names: Vec<String> = databases.iter().map(|db| db.name.clone()).collect();
+        assert!(
+            db_names.contains(&database_name1.as_ref().to_string()),
+            "Should contain the first test database: {}",
+            database_name1.as_ref()
+        );
+        assert!(
+            db_names.contains(&database_name2.as_ref().to_string()),
+            "Should contain the second test database: {}",
+            database_name2.as_ref()
+        );
+
+        // Verify all databases belong to the correct tenant
+        for db in &databases {
+            assert_eq!(
+                db.tenant, tenant_id,
+                "Database should belong to test tenant"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases_empty_tenant() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Use a non-existent tenant
+        let tenant_id = Uuid::new_v4().to_string();
+        let request = internal::ListDatabasesRequest { tenant_id };
+
+        let backends = vec![Backend::Spanner(backend)];
+        let result = request.run(backends).await;
+
+        assert!(result.is_ok(), "Should succeed even for empty tenant");
+
+        let databases = result.unwrap();
+        assert!(
+            databases.is_empty(),
+            "Should return empty list for non-existent tenant"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases_with_factory() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup test data - create multiple databases
+        let (tenant_id, database_name1) = setup_tenant_and_database(&backend).await;
+        let database_name2 = DatabaseName::new("test_database_2").expect("Invalid database name");
+        let create_db_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: database_name2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_db_req2)
+            .await
+            .expect("Failed to create second database");
+
+        // Create a backend factory
+        let mut topology_to_backend = std::collections::HashMap::new();
+        topology_to_backend.insert(TopologyName::new("us").unwrap(), backend.clone());
+        let factory = BackendFactory::new(topology_to_backend);
+
+        // Test the Assignable implementation
+        let request = internal::ListDatabasesRequest {
+            tenant_id: tenant_id.clone(),
+        };
+        let backends = request.assign(&factory);
+
+        assert!(!backends.is_empty(), "Should assign at least one backend");
+
+        // Test the Runnable implementation with factory-assigned backends
+        let result = request.run(backends).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to list databases: {:?}",
+            result.err()
+        );
+
+        let databases = result.unwrap();
+        assert!(databases.len() >= 2, "Should return at least two databases");
+
+        // Verify both databases we created are in the results
+        let db_names: Vec<String> = databases.iter().map(|db| db.name.clone()).collect();
+        assert!(
+            db_names.contains(&database_name1.as_ref().to_string()),
+            "Should contain the first test database: {}",
+            database_name1.as_ref()
+        );
+        assert!(
+            db_names.contains(&database_name2.as_ref().to_string()),
+            "Should contain the second test database: {}",
+            database_name2.as_ref()
+        );
+
+        // Verify all databases belong to the correct tenant
+        for db in &databases {
+            assert_eq!(
+                db.tenant, tenant_id,
+                "Database should belong to test tenant"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_list_databases_single_and_mcmr() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Setup test data - create single-region databases
+        let (tenant_id, single_region_db1) = setup_tenant_and_database(&backend).await;
+        let single_region_db2 =
+            DatabaseName::new("single_region_db_2").expect("Invalid database name");
+        let create_sr_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: single_region_db2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_sr_req2)
+            .await
+            .expect("Failed to create second single-region database");
+
+        // Create MCMR databases (simulate by creating databases with topology prefixes)
+        let mcmr_db1 = DatabaseName::new("us+mcmr_db_1").expect("Invalid database name");
+        let create_mcmr_req1 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: mcmr_db1.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_mcmr_req1)
+            .await
+            .expect("Failed to create first MCMR database");
+
+        let mcmr_db2 = DatabaseName::new("eu+mcmr_db_2").expect("Invalid database name");
+        let create_mcmr_req2 = CreateDatabaseRequest {
+            id: Uuid::new_v4(),
+            name: mcmr_db2.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+        let _: crate::types::CreateDatabaseResponse = backend
+            .create_database(create_mcmr_req2)
+            .await
+            .expect("Failed to create second MCMR database");
+
+        // Test the internal ListDatabasesRequest
+        let request = internal::ListDatabasesRequest {
+            tenant_id: tenant_id.clone(),
+        };
+
+        // Test the Runnable implementation with single backend (simulates MCMR scenario)
+        let backends = vec![Backend::Spanner(backend.clone())];
+        let result = request.run(backends).await;
+
+        assert!(
+            result.is_ok(),
+            "Failed to list databases with single and MCMR: {:?}",
+            result.err()
+        );
+
+        let databases = result.unwrap();
+        assert!(
+            databases.len() >= 4,
+            "Should return at least four databases"
+        );
+
+        // Verify all databases we created are in the results
+        let db_names: Vec<String> = databases.iter().map(|db| db.name.clone()).collect();
+        assert!(
+            db_names.contains(&single_region_db1.as_ref().to_string()),
+            "Should contain the first single-region database: {}",
+            single_region_db1.as_ref()
+        );
+        assert!(
+            db_names.contains(&single_region_db2.as_ref().to_string()),
+            "Should contain the second single-region database: {}",
+            single_region_db2.as_ref()
+        );
+        assert!(
+            db_names.contains(&mcmr_db1.as_ref().to_string()),
+            "Should contain the first MCMR database: {}",
+            mcmr_db1.as_ref()
+        );
+        assert!(
+            db_names.contains(&mcmr_db2.as_ref().to_string()),
+            "Should contain the second MCMR database: {}",
+            mcmr_db2.as_ref()
+        );
+
+        // Verify all databases belong to the correct tenant
+        for db in &databases {
+            assert_eq!(
+                db.tenant, tenant_id,
+                "Database should belong to test tenant"
+            );
+        }
+
+        // Test stable sorting by topology - single-region databases first, then MCMR sorted by topology
+        let single_region_dbs: Vec<&Database> = databases
+            .iter()
+            .filter(|db| !db.name.contains('+'))
+            .collect();
+        let mcmr_dbs: Vec<&Database> = databases
+            .iter()
+            .filter(|db| db.name.contains('+'))
+            .collect();
+
+        // Verify single-region databases come first
+        if !single_region_dbs.is_empty() && !mcmr_dbs.is_empty() {
+            let first_mcmr_index = databases
+                .iter()
+                .position(|db| db.name.contains('+'))
+                .unwrap();
+
+            // All databases before the first MCMR database should be single-region
+            for db in &databases[..first_mcmr_index] {
+                assert!(
+                    !db.name.contains('+'),
+                    "Database before first MCMR should be single-region, got: {}",
+                    db.name
+                );
+            }
+
+            // All databases after the first MCMR database should be MCMR
+            for db in &databases[first_mcmr_index..] {
+                assert!(
+                    db.name.contains('+'),
+                    "Database after first MCMR should be MCMR, got: {}",
+                    db.name
+                );
+            }
+        }
+
+        // Verify MCMR databases are sorted by topology (eu before us)
+        assert!(
+            mcmr_dbs.len() == 2,
+            "Should return exactly two MCMR databases"
+        );
+        assert!(
+            mcmr_dbs[0].name.starts_with("eu+"),
+            "First MCMR database should be from 'eu' topology, got: {}",
+            mcmr_dbs[0].name
+        );
+        assert!(
+            mcmr_dbs[1].name.starts_with("us+"),
+            "Second MCMR database should be from 'us' topology, got: {}",
+            mcmr_dbs[1].name
+        );
+
+        // Test that we have both single-region and MCMR databases
+        let single_region_count = databases.iter().filter(|db| !db.name.contains('+')).count();
+        let mcmr_count = databases.iter().filter(|db| db.name.contains('+')).count();
+
+        assert!(
+            single_region_count >= 2,
+            "Should have at least 2 single-region databases, got: {}",
+            single_region_count
+        );
+        assert!(
+            mcmr_count >= 2,
+            "Should have at least 2 MCMR databases, got: {}",
+            mcmr_count
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_mcmr_delete_collection_soft_delete() {
+        let Some(backend): Option<SpannerBackend> = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (service, _temp_dir) = setup_test_service(backend.clone()).await;
+
+        // Create test data
+        let (tenant_id, database_name) = setup_tenant_and_database(&backend).await;
+
+        // Create collection using the internal type like other tests
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let create_collection_req = CreateCollectionRequest {
+            id: collection_id,
+            tenant_id: tenant_id.clone(),
+            database_name: database_name.clone(),
+            name: "test_collection".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+
+        let backend_for_create = create_collection_req.assign(&service.backends);
+        let _create_response = create_collection_req.run(backend_for_create).await.unwrap();
+
+        // Test: Delete the collection (soft delete)
+        let delete_req = chroma_types::chroma_proto::DeleteCollectionRequest {
+            tenant: tenant_id.clone(),
+            database: database_name.as_ref().to_string(),
+            id: collection_id.0.to_string(),
+            segment_ids: vec![],
+        };
+        let delete_response = service
+            .delete_collection(Request::new(delete_req))
+            .await
+            .unwrap();
+
+        // Verify the response
+        assert_eq!(
+            delete_response.into_inner(),
+            chroma_types::chroma_proto::DeleteCollectionResponse {}
+        );
+
+        // Verify the collection is soft deleted by trying to get it
+        let get_req = chroma_types::chroma_proto::GetCollectionWithSegmentsRequest {
+            database: Some(database_name.as_ref().to_string()),
+            id: collection_id.0.to_string(),
+        };
+        let get_result = service
+            .get_collection_with_segments(Request::new(get_req))
+            .await;
+
+        // Should fail because collection is soft deleted
+        assert!(get_result.is_err());
+        let status = get_result.unwrap_err();
+        assert_eq!(status.code(), tonic::Code::NotFound);
+
+        // Verify the collection exists in soft-deleted form using backend directly
+        let get_collections_req = internal::GetCollectionsRequest {
+            filter: internal::CollectionFilter {
+                ids: Some(vec![collection_id]),
+                database_name: Some(database_name.clone()),
+                name: None,
+                tenant_id: None,
+                include_soft_deleted: true,
+                limit: None,
+                offset: None,
+                topology_name: None,
+            },
+        };
+        let backend_for_get = get_collections_req.assign(&service.backends);
+        let get_collections_result = get_collections_req.run(backend_for_get).await;
+
+        // Should succeed and return the soft-deleted collection
+        assert!(get_collections_result.is_ok());
+        let response = get_collections_result.unwrap();
+        assert_eq!(response.collections.len(), 1);
+        // The collection should be returned when include_soft_deleted=true
+        // (even though chroma_types::Collection doesn't expose is_deleted field)
+        // because the proto structure is different. The main test is that
+        // soft delete works and the collection is not found when trying to get it.
     }
 }

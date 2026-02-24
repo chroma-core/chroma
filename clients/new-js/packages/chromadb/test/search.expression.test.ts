@@ -301,6 +301,61 @@ describe("search expression DSL", () => {
     ]);
   });
 
+  test("K.DOCUMENT.contains rejects non-string values", () => {
+    expect(() => K.DOCUMENT.contains(1 as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.contains(1 as any)).toThrow(
+      "K.DOCUMENT.contains requires a string value",
+    );
+    expect(() => K.DOCUMENT.contains(true as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.contains(true as any)).toThrow(
+      "K.DOCUMENT.contains requires a string value",
+    );
+  });
+
+  test("K.DOCUMENT.notContains rejects non-string values", () => {
+    expect(() => K.DOCUMENT.notContains(42 as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.notContains(42 as any)).toThrow(
+      "K.DOCUMENT.notContains requires a string value",
+    );
+    expect(() => K.DOCUMENT.notContains(false as any)).toThrow(TypeError);
+    expect(() => K.DOCUMENT.notContains(false as any)).toThrow(
+      "K.DOCUMENT.notContains requires a string value",
+    );
+  });
+
+  test("K.DOCUMENT.contains accepts string values", () => {
+    const expr = K.DOCUMENT.contains("machine learning");
+    const payload = new Search({ where: expr }).toPayload();
+    expect(payload.filter).toEqual({
+      "#document": { $contains: "machine learning" },
+    });
+  });
+
+  test("K.DOCUMENT.notContains accepts string values", () => {
+    const expr = K.DOCUMENT.notContains("deprecated");
+    const payload = new Search({ where: expr }).toPayload();
+    expect(payload.filter).toEqual({
+      "#document": { $not_contains: "deprecated" },
+    });
+  });
+
+  test("metadata key contains/notContains still accepts numbers and booleans", () => {
+    const containsNum = K("scores").contains(42);
+    expect(new Search({ where: containsNum }).toPayload().filter).toEqual({
+      scores: { $contains: 42 },
+    });
+
+    const containsBool = K("flags").contains(true);
+    expect(new Search({ where: containsBool }).toPayload().filter).toEqual({
+      flags: { $contains: true },
+    });
+
+    const notContainsNum = K("scores").notContains(42);
+    expect(new Search({ where: notContainsNum }).toPayload().filter).toEqual({
+      scores: { $not_contains: 42 },
+    });
+  });
+
   test("K helper maps metadata selections and operators", () => {
     const where = K("author")
       .isIn(["alice", "bob"])

@@ -23,12 +23,19 @@ type ReplLogWriter = LogWriter<
 
 async fn writer_thread(
     writer: Arc<ReplLogWriter>,
+    storage: Arc<chroma_storage::Storage>,
+    prefix: String,
     mutex: Arc<Mutex<()>>,
     wait: Arc<tokio::sync::Notify>,
     notify: Arc<tokio::sync::Notify>,
     iterations: usize,
 ) -> (usize, usize) {
-    let cursors = writer.cursors(CursorStoreOptions::default()).await.unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        storage,
+        prefix,
+        "writer_thread".to_string(),
+    );
     let mut witness = cursors
         .load(&CursorName::new("my_cursor").unwrap())
         .await
@@ -174,10 +181,12 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
         .await
         .expect("LogWriter::open should succeed"),
     );
-    let cursors = writer1
-        .cursors(CursorStoreOptions::default())
-        .await
-        .unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::new(storage.clone()),
+        prefix.clone(),
+        "init_cursor".to_string(),
+    );
     cursors
         .init(&CursorName::new("my_cursor").unwrap(), Cursor::default())
         .await
@@ -219,6 +228,8 @@ async fn test_k8s_mcmr_integration_repl_98_garbage_alternate() {
     // Launch both threads.
     let handle1 = tokio::spawn(writer_thread(
         Arc::clone(&writer1),
+        Arc::new(storage),
+        prefix,
         Arc::clone(&mutex),
         Arc::clone(&notify_writer),
         Arc::clone(&notify_gcer),

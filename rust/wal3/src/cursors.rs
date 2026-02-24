@@ -8,6 +8,11 @@ use chroma_storage::{
 
 use crate::{CursorStoreOptions, Error, LogPosition};
 
+// SAFETY(rescrv): "compaction" is a valid cursor name (non-empty, alphanumeric).
+/// The well-known cursor name used for compaction offsets.
+pub static INTRINSIC_CURSOR: CursorName =
+    unsafe { CursorName::from_string_unchecked("compaction") };
+
 //////////////////////////////////////////// CursorName ////////////////////////////////////////////
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -233,6 +238,12 @@ impl CursorStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn intrinsic_cursor_is_valid() {
+        assert!(INTRINSIC_CURSOR.is_valid());
+        assert_eq!(INTRINSIC_CURSOR.path(), "cursor/compaction.json");
+    }
 
     #[test]
     fn cursor_new() {

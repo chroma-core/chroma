@@ -20,10 +20,10 @@ use chroma_types::{
     },
     plan::{Count, Get, Knn},
     test_segment, BooleanOperator, Chunk, Collection, CollectionAndSegments, CompositeExpression,
-    DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata, MetadataComparison,
-    MetadataExpression, MetadataSetValue, MetadataValue, Operation, OperationRecord,
-    PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator, UpdateMetadata,
-    Where, CHROMA_KEY,
+    ContainsOperator, DocumentExpression, DocumentOperator, KnnIndex, LogRecord, Metadata,
+    MetadataComparison, MetadataExpression, MetadataSetValue, MetadataValue, Operation,
+    OperationRecord, PrimitiveOperator, Schema, Segment, SegmentScope, SegmentUuid, SetOperator,
+    UpdateMetadata, Where, CHROMA_KEY,
 };
 use regex::Regex;
 use std::collections::BinaryHeap;
@@ -57,17 +57,35 @@ impl TestDistributedSegment {
             .await
             .expect("Expected to construct gc context for spann");
 
+        #[allow(unused_mut)]
+        let mut temp_dirs = vec![blockfile_dir, hnsw_dir];
+
+        #[cfg(feature = "usearch")]
+        let (usearch_dir, usearch_provider) = {
+            let (dir, storage) = chroma_storage::test_storage();
+            let provider = chroma_index::usearch::USearchIndexProvider::new(
+                storage,
+                chroma_cache::new_non_persistent_cache_for_test(),
+            );
+            (dir, provider)
+        };
+
+        #[cfg(feature = "usearch")]
+        temp_dirs.push(usearch_dir);
+
         Self {
-            temp_dirs: vec![blockfile_dir, hnsw_dir],
+            temp_dirs,
             blockfile_provider: blockfile_provider.clone(),
             hnsw_provider: hnsw_provider.clone(),
             spann_provider: SpannProvider {
-                hnsw_provider,
+                adaptive_search_nprobe: true,
                 blockfile_provider,
                 garbage_collection_context,
+                hnsw_provider,
                 metrics: SpannMetrics::default(),
                 pl_block_size: 5 * 1024 * 1024,
-                adaptive_search_nprobe: true,
+                #[cfg(feature = "usearch")]
+                usearch_provider,
             },
             collection,
             metadata_segment: test_segment(collection_uuid, SegmentScope::METADATA),
@@ -587,6 +605,37 @@ impl CheckRecord for MetadataExpression {
                 match set_operator {
                     SetOperator::In => contains,
                     SetOperator::NotIn => !contains,
+                }
+            }
+            MetadataComparison::ArrayContains(contains_operator, query_value) => {
+                // Check if the stored metadata field contains the query scalar value.
+                // Note: Scalars are treated as singleton arrays to match blockfile behavior,
+                // where arrays are "exploded" in the index (each element indexed individually)
+                // and scalars/array-elements are indistinguishable in the inverted index.
+                let found = match (stored, query_value) {
+                    (Some(MetadataValue::BoolArray(arr)), MetadataValue::Bool(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::IntArray(arr)), MetadataValue::Int(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::FloatArray(arr)), MetadataValue::Float(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::StringArray(arr)), MetadataValue::Str(val)) => {
+                        arr.contains(val)
+                    }
+                    (Some(MetadataValue::Bool(scalar)), MetadataValue::Bool(val)) => scalar == val,
+                    (Some(MetadataValue::Int(scalar)), MetadataValue::Int(val)) => scalar == val,
+                    (Some(MetadataValue::Float(scalar)), MetadataValue::Float(val)) => {
+                        scalar == val
+                    }
+                    (Some(MetadataValue::Str(scalar)), MetadataValue::Str(val)) => scalar == val,
+                    _ => false,
+                };
+                match contains_operator {
+                    ContainsOperator::Contains => found,
+                    ContainsOperator::NotContains => !found,
                 }
             }
         }

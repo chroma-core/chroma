@@ -42,6 +42,22 @@ const search2 = new Search({
   select: ["#document", "#score"]
 });
 ```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .r#where(Key::field("status").eq("active"))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(10), 0)
+    .select([Key::Document, Key::Score]);
+```
 </CodeGroup>
 
 ## Constructor Parameters
@@ -121,6 +137,26 @@ search2 = search2.where(K("status").eq("active"));
 search2 = search2.rank(Knn({ query: "recent advances in quantum computing" }));
 search2 = search2.limit(20);
 search2 = search2.select(K.DOCUMENT, K.METADATA);
+```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let base = SearchPayload::default().r#where(Key::field("category").eq("science"));
+let search_v1 = base.clone().limit(Some(5), 0);
+let search_v2 = base.clone().limit(Some(10), 0);
+
+let search = SearchPayload::default()
+    .r#where(Key::field("status").eq("active"))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.2, 0.4, 0.6]),
+        key: Key::Embedding,
+        limit: 20,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(20), 0)
+    .select([Key::Document, Key::Metadata]);
 ```
 </CodeGroup>
 
@@ -207,6 +243,22 @@ const search5 = new Search({ where: K("status").eq("published") });
 
 // Just ranking
 const search6 = new Search({ rank: Knn({ query: "artificial intelligence" }) });
+```
+
+```rust Rust
+use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
+
+let search = SearchPayload::default()
+    .r#where(Key::field("category").eq("science"))
+    .rank(RankExpr::Knn {
+        query: QueryVector::Dense(vec![0.1, 0.2, 0.3]),
+        key: Key::Embedding,
+        limit: 10,
+        default: None,
+        return_rank: false,
+    })
+    .limit(Some(10), 0)
+    .select([Key::Document, Key::Score, Key::field("author")]);
 ```
 </CodeGroup>
 

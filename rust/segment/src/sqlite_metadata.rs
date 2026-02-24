@@ -6,18 +6,25 @@ use std::{
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_sqlite::{
     db::SqliteDb,
-    helpers::{delete_metadata, update_metadata},
-    table::{Collections, EmbeddingFulltextSearch, EmbeddingMetadata, Embeddings, MaxSeqId},
+    helpers::{
+        delete_array_metadata, delete_array_metadata_keys, delete_metadata, update_metadata,
+        upsert_array_metadata,
+    },
+    table::{
+        Collections, EmbeddingFulltextSearch, EmbeddingMetadata, EmbeddingMetadataArray,
+        Embeddings, MaxSeqId,
+    },
 };
 use chroma_types::{
     operator::{
         CountResult, Filter, GetResult, Limit, Projection, ProjectionOutput, ProjectionRecord, Scan,
     },
     plan::{Count, Get},
-    BooleanOperator, Chunk, CollectionUuid, CompositeExpression, DocumentExpression,
-    DocumentOperator, LogRecord, MetadataComparison, MetadataExpression, MetadataSetValue,
-    MetadataValue, MetadataValueConversionError, Operation, OperationRecord, PrimitiveOperator,
-    Schema, SegmentUuid, SetOperator, UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
+    BooleanOperator, Chunk, CollectionUuid, CompositeExpression, ContainsOperator,
+    DocumentExpression, DocumentOperator, LogRecord, Metadata, MetadataComparison,
+    MetadataExpression, MetadataSetValue, MetadataValue, MetadataValueConversionError, Operation,
+    OperationRecord, PrimitiveOperator, Schema, SegmentUuid, SetOperator, UpdateMetadata,
+    UpdateMetadataValue, Where, CHROMA_DOCUMENT_KEY,
 };
 use sea_query::{
     Alias, DeleteStatement, Expr, ExprTrait, Func, InsertStatement, LikeExpr, OnConflict, Query,
@@ -324,6 +331,82 @@ impl SqliteMetadataWriter {
         }
     }
 
+    /// Split `UpdateMetadata` into scalar values (for `embedding_metadata`)
+    /// and a resolved `Metadata` map containing only array values (for
+    /// `embedding_metadata_array`).  Keys set to `None` are collected
+    /// separately so they can be deleted from both tables.
+    fn split_metadata(
+        meta: UpdateMetadata,
+    ) -> (
+        UpdateMetadata, // scalar (+ None) entries for the original table
+        Metadata,       // array entries only
+        Vec<String>,    // keys set to None (need deletion from array table too)
+    ) {
+        let mut scalars: UpdateMetadata = HashMap::new();
+        let mut arrays: Metadata = HashMap::new();
+        let mut deleted_keys: Vec<String> = Vec::new();
+        for (key, value) in meta {
+            match &value {
+                UpdateMetadataValue::BoolArray(_)
+                | UpdateMetadataValue::IntArray(_)
+                | UpdateMetadataValue::FloatArray(_)
+                | UpdateMetadataValue::StringArray(_) => {
+                    // Safe: we just matched array variants.
+                    if let Ok(mv) = MetadataValue::try_from(&value) {
+                        arrays.insert(key, mv);
+                    }
+                }
+                UpdateMetadataValue::None => {
+                    // Delete from both tables.
+                    deleted_keys.push(key.clone());
+                    scalars.insert(key, value);
+                }
+                _ => {
+                    scalars.insert(key, value);
+                }
+            }
+        }
+        (scalars, arrays, deleted_keys)
+    }
+
+    async fn write_metadata<C>(
+        tx: &mut C,
+        offset_id: u32,
+        meta: UpdateMetadata,
+    ) -> Result<(), SqliteMetadataError>
+    where
+        for<'connection> &'connection mut C: sqlx::Executor<'connection, Database = sqlx::Sqlite>,
+    {
+        let (mut scalars, arrays, deleted_keys) = Self::split_metadata(meta);
+
+        // Keys becoming arrays must be removed from the scalar table.
+        for key in arrays.keys() {
+            scalars.insert(key.clone(), UpdateMetadataValue::None);
+        }
+
+        // Keys becoming scalars (or explicitly deleted) must be removed from the array table.
+        let mut array_keys_to_delete = deleted_keys;
+        for (key, val) in &scalars {
+            if !matches!(val, UpdateMetadataValue::None) {
+                array_keys_to_delete.push(key.clone());
+            }
+        }
+
+        if !scalars.is_empty() {
+            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, scalars).await?;
+        }
+
+        if !array_keys_to_delete.is_empty() {
+            delete_array_metadata_keys(tx, offset_id, &array_keys_to_delete).await?;
+        }
+
+        if !arrays.is_empty() {
+            upsert_array_metadata(tx, offset_id, &arrays).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn apply_logs<C>(
         &self,
         logs: Chunk<LogRecord>,
@@ -382,7 +465,7 @@ impl SqliteMetadataWriter {
                                     schema_modified = true;
                                 }
                             }
-                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
+                            Self::write_metadata(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
@@ -400,7 +483,7 @@ impl SqliteMetadataWriter {
                                     schema_modified = true;
                                 }
                             }
-                            update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
+                            Self::write_metadata(tx, offset_id, meta).await?;
                         }
 
                         if let Some(doc) = document {
@@ -420,7 +503,7 @@ impl SqliteMetadataWriter {
                                 schema_modified = true;
                             }
                         }
-                        update_metadata::<EmbeddingMetadata, _, _>(tx, offset_id, meta).await?;
+                        Self::write_metadata(tx, offset_id, meta).await?;
                     }
 
                     if let Some(doc) = document {
@@ -432,6 +515,7 @@ impl SqliteMetadataWriter {
                     if let Some(offset_id) = Self::delete_record(tx, segment_id, id.clone()).await?
                     {
                         delete_metadata::<EmbeddingMetadata, _, _>(tx, offset_id).await?;
+                        delete_array_metadata(tx, offset_id).await?;
                         Self::delete_document(tx, offset_id).await?;
                     }
                 }
@@ -644,6 +728,14 @@ impl IntoSqliteExpr for MetadataExpression {
                     MetadataValue::SparseVector(_) => {
                         unimplemented!("Comparision with sparse vector is not allowed")
                     }
+                    MetadataValue::BoolArray(_)
+                    | MetadataValue::IntArray(_)
+                    | MetadataValue::FloatArray(_)
+                    | MetadataValue::StringArray(_) => {
+                        unimplemented!(
+                            "Primitive comparison with array metadata values is not supported"
+                        )
+                    }
                 };
                 let scol = Expr::col((EmbeddingMetadata::Table, col));
                 let mut subq = Query::select()
@@ -763,6 +855,40 @@ impl IntoSqliteExpr for MetadataExpression {
                     }
                 }
             }
+            MetadataComparison::ArrayContains(contains_op, val) => {
+                // Array contains: arrays are stored exploded in the separate
+                // `embedding_metadata_array` table (one row per element).
+                // A contains check is an equality lookup on the scalar value.
+                let (col, sval) = match val {
+                    MetadataValue::Bool(b) => (EmbeddingMetadataArray::BoolValue, Expr::val(*b)),
+                    MetadataValue::Int(i) => (EmbeddingMetadataArray::IntValue, Expr::val(*i)),
+                    MetadataValue::Float(f) => (EmbeddingMetadataArray::FloatValue, Expr::val(*f)),
+                    MetadataValue::Str(s) => (EmbeddingMetadataArray::StringValue, Expr::val(s)),
+                    _ => unreachable!("ArrayContains only supports scalar metadata values"),
+                };
+                let arr_key_col =
+                    Expr::col((EmbeddingMetadataArray::Table, EmbeddingMetadataArray::Key));
+                let arr_key_cond = arr_key_col
+                    .clone()
+                    .eq(self.key.to_string())
+                    .and(arr_key_col.is_not_null());
+                let scol = Expr::col((EmbeddingMetadataArray::Table, col));
+                let subq = Query::select()
+                    .column(EmbeddingMetadataArray::Id)
+                    .from(EmbeddingMetadataArray::Table)
+                    .and_where(arr_key_cond)
+                    .and_where(scol.eq(sval))
+                    .to_owned();
+
+                match contains_op {
+                    ContainsOperator::Contains => {
+                        Expr::col((Embeddings::Table, Embeddings::Id)).in_subquery(subq)
+                    }
+                    ContainsOperator::NotContains => {
+                        Expr::col((Embeddings::Table, Embeddings::Id)).not_in_subquery(subq)
+                    }
+                }
+            }
         }
     }
 }
@@ -775,6 +901,46 @@ pub struct SqliteMetadataReader {
 impl SqliteMetadataReader {
     pub fn new(db: SqliteDb) -> Self {
         Self { db }
+    }
+
+    /// Accumulate an exploded array element into the metadata map.
+    ///
+    /// Column layout: 0=id, 1=key, 2=string_value, 3=int_value, 4=float_value, 5=bool_value
+    fn accumulate_array_value(
+        metadata: &mut HashMap<String, MetadataValue>,
+        key: &str,
+        row: &sqlx::sqlite::SqliteRow,
+    ) -> Result<(), SqliteMetadataError> {
+        if let Ok(Some(s)) = row.try_get::<Option<String>, _>(2) {
+            match metadata.get_mut(key) {
+                Some(MetadataValue::StringArray(arr)) => arr.push(s),
+                _ => {
+                    metadata.insert(key.to_string(), MetadataValue::StringArray(vec![s]));
+                }
+            }
+        } else if let Ok(Some(i)) = row.try_get::<Option<i64>, _>(3) {
+            match metadata.get_mut(key) {
+                Some(MetadataValue::IntArray(arr)) => arr.push(i),
+                _ => {
+                    metadata.insert(key.to_string(), MetadataValue::IntArray(vec![i]));
+                }
+            }
+        } else if let Ok(Some(f)) = row.try_get::<Option<f64>, _>(4) {
+            match metadata.get_mut(key) {
+                Some(MetadataValue::FloatArray(arr)) => arr.push(f),
+                _ => {
+                    metadata.insert(key.to_string(), MetadataValue::FloatArray(vec![f]));
+                }
+            }
+        } else if let Ok(Some(b)) = row.try_get::<Option<bool>, _>(5) {
+            match metadata.get_mut(key) {
+                Some(MetadataValue::BoolArray(arr)) => arr.push(b),
+                _ => {
+                    metadata.insert(key.to_string(), MetadataValue::BoolArray(vec![b]));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn current_max_seq_id(
@@ -926,6 +1092,41 @@ impl SqliteMetadataReader {
             }
         }
 
+        // Fetch array metadata from the separate array table and merge
+        // into the records we already have.
+        if metadata && !records.is_empty() {
+            let offset_ids: Vec<u32> = records.keys().copied().collect();
+            let (arr_sql, arr_vals) = Query::select()
+                .columns([
+                    EmbeddingMetadataArray::Id,
+                    EmbeddingMetadataArray::Key,
+                    EmbeddingMetadataArray::StringValue,
+                    EmbeddingMetadataArray::IntValue,
+                    EmbeddingMetadataArray::FloatValue,
+                    EmbeddingMetadataArray::BoolValue,
+                ])
+                .from(EmbeddingMetadataArray::Table)
+                .and_where(
+                    Expr::col(EmbeddingMetadataArray::Id)
+                        .is_in(offset_ids.iter().copied().map(|id| id as i64)),
+                )
+                .build_sqlx(SqliteQueryBuilder);
+
+            let arr_rows = sqlx::query_with(&arr_sql, arr_vals)
+                .fetch_all(self.db.get_conn())
+                .await?;
+
+            for row in arr_rows {
+                let offset_id: u32 = row.try_get(0)?;
+                let key: String = row.try_get(1)?;
+                if let Some(record) = records.get_mut(&offset_id) {
+                    if let Some(md) = record.metadata.as_mut() {
+                        Self::accumulate_array_value(md, &key, &row)?;
+                    }
+                }
+            }
+        }
+
         Ok(GetResult {
             pulled_log_bytes: 0,
             result: ProjectionOutput {
@@ -958,9 +1159,9 @@ mod tests {
         operator::{Filter, Limit, Projection, Scan},
         plan::{Count, Get},
         strategies::{any_collection_data_and_where_filter, TestCollectionData},
-        Chunk, CollectionAndSegments, DocumentOperator, LogRecord, MetadataComparison,
-        MetadataExpression, MetadataValue, Operation, OperationRecord, PrimitiveOperator,
-        UpdateMetadataValue, Where,
+        Chunk, CollectionAndSegments, ContainsOperator, DocumentOperator, LogRecord,
+        MetadataComparison, MetadataExpression, MetadataValue, Operation, OperationRecord,
+        PrimitiveOperator, UpdateMetadataValue, Where,
     };
     use proptest::prelude::*;
     use std::collections::HashMap;
@@ -1368,5 +1569,1595 @@ mod tests {
 
         // no results bc fts matches but metadata does not
         assert_eq!(ref_get.result.records.len(), 0);
+    }
+
+    /// Helper: create logs, write them, and return reader + collection_and_segments.
+    async fn setup_with_logs(
+        logs: Vec<LogRecord>,
+    ) -> (SqliteMetadataReader, CollectionAndSegments) {
+        let writer = SqliteMetadataWriter {
+            db: get_new_sqlite_db().await,
+        };
+        let cas = CollectionAndSegments::test(3);
+        let seg_id = cas.metadata_segment.id;
+        let mut tx = writer.begin().await.expect("begin tx");
+        writer
+            .apply_logs(
+                Chunk::new(logs.into()),
+                seg_id,
+                cas.collection.schema.clone(),
+                &mut *tx,
+            )
+            .await
+            .expect("apply logs");
+        tx.commit().await.expect("commit");
+        let reader = SqliteMetadataReader { db: writer.db };
+        (reader, cas)
+    }
+
+    fn make_get_plan(cas: &CollectionAndSegments, where_clause: Option<Where>) -> Get {
+        Get {
+            scan: Scan {
+                collection_and_segments: cas.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause,
+            },
+            limit: Limit {
+                offset: 0,
+                limit: None,
+            },
+            proj: Projection {
+                document: false,
+                embedding: false,
+                metadata: true,
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_array_metadata_write_and_read() {
+        // Write records with array metadata and read them back.
+        let mut meta = HashMap::new();
+        meta.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["action".to_string(), "comedy".to_string()]),
+        );
+        meta.insert(
+            "scores".to_string(),
+            UpdateMetadataValue::IntArray(vec![10, 20, 30]),
+        );
+        meta.insert(
+            "scalar_key".to_string(),
+            UpdateMetadataValue::Str("plain".to_string()),
+        );
+
+        let logs = vec![LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: "id1".to_string(),
+                metadata: Some(meta),
+                document: None,
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        }];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata present");
+
+        // Scalar comes back as scalar.
+        assert_eq!(
+            md.get("scalar_key"),
+            Some(&MetadataValue::Str("plain".to_string()))
+        );
+
+        // String array round-trips (order may vary within the array).
+        match md.get("tags") {
+            Some(MetadataValue::StringArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec!["action", "comedy"]);
+            }
+            other => panic!("Expected StringArray for 'tags', got {:?}", other),
+        }
+
+        // Int array round-trips.
+        match md.get("scores") {
+            Some(MetadataValue::IntArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec![10, 20, 30]);
+            }
+            other => panic!("Expected IntArray for 'scores', got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_array_contains_query() {
+        // Two records: id1 has tags ["action", "comedy"], id2 has tags ["drama"].
+        let mut meta1 = HashMap::new();
+        meta1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["action".to_string(), "comedy".to_string()]),
+        );
+        let mut meta2 = HashMap::new();
+        meta2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["drama".to_string()]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id2".to_string(),
+                    metadata: Some(meta2),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // $contains "action" → should match only id1
+        let contains_action = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("action".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_action));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // $contains "drama" → should match only id2
+        let contains_drama = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("drama".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_drama));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+
+        // $contains "unknown" → no matches
+        let contains_none = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("unknown".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_none));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_array_not_contains_query() {
+        // id1: tags=["action","comedy"], id2: tags=["drama"]
+        let mut meta1 = HashMap::new();
+        meta1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["action".to_string(), "comedy".to_string()]),
+        );
+        let mut meta2 = HashMap::new();
+        meta2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["drama".to_string()]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id2".to_string(),
+                    metadata: Some(meta2),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // $not_contains "action" → should exclude id1, returning only id2
+        let not_contains_action = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::NotContains,
+                MetadataValue::Str("action".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(not_contains_action));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+    }
+
+    #[tokio::test]
+    async fn test_array_int_contains_query() {
+        // Test contains on integer arrays.
+        let mut meta1 = HashMap::new();
+        meta1.insert(
+            "scores".to_string(),
+            UpdateMetadataValue::IntArray(vec![1, 2, 3]),
+        );
+        let mut meta2 = HashMap::new();
+        meta2.insert(
+            "scores".to_string(),
+            UpdateMetadataValue::IntArray(vec![4, 5]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id2".to_string(),
+                    metadata: Some(meta2),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // $contains 2 → id1 only
+        let contains_2 = Where::Metadata(MetadataExpression {
+            key: "scores".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Int(2),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_2));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // $contains 5 → id2 only
+        let contains_5 = Where::Metadata(MetadataExpression {
+            key: "scores".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Int(5),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_5));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+    }
+
+    #[tokio::test]
+    async fn test_array_metadata_update() {
+        // Verify that updating an array replaces the old exploded rows.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["old_a".to_string(), "old_b".to_string()]),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["new_x".to_string()]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // After update, $contains "old_a" should NOT match
+        let contains_old = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("old_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_old));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+
+        // $contains "new_x" should match
+        let contains_new = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("new_x".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_new));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // Read back metadata to verify the array was replaced
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata");
+        match md.get("tags") {
+            Some(MetadataValue::StringArray(arr)) => {
+                assert_eq!(arr, &vec!["new_x".to_string()]);
+            }
+            other => panic!("Expected StringArray, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_mixed_scalar_and_array_metadata() {
+        // Verify that scalar metadata (embedding_metadata table) and
+        // array metadata (embedding_metadata_array table) coexist correctly
+        // on the same record and are both returned when projecting.
+        let mut meta = HashMap::new();
+        meta.insert(
+            "name".to_string(),
+            UpdateMetadataValue::Str("Alice".to_string()),
+        );
+        meta.insert("score".to_string(), UpdateMetadataValue::Int(42));
+        meta.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["admin".to_string(), "user".to_string()]),
+        );
+        meta.insert(
+            "ratings".to_string(),
+            UpdateMetadataValue::FloatArray(vec![4.5, 3.2]),
+        );
+
+        let logs = vec![LogRecord {
+            log_offset: 0,
+            record: OperationRecord {
+                id: "id1".to_string(),
+                metadata: Some(meta),
+                document: Some("hello world".to_string()),
+                operation: Operation::Add,
+                embedding: None,
+                encoding: None,
+            },
+        }];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Read back all metadata (no filter).
+        let plan = Get {
+            scan: Scan {
+                collection_and_segments: cas.clone(),
+            },
+            filter: Filter {
+                query_ids: None,
+                where_clause: None,
+            },
+            limit: Limit {
+                offset: 0,
+                limit: None,
+            },
+            proj: Projection {
+                document: true,
+                embedding: false,
+                metadata: true,
+            },
+        };
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+
+        let rec = &result.result.records[0];
+        assert_eq!(rec.document.as_deref(), Some("hello world"));
+
+        let md = rec.metadata.as_ref().expect("metadata");
+        // Scalars
+        assert_eq!(
+            md.get("name"),
+            Some(&MetadataValue::Str("Alice".to_string()))
+        );
+        assert_eq!(md.get("score"), Some(&MetadataValue::Int(42)));
+        // Arrays
+        match md.get("tags") {
+            Some(MetadataValue::StringArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec!["admin", "user"]);
+            }
+            other => panic!("Expected StringArray for 'tags', got {:?}", other),
+        }
+        match md.get("ratings") {
+            Some(MetadataValue::FloatArray(arr)) => {
+                assert_eq!(arr.len(), 2);
+                let mut sorted = arr.clone();
+                sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+                assert!((sorted[0] - 3.2).abs() < 1e-6);
+                assert!((sorted[1] - 4.5).abs() < 1e-6);
+            }
+            other => panic!("Expected FloatArray for 'ratings', got {:?}", other),
+        }
+
+        // Now filter by $contains on the array while scalars also present.
+        let contains_admin = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("admin".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_admin));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // Filter by scalar while arrays also present.
+        let eq_score = Where::Metadata(MetadataExpression {
+            key: "score".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Int(42),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_score));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+    }
+
+    #[tokio::test]
+    async fn test_delete_cleans_array_metadata() {
+        // Add a record with array metadata, then delete it.
+        // Verify the record is gone and the array table is clean
+        // (a subsequent add + contains query doesn't see stale data).
+        let mut meta = HashMap::new();
+        meta.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["stale_a".to_string(), "stale_b".to_string()]),
+        );
+        meta.insert("score".to_string(), UpdateMetadataValue::Int(99));
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            // Delete the same record.
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // No records should exist.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+
+        // A $contains query for the old value should also return nothing,
+        // confirming no orphaned rows in the array table.
+        let contains_stale = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("stale_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_stale));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_float_and_bool_contains_query() {
+        // Test $contains on float and bool array types.
+        let mut meta1 = HashMap::new();
+        meta1.insert(
+            "ratings".to_string(),
+            UpdateMetadataValue::FloatArray(vec![4.5, 3.2, 1.0]),
+        );
+        meta1.insert(
+            "flags".to_string(),
+            UpdateMetadataValue::BoolArray(vec![true, false]),
+        );
+
+        let mut meta2 = HashMap::new();
+        meta2.insert(
+            "ratings".to_string(),
+            UpdateMetadataValue::FloatArray(vec![2.0, 5.0]),
+        );
+        meta2.insert(
+            "flags".to_string(),
+            UpdateMetadataValue::BoolArray(vec![false]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id2".to_string(),
+                    metadata: Some(meta2),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Float $contains 4.5 → id1 only
+        let contains_4_5 = Where::Metadata(MetadataExpression {
+            key: "ratings".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Float(4.5),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_4_5));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // Float $contains 5.0 → id2 only
+        let contains_5 = Where::Metadata(MetadataExpression {
+            key: "ratings".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Float(5.0),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_5));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+
+        // Float $not_contains 4.5 → id2 only
+        let not_contains_4_5 = Where::Metadata(MetadataExpression {
+            key: "ratings".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::NotContains,
+                MetadataValue::Float(4.5),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(not_contains_4_5));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+
+        // Bool $contains true → id1 only (id2 has only [false])
+        let contains_true = Where::Metadata(MetadataExpression {
+            key: "flags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Bool(true),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_true));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // Bool $contains false → both id1 and id2
+        let contains_false = Where::Metadata(MetadataExpression {
+            key: "flags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Bool(false),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_false));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 2);
+
+        // Bool $not_contains true → id2 only
+        let not_contains_true = Where::Metadata(MetadataExpression {
+            key: "flags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::NotContains,
+                MetadataValue::Bool(true),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(not_contains_true));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+
+        // Read back and verify array types are correct.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 2);
+
+        for rec in &result.result.records {
+            let md = rec.metadata.as_ref().expect("metadata");
+            match md.get("ratings") {
+                Some(MetadataValue::FloatArray(_)) => {}
+                other => panic!(
+                    "Expected FloatArray for 'ratings' on {}, got {:?}",
+                    rec.id, other
+                ),
+            }
+            match md.get("flags") {
+                Some(MetadataValue::BoolArray(_)) => {}
+                other => panic!(
+                    "Expected BoolArray for 'flags' on {}, got {:?}",
+                    rec.id, other
+                ),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_delete_isolation() {
+        // Two records with array metadata. Delete one, verify the other is
+        // completely unaffected — both its scalar and array metadata survive.
+        let mut meta1 = HashMap::new();
+        meta1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["a".to_string(), "b".to_string()]),
+        );
+        meta1.insert("x".to_string(), UpdateMetadataValue::Int(1));
+
+        let mut meta2 = HashMap::new();
+        meta2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["c".to_string(), "d".to_string()]),
+        );
+        meta2.insert("x".to_string(), UpdateMetadataValue::Int(2));
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id2".to_string(),
+                    metadata: Some(meta2),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            // Delete only id1.
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: None,
+                    document: None,
+                    operation: Operation::Delete,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Only id2 should remain.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata");
+        assert_eq!(md.get("x"), Some(&MetadataValue::Int(2)));
+        match md.get("tags") {
+            Some(MetadataValue::StringArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec!["c", "d"]);
+            }
+            other => panic!("Expected StringArray for 'tags', got {:?}", other),
+        }
+
+        // $contains "a" (from deleted id1) should return nothing.
+        let contains_a = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_a));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+
+        // $contains "c" (from surviving id2) should return id2.
+        let contains_c = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("c".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_c));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id2");
+    }
+
+    #[tokio::test]
+    async fn test_partial_metadata_key_delete() {
+        // A record has scalar "name", array "tags", and array "scores".
+        // Update with tags=None to delete just that key.
+        // Verify "name" and "scores" survive, "tags" is gone, and
+        // $contains queries reflect the change.
+        let mut meta = HashMap::new();
+        meta.insert(
+            "name".to_string(),
+            UpdateMetadataValue::Str("Alice".to_string()),
+        );
+        meta.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["admin".to_string(), "user".to_string()]),
+        );
+        meta.insert(
+            "scores".to_string(),
+            UpdateMetadataValue::IntArray(vec![10, 20]),
+        );
+
+        let mut delete_tags = HashMap::new();
+        delete_tags.insert("tags".to_string(), UpdateMetadataValue::None);
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            // Update: delete only the "tags" key.
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(delete_tags),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Read back: "tags" should be gone, "name" and "scores" survive.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata");
+        assert_eq!(
+            md.get("name"),
+            Some(&MetadataValue::Str("Alice".to_string()))
+        );
+        assert!(md.get("tags").is_none(), "tags should have been deleted");
+        match md.get("scores") {
+            Some(MetadataValue::IntArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec![10, 20]);
+            }
+            other => panic!("Expected IntArray for 'scores', got {:?}", other),
+        }
+
+        // $contains "admin" should return nothing (tags deleted).
+        let contains_admin = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("admin".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_admin));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+
+        // $contains 10 on scores should still work.
+        let contains_10 = Where::Metadata(MetadataExpression {
+            key: "scores".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Int(10),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_10));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+    }
+
+    #[tokio::test]
+    async fn test_metadata_type_change_scalar_to_array() {
+        // Add a record with a scalar "tags" field, then update it to an array.
+        // The old scalar value must be cleaned from embedding_metadata so that
+        // a scalar equality query no longer matches.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("old_scalar".to_string()),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["new_a".to_string(), "new_b".to_string()]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // The old scalar value must NOT be returned by an equality query.
+        let eq_old = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("old_scalar".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_old));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Stale scalar value should have been removed"
+        );
+
+        // The new array value should be queryable via $contains.
+        let contains_new = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("new_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_new));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // Read back metadata and verify it's an array now.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata");
+        match md.get("tags") {
+            Some(MetadataValue::StringArray(arr)) => {
+                let mut sorted = arr.clone();
+                sorted.sort();
+                assert_eq!(sorted, vec!["new_a", "new_b"]);
+            }
+            other => panic!("Expected StringArray, got {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_metadata_type_change_array_to_scalar() {
+        // Add a record with an array "tags" field, then update it to a scalar.
+        // The old array rows must be cleaned from embedding_metadata_array so
+        // that a $contains query no longer matches.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["old_a".to_string(), "old_b".to_string()]),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("new_scalar".to_string()),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // The old array values must NOT match a $contains query.
+        let contains_old = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("old_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_old));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Stale array rows should have been removed"
+        );
+
+        // The new scalar value should be queryable via equality.
+        let eq_new = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("new_scalar".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_new));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        assert_eq!(result.result.records[0].id, "id1");
+
+        // Read back metadata and verify it's a scalar now.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        let md = result.result.records[0]
+            .metadata
+            .as_ref()
+            .expect("metadata");
+        assert_eq!(
+            md.get("tags"),
+            Some(&MetadataValue::Str("new_scalar".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_metadata_type_change_scalar_to_array_two_apply_logs() {
+        // Simulate the e2e path: Add is applied in one apply_logs call,
+        // then Update is applied in a second apply_logs call.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("old_scalar".to_string()),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["new_a".to_string(), "new_b".to_string()]),
+        );
+
+        let writer = SqliteMetadataWriter {
+            db: get_new_sqlite_db().await,
+        };
+        let cas = CollectionAndSegments::test(3);
+        let seg_id = cas.metadata_segment.id;
+
+        // First apply_logs: Add
+        let mut tx = writer.begin().await.expect("begin tx");
+        writer
+            .apply_logs(
+                Chunk::new(
+                    vec![LogRecord {
+                        log_offset: 0,
+                        record: OperationRecord {
+                            id: "id1".to_string(),
+                            metadata: Some(meta_v1),
+                            document: None,
+                            operation: Operation::Add,
+                            embedding: None,
+                            encoding: None,
+                        },
+                    }]
+                    .into(),
+                ),
+                seg_id,
+                cas.collection.schema.clone(),
+                &mut *tx,
+            )
+            .await
+            .expect("apply logs (add)");
+        tx.commit().await.expect("commit");
+
+        // Second apply_logs: Update (scalar -> array)
+        let mut tx = writer.begin().await.expect("begin tx");
+        writer
+            .apply_logs(
+                Chunk::new(
+                    vec![LogRecord {
+                        log_offset: 1,
+                        record: OperationRecord {
+                            id: "id1".to_string(),
+                            metadata: Some(meta_v2),
+                            document: None,
+                            operation: Operation::Update,
+                            embedding: None,
+                            encoding: None,
+                        },
+                    }]
+                    .into(),
+                ),
+                seg_id,
+                cas.collection.schema.clone(),
+                &mut *tx,
+            )
+            .await
+            .expect("apply logs (update)");
+        tx.commit().await.expect("commit");
+
+        let reader = SqliteMetadataReader { db: writer.db };
+
+        // The old scalar value must NOT match.
+        let eq_old = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("old_scalar".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_old));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Stale scalar value should have been removed after type change"
+        );
+
+        // The new array value should be queryable.
+        let contains_new = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("new_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_new));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_type_change_via_upsert() {
+        // Upsert with scalar, then upsert again changing to array.
+        // Verifies the Upsert code path (not just Update) also cleans up.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("scalar_val".to_string()),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["arr_a".to_string(), "arr_b".to_string()]),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Upsert,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Upsert,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Old scalar must be gone.
+        let eq_old = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("scalar_val".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_old));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0, "Stale scalar from upsert");
+
+        // New array must be queryable.
+        let contains_new = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("arr_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_new));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_rapid_type_flip() {
+        // scalar -> array -> scalar: two type changes in rapid succession.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("original".to_string()),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["mid_a".to_string()]),
+        );
+
+        let mut meta_v3 = HashMap::new();
+        meta_v3.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("final_scalar".to_string()),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v3),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Original scalar must be gone.
+        let eq_original = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("original".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_original));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Original scalar should be gone"
+        );
+
+        // Intermediate array must be gone.
+        let contains_mid = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("mid_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_mid));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Intermediate array should be gone"
+        );
+
+        // Final scalar must be queryable.
+        let eq_final = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("final_scalar".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_final));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+
+        // Verify readback.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records[0]
+                .metadata
+                .as_ref()
+                .unwrap()
+                .get("tags"),
+            Some(&MetadataValue::Str("final_scalar".to_string()))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_metadata_mixed_simultaneous_type_changes() {
+        // Single update changes "color" from scalar->array AND "tags" from array->scalar.
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "color".to_string(),
+            UpdateMetadataValue::Str("red".to_string()),
+        );
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["old_a".to_string(), "old_b".to_string()]),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "color".to_string(),
+            UpdateMetadataValue::StringArray(vec!["blue".to_string(), "green".to_string()]),
+        );
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("new_scalar".to_string()),
+        );
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // "color" old scalar must be gone.
+        let eq_red = Where::Metadata(MetadataExpression {
+            key: "color".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("red".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_red));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Old color scalar should be gone"
+        );
+
+        // "color" new array must be queryable.
+        let contains_blue = Where::Metadata(MetadataExpression {
+            key: "color".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("blue".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_blue));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+
+        // "tags" old array must be gone.
+        let contains_old_a = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("old_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_old_a));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(
+            result.result.records.len(),
+            0,
+            "Old tags array should be gone"
+        );
+
+        // "tags" new scalar must be queryable.
+        let eq_new_scalar = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("new_scalar".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_new_scalar));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_metadata_delete_after_type_change() {
+        // Add with scalar, update to array, then delete the key entirely.
+        // Verifies None cleans up from the array table (not just scalar).
+        let mut meta_v1 = HashMap::new();
+        meta_v1.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::Str("scalar_val".to_string()),
+        );
+
+        let mut meta_v2 = HashMap::new();
+        meta_v2.insert(
+            "tags".to_string(),
+            UpdateMetadataValue::StringArray(vec!["arr_a".to_string(), "arr_b".to_string()]),
+        );
+
+        let mut meta_v3 = HashMap::new();
+        meta_v3.insert("tags".to_string(), UpdateMetadataValue::None);
+
+        let logs = vec![
+            LogRecord {
+                log_offset: 0,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v1),
+                    document: None,
+                    operation: Operation::Add,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 1,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v2),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+            LogRecord {
+                log_offset: 2,
+                record: OperationRecord {
+                    id: "id1".to_string(),
+                    metadata: Some(meta_v3),
+                    document: None,
+                    operation: Operation::Update,
+                    embedding: None,
+                    encoding: None,
+                },
+            },
+        ];
+
+        let (reader, cas) = setup_with_logs(logs).await;
+
+        // Record still exists but has no "tags" key at all.
+        let plan = make_get_plan(&cas, None);
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 1);
+        let has_tags = result.result.records[0]
+            .metadata
+            .as_ref()
+            .map(|md| md.contains_key("tags"))
+            .unwrap_or(false);
+        assert!(
+            !has_tags,
+            "tags key should be fully deleted, got {:?}",
+            result.result.records[0].metadata
+        );
+
+        // Neither scalar nor array queries should match.
+        let eq_scalar = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::Primitive(
+                PrimitiveOperator::Equal,
+                MetadataValue::Str("scalar_val".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(eq_scalar));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
+
+        let contains_arr = Where::Metadata(MetadataExpression {
+            key: "tags".to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::Contains,
+                MetadataValue::Str("arr_a".to_string()),
+            ),
+        });
+        let plan = make_get_plan(&cas, Some(contains_arr));
+        let result = reader.get(plan).await.expect("get");
+        assert_eq!(result.result.records.len(), 0);
     }
 }

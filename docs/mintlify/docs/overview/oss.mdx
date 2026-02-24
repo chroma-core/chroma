@@ -95,6 +95,12 @@ client = chromadb.PersistentClient(path="/path/to/save/to", settings=Settings(an
 Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
 
 </Tab>
+
+<Tab title="Rust" icon="rust">
+
+Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
+
+</Tab>
 </Tabs>
 
 #### In Chroma's Backend Server Using Environment Variables
@@ -106,29 +112,3 @@ If you are running Chroma on your local computer with `docker-compose` you can s
 ```text
 ANONYMIZED_TELEMETRY=False
 ```
-
-### What do you track?
-
-We will only track usage details that help us make product decisions, specifically:
-
-- Chroma version and environment details (e.g. OS, Python version, is it running in a container, or in a jupyter notebook)
-- Usage of embedding functions that ship with Chroma and aggregated usage of custom embeddings (we collect no information about the custom embeddings themselves)
-- Client interactions with our hosted Chroma Cloud service.
-- Collection commands. We track the anonymized uuid of a collection as well as the number of items
-  - `add`
-  - `update`
-  - `query`
-  - `get`
-  - `delete`
-
-We **do not** collect personally-identifiable or sensitive information, such as: usernames, hostnames, file names, environment variables, or hostnames of systems being tested.
-
-To view the list of events we track, you may reference the **[code](https://github.com/chroma-core/chroma/blob/main/chromadb/telemetry/product/events.py)**
-
-### Where is telemetry information stored?
-
-We use **[Posthog](https://posthog.com/)** to store and visualize telemetry data.
-
-<Callout>
-Posthog is an open source platform for product analytics. Learn more about Posthog on **[posthog.com](https://posthog.com/)** or **[github.com/posthog](https://github.com/posthog/posthog)**
-</Callout>

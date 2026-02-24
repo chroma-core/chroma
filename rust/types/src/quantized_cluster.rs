@@ -4,8 +4,8 @@ use std::mem::size_of_val;
 pub struct QuantizedCluster<'data> {
     pub center: &'data [f32],
     pub codes: &'data [u8],
-    pub ids: &'data [u64],
-    pub versions: &'data [u64],
+    pub ids: &'data [u32],
+    pub versions: &'data [u32],
 }
 
 impl QuantizedCluster<'_> {
@@ -21,8 +21,8 @@ impl QuantizedCluster<'_> {
 pub struct QuantizedClusterOwned {
     pub center: Vec<f32>,
     pub codes: Vec<u8>,
-    pub ids: Vec<u64>,
-    pub versions: Vec<u64>,
+    pub ids: Vec<u32>,
+    pub versions: Vec<u32>,
 }
 
 impl From<QuantizedCluster<'_>> for QuantizedClusterOwned {

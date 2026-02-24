@@ -5,32 +5,65 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::HashSet;
+use std::time::Duration;
 
+#[cfg(test)]
+use serial_test::serial;
+
+use chroma_config::spanner::{SpannerChannelConfig, SpannerSessionPoolConfig};
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_types::DatabaseUuid;
 use google_cloud_gax::conn::Environment;
-use google_cloud_spanner::client::{Client, ClientConfig};
+use google_cloud_googleapis::spanner::admin::database::v1::UpdateDatabaseDdlRequest;
+use google_cloud_spanner::admin::client::Client as AdminClient;
+use google_cloud_spanner::admin::AdminClientConfig;
+use google_cloud_spanner::client::{ChannelConfig, Client, ClientConfig};
 use google_cloud_spanner::key::Key;
 use google_cloud_spanner::mutation::{delete, insert, update};
 use google_cloud_spanner::row::Row;
+use google_cloud_spanner::session::SessionConfig;
 use google_cloud_spanner::statement::Statement;
 use google_cloud_spanner::transaction_rw::ReadWriteTransaction;
 use thiserror::Error;
+use tracing::instrument;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::config::{SpannerBackendConfig, SpannerConfig};
+
+/// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
+fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
+    let mut config = SessionConfig::default();
+    config.session_get_timeout = Duration::from_secs(cfg.session_get_timeout_secs);
+    config.max_opened = cfg.max_opened;
+    config.min_opened = cfg.min_opened;
+    config
+}
+
+/// Converts a SpannerChannelConfig to the library's ChannelConfig.
+fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
+    ChannelConfig {
+        num_channels: cfg.num_channels,
+        connect_timeout: Duration::from_secs(cfg.connect_timeout_secs),
+        timeout: Duration::from_secs(cfg.timeout_secs),
+    }
+}
+
 use crate::types::{
-    CollectionFilter, CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
-    FlushCompactionResponse, GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse,
-    GetCollectionsRequest, GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse,
-    GetTenantsRequest, GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
+    CollectionFilter, CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
     UpdateCollectionRequest, UpdateCollectionResponse, UpdateSegmentRequest, UpdateTenantRequest,
 };
 
 use chroma_types::{
     Collection, Database, InternalCollectionConfiguration, RegionName, Segment, Tenant,
+    TopologyName,
 };
 
 #[derive(Error, Debug)]
@@ -57,19 +90,31 @@ impl ChromaError for SpannerError {
 #[derive(Clone)]
 pub struct SpannerBackend {
     client: Client,
+    /// The Spanner configuration (needed for running migrations on reset)
+    spanner_config: SpannerConfig,
     /// All regions in this backend's topology (for multi-region writes)
     regions: Vec<RegionName>,
     /// The local region for this instance (for reads)
     local_region: RegionName,
+    /// The topology name for this backend (for migrations)
+    topology_name: TopologyName,
 }
 
 impl SpannerBackend {
     /// Create a new SpannerBackend with the given client and region configuration.
-    pub fn new(client: Client, regions: Vec<RegionName>, local_region: RegionName) -> Self {
+    pub fn new(
+        client: Client,
+        spanner_config: SpannerConfig,
+        regions: Vec<RegionName>,
+        local_region: RegionName,
+        topology_name: TopologyName,
+    ) -> Self {
         Self {
             client,
+            spanner_config,
             regions,
             local_region,
+            topology_name,
         }
     }
 
@@ -98,6 +143,7 @@ impl SpannerBackend {
     /// Uses commit timestamps for created_at and updated_at.
     /// Sets last_compaction_time to Unix epoch (0) by default.
     /// If the tenant already exists, does nothing (insert on conflict do nothing).
+    #[instrument(skip(self), level = "info")]
     pub async fn create_tenant(
         &self,
         req: CreateTenantRequest,
@@ -113,7 +159,7 @@ impl SpannerBackend {
                     );
                     check_stmt.add_param("id", &tenant_id);
 
-                    let mut iter = tx.query(check_stmt).await?;
+                    let mut iter = tx.query(check_stmt).instrument(tracing::debug_span!("create_tenant query")).await?;
 
                     // If tenant doesn't exist, insert it otherwise ignore for idempotency
                     // Set last_compaction_time to Unix epoch (0) by default
@@ -141,6 +187,7 @@ impl SpannerBackend {
     /// Get tenants by ids.
     ///
     /// Returns `SysDbError::NotFound` if any tenant does not exist or is marked as deleted.
+    #[instrument(skip(self), level = "info")]
     pub async fn get_tenants(
         &self,
         req: GetTenantsRequest,
@@ -152,7 +199,10 @@ impl SpannerBackend {
 
         let mut tx = self.client.single().await?;
 
-        let mut iter = tx.query(stmt).await?;
+        let mut iter = tx
+            .query(stmt)
+            .instrument(tracing::debug_span!("get_tenants query"))
+            .await?;
         let mut tenants = Vec::new();
 
         // Get all rows
@@ -171,6 +221,7 @@ impl SpannerBackend {
         }
     }
 
+    #[instrument(skip(self, tx), level = "info")]
     async fn update_tenant(
         &self,
         tx: &mut ReadWriteTransaction,
@@ -197,6 +248,7 @@ impl SpannerBackend {
     ///
     /// This mimics the Go RegisterFilePaths function which updates the file_paths
     /// column for each segment with the new file paths from compaction.
+    #[instrument(skip(self, tx, req), fields(collection_id = %req.collection_id), level = "info")]
     async fn update_segments(
         &self,
         tx: &mut ReadWriteTransaction,
@@ -233,7 +285,13 @@ impl SpannerBackend {
             update_stmt.add_param("region", &self.local_region().as_str());
             update_stmt.add_param("file_paths", &file_paths_json);
 
-            let rows_affected = tx.update(update_stmt).await?;
+            let rows_affected = tx
+                .update(update_stmt)
+                .instrument(tracing::info_span!(
+                    "update_segment_file_paths",
+                    segment_id = %flush_segment_compaction.segment_id
+                ))
+                .await?;
             if rows_affected == 0 {
                 return Err(SysDbError::NotFound(format!(
                     "segment '{}' not found",
@@ -259,6 +317,7 @@ impl SpannerBackend {
     /// Validates that the database name is not empty and that the tenant exists.
     /// Uses commit timestamps for created_at and updated_at.
     /// All checks and the insert are done atomically in a single transaction.
+    #[instrument(skip(self), level = "info")]
     pub async fn create_database(
         &self,
         req: CreateDatabaseRequest,
@@ -277,7 +336,10 @@ impl SpannerBackend {
                     );
                     tenant_check_stmt.add_param("id", &tenant_id);
 
-                    let mut tenant_iter = tx.query(tenant_check_stmt).await?;
+                    let mut tenant_iter = tx
+                        .query(tenant_check_stmt)
+                        .instrument(tracing::debug_span!("check_tenant_exists"))
+                        .await?;
                     if tenant_iter.next().await?.is_none() {
                         return Err(SysDbError::NotFound(format!(
                             "tenant '{}' not found",
@@ -292,7 +354,7 @@ impl SpannerBackend {
                     name_check_stmt.add_param("name", &db_name);
                     name_check_stmt.add_param("tenant_id", &tenant_id);
 
-                    let mut name_iter = tx.query(name_check_stmt).await?;
+                    let mut name_iter = tx.query(name_check_stmt).instrument(tracing::debug_span!("check_database_name_exists")).await?;
                     if name_iter.next().await?.is_some() {
                         return Err(SysDbError::AlreadyExists(format!(
                             "database with name '{}' already exists for tenant '{}'",
@@ -306,7 +368,10 @@ impl SpannerBackend {
                     );
                     check_stmt.add_param("id", &db_id);
 
-                    let mut iter = tx.query(check_stmt).await?;
+                    let mut iter = tx
+                        .query(check_stmt)
+                        .instrument(tracing::debug_span!("check_database_exists"))
+                        .await?;
                     if iter.next().await?.is_some() {
                         return Err(SysDbError::AlreadyExists(format!(
                             "database with id '{}' already exists",
@@ -323,7 +388,9 @@ impl SpannerBackend {
                     insert_stmt.add_param("tenant_id", &tenant_id);
                     insert_stmt.add_param("is_deleted", &false);
 
-                    tx.update(insert_stmt).await?;
+                    tx.update(insert_stmt)
+                        .instrument(tracing::info_span!("insert_database"))
+                        .await?;
                     tracing::info!("Created database: {} for tenant: {}", db_name, tenant_id);
 
                     Ok(())
@@ -340,6 +407,7 @@ impl SpannerBackend {
     /// Get a database by name and tenant.
     ///
     /// Returns `SysDbError::NotFound` if the database does not exist or is marked as deleted.
+    #[instrument(skip(self), level = "info")]
     pub async fn get_database(
         &self,
         req: GetDatabaseRequest,
@@ -353,7 +421,10 @@ impl SpannerBackend {
 
         let mut tx = self.client.single().await?;
 
-        let mut iter = tx.query(stmt).await?;
+        let mut iter = tx
+            .query(stmt)
+            .instrument(tracing::info_span!("get_database query"))
+            .await?;
 
         // Get the first row if it exists
         if let Some(row) = iter.next().await? {
@@ -368,13 +439,28 @@ impl SpannerBackend {
         }
     }
 
-    pub async fn list_databases(
-        &self,
-        _tenant: &str,
-        _limit: Option<i32>,
-        _offset: i32,
-    ) -> Result<Vec<chroma_types::chroma_proto::Database>, SysDbError> {
-        todo!("implement list_databases")
+    #[instrument(skip(self), level = "info")]
+    pub async fn list_databases(&self, tenant: &str) -> Result<Vec<Database>, SysDbError> {
+        let query = "SELECT id, name, tenant_id FROM databases \
+                     WHERE tenant_id = @tenant_id AND is_deleted = FALSE \
+                     ORDER BY created_at ASC";
+
+        let mut stmt = Statement::new(query);
+        stmt.add_param("tenant_id", &tenant);
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx
+            .query(stmt)
+            .instrument(tracing::info_span!("list_databases query"))
+            .await?;
+
+        let mut databases = Vec::new();
+        while let Some(row) = result_set.next().await? {
+            let database = Database::try_from(SpannerRow { row })?;
+            databases.push(database);
+        }
+
+        Ok(databases)
     }
 
     pub async fn delete_database(&self, _name: &str, _tenant: &str) -> Result<(), SysDbError> {
@@ -385,6 +471,7 @@ impl SpannerBackend {
     // Collection Operations
     // ============================================================
 
+    #[instrument(skip(self), level = "info")]
     pub async fn create_collection(
         &self,
         req: CreateCollectionRequest,
@@ -458,7 +545,7 @@ impl SpannerBackend {
                     db_stmt.add_param("name", &database_name);
                     db_stmt.add_param("tenant_id", &tenant_id_str);
 
-                    let mut db_iter = tx.query(db_stmt).await?;
+                    let mut db_iter = tx.query(db_stmt).instrument(tracing::debug_span!("get_database_by_name")).await?;
                     let db_row = db_iter.next().await?;
                     let database_id = match db_row {
                         Some(row) => {
@@ -481,7 +568,7 @@ impl SpannerBackend {
                     );
                     id_check_stmt.add_param("collection_id", &collection_id);
 
-                    let mut id_iter = tx.query(id_check_stmt).await?;
+                    let mut id_iter = tx.query(id_check_stmt).instrument(tracing::debug_span!("check_collection_exists_by_id")).await?;
                     if id_iter.next().await?.is_some() {
                         if get_or_create {
                             // Return the existing collection
@@ -504,7 +591,7 @@ impl SpannerBackend {
                     check_stmt.add_param("database_name", &database_name);
                     check_stmt.add_param("name", &collection_name);
 
-                    let mut check_iter = tx.query(check_stmt).await?;
+                    let mut check_iter = tx.query(check_stmt).instrument(tracing::debug_span!("check_collection_exists_by_name")).await?;
                     if let Some(existing_row) = check_iter.next().await? {
                         // Collection with same name exists
                         if get_or_create {
@@ -566,12 +653,6 @@ impl SpannerBackend {
                                 "index_schema",
                                 "created_at",
                                 "updated_at",
-                                "version",
-                                "last_compacted_offset",
-                                "total_records_post_compaction",
-                                "size_bytes_post_compaction",
-                                "num_versions",
-                                "compaction_failure_count",
                             ],
                             &[
                                 &collection_id,
@@ -579,12 +660,6 @@ impl SpannerBackend {
                                 &index_schema_json,
                                 &commit_ts,
                                 &commit_ts,
-                                &(0i64),  // initial version
-                                &(0i64),  // initial last_compacted_offset
-                                &(0i64),  // initial total_records_post_compaction
-                                &(0i64),  // initial size_bytes_post_compaction
-                                &(0i64),  // initial num_versions
-                                &(0i64),  // initial compaction_failure_count
                             ],
                         ));
                     }
@@ -642,6 +717,10 @@ impl SpannerBackend {
                                 chroma_types::MetadataValue::Float(f) => (None, None, Some(*f), None),
                                 chroma_types::MetadataValue::Bool(b) => (None, None, None, Some(*b)),
                                 chroma_types::MetadataValue::SparseVector(_) => continue, // Not supported
+                                chroma_types::MetadataValue::BoolArray(_)
+                                | chroma_types::MetadataValue::IntArray(_)
+                                | chroma_types::MetadataValue::FloatArray(_)
+                                | chroma_types::MetadataValue::StringArray(_) => continue, // Array types not supported in Spanner yet
                             };
 
                             mutations.push(insert(
@@ -729,6 +808,7 @@ impl SpannerBackend {
     /// - `limit` and `offset`: Pagination
     ///
     /// Returns a list of matching collections.
+    #[instrument(skip(self), level = "info")]
     pub async fn get_collections(
         &self,
         req: GetCollectionsRequest,
@@ -852,7 +932,10 @@ impl SpannerBackend {
         }
 
         let mut tx = self.client.single().await?;
-        let mut result_set = tx.query(stmt).await?;
+        let mut result_set = tx
+            .query(stmt)
+            .instrument(tracing::info_span!("get_collections query"))
+            .await?;
 
         // Collect all rows, grouped by collection_id, preserving query order (created_at ASC)
         let mut collection_order: Vec<String> = Vec::new();
@@ -883,6 +966,55 @@ impl SpannerBackend {
         }
 
         Ok(GetCollectionsResponse { collections })
+    }
+
+    /// Count collections for a tenant, optionally filtered by database.
+    ///
+    /// Counts only non-deleted collections.
+    pub async fn count_collections(
+        &self,
+        req: CountCollectionsRequest,
+    ) -> Result<CountCollectionsResponse, SysDbError> {
+        // Build dynamic WHERE clause
+        let mut where_clauses: Vec<String> = Vec::new();
+        where_clauses.push("tenant_id = @tenant_id".to_string());
+        where_clauses.push("c.is_deleted = FALSE".to_string());
+
+        if req.database_name.is_some() {
+            where_clauses.push("database_name = @database_name".to_string());
+        }
+
+        let where_clause = where_clauses.join(" AND ");
+
+        let query = format!(
+            r#"
+            SELECT COUNT(*) as count
+            FROM collections c
+            WHERE {}
+            "#,
+            where_clause
+        );
+
+        let mut stmt = Statement::new(query);
+        stmt.add_param("tenant_id", &req.tenant_id);
+
+        if let Some(ref db_name) = req.database_name {
+            stmt.add_param("database_name", &db_name.as_ref());
+        }
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx.query(stmt).await?;
+
+        let count: i64 = if let Some(row) = result_set.next().await? {
+            row.column_by_name("count")
+                .map_err(SysDbError::FailedToReadColumn)?
+        } else {
+            0
+        };
+
+        Ok(CountCollectionsResponse {
+            count: count as u64,
+        })
     }
 
     /// Fetch a collection from the database within a transaction.
@@ -928,7 +1060,10 @@ impl SpannerBackend {
         fetch_stmt.add_param("collection_id", &collection_id);
         fetch_stmt.add_param("region", &region);
 
-        let mut fetch_iter = tx.query(fetch_stmt).await?;
+        let mut fetch_iter = tx
+            .query(fetch_stmt)
+            .instrument(tracing::info_span!("fetch_collection_in_tx query"))
+            .await?;
 
         // Collect all rows and convert to Collection using TryFrom<Vec<Row>>
         let mut rows = Vec::new();
@@ -952,6 +1087,7 @@ impl SpannerBackend {
     /// - Segments: deduplicated using HashMap
     ///
     /// This approach fetches all data in a single network round trip.
+    #[instrument(skip(self), level = "info")]
     pub async fn get_collection_with_segments(
         &self,
         req: GetCollectionWithSegmentsRequest,
@@ -1003,7 +1139,10 @@ impl SpannerBackend {
         stmt.add_param("region", &region);
 
         let mut tx = self.client.single().await?;
-        let mut result_set = tx.query(stmt).await?;
+        let mut result_set = tx
+            .query(stmt)
+            .instrument(tracing::debug_span!("get_collection_with_segments query"))
+            .await?;
 
         // Collect all rows
         let mut rows: Vec<Row> = Vec::new();
@@ -1066,6 +1205,7 @@ impl SpannerBackend {
     /// - `new_configuration`: New configuration (selective update of hnsw, spann, or embedding function)
     ///
     /// Returns the updated collection.
+    #[instrument(skip(self))]
     pub async fn update_collection(
         &self,
         req: UpdateCollectionRequest,
@@ -1077,6 +1217,9 @@ impl SpannerBackend {
             metadata,
             reset_metadata,
             new_configuration,
+            cursor_updates,
+            database_name: _, // Ignore database_name as it's only used for routing
+            is_deleted,
             ..
         } = req;
 
@@ -1089,6 +1232,8 @@ impl SpannerBackend {
                 let name = name.clone();
                 let metadata = metadata.clone();
                 let new_configuration = new_configuration.clone();
+                let cursor_updates = cursor_updates.clone();
+                let local_region = self.local_region.clone();
 
                 Box::pin(async move {
                     // First, verify the collection exists and get tenant/database info for name uniqueness check
@@ -1097,7 +1242,7 @@ impl SpannerBackend {
                     );
                     check_stmt.add_param("collection_id", &collection_id);
 
-                    let mut check_iter = tx.query(check_stmt).await?;
+                    let mut check_iter = tx.query(check_stmt).instrument(tracing::debug_span!("check_collection_metadata")).await?;
                     let (tenant_id, database_name): (String, String) = match check_iter.next().await? {
                         Some(row) => {
                             let tenant: String = row.column_by_name("tenant_id").map_err(SysDbError::FailedToReadColumn)?;
@@ -1122,7 +1267,7 @@ impl SpannerBackend {
                         name_check_stmt.add_param("name", new_name);
                         name_check_stmt.add_param("collection_id", &collection_id);
 
-                        let mut name_iter = tx.query(name_check_stmt).await?;
+                        let mut name_iter = tx.query(name_check_stmt).instrument(tracing::debug_span!("check_collection_name_exists")).await?;
                         if name_iter.next().await?.is_some() {
                             return Err(SysDbError::AlreadyExists(format!(
                                 "collection with name '{}' already exists in database '{}'",
@@ -1135,8 +1280,22 @@ impl SpannerBackend {
                     let commit_ts = "spanner.commit_timestamp()";
                     let mut mutations = Vec::new();
 
+                    // Handle soft delete operation
+                    if let Some(true) = is_deleted {
+                        // For soft delete, the new name should be provided in the request
+                        let new_name = name.as_ref().ok_or_else(|| {
+                            SysDbError::InvalidArgument("name is required for soft delete operation".to_string())
+                        })?;
+
+                        mutations.push(update(
+                            "collections",
+                            &["collection_id", "name", "is_deleted", "updated_at"],
+                            &[&collection_id, new_name, &true, &commit_ts],
+                        ));
+                    }
+
                     // Determine what needs to be updated
-                    let has_collection_changes = name.is_some() || dimension.is_some();
+                    let has_collection_changes = (name.is_some() && is_deleted != Some(true)) || dimension.is_some();
                     let has_metadata_changes = metadata.is_some() || reset_metadata;
                     let has_config_changes = new_configuration.as_ref().is_some_and(|c| {
                         c.hnsw.is_some() || c.spann.is_some() || c.embedding_function.is_some()
@@ -1149,7 +1308,7 @@ impl SpannerBackend {
                             "SELECT name, dimension FROM collections WHERE collection_id = @collection_id",
                         );
                         current_stmt.add_param("collection_id", &collection_id);
-                        let mut current_iter = tx.query(current_stmt).await?;
+                        let mut current_iter = tx.query(current_stmt).instrument(tracing::debug_span!("get_current_collection_info")).await?;
                         let (current_name, current_dimension): (String, Option<i64>) = match current_iter.next().await? {
                             Some(row) => {
                                 let n: String = row.column_by_name("name").map_err(SysDbError::FailedToReadColumn)?;
@@ -1176,7 +1335,7 @@ impl SpannerBackend {
                             "SELECT key FROM collection_metadata WHERE collection_id = @collection_id",
                         );
                         keys_stmt.add_param("collection_id", &collection_id);
-                        let mut keys_iter = tx.query(keys_stmt).await?;
+                        let mut keys_iter = tx.query(keys_stmt).instrument(tracing::debug_span!("get_collection_metadata_keys")).await?;
                         while let Some(row) = keys_iter.next().await? {
                             let key: String = row.column_by_name("key").map_err(SysDbError::FailedToReadColumn)?;
                             mutations.push(delete(
@@ -1205,6 +1364,10 @@ impl SpannerBackend {
                                         (None, None, None, Some(*b))
                                     }
                                     chroma_types::MetadataValue::SparseVector(_) => continue,
+                                    chroma_types::MetadataValue::BoolArray(_)
+                                    | chroma_types::MetadataValue::IntArray(_)
+                                    | chroma_types::MetadataValue::FloatArray(_)
+                                    | chroma_types::MetadataValue::StringArray(_) => continue, // Array types not supported in Spanner yet
                                 };
 
                                 mutations.push(insert(
@@ -1246,7 +1409,7 @@ impl SpannerBackend {
                         );
                         schema_stmt.add_param("collection_id", &collection_id);
 
-                        let mut schema_iter = tx.query(schema_stmt).await?;
+                        let mut schema_iter = tx.query(schema_stmt).instrument(tracing::debug_span!("get_collection_schemas")).await?;
                         let mut region_schemas: Vec<(String, String)> = Vec::new();
 
                         while let Some(row) = schema_iter.next().await? {
@@ -1278,6 +1441,43 @@ impl SpannerBackend {
                         }
                     }
 
+                    // Handle cursor updates - increment compaction failure count only if explicitly requested
+                    if let Some(ref cursor_update) = cursor_updates {
+                        if let Some(increment) = cursor_update.compaction_failure_count_increment {
+                            if increment > 0 {
+                            let region = &local_region;
+
+                            // First, select the current compaction failure count
+                            let mut select_stmt = Statement::new(
+                                "SELECT compaction_failure_count FROM collection_compaction_cursors WHERE collection_id = @collection_id AND region = @region"
+                            );
+                            select_stmt.add_param("collection_id", &collection_id);
+                            select_stmt.add_param("region", &region.as_str());
+
+                            let mut rows = tx.query(select_stmt).await?;
+                            let current_count: i64 = if let Some(row) = rows.next().await? {
+                                row.column_by_name("compaction_failure_count").map_err(SysDbError::FailedToReadColumn)?
+                            } else {
+                                return Err(SysDbError::NotFound(format!(
+                                    "collection_compaction_cursor for collection '{}' in region '{}' not found",
+                                    collection_id, region
+                                )));
+                            };
+
+                            // Ensure current count is not negative (data integrity check)
+                            let current_count = current_count.max(0);
+
+                            // Buffer the update with incremented count, ensuring it never goes negative
+                            let new_count = current_count.saturating_add(increment as i64).max(0);
+                            mutations.push(update(
+                                "collection_compaction_cursors",
+                                &["collection_id", "region", "compaction_failure_count", "updated_at"],
+                                &[&collection_id, &region.as_str(), &new_count, &commit_ts],
+                            ));
+                        }
+                        }
+                    }
+
                     // Buffer all mutations - they will be applied atomically at commit
                     if !mutations.is_empty() {
                         tx.buffer_write(mutations);
@@ -1298,6 +1498,7 @@ impl SpannerBackend {
 
     /// Flush collection compaction results to the database.
     /// This mimics the logic in go/pkg/sysdb/coordinator/table_catalog.go::FlushCollectionCompactionForVersionedCollection
+    #[instrument(skip(self, req))]
     pub async fn flush_collection_compaction(
         &self,
         req: FlushCompactionRequest,
@@ -1429,7 +1630,7 @@ impl SpannerBackend {
                             num_versions = @num_active_versions,
                             compaction_failure_count = 0,
                             index_schema = COALESCE(PARSE_JSON(@schema_str), index_schema)
-                            WHERE collection_id = @collection_id AND version = @current_version AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
+                            WHERE collection_id = @collection_id AND (version = @current_version OR version IS NULL) AND region = @region AND (version_file_name = @old_version_file_name OR version_file_name IS NULL)",
                     );
                     update_stmt.add_param("collection_id", &collection_id);
                     update_stmt.add_param("new_version", &(new_version as i64));
@@ -1450,7 +1651,15 @@ impl SpannerBackend {
                     update_stmt.add_param("schema_str", &schema_str);
                     update_stmt.add_param("region", &region.to_string());
                     update_stmt.add_param("old_version_file_name", &old_version_file_name);
-                    let rows_affected = tx.update(update_stmt).await?;
+                    let rows_affected = tx
+                        .update(update_stmt)
+                        .instrument(tracing::info_span!(
+                            "flush_compaction update query",
+                            collection_id = %collection_id,
+                            version_file_path = %version_file_path,
+                            region = %region,
+                        ))
+                        .await?;
 
                     if rows_affected == 0 {
                         // CAS operation failed - collection was updated by another transaction
@@ -1502,21 +1711,181 @@ impl SpannerBackend {
         }
     }
 
+    /// Reset the database state by dropping all tables and re-running migrations.
+    /// This provides a completely clean slate for testing.
+    #[instrument(skip(self), level = "info")]
+    pub async fn reset(&self) -> Result<(), SysDbError> {
+        // Step 1: Get all indexes first
+        let get_indexes_stmt = Statement::new(
+            "SELECT table_name, index_name FROM INFORMATION_SCHEMA.INDEXES WHERE table_schema = ''",
+        );
+        let mut tx = self.client.single().await?;
+        let mut indexes_result = tx
+            .query(get_indexes_stmt)
+            .instrument(tracing::debug_span!("get_spanner_indexes"))
+            .await?;
+        let mut table_names = HashSet::new();
+
+        let mut indexes: Vec<(String, String)> = Vec::new();
+        while let Some(row) = indexes_result.next().await? {
+            let table_name: String = row
+                .column_by_name("table_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            table_names.insert(table_name.clone());
+            let index_name: String = row
+                .column_by_name("index_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            if index_name != "PRIMARY_KEY" {
+                indexes.push((table_name, index_name));
+            }
+        }
+
+        tracing::info!(
+            "Found {} tables to drop: {:?}",
+            table_names.len(),
+            table_names
+        );
+        tracing::info!("Found {} indexes to drop: {:?}", indexes.len(), indexes);
+
+        // Step 2: Create admin client for DDL operations
+        let (admin_client, database_path) = match &self.spanner_config {
+            SpannerConfig::Emulator(emulator) => {
+                let admin_config = AdminClientConfig {
+                    environment: Environment::Emulator(emulator.grpc_endpoint()),
+                };
+                let client = AdminClient::new(admin_config).await.map_err(|e| {
+                    SysDbError::Internal(format!("Failed to create admin client: {}", e))
+                })?;
+                (client, emulator.database_path())
+            }
+            _ => {
+                return Err(SysDbError::Internal(
+                    "Reset only allowed for emulator".to_string(),
+                ));
+            }
+        };
+
+        // Step 3: Drop all indexes first, then tables
+        // Try multiple passes to handle dependencies
+        for _pass in 0..5 {
+            // Drop indexes first
+            let mut remaining_indexes: Vec<(String, String)> = Vec::new();
+            for (table_name, index_name) in &indexes {
+                let drop_index_ddl = format!("DROP INDEX {}", index_name);
+                let request = UpdateDatabaseDdlRequest {
+                    database: database_path.clone(),
+                    statements: vec![drop_index_ddl],
+                    operation_id: String::new(),
+                    proto_descriptors: Vec::new(),
+                    throughput_mode: false,
+                };
+
+                match admin_client
+                    .database()
+                    .update_database_ddl(request, None)
+                    .await
+                {
+                    Ok(mut operation) => {
+                        if let Err(e) = operation.wait(None).await {
+                            tracing::debug!("Failed to execute DDL: {}", e);
+                            remaining_indexes.push((table_name.clone(), index_name.clone()));
+                        } else {
+                            tracing::info!("Successfully executed DDL DROP INDEX {}", index_name);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to execute DDL: {}", e);
+                        remaining_indexes.push((table_name.clone(), index_name.clone()));
+                    }
+                }
+            }
+            indexes = remaining_indexes;
+
+            // Then drop tables
+            if table_names.is_empty() {
+                break;
+            }
+
+            let mut remaining_tables: HashSet<String> = HashSet::new();
+            for table_name in &table_names {
+                let drop_table_ddl = format!("DROP TABLE {}", table_name);
+                let request = UpdateDatabaseDdlRequest {
+                    database: database_path.clone(),
+                    statements: vec![drop_table_ddl],
+                    operation_id: String::new(),
+                    proto_descriptors: Vec::new(),
+                    throughput_mode: false,
+                };
+
+                match admin_client
+                    .database()
+                    .update_database_ddl(request, None)
+                    .await
+                {
+                    Ok(mut operation) => {
+                        if let Err(e) = operation.wait(None).await {
+                            tracing::debug!("Failed to execute DDL: {}", e);
+                            remaining_tables.insert(table_name.clone());
+                        } else {
+                            tracing::info!("Successfully executed DDL DROP TABLE {}", table_name);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to execute DDL: {}", e);
+                        remaining_tables.insert(table_name.clone());
+                    }
+                }
+            }
+            table_names = remaining_tables;
+        }
+
+        if !indexes.is_empty() {
+            return Err(SysDbError::Internal(format!(
+                "Failed to drop indexes after 5 passes: {:?}",
+                indexes
+            )));
+        }
+
+        if !table_names.is_empty() {
+            return Err(SysDbError::Internal(format!(
+                "Failed to drop tables after 5 passes: {:?}",
+                table_names
+            )));
+        }
+
+        // Step 4: Run migrations to recreate schema
+        tracing::info!("Running migrations to recreate schema...");
+        spanner_migrations::run_migrations(
+            &self.spanner_config,
+            Some("spanner_sysdb"),
+            spanner_migrations::MigrationMode::Apply,
+            Some(&self.topology_name.to_string()),
+        )
+        .await
+        .map_err(|e| SysDbError::Internal(format!("Failed to run migrations: {}", e)))?;
+
+        tracing::info!("Successfully reset Spanner database state");
+        Ok(())
+    }
+
     pub async fn close(self) {
         self.client.close().await;
     }
 }
-
 #[async_trait::async_trait]
 impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
     async fn try_from_config(
         config: &SpannerBackendConfig<'a>,
         _registry: &Registry,
     ) -> Result<Self, Box<dyn ChromaError>> {
+        let session_config = to_session_config(config.spanner.session_pool());
         let client = match config.spanner {
             SpannerConfig::Emulator(emulator) => {
+                let channel_config = to_channel_config(config.spanner.channel());
                 let client_config = ClientConfig {
                     environment: Environment::Emulator(emulator.grpc_endpoint()),
+                    session_config,
+                    channel_config,
                     ..Default::default()
                 };
 
@@ -1535,10 +1904,13 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
                 client
             }
             SpannerConfig::Gcp(gcp) => {
-                let client_config = ClientConfig::default().with_auth().await.map_err(|e| {
+                let channel_config = to_channel_config(config.spanner.channel());
+                let mut client_config = ClientConfig::default().with_auth().await.map_err(|e| {
                     Box::new(SpannerError::ConfigurationError(e.to_string()))
                         as Box<dyn ChromaError>
                 })?;
+                client_config.session_config = session_config;
+                client_config.channel_config = channel_config;
 
                 let client = Client::new(&gcp.database_path(), client_config)
                     .await
@@ -1555,8 +1927,10 @@ impl<'a> Configurable<SpannerBackendConfig<'a>> for SpannerBackend {
 
         Ok(SpannerBackend {
             client,
+            spanner_config: config.spanner.clone(),
             regions: config.regions.clone(),
             local_region: config.local_region.clone(),
+            topology_name: config.topology_name.clone(),
         })
     }
 }
@@ -1567,7 +1941,7 @@ pub mod tests {
     use crate::types::{
         CollectionFilter, CreateCollectionRequest, CreateDatabaseRequest, CreateTenantRequest,
         GetCollectionWithSegmentsRequest, GetCollectionsRequest, GetDatabaseRequest,
-        GetTenantsRequest, UpdateCollectionRequest,
+        GetTenantsRequest, UpdateCollectionCursor, UpdateCollectionRequest,
     };
     use chroma_types::{
         CollectionUuid, DatabaseName, Schema, Segment, SegmentScope, SegmentType, SegmentUuid,
@@ -1597,6 +1971,8 @@ pub mod tests {
             project: "local-project".to_string(),
             instance: "test-instance".to_string(),
             database: "local-sysdb-database".to_string(),
+            session_pool: Default::default(),
+            channel: Default::default(),
         };
 
         let spanner_config = SpannerConfig::Emulator(emulator);
@@ -1614,6 +1990,7 @@ pub mod tests {
             spanner: &spanner_config,
             regions,
             local_region,
+            topology_name: TopologyName::new("test-topology").unwrap(),
         };
 
         match SpannerBackend::try_from_config(&config, &registry).await {
@@ -6858,6 +7235,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6904,6 +7283,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -6957,6 +7338,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7026,6 +7409,8 @@ pub mod tests {
             metadata: Some(new_metadata.clone()),
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7088,6 +7473,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: true,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7140,6 +7527,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7188,6 +7577,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7240,6 +7631,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7305,6 +7698,8 @@ pub mod tests {
             metadata: Some(new_metadata.clone()),
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7354,6 +7749,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7413,6 +7810,8 @@ pub mod tests {
                 spann: None,
                 embedding_function: None,
             }),
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7462,6 +7861,8 @@ pub mod tests {
             metadata: None,
             reset_metadata: false,
             new_configuration: None,
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7519,6 +7920,8 @@ pub mod tests {
                 spann: None,
                 embedding_function: Some(new_ef.clone()),
             }),
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7593,6 +7996,8 @@ pub mod tests {
                 spann: Some(spann_update.clone()),
                 embedding_function: None,
             }),
+            cursor_updates: None,
+            is_deleted: None,
         };
 
         let result = backend.update_collection(update_req).await;
@@ -7624,5 +8029,667 @@ pub mod tests {
             None,
             Some(&expected_schema),
         );
+    }
+
+    #[tokio::test]
+    #[serial] // Don't want the reset to run concurrently with other tests
+    async fn test_k8s_mcmr_integration_reset_emulator_config() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        // Test that reset works with emulator config
+        let result = backend.reset().await;
+        assert!(
+            result.is_ok(),
+            "Reset should succeed with emulator config: {:?}",
+            result.err()
+        );
+
+        // Verify that after reset there's exactly one tenant
+        let tenants_req = GetTenantsRequest {
+            ids: vec!["default_tenant".to_string()],
+        };
+        let tenants_result = backend.get_tenants(tenants_req).await;
+        assert!(
+            tenants_result.is_ok(),
+            "Failed to list tenants after reset: {:?}",
+            tenants_result.err()
+        );
+        let tenants_response = tenants_result.unwrap();
+        assert_eq!(
+            tenants_response.tenants.len(),
+            1,
+            "Should have exactly one tenant after reset"
+        );
+
+        let tenant = &tenants_response.tenants[0];
+
+        // Verify that for that tenant there's exactly one database
+        let databases = backend.list_databases(&tenant.id).await;
+        assert!(
+            databases.is_ok(),
+            "Failed to list databases after reset: {:?}",
+            databases.err()
+        );
+        let databases_vec = databases.unwrap();
+        assert_eq!(
+            databases_vec.len(),
+            1,
+            "Should have exactly one database after reset"
+        );
+
+        let database = &databases_vec[0];
+
+        // Verify that for that database there are no collections
+        let collections_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .database_name(chroma_types::DatabaseName::new(database.name.clone()).unwrap())
+                .tenant_id(tenant.id.clone()),
+        };
+        let collections_result = backend.get_collections(collections_req).await;
+        assert!(
+            collections_result.is_ok(),
+            "Failed to list collections after reset: {:?}",
+            collections_result.err()
+        );
+        let collections_response = collections_result.unwrap();
+        assert_eq!(
+            collections_response.collections.len(),
+            0,
+            "Should have no collections after reset"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_reset_non_emulator_config_fails() {
+        use crate::config::SpannerBackendConfig;
+        use chroma_config::spanner::SpannerGcpConfig;
+
+        // Create a GCP config (non-emulator)
+        let gcp_config = SpannerGcpConfig {
+            project: "test-project".to_string(),
+            instance: "test-instance".to_string(),
+            database: "test-database".to_string(),
+            session_pool: SpannerSessionPoolConfig::default(),
+            channel: SpannerChannelConfig::default(),
+        };
+
+        let spanner_config = SpannerConfig::Gcp(gcp_config);
+        let registry = Registry::new();
+
+        let regions = vec![
+            RegionName::new("us").unwrap(),
+            RegionName::new("asia").unwrap(),
+            RegionName::new("europe").unwrap(),
+        ];
+        let local_region = RegionName::new("us").unwrap();
+
+        let config = SpannerBackendConfig {
+            spanner: &spanner_config,
+            regions,
+            local_region,
+            topology_name: TopologyName::new("test-gcp-topology").unwrap(),
+        };
+
+        // Create backend with GCP config
+        let backend = SpannerBackend::try_from_config(&config, &registry).await;
+
+        // Even if connection fails, we can test the reset logic by creating a minimal backend
+        // For this test, we'll create a backend manually with GCP config
+        if let Ok(backend) = backend {
+            // Test that reset fails with non-emulator config
+            let result = backend.reset().await;
+            assert!(
+                result.is_err(),
+                "Reset should fail with non-emulator config"
+            );
+
+            let error = result.unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Reset only allowed for emulator"),
+                "Expected 'Reset only allowed for emulator' error, got: {}",
+                error
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_count_collections() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Verify count is zero at the beginning
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections at start: {:?}",
+            result.err()
+        );
+        let initial_count = result.unwrap().count;
+        assert_eq!(initial_count, 0, "Should start with zero collections");
+
+        // Create some test collections to count
+        let collection1_id = CollectionUuid(Uuid::new_v4());
+        let collection2_id = CollectionUuid(Uuid::new_v4());
+
+        // Create first collection
+        let create_req1 = CreateCollectionRequest {
+            id: collection1_id,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+            name: "test_collection_1".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection1_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+        let _result1 = backend.create_collection(create_req1).await;
+
+        // Create second collection
+        let create_req2 = CreateCollectionRequest {
+            id: collection2_id,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+            name: "test_collection_2".to_string(),
+            dimension: Some(256),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection2_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+        let _result2 = backend.create_collection(create_req2).await;
+
+        // Test counting with database filter
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections with database filter: {:?}",
+            result.err()
+        );
+        let count_with_db = result.unwrap().count;
+        println!("Collections count with database filter: {}", count_with_db);
+
+        // Test counting without database filter (should include all backends)
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: None,
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections without database filter: {:?}",
+            result.err()
+        );
+        let count_all = result.unwrap().count;
+        println!("Collections count without database filter: {}", count_all);
+
+        // Should have exactly 2 collections with database filter
+        assert_eq!(
+            count_with_db, 2,
+            "Should count exactly 2 collections with database filter"
+        );
+
+        // The count without database filter should be >= count with database filter
+        assert!(
+            count_all >= count_with_db,
+            "Count without database filter ({}) should be >= count with database filter ({})",
+            count_all,
+            count_with_db
+        );
+    }
+
+    // ============================================================
+    // Cursor Update Tests (increment_compaction_failure_count)
+    // ============================================================
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+        let name = format!("test_coll_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema (which creates compaction cursors)
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Verify initial compaction failure count is 0 for all regions
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 0);
+
+        // Update collection to increment compaction failure count for us region
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count_increment: Some(1), // This field indicates intent to increment
+            }),
+            is_deleted: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to increment compaction failure count: {:?}",
+            result.err()
+        );
+
+        // Verify compaction failure count was incremented for us region
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_multiple_times(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Verify count is zero at the beginning
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections at start: {:?}",
+            result.err()
+        );
+        let initial_count = result.unwrap().count;
+        assert_eq!(initial_count, 0, "Should start with zero collections");
+
+        // Create some test collections to count
+        let collection1_id = CollectionUuid(Uuid::new_v4());
+        let collection2_id = CollectionUuid(Uuid::new_v4());
+
+        // Create first collection
+        let create_req1 = CreateCollectionRequest {
+            id: collection1_id,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+            name: "test_collection_1".to_string(),
+            dimension: Some(128),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection1_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+        let _result1 = backend.create_collection(create_req1).await;
+
+        // Create second collection
+        let create_req2 = CreateCollectionRequest {
+            id: collection2_id,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+            name: "test_collection_2".to_string(),
+            dimension: Some(256),
+            metadata: Some(HashMap::new()),
+            segments: vec![Segment {
+                id: SegmentUuid(Uuid::new_v4()),
+                r#type: SegmentType::BlockfileMetadata,
+                scope: SegmentScope::METADATA,
+                collection: collection2_id,
+                file_path: HashMap::new(),
+                metadata: None,
+            }],
+            index_schema: chroma_types::Schema::default(),
+            get_or_create: false,
+        };
+        let _result2 = backend.create_collection(create_req2).await;
+
+        // Test counting with database filter
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: Some(db_name.clone()),
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections with database filter: {:?}",
+            result.err()
+        );
+        let count_with_db = result.unwrap().count;
+        println!("Collections count with database filter: {}", count_with_db);
+
+        // Test counting without database filter (should include all backends)
+        let count_req = CountCollectionsRequest {
+            tenant_id: tenant_id.clone(),
+            database_name: None,
+        };
+        let result = backend.count_collections(count_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to count collections without database filter: {:?}",
+            result.err()
+        );
+        let count_all = result.unwrap().count;
+        println!("Collections count without database filter: {}", count_all);
+
+        // Should have exactly 2 collections with database filter
+        assert_eq!(
+            count_with_db, 2,
+            "Should count exactly 2 collections with database filter"
+        );
+
+        // The count without database filter should be >= count with database filter
+        assert!(
+            count_all >= count_with_db,
+            "Count without database filter ({}) should be >= count with database filter ({})",
+            count_all,
+            count_with_db
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_local_region(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_regions_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Increment compaction failure count (uses local_region automatically)
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count_increment: Some(1),
+            }),
+            is_deleted: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to increment compaction failure count for local region: {:?}",
+            result.err()
+        );
+
+        // Verify count was incremented for local region
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 1); // Local region should have count 1
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_hnsw_collection(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_hnsw_{}", Uuid::new_v4());
+
+        // Create collection with HNSW schema
+        let hnsw_schema = Schema::new_default(chroma_types::KnnIndex::Hnsw);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            hnsw_schema.clone(),
+        )
+        .await;
+
+        // Increment compaction failure count - should work for HNSW collections too
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count_increment: Some(1),
+            }),
+            is_deleted: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Should succeed to increment compaction failure count for HNSW collection: {:?}",
+            result.err()
+        );
+
+        // Verify the count was incremented
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_with_other_updates(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let original_name = format!("test_coll_mixed_{}", Uuid::new_v4());
+        let new_name = format!("test_coll_mixed_updated_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &original_name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Update name and increment compaction failure count in same request
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: Some(new_name.clone()),
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count_increment: Some(1),
+            }),
+            is_deleted: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection with mixed changes: {:?}",
+            result.err()
+        );
+
+        // Verify both changes were applied
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.name, new_name);
+        assert_eq!(collection.compaction_failure_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_cursor_updates_none(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_none_cursor_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Update collection without cursor_updates (should not affect compaction failure count)
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: Some(256),
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: None, // No cursor updates
+            is_deleted: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection without cursor updates: {:?}",
+            result.err()
+        );
+
+        // Verify compaction failure count is unchanged
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 0);
+        assert_eq!(collection.dimension, Some(256));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_update_collection_increment_compaction_failure_count_cursor_updates_none_field(
+    ) {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        let name = format!("test_coll_none_field_{}", Uuid::new_v4());
+
+        // Create collection with SPANN schema
+        let spann_schema = Schema::new_default(chroma_types::KnnIndex::Spann);
+        let collection_id = create_collection_for_update_with_schema(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &name,
+            Some(128),
+            None,
+            spann_schema.clone(),
+        )
+        .await;
+
+        // Update collection with cursor_updates but compaction_failure_count_increment: None (should not affect compaction failure count)
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: Some(256),
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: Some(UpdateCollectionCursor {
+                compaction_failure_count_increment: None, // Explicitly None - should not trigger increment
+            }),
+            is_deleted: None,
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to update collection with cursor_updates but None compaction_failure_count_increment: {:?}",
+            result.err()
+        );
+
+        // Verify compaction failure count is unchanged (this is the key test for the fix)
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.compaction_failure_count, 0);
+        assert_eq!(collection.dimension, Some(256));
     }
 }

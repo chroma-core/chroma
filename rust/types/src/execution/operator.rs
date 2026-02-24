@@ -4,16 +4,16 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, HashSet},
     fmt,
-    hash::Hash,
+    hash::{Hash, Hasher},
     ops::{Add, Div, Mul, Neg, Sub},
 };
 use thiserror::Error;
 
 use crate::{
     chroma_proto, logical_size_of_metadata, parse_where, CollectionAndSegments, CollectionUuid,
-    DocumentExpression, DocumentOperator, Metadata, MetadataComparison, MetadataExpression,
-    MetadataSetValue, MetadataValue, PrimitiveOperator, ScalarEncoding, SetOperator, SparseVector,
-    Where,
+    ContainsOperator, DocumentExpression, DocumentOperator, Metadata, MetadataComparison,
+    MetadataExpression, MetadataSetValue, MetadataValue, PrimitiveOperator, ScalarEncoding,
+    SetOperator, SparseVector, Where,
 };
 
 use super::error::QueryConversionError;
@@ -410,6 +410,12 @@ impl PartialEq for RecordMeasure {
 
 impl Eq for RecordMeasure {}
 
+impl Hash for RecordMeasure {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.offset_id.hash(state);
+    }
+}
+
 impl Ord for RecordMeasure {
     fn cmp(&self, other: &Self) -> Ordering {
         self.measure
@@ -444,7 +450,7 @@ pub struct Merge {
 }
 
 impl Merge {
-    pub fn merge<M: Eq + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
+    pub fn merge<M: Clone + Eq + Hash + Ord>(&self, input: Vec<Vec<M>>) -> Vec<M> {
         let mut batch_iters = input.into_iter().map(Vec::into_iter).collect::<Vec<_>>();
 
         let mut max_heap = batch_iters
@@ -453,6 +459,7 @@ impl Merge {
             .filter_map(|(idx, itr)| itr.next().map(|rec| (rec, idx)))
             .collect::<BinaryHeap<_>>();
 
+        let mut seen = HashSet::with_capacity(self.k as usize);
         let mut fusion = Vec::with_capacity(self.k as usize);
         while let Some((m, idx)) = max_heap.pop() {
             if self.k <= fusion.len() as u32 {
@@ -461,7 +468,7 @@ impl Merge {
             if let Some(next_m) = batch_iters[idx].next() {
                 max_heap.push((next_m, idx));
             }
-            if fusion.last().is_some_and(|tail| tail == &m) {
+            if !seen.insert(m.clone()) {
                 continue;
             }
             fusion.push(m);
@@ -2018,10 +2025,12 @@ impl Key {
         })
     }
 
-    /// Creates a substring filter (case-sensitive, document content only).
+    /// Creates a document substring filter (case-sensitive).
     ///
-    /// Note: Currently only works with `Key::Document`. Pattern must have at least
-    /// 3 literal characters for accurate results.
+    /// Only valid on `Key::Document`. Pattern must have at least 3 literal
+    /// characters for accurate results.
+    ///
+    /// For metadata array contains, use [`contains_value`](Key::contains_value).
     ///
     /// # Examples
     ///
@@ -2038,9 +2047,12 @@ impl Key {
         })
     }
 
-    /// Creates a negative substring filter (case-sensitive, document content only).
+    /// Creates a negative document substring filter (case-sensitive).
     ///
-    /// Note: Currently only works with `Key::Document`.
+    /// Only valid on `Key::Document`.
+    ///
+    /// For metadata array not-contains, use
+    /// [`not_contains_value`](Key::not_contains_value).
     ///
     /// # Examples
     ///
@@ -2054,6 +2066,46 @@ impl Key {
         Where::Document(DocumentExpression {
             operator: DocumentOperator::NotContains,
             pattern: text.into(),
+        })
+    }
+
+    /// Checks whether a metadata array field contains the given scalar value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("tags").contains_value("action");
+    /// let filter = Key::field("scores").contains_value(42);
+    /// let filter = Key::field("ratings").contains_value(4.5);
+    /// let filter = Key::field("flags").contains_value(true);
+    /// ```
+    pub fn contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::ArrayContains(ContainsOperator::Contains, value.into()),
+        })
+    }
+
+    /// Checks that a metadata array field does **not** contain the given scalar
+    /// value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use chroma_types::operator::Key;
+    ///
+    /// let filter = Key::field("tags").not_contains_value("draft");
+    /// let filter = Key::field("scores").not_contains_value(0);
+    /// ```
+    pub fn not_contains_value<T: Into<MetadataValue>>(self, value: T) -> Where {
+        Where::Metadata(MetadataExpression {
+            key: self.to_string(),
+            comparison: MetadataComparison::ArrayContains(
+                ContainsOperator::NotContains,
+                value.into(),
+            ),
         })
     }
 
@@ -2395,15 +2447,15 @@ impl TryFrom<GroupBy> for chroma_proto::GroupByOperator {
 /// fn process_results(records: Vec<SearchRecord>) {
 ///     for record in records {
 ///         println!("ID: {}", record.id);
-///         
+///
 ///         if let Some(score) = record.score {
 ///             println!("  Score: {:.3}", score);
 ///         }
-///         
+///
 ///         if let Some(doc) = record.document {
 ///             println!("  Document: {}", doc);
 ///         }
-///         
+///
 ///         if let Some(meta) = record.metadata {
 ///             println!("  Metadata: {:?}", meta);
 ///         }
@@ -2476,7 +2528,7 @@ impl TryFrom<SearchRecord> for chroma_proto::SearchRecord {
 ///
 /// fn process_search_result(result: SearchPayloadResult) {
 ///     println!("Found {} results", result.records.len());
-///     
+///
 ///     for (i, record) in result.records.iter().enumerate() {
 ///         println!("{}. {} (score: {:?})", i + 1, record.id, record.score);
 ///     }
@@ -2535,7 +2587,7 @@ impl TryFrom<SearchPayloadResult> for chroma_proto::SearchPayloadResult {
 /// fn process_single_search(result: SearchResult) {
 ///     // Single search, so results[0] contains our records
 ///     let records = &result.results[0].records;
-///     
+///
 ///     for record in records {
 ///         println!("{}: score={:?}", record.id, record.score);
 ///     }
@@ -3355,7 +3407,7 @@ mod tests {
 
     #[test]
     fn test_merge_with_custom_struct() {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+        #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
         struct Score {
             value: i32,
             id: String,
@@ -3516,6 +3568,80 @@ mod tests {
         let input = vec![vec![10i32, 0, -10, -20], vec![5, -5, -15], vec![15, -25]];
         let result = merge.merge(input);
         assert_eq!(result, vec![15, 10, 5, 0, -5]);
+    }
+
+    #[test]
+    fn test_merge_dedup_same_id_different_scores() {
+        use std::cmp::Reverse;
+
+        // Simulates quantized distance estimation: the same offset_id appears
+        // in multiple posting lists with different approximate distances.
+        // Merge should keep only the first (best-scored) occurrence per id.
+        let merge = Merge { k: 5 };
+
+        // Three posting lists with overlapping IDs and different estimated distances.
+        // Using Reverse<RecordMeasure> to match the real knn_merge call site:
+        // the heap acts as a min-heap on measure (smallest distance = best).
+        let input: Vec<Vec<Reverse<RecordMeasure>>> = vec![
+            vec![
+                Reverse(RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.10,
+                }),
+                Reverse(RecordMeasure {
+                    offset_id: 4,
+                    measure: 0.50,
+                }),
+                Reverse(RecordMeasure {
+                    offset_id: 5,
+                    measure: 0.70,
+                }),
+            ],
+            vec![
+                Reverse(RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.20,
+                }),
+                Reverse(RecordMeasure {
+                    offset_id: 1,
+                    measure: 0.25,
+                }), // dup id=1, worse
+                Reverse(RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.60,
+                }),
+            ],
+            vec![
+                Reverse(RecordMeasure {
+                    offset_id: 3,
+                    measure: 0.15,
+                }), // dup id=3, better than 0.60
+                Reverse(RecordMeasure {
+                    offset_id: 4,
+                    measure: 0.35,
+                }), // dup id=4, better than 0.50
+                Reverse(RecordMeasure {
+                    offset_id: 2,
+                    measure: 0.80,
+                }), // dup id=2, worse
+            ],
+        ];
+
+        // Expected merge order (ascending distance via Reverse min-heap):
+        //   pop 0.10 id=1 → keep
+        //   pop 0.15 id=3 → keep
+        //   pop 0.20 id=2 → keep
+        //   pop 0.25 id=1 → dup, skip
+        //   pop 0.35 id=4 → keep
+        //   pop 0.50 id=4 → dup, skip
+        //   pop 0.60 id=3 → dup, skip
+        //   pop 0.70 id=5 → keep (5th unique)
+        let result: Vec<Reverse<RecordMeasure>> = merge.merge(input);
+        let ids: Vec<u32> = result.iter().map(|Reverse(r)| r.offset_id).collect();
+        let measures: Vec<f32> = result.iter().map(|Reverse(r)| r.measure).collect();
+
+        assert_eq!(ids, vec![1, 3, 2, 4, 5]);
+        assert_eq!(measures, vec![0.10, 0.15, 0.20, 0.35, 0.70]);
     }
 
     #[test]

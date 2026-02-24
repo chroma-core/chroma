@@ -8,11 +8,12 @@ use chroma_error::{ChromaError, ErrorCodes, TonicError, TonicMissingFieldError};
 use chroma_types::chroma_proto::sys_db_client::SysDbClient;
 use chroma_types::chroma_proto::VersionListForCollection;
 use chroma_types::{
-    chroma_proto, chroma_proto::CollectionVersionInfo, CollectionAndSegments, CollectionFlushInfo,
-    CollectionFlushInfoConversionError, CollectionMetadataUpdate, CountCollectionsError,
-    CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse, CreateTenantError,
-    CreateTenantResponse, Database, DatabaseName, DeleteCollectionError, DeleteDatabaseError,
-    DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
+    chroma_proto, chroma_proto::CollectionVersionInfo,
+    chroma_proto::IncrementCompactionFailureCountRequest, CollectionAndSegments,
+    CollectionFlushInfo, CollectionFlushInfoConversionError, CollectionMetadataUpdate,
+    CountCollectionsError, CreateCollectionError, CreateDatabaseError, CreateDatabaseResponse,
+    CreateTenantError, CreateTenantResponse, Database, DatabaseName, DeleteCollectionError,
+    DeleteDatabaseError, DeleteDatabaseResponse, GetCollectionByCrnError, GetCollectionSizeError,
     GetCollectionWithSegmentsError, GetCollectionsError, GetDatabaseError, GetDatabaseResponse,
     GetSegmentsError, GetTenantError, GetTenantResponse, InternalCollectionConfiguration,
     InternalUpdateCollectionConfiguration, ListAttachedFunctionsError, ListCollectionVersionsError,
@@ -395,7 +396,7 @@ impl SysDb {
     pub async fn delete_collection(
         &mut self,
         tenant: String,
-        database: String,
+        database: DatabaseName,
         collection_id: CollectionUuid,
         segment_ids: Vec<SegmentUuid>,
     ) -> Result<(), DeleteCollectionError> {
@@ -406,7 +407,12 @@ impl SysDb {
             }
             SysDb::Sqlite(sqlite) => {
                 sqlite
-                    .delete_collection(tenant, database, collection_id, segment_ids)
+                    .delete_collection(
+                        tenant,
+                        database.as_ref().to_string(),
+                        collection_id,
+                        segment_ids,
+                    )
                     .await
             }
             SysDb::Test(_) => {
@@ -717,9 +723,13 @@ impl SysDb {
     pub async fn increment_compaction_failure_count(
         &mut self,
         collection_id: CollectionUuid,
+        database_name: &DatabaseName,
     ) -> Result<(), IncrementCompactionFailureCountError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.increment_compaction_failure_count(collection_id).await,
+            SysDb::Grpc(grpc) => {
+                grpc.increment_compaction_failure_count(collection_id, database_name)
+                    .await
+            }
             SysDb::Test(test) => {
                 test.increment_compaction_failure_count(collection_id);
                 Ok(())
@@ -1007,28 +1017,95 @@ impl GrpcSysDb {
         limit: Option<u32>,
         offset: u32,
     ) -> Result<ListDatabasesResponse, ListDatabasesError> {
-        let req = chroma_proto::ListDatabasesRequest {
-            tenant,
-            limit: limit.map(|l| l as i32),
-            offset: Some(offset as i32),
+        // Collect databases from single-region client
+        // We request all databases (offset=0) and handle pagination manually
+        let single_region_req = chroma_proto::ListDatabasesRequest {
+            tenant: tenant.clone(),
+            limit: None,
+            offset: Some(0),
         };
-        match self.client.list_databases(req).await {
-            Ok(resp) => resp
-                .into_inner()
-                .databases
-                .into_iter()
-                .map(|db| {
-                    Uuid::parse_str(&db.id)
-                        .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
-                        .map(|id| Database {
-                            id,
-                            name: db.name,
-                            tenant: db.tenant,
-                        })
-                })
-                .collect(),
-            Err(err) => Err(ListDatabasesError::Internal(err.into())),
+        let single_region_dbs: Vec<Database> =
+            match self.client.list_databases(single_region_req).await {
+                Ok(resp) => resp
+                    .into_inner()
+                    .databases
+                    .into_iter()
+                    .map(|db| {
+                        Uuid::parse_str(&db.id)
+                            .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
+                            .map(|id| Database {
+                                id,
+                                name: db.name,
+                                tenant: db.tenant.clone(),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Err(err) => return Err(ListDatabasesError::Internal(err.into())),
+            };
+
+        // Early bail-out: if single-region has enough results to satisfy offset + limit
+        if let Some(lim) = limit {
+            let total_needed = offset.saturating_add(lim);
+            if single_region_dbs.len() as u32 >= total_needed {
+                let start = (offset as usize).min(single_region_dbs.len());
+                let end = (start.saturating_add(lim as usize)).min(single_region_dbs.len());
+                return Ok(single_region_dbs[start..end].to_vec());
+            }
         }
+
+        // Collect databases from MCMR client if available
+        // MCMR returns databases with topology prefixes (e.g., "topology+db_name")
+        // Note: MCMR server does not support limit/offset, so we request all and paginate client-side
+        let mcmr_req = chroma_proto::ListDatabasesRequest {
+            tenant: tenant.clone(),
+            limit: None,
+            offset: None,
+        };
+        let mut mcmr_dbs: Vec<Database> = if let Some(mut mcmr_client) = self._mcmr_client.clone() {
+            match mcmr_client.list_databases(mcmr_req).await {
+                Ok(resp) => resp
+                    .into_inner()
+                    .databases
+                    .into_iter()
+                    .map(|db| {
+                        Uuid::parse_str(&db.id)
+                            .map_err(|err| ListDatabasesError::InvalidID(err.to_string()))
+                            .map(|id| Database {
+                                id,
+                                name: db.name,
+                                tenant: db.tenant.clone(),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+                Err(err) => {
+                    tracing::error!("Failed to list databases from MCMR client: {:?}", err);
+                    return Err(ListDatabasesError::Internal(err.into()));
+                }
+            }
+        } else {
+            Vec::new()
+        };
+
+        // Stable sort MCMR databases by topology prefix (the part before '+')
+        mcmr_dbs.sort_by_key(|db| {
+            DatabaseName::new(db.name.clone())
+                .map(|name| name.topology().unwrap_or("".to_string()))
+                .unwrap_or("".to_string())
+        });
+
+        // Merge results: single-region databases first, then MCMR databases
+        let mut all_dbs = single_region_dbs;
+        all_dbs.extend(mcmr_dbs);
+
+        // Apply offset and limit to the combined results manually
+        let start = (offset as usize).min(all_dbs.len());
+        let end = if let Some(lim) = limit {
+            (start + lim as usize).min(all_dbs.len())
+        } else {
+            all_dbs.len()
+        };
+
+        Ok(all_dbs[start..end].to_vec())
     }
 
     pub async fn get_database(
@@ -1215,22 +1292,44 @@ impl GrpcSysDb {
         tenant: String,
         database: Option<DatabaseName>,
     ) -> Result<usize, CountCollectionsError> {
-        // Route to MCMR client if database has a valid topology
-        let mut client = if let Some(ref db) = database {
-            self.client(db)
-                .map_err(|_| CountCollectionsError::Internal)?
-        } else {
-            self.client.clone()
+        let request = chroma_proto::CountCollectionsRequest {
+            tenant: tenant.clone(),
+            database: database.clone().map(|d| d.into_string()),
         };
 
-        let request = chroma_proto::CountCollectionsRequest {
-            tenant,
-            database: database.map(|d| d.into_string()),
-        };
-        let res = client.count_collections(request).await;
-        match res {
-            Ok(res) => Ok(res.into_inner().count as usize),
-            Err(_) => Err(CountCollectionsError::Internal),
+        if let Some(ref db) = database {
+            // When database is specified, route to the appropriate client
+            let mut client = self
+                .client(db)
+                .map_err(|_| CountCollectionsError::Internal)?;
+            let res = client
+                .count_collections(request)
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?;
+            Ok(res.into_inner().count as usize)
+        } else {
+            // When no database is specified, query all clients and sum the results
+            let mut total_count = 0usize;
+
+            // Query default client
+            let res = self
+                .client
+                .count_collections(request.clone())
+                .await
+                .map_err(|_| CountCollectionsError::Internal)?;
+            total_count += res.into_inner().count as usize;
+
+            // Query MCMR client if available
+            if let Some(mcmr_client) = &self._mcmr_client {
+                let res = mcmr_client
+                    .clone()
+                    .count_collections(request)
+                    .await
+                    .map_err(|_| CountCollectionsError::Internal)?;
+                total_count += res.into_inner().count as usize;
+            }
+
+            Ok(total_count)
         }
     }
 
@@ -1365,14 +1464,19 @@ impl GrpcSysDb {
     async fn delete_collection(
         &mut self,
         tenant: String,
-        database: String,
+        database: DatabaseName,
         collection_id: CollectionUuid,
         segment_ids: Vec<SegmentUuid>,
     ) -> Result<(), DeleteCollectionError> {
-        self.client
+        self.client(&database)
+            .map_err(|e| {
+                DeleteCollectionError::Internal(
+                    TonicError(tonic::Status::internal(e.to_string())).boxed(),
+                )
+            })?
             .delete_collection(chroma_proto::DeleteCollectionRequest {
                 tenant,
-                database,
+                database: database.into_string(),
                 id: collection_id.0.to_string(),
                 segment_ids: segment_ids.into_iter().map(|id| id.0.to_string()).collect(),
             })
@@ -1938,12 +2042,17 @@ impl GrpcSysDb {
     async fn increment_compaction_failure_count(
         &mut self,
         collection_id: CollectionUuid,
+        database_name: &DatabaseName,
     ) -> Result<(), IncrementCompactionFailureCountError> {
-        let req = chroma_proto::IncrementCompactionFailureCountRequest {
+        let req = IncrementCompactionFailureCountRequest {
             collection_id: collection_id.0.to_string(),
+            database_name: Some(database_name.clone().into_string()),
         };
 
-        self.client.increment_compaction_failure_count(req).await?;
+        let _res = self
+            .client(database_name)?
+            .increment_compaction_failure_count(req)
+            .await?;
         Ok(())
     }
 
@@ -1965,10 +2074,18 @@ impl GrpcSysDb {
     }
 
     async fn reset(&mut self) -> Result<ResetResponse, ResetError> {
+        // Call the Rust SysDB service's reset_state which will fan out to all backends
         self.client
             .reset_state(())
             .await
             .map_err(|e| TonicError(e).boxed())?;
+        if let Some(mut mcmr_client) = self._mcmr_client.clone() {
+            mcmr_client
+                .reset_state(())
+                .await
+                .map_err(|e| TonicError(e).boxed())?;
+        }
+
         Ok(ResetResponse {})
     }
 
@@ -2403,6 +2520,8 @@ pub enum IncrementCompactionFailureCountError {
     FailedToIncrement(#[from] tonic::Status),
     #[error("SQLite error: {0}")]
     Sqlite(#[from] sqlx::Error),
+    #[error("Client resolution error: {0}")]
+    ClientResolution(#[from] ClientResolutionError),
     #[error("Unimplemented: increment_compaction_failure_count is not supported for SqliteSysDb")]
     Unimplemented,
 }
@@ -2412,6 +2531,7 @@ impl ChromaError for IncrementCompactionFailureCountError {
         match self {
             IncrementCompactionFailureCountError::FailedToIncrement(_) => ErrorCodes::Internal,
             IncrementCompactionFailureCountError::Sqlite(_) => ErrorCodes::Internal,
+            IncrementCompactionFailureCountError::ClientResolution(_) => ErrorCodes::Internal,
             IncrementCompactionFailureCountError::Unimplemented => ErrorCodes::Internal,
         }
     }

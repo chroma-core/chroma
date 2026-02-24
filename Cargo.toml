@@ -72,7 +72,7 @@ validator = { version = "0.19", features = ["derive"] }
 rust-embed = { version = "8.5.0", features = ["include-exclude", "debug-embed"] }
 hnswlib = { version = "0.8.2", git = "https://github.com/chroma-core/hnswlib.git", branch = "master" }
 usearch = "2.23"
-crossbeam = "0.8.4"
+faer = { version = "0.24.0", default-features = false, features = ["std", "rand"] }
 reqwest = { version = "0.12.9", features = ["rustls-tls-native-roots", "http2"], default-features = false }
 random-port = "0.1.1"
 ndarray = { version = "0.16.1", features = ["approx"] }
@@ -81,18 +81,18 @@ petgraph = { version = "0.8.1" }
 base64 = "0.22"
 bitpacking = "0.9"
 tikv-jemallocator = { version = "0.6.0", features = ["profiling"] }
-google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner" }
+google-cloud-spanner = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-spanner", features = ["trace"] }
 google-cloud-gax = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-gax" }
 google-cloud-googleapis = { git = "https://github.com/yoshidan/google-cloud-rust", tag = "v20251222", package = "gcloud-googleapis", features = ["spanner"] }
 
-chroma = { path = "rust/chroma", version = "0.12.0" }
-chroma-api-types = { path = "rust/api-types", version = "0.12.0" }
+chroma = { path = "rust/chroma", version = "0.13.1" }
+chroma-api-types = { path = "rust/api-types", version = "0.13.1" }
 chroma-benchmark = { path = "rust/benchmark" }
 chroma-blockstore = { path = "rust/blockstore" }
 chroma-cache = { path = "rust/cache" }
 chroma-config = { path = "rust/config" }
 chroma-distance = { path = "rust/distance" }
-chroma-error = { path = "rust/error", version = "0.12.0" }
+chroma-error = { path = "rust/error", version = "0.13.1" }
 chroma-frontend = { path = "rust/frontend" }
 chroma-index = { path = "rust/index" }
 chroma-log = { path = "rust/log" }
@@ -104,7 +104,7 @@ chroma-storage = { path = "rust/storage" }
 chroma-system = { path = "rust/system" }
 chroma-sysdb = { path = "rust/sysdb" }
 chroma-tracing = { path = "rust/tracing" }
-chroma-types = { path = "rust/types", version = "0.12.0" }
+chroma-types = { path = "rust/types", version = "0.13.1" }
 chroma-sqlite = { path = "rust/sqlite" }
 chroma-cli = { path = "rust/cli" }
 chroma-jemalloc-pprof-server = { path = "rust/jemalloc-pprof-server" }

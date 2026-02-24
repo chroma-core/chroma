@@ -66,17 +66,17 @@ use crate::config::SpannerBackendConfig;
 use crate::spanner::SpannerBackend;
 use crate::types::SysDbError;
 use crate::types::{
-    CreateCollectionRequest, CreateCollectionResponse, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, FlushCompactionRequest,
-    FlushCompactionResponse, GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse,
-    GetCollectionsRequest, GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse,
-    GetTenantsRequest, GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
+    CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
+    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
+    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
+    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
+    GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
 use chroma_storage::config::{RegionalStorage, TopologicalStorage};
-use chroma_types::chroma_proto::Database;
-use chroma_types::{MultiCloudMultiRegionConfiguration, TopologyName};
+use chroma_types::{Database, MultiCloudMultiRegionConfiguration, TopologyName};
 
 /// Factory that holds all configured backend instances.
 ///
@@ -105,6 +105,7 @@ impl Configurable<SysdbMcmrConfig> for BackendFactory {
                 spanner: &topology.config().spanner,
                 regions: topology.regions().to_vec(),
                 local_region: local_region_name.clone(),
+                topology_name: topology.name().clone(),
             };
             let backend = SpannerBackend::try_from_config(&backend_config, registry).await?;
             topology_to_backend.insert(topology.name().clone(), backend);
@@ -273,14 +274,9 @@ impl Backend {
     }
 
     /// List databases for a tenant.
-    pub async fn list_databases(
-        &self,
-        tenant: &str,
-        limit: Option<i32>,
-        offset: i32,
-    ) -> Result<Vec<Database>, SysDbError> {
+    pub async fn list_databases(&self, tenant: &str) -> Result<Vec<Database>, SysDbError> {
         match self {
-            Backend::Spanner(s) => s.list_databases(tenant, limit, offset).await,
+            Backend::Spanner(s) => s.list_databases(tenant).await,
         }
     }
 
@@ -317,6 +313,18 @@ impl Backend {
         }
     }
 
+    /// Count collections for a tenant, optionally filtered by database.
+    ///
+    /// Returns the count of non-deleted collections.
+    pub async fn count_collections(
+        &self,
+        req: CountCollectionsRequest,
+    ) -> Result<CountCollectionsResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.count_collections(req).await,
+        }
+    }
+
     /// Get a collection with its segments.
     ///
     /// Returns `SysDbError::NotFound` if the collection does not exist.
@@ -350,6 +358,13 @@ impl Backend {
     ) -> Result<FlushCompactionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.flush_collection_compaction(req).await,
+        }
+    }
+
+    /// Reset the database state by deleting all data and recreating default entities.
+    pub async fn reset(&self) -> Result<(), SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.reset().await,
         }
     }
 

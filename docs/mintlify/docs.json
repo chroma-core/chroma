@@ -172,7 +172,7 @@
         "pages": [
           "integrations/chroma-integrations",
           {
-            "group": "Embedding Models",
+            "group": "Dense Embedding Models",
             "pages": [
               "integrations/embedding-models/openai",
               "integrations/embedding-models/cohere",
@@ -194,9 +194,15 @@
               "integrations/embedding-models/cloudflare-workers-ai",
               "integrations/embedding-models/amazon-bedrock",
               "integrations/embedding-models/baseten",
+              "integrations/embedding-models/chroma-cloud-qwen"
+            ]
+          },
+          {
+            "group": "Sparse Embedding Models",
+            "pages": [
               "integrations/embedding-models/chroma-bm25",
-              "integrations/embedding-models/chroma-cloud-qwen",
-              "integrations/embedding-models/chroma-cloud-splade"
+              "integrations/embedding-models/chroma-cloud-splade",
+              "integrations/embedding-models/hugging-face"
             ]
           },
           {
@@ -226,9 +232,36 @@
           {
             "group": "SDKs",
             "pages": [
-              "reference/python",
-              "reference/typescript",
+              {
+                "group": "Python",
+                "pages": [
+                  "reference/python/client",
+                  "reference/python/collection",
+                  "reference/python/embedding-functions",
+                  "reference/python/search",
+                  "reference/python/schema",
+                  "reference/python/where-filter"
+                ]
+              },
+              {
+                "group": "TypeScript",
+                "pages": [
+                  "reference/typescript/client",
+                  "reference/typescript/collection",
+                  "reference/typescript/embedding-functions",
+                  "reference/typescript/search",
+                  "reference/typescript/schema",
+                  "reference/typescript/where-filter"
+                ]
+              },
               "reference/rust"
+            ]
+          },
+          {
+            "group": "Beta SDKs",
+            "pages": [
+              "reference/kotlin",
+              "reference/swift"
             ]
           },
           {
@@ -238,8 +271,90 @@
                 "group": "Chroma Core API",
                 "openapi": {
                   "source": "openapi.json",
-                  "directory": "reference/chroma-api"
-                }
+                  "directory": "/reference/chroma-api"
+                },
+                "pages": [
+                  {
+                    "group": "Tenant",
+                    "pages": [
+                      "POST /api/v2/tenants",
+                      "GET /api/v2/tenants/{tenant_name}",
+                      "PATCH /api/v2/tenants/{tenant_name}"
+                    ]
+                  },
+                  {
+                    "group": "Database",
+                    "pages": [
+                      "GET /api/v2/tenants/{tenant}/databases",
+                      "POST /api/v2/tenants/{tenant}/databases",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}",
+                      "DELETE /api/v2/tenants/{tenant}/databases/{database}"
+                    ]
+                  },
+                  {
+                    "group": "Collection",
+                    "pages": [
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections_count",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                      "PUT /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}",
+                      "DELETE /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}"
+                    ]
+                  },
+                  {
+                    "group": "Record",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/delete",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/indexing_status",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/get",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/query",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/search",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/update",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/upsert"
+                    ]
+                  },
+                  {
+                    "group": "System",
+                    "pages": [
+                      "GET /api/v2/healthcheck",
+                      "GET /api/v2/heartbeat",
+                      "GET /api/v2/pre-flight-checks",
+                      "GET /api/v2/version"
+                    ]
+                  },
+                  {
+                    "group": "Authentication",
+                    "pages": [
+                      "GET /api/v2/auth/identity"
+                    ]
+                  }
+                ]
+              },
+              {
+                "group": "Chroma Cloud API",
+                "openapi": {
+                  "source": "openapi.json",
+                  "directory": "api-reference"
+                },
+                "pages": [
+                  {
+                    "group": "Collection",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork"
+                    ]
+                  },
+                  {
+                    "group": "Function",
+                    "pages": [
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/attach",
+                      "GET /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/functions/{function_name}",
+                      "POST /api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/attached_functions/{name}/detach"
+                    ]
+                  }
+                ]
               },
               {
                 "group": "Chroma Sync API",
@@ -248,6 +363,12 @@
                   "directory": "reference/sync-api"
                 }
               }
+            ]
+          },
+          {
+            "group": "Other",
+            "pages": [
+              "reference/where-filter"
             ]
           }
         ]
@@ -272,9 +393,19 @@
   "navbar": {
     "links": [
       {
-        "label": "GitHub",
         "icon": "github",
+        "label": "26k",
         "href": "https://github.com/chroma-core/chroma"
+      },
+      {
+        "icon": "discord",
+        "label": "11k",
+        "href": "https://discord.gg/dSHcBEMSk7"
+      },
+      {
+        "label": "25k",
+        "icon": "x-twitter",
+        "href": "https://x.com/trychroma"
       }
     ],
     "primary": {
@@ -287,6 +418,7 @@
     "options": [
       "copy",
       "view",
+      "grok",
       "chatgpt",
       "claude",
       "mcp",
@@ -328,5 +460,31 @@
     "gtm": {
       "tagId": "GTM-T8MGS4GJ"
     }
-  }
+  },
+  "redirects": [
+    {
+      "source": "/reference/chroma-reference",
+      "destination": "/reference/overview"
+    },
+    {
+      "source": "/reference/js/:slug*",
+      "destination": "/reference/typescript/"
+    },
+    {
+      "source": "/reference/python",
+      "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/python/index",
+      "destination": "/reference/python/client"
+    },
+    {
+      "source": "/reference/typescript",
+      "destination": "/reference/typescript/client"
+    },
+    {
+      "source": "/reference/typescript/index",
+      "destination": "/reference/typescript/client"
+    }
+  ]
 }

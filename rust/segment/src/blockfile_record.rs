@@ -578,6 +578,9 @@ pub enum ApplyMaterializedLogError {
     Materialization(#[from] LogMaterializerError),
     #[error("Error applying materialized records to spann segment: {0}")]
     SpannSegmentError(#[from] SpannSegmentWriterError),
+    #[cfg(feature = "usearch")]
+    #[error(transparent)]
+    QuantizedSpannSegmentError(#[from] crate::quantized_spann::QuantizedSpannSegmentError),
 }
 
 impl ChromaError for ApplyMaterializedLogError {
@@ -592,6 +595,8 @@ impl ChromaError for ApplyMaterializedLogError {
             ApplyMaterializedLogError::HnswIndex(_) => ErrorCodes::Internal,
             ApplyMaterializedLogError::Materialization(e) => e.code(),
             ApplyMaterializedLogError::SpannSegmentError(e) => e.code(),
+            #[cfg(feature = "usearch")]
+            ApplyMaterializedLogError::QuantizedSpannSegmentError(e) => e.code(),
         }
     }
 }

@@ -131,7 +131,7 @@ schema = Schema()
 
 # Configure vector index with custom embedding function
 embedding_function = OpenAIEmbeddingFunction(
-    api_key="your-api-key",
+    api_key_env_var="OPENAI_API_KEY",
     model_name="text-embedding-3-small"
 )
 
@@ -149,7 +149,7 @@ const schema = new Schema();
 
 // Configure vector index with custom embedding function
 const embeddingFunction = new OpenAIEmbeddingFunction({
-  apiKey: "your-api-key",
+  apiKeyEnvVar: "OPENAI_API_KEY",
   modelName: "text-embedding-3-small"
 });
 
@@ -252,7 +252,11 @@ schema.deleteIndex(undefined, "temporary_field");
 </CodeGroup>
 
 <Callout>
-**Note:** Not all indexes can be deleted. Vector and FTS indexes currently cannot be disabled
+**Note:** Not all indexes can be deleted. Vector indexes currently cannot be disabled.
+</Callout>
+
+<Callout>
+**Array metadata and indexes:** Array metadata (e.g. `[1, 2, 3]` or `["action", "comedy"]`) shares the same inverted index as its scalar counterpart. Disabling `IntInvertedIndexConfig` will also prevent `$contains` and `$not_contains` queries on integer arrays, and similarly for other types.
 </Callout>
 
 ## Method Chaining
