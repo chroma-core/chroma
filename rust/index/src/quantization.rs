@@ -69,6 +69,22 @@
 //! Euclidean:    ‖a‖² + ‖b‖² - 2 * ⟨a, b⟩
 //! InnerProduct: 1 - ⟨a, b⟩
 //! ```
+//!
+//! ## Code types
+//!
+//! Two concrete implementations cover the supported bit widths:
+//!
+//! | Type | Header | Quantization |
+//! |------|--------|-------------|
+//! | [`Code1Bit`] | 16 bytes (includes `signed_sum`) | Sign of residual |
+//! | [`Code4Bit`] | 12 bytes | Ray-walk |
+//!
+//! Both implement [`RabitqCode`] for shared accessor access. The shared distance
+//! math lives in [`rabitq_distance_query`] and [`rabitq_distance_code`], which
+//! take any `impl RabitqCode` — each concrete type supplies only the type-specific
+//! inner product kernel (`g_dot_r_q` or `g_a_dot_g_b`) before calling the helper.
+//!
+//! [`Code<T>`] is a type alias for [`Code4Bit<T>`] for backward compatibility.
 
 use std::mem::size_of;
 
@@ -77,18 +93,20 @@ use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
 
-/// Header for quantized code containing metadata.
+// ── Headers ───────────────────────────────────────────────────────────────────
+
+/// Header for 4-bit quantized codes. 12 bytes.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
-// muiltbit code header
 struct CodeHeader {
     correction: f32,
     norm: f32,
     radial: f32,
 }
 
-// single bit code header
-// returned when BITS == 1
+/// Header for 1-bit codes. Extends the 4-bit layout with `signed_sum`
+/// (2·popcount(x_b) − dim), precomputed at index time for zero-cost query scoring.
+/// 16 bytes.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
 struct CodeHeader1 {
@@ -98,244 +116,133 @@ struct CodeHeader1 {
     signed_sum: i32,
 }
 
-// generic code header
-#[repr(C)]
-#[derive(Copy, Clone, Pod, Zeroable)]
-struct CodeHeaderGeneric<T> {
-    correction: f32,
-    norm: f32,
-    radial: f32,
-    signed_sum: i32,
+// ── Shared interface ──────────────────────────────────────────────────────────
+
+/// Shared accessors for RaBitQ code types.
+///
+/// Implemented by both [`Code1Bit`] and [`Code4Bit`], allowing the shared
+/// distance helpers ([`rabitq_distance_query`], [`rabitq_distance_code`]) to
+/// read header fields without knowing the concrete code type.
+pub trait RabitqCode {
+    /// Correction factor `⟨g, n⟩`.
+    fn correction(&self) -> f32;
+    /// Data residual norm `‖r‖`.
+    fn norm(&self) -> f32;
+    /// Radial component `⟨r, c⟩`.
+    fn radial(&self) -> f32;
+    /// Packed quantization codes (excluding the header).
+    fn packed(&self) -> &[u8];
 }
 
-/// Quantized representation of a data residual.
+// ── Code4Bit ──────────────────────────────────────────────────────────────────
+
+/// 4-bit RaBitQ quantized code.
 ///
-/// Generic over the backing storage `T`, allowing both owned (`Vec<u8>`) and
-/// borrowed (`&[u8]`) representations. The const parameter `BITS` controls
-/// the number of bits per quantization code.
+/// Byte layout: `[CodeHeader (12 bytes)][packed 4-bit codes]`
 ///
-/// Byte layout:
-/// - `[0..12]` CodeHeader (correction, norm, radial as f32)
-/// - `[12..]` packed codes
-pub struct Code<T, const BITS: u8 = 4>(T);
+/// Uses a ray-walk algorithm to find the optimal grid point in
+/// {±0.5, ±1.5, ±2.5, ±3.5, ±4.5, ±5.5, ±6.5, ±7.5}^dim that maximises
+/// cosine similarity with the data residual.
+pub struct Code4Bit<T = Vec<u8>>(T);
 
-impl<T, const BITS: u8> Code<T, BITS> {
-    /// Quantization range ceiling: `2^(BITS-1)`
-    const CEIL: u8 = 1 << (BITS - 1);
+impl<T: AsRef<[u8]>> RabitqCode for Code4Bit<T> {
+    fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    }
+    fn packed(&self) -> &[u8] {
+        &self.0.as_ref()[size_of::<CodeHeader>()..]
+    }
+}
 
-    /// Grid offset for centering codes.
-    const GRID_OFFSET: f32 = 0.5;
-
-    /// Wraps existing bytes as a quantized code.
+impl<T> Code4Bit<T> {
+    /// Wraps existing bytes as a 4-bit code.
     pub fn new(bytes: T) -> Self {
         Self(bytes)
     }
-
-    /// Returns the packed byte length for a given dimension.
-    pub fn packed_len(dim: usize) -> usize {
-        Self::padded_dim(dim) * BITS as usize / 8
-    }
-
-    /// Returns the padded dimension.
-    ///
-    /// For BITS=1, pads to u64 boundary (64) for efficient popcount.
-    ///     We don't need to pad to 256 because we are using bit-level
-    ///     operations instead of unpacking the grid. i.e. hamming_distance and
-    ///     hamming_distance and signed_dot, not BitPacker8x decompression.
-    /// For BITS≥2, pads to BitPacker8x block size (256).
-    fn padded_dim(dim: usize) -> usize {
-        if BITS == 1 {
-            dim.div_ceil(64) * 64
-        } else {
-            dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
-        }
-    }
 }
 
-impl<T: AsRef<[u8]>, const BITS: u8> Code<T, BITS> {
-    /// Returns the correction factor `⟨g, n⟩`.
-    pub fn correction(&self) -> f32 {
-        self.header().correction
-    }
-
+impl<T: AsRef<[u8]>> Code4Bit<T> {
     /// Estimates distance between two original data vectors `d_a` and `d_b`.
     ///
-    /// See module-level documentation for the full derivation.
+    /// For 4-bit codes, `⟨g_a, g_b⟩` is computed by unpacking the grid vectors
+    /// and taking their dot product.
     pub fn distance_code<U: AsRef<[u8]>>(
         &self,
-        distance_function: &DistanceFunction,
-        code: &Code<U, BITS>,
+        distance_fn: &DistanceFunction,
+        other: &Code4Bit<U>,
         c_norm: f32,
         dim: usize,
     ) -> f32 {
-        let norm_a = self.norm();
-        let norm_b = code.norm();
-        let radial_a = self.radial();
-        let radial_b = code.radial();
-        let correction_a = self.correction();
-        let correction_b = code.correction();
-
-        // 3.2 Constructing an Unbiased Estimator for Distance Estimation
-        // The key achievement is estimating the product of the data and query vectors:
-        //     ⟨o, q⟩ in the paper and ⟨d_a, d_b⟩ in our code.
-        // Theorem 3.2:
-        //     ⟨o, q⟩ = E[⟨o¯, q⟩ / ⟨o¯, o⟩]
-        //
-        //     Where the error is bounded by O(1/√D) with high probability.
-        //     Namely, as D → ∞, the error approaches 0.
-        //     The constant factor of O depends on the norms of the data and query vectors.
-        // Error sources
-        // - Angular displacement caused by mapping o to the nearest hypercube vertex.
-        // - Norm of the data and query vectors being non-unit.
-        // How they are corrected:
-        // - The division by ⟨ō, o⟩ corrects on average (in expectation) for
-        //     the angular displacement caused by mapping o to the nearest hypercube vertex.
-        //     - Without the division, ⟨ō, q⟩ underestimates ⟨o, q⟩ because ⟨ō, o⟩ is less than 1 — the quantization rotated ō away from o, attenuating the signal. Dividing by ⟨ō, o⟩ undoes that attenuation, recovering ⟨o, q⟩ from the signal term.
-        // - The error that remains after the correction is the noise term ⟨ō, q⊥⟩ divided by ⟨ō, o⟩
-        //     (which is bounded by O(1/√D))
-        let g_a_dot_g_b = if BITS == 1 {
-            // For BITS=1, each g[i] is either +0.5 or -0.5.
-            // The dot product ⟨g_a, g_b⟩ counts where the two codes agree vs. disagree.
-            //     When both bits match: (+0.5)(+0.5) or (-0.5)(-0.5) = +0.25
-            //     When bits differ: (+0.5)(-0.5) or (-0.5)(+0.5) = -0.25
-            // So ⟨g_a, g_b⟩ = 0.25 · (agreements − disagreements).
-            //     And since agreements + disagreements = D, we get
-            //     agreements − disagreements = D − 2·hamming.
-            // Hence:
-            //     ⟨g_a, g_b⟩ = 0.25 · (D − 2 · hamming(a, b))
-            let hamming = hamming_distance(self.packed(), code.packed());
-            0.25 * (dim as f32 - 2.0 * hamming as f32)
-        } else {
-            let g_a = self.unpack_grid(dim);
-            let g_b = code.unpack_grid(dim);
-            f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32
-        };
-
-        // ⟨n_a, n_b⟩ ≈ ⟨g_a, g_b⟩ / (⟨g_a, n_a⟩ * ⟨g_b, n_b⟩)
-        let n_a_dot_n_b = g_a_dot_g_b / (correction_a * correction_b);
-
-        // ⟨d_a, d_b⟩ = ‖c‖² + ⟨r_a, c⟩ + ⟨r_b, c⟩ + ‖r_a‖ * ‖r_b‖ * ⟨n_a, n_b⟩
-        let d_a_dot_d_b = c_norm * c_norm + radial_a + radial_b + norm_a * norm_b * n_a_dot_n_b;
-
-        match distance_function {
-            DistanceFunction::Cosine => {
-                // ‖d‖² = ‖c‖² + 2⟨r, c⟩ + ‖r‖²
-                let d_a_norm_sq = c_norm * c_norm + 2.0 * radial_a + norm_a * norm_a;
-                let d_b_norm_sq = c_norm * c_norm + 2.0 * radial_b + norm_b * norm_b;
-                1.0 - d_a_dot_d_b / (d_a_norm_sq.sqrt() * d_b_norm_sq.sqrt()).max(f32::EPSILON)
-            }
-            DistanceFunction::Euclidean => {
-                // ‖d_a - d_b‖² = ‖d_a‖² + ‖d_b‖² - 2⟨d_a, d_b⟩
-                let d_a_norm_sq = c_norm * c_norm + 2.0 * radial_a + norm_a * norm_a;
-                let d_b_norm_sq = c_norm * c_norm + 2.0 * radial_b + norm_b * norm_b;
-                d_a_norm_sq + d_b_norm_sq - 2.0 * d_a_dot_d_b
-            }
-            DistanceFunction::InnerProduct => 1.0 - d_a_dot_d_b,
-        }
+        let g_a = self.unpack_grid(dim);
+        let g_b = other.unpack_grid(dim);
+        let g_a_dot_g_b = f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32;
+        rabitq_distance_code(g_a_dot_g_b, self, other, c_norm, distance_fn)
     }
 
-    /// Estimates distance between original data vector `d` and query `q`.
+    /// Estimates distance from data vector `d` to query `q`.
     ///
-    /// See module-level documentation for the full derivation.
+    /// For 4-bit codes, `⟨g, r_q⟩` is computed by unpacking the grid vector
+    /// and taking its dot product with the query residual.
     pub fn distance_query(
         &self,
-        distance_function: &DistanceFunction,
+        distance_fn: &DistanceFunction,
         r_q: &[f32],
         c_norm: f32,
         c_dot_q: f32,
         q_norm: f32,
     ) -> f32 {
-        let norm = self.norm();
-        let radial = self.radial();
-        let correction = self.correction();
-
-        let g_dot_r_q = if BITS == 1 {
-            // For BITS=1, g[i] is +0.5 when bit=1 and −0.5 when bit=0.
-            // ⟨g, r_q⟩ = Σ g[i] · r_q[i]
-            //           = 0.5 · Σ_{bit=1} r_q[i]  −  0.5 · Σ_{bit=0} r_q[i]
-            //           = 0.5 · Σ sign(g[i]) · r_q[i]
-            //
-            // where
-            // - sign(g[i]) = +1 when bit=1, −1 when bit=0.
-            // - S₁ = Σ_{bit=1} r_q[i]
-            // - S₀ = Σ_{bit=0} r_q[i]
-            0.5 * signed_dot(self.packed(), r_q)
-        } else {
-            let g = self.unpack_grid(r_q.len());
-            f32::dot(&g, r_q).unwrap_or(0.0) as f32
-        };
-
-        // ⟨r, r_q⟩ ≈ ‖r‖ * ⟨g, r_q⟩ / ⟨g, n⟩
-        let r_dot_r_q = norm * g_dot_r_q / correction;
-
-        // ⟨d, q⟩ = ⟨c, q⟩ + ⟨r, c⟩ + ⟨r, r_q⟩
-        let d_dot_q = c_dot_q + radial + r_dot_r_q;
-
-        match distance_function {
-            DistanceFunction::Cosine => {
-                // ‖d‖² = ‖c‖² + 2⟨r, c⟩ + ‖r‖²
-                let d_norm_sq = c_norm * c_norm + 2.0 * radial + norm * norm;
-                1.0 - d_dot_q / (d_norm_sq.sqrt() * q_norm).max(f32::EPSILON)
-            }
-            DistanceFunction::Euclidean => {
-                // ‖d‖² = ‖c‖² + 2⟨r, c⟩ + ‖r‖²
-                let d_norm_sq = c_norm * c_norm + 2.0 * radial + norm * norm;
-                d_norm_sq + q_norm * q_norm - 2.0 * d_dot_q
-            }
-            DistanceFunction::InnerProduct => 1.0 - d_dot_q,
-        }
+        let g = self.unpack_grid(r_q.len());
+        let g_dot_r_q = f32::dot(&g, r_q).unwrap_or(0.0) as f32;
+        rabitq_distance_query(g_dot_r_q, self, c_norm, c_dot_q, q_norm, distance_fn)
     }
 
-    /// Returns the header containing correction, norm, and radial.
-    /// Uses unaligned read since Vec<u8> only guarantees 1-byte alignment.
-    fn header(&self) -> CodeHeader {
-        bytemuck::pod_read_unaligned(&self.0.as_ref()[..size_of::<CodeHeader>()])
-    }
-
-    /// Returns the data residual norm `‖r‖`.
-    pub fn norm(&self) -> f32 {
-        self.header().norm
-    }
-
-    /// Returns the packed codes portion of the buffer.
-    fn packed(&self) -> &[u8] {
-        &self.0.as_ref()[size_of::<CodeHeader>()..]
-    }
-
-    /// Returns the radial component `⟨r, c⟩`.
-    pub fn radial(&self) -> f32 {
-        self.header().radial
-    }
-
-    /// Returns the size of buffer in bytes.
-    pub fn size(dim: usize) -> usize {
-        size_of::<CodeHeader>() + Self::packed_len(dim)
-    }
-
-    /// Unpacks the grid point from the packed codes.
+    /// Unpacks the grid point from the packed 4-bit codes.
     fn unpack_grid(&self, dim: usize) -> Vec<f32> {
+        const BITS: u8 = 4;
+        const CEIL: u8 = 8; // 1 << (BITS - 1)
+        const GRID_OFFSET: f32 = 0.5;
         let packed = self.packed();
         let bitpacker = BitPacker8x::new();
-        let mut codes = vec![0u32; Self::padded_dim(dim)];
+        let mut codes = vec![0u32; padded_dim_4bit(dim)];
 
         for (i, chunk) in codes.chunks_mut(BitPacker8x::BLOCK_LEN).enumerate() {
             let offset = i * BitPacker8x::compressed_block_size(BITS);
             bitpacker.decompress(&packed[offset..], chunk, BITS);
         }
 
-        let offset = f32::from(Self::CEIL) - Self::GRID_OFFSET;
+        let offset = f32::from(CEIL) - GRID_OFFSET;
         codes[..dim].iter().map(|&c| c as f32 - offset).collect()
     }
 }
 
-impl<T: AsRef<[u8]>, const BITS: u8> AsRef<[u8]> for Code<T, BITS> {
+impl<T: AsRef<[u8]>> AsRef<[u8]> for Code4Bit<T> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl<const BITS: u8> Code<Vec<u8>, BITS> {
-    /// Quantizes a data vector relative to its cluster centroid.
+impl Code4Bit {
+    const BITS: u8 = 4;
+    const CEIL: u8 = 8; // 1 << (BITS - 1)
+    const GRID_OFFSET: f32 = 0.5;
+
+    /// Packed byte length for a given dimension.
+    pub fn packed_len(dim: usize) -> usize {
+        padded_dim_4bit(dim) * Self::BITS as usize / 8
+    }
+
+    /// Total byte size of the code buffer for a given dimension.
+    pub fn size(dim: usize) -> usize {
+        size_of::<CodeHeader>() + Self::packed_len(dim)
+    }
+
+    /// Quantizes a data vector relative to its cluster centroid (4-bit ray-walk).
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
         let r = embedding
             .iter()
@@ -348,107 +255,18 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
 
         // Early return for near-zero residual
         if dim == 0 || norm < f32::EPSILON {
-            let header = CodeHeader {
+            let mut bytes = Vec::with_capacity(Self::size(dim));
+            bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader {
                 correction: 1.0,
                 norm,
                 radial,
-            };
-            let mut bytes = Vec::with_capacity(Self::size(dim));
-            bytes.extend_from_slice(bytemuck::bytes_of(&header));
+            }));
             bytes.resize(Self::size(dim), 0);
             return Self(bytes);
         }
 
-        // 1-bit: sign-based quantization (no ray-walk needed). See section 3.1.3 of the paper.
-        // The embedding is already rotated, so we only need to take the sign
-        // of each bit.
-        //
-        // Computing the Quantized Codes of Data Vectors
-        // - normalize the data vector -> o'
-        // - Have a "codebook" of unit vectors. Stored as a rotation matrix P
-        // - Find the nearest the nearest unrotated unit vector
-        //     1. Apply P⁻¹ to the data vector (unrotate).
-        //         - P⁻¹ = Pᵀ for orthonormal matrices
-        //         - since we only ever use P⁻¹, that's what we store in index.rotation
-        //         - We do this instead of rotating the data vector because it's faster and equivalent: Equation 8 in the paper: ⟨o,P xˉ⟩=⟨P−1 o, xˉ⟩
-        //         - The inner product between the data vector o and a rotated codebook entry Px̄, equals the inner product between the inverse-rotated data vector P⁻¹o and the unrotated codebook entry x̄.
-        //     2. Take the sign of each bit of the inverse-rotated data vector.
-        //         - This gives the nearest unrotated unit vector.
-        //         - we can do this instead of rotating all 2^D vectors in C, because x̄ ∈ C has entries ±1/√D, the argmax over C is just the sign of each component of P⁻¹o:
-        //         - xˉ[i] = sign((P⁻¹o)[i]) / √D,
-        //     - The whole point of the "de-rotate the data instead of rotating the codebook" trick is precisely that you never need Px̄ (AKA ō) explicitly (because Px̄ is expensive to store and compute with, it's not binary-valued) — you just keep everything in the P⁻¹-rotated coordinate frame, where x̄ is just a sign vector and inner products can be computed with popcount.
-        //
-        // Notation:
-        // TODO align with notation above
-        // o — the normalized data vector (in the original space, after subtracting centroid and normalizing to unit length)
-        // ō - the rotated, quantized data vector (Px̄)
-        // P — the random orthogonal rotation matrix used to construct the randomized codebook C_rand
-        // x̄ — a candidate vector from the unrotated codebook C = {±1/√D}^D (axis-aligned, bi-valued)
-        // Px̄ — the rotated codebook vector, i.e., the candidate from C_rand (the actual quantized vector ō lives here)
-        // P⁻¹ — the inverse rotation (which equals Pᵀ since P is orthogonal)
-        // P⁻¹o — the data vector inversely transformed into the unrotated codebook space
-
-        if BITS == 1 {
-            // Build packed codes: [sign_bits]
-            // Pack sign bits branchlessly, 8 floats → 1 byte at a time.
-            // For each f32, the IEEE-754 sign bit is bit 31: 1 = negative, 0 = positive.
-            // We want the packed bit to be 1 when val >= 0, so we invert the sign bit.
-            // Processing a full chunk per byte eliminates all i/8 and i%8 index arithmetic
-            // as used previously: `packed[i / 8] |= 1 << (i % 8);`
-            // TODO benchmark branchless vs previous conditional
-            // f32.sign?
-            let mut packed = vec![0u8; Self::packed_len(dim)];
-            for (byte_ref, chunk) in packed.iter_mut().zip(r.chunks(8)) {
-                let mut byte = 0u8;
-                for (j, &val) in chunk.iter().enumerate() {
-                    let sign = (val.to_bits() >> 31) as u8; // 1 if negative, 0 if non-negative
-                    byte |= (sign ^ 1) << j;
-                }
-                *byte_ref = byte;
-            }
-
-            // abs_sum is computed in its own loop so rustc/LLVM can auto-vectorize it
-            // with VABSPS + VADDPS (or equivalent).
-            //
-            // auto-vectorization can happen when a loop body has:
-            // - No cross-iteration dependencies
-            // - Pure float operations (abs + add)
-            // - Sequential memory access over a contiguous slice
-            //
-            // So this line will get converted into:
-            // - Load 8 floats at once into a 256-bit AVX register (YMM register)
-            // - Apply VABSPS — "Vector ABSolute value Packed Single" — to all 8 lanes simultaneously (this is literally just masking off the sign bit on each f32 in parallel)
-            // - Accumulate into a running sum register with VADDPS — "Vector ADD Packed Single"
-            // - At the end, do a horizontal reduction across the 8 lanes to collapse into a single f32
-            //
-            // For a 1024-dimensional vector that's 128 iterations instead of 1024 scalar operations.
-            let abs_sum: f32 = r.iter().map(|v| v.abs()).sum();
-
-            // correction = ⟨g, n⟩
-            //            = ⟨g, r⟩ / ‖r‖
-            //            = Σ g[i] * r[i] / ‖r‖
-            //               - for BITS=1, g[i] always has the same sign as r[i]
-            //                  g[i] = +0.5   if r[i] >= 0
-            //                  g[i] = -0.5   if r[i] <  0
-            //               - Therefore g[i] * r[i] = sign(r[i]) * 0.5 * r[i] = 0.5 * |r[i]|
-            //            = Σ 0.5 * |r[i]| / ‖r‖
-            //            = 0.5 * Σ |r[i]| / ‖r‖
-            //            = GRID_OFFSET * abs_sum / norm
-            let correction = Self::GRID_OFFSET * abs_sum / norm;
-            let header = CodeHeader {
-                correction,
-                norm,
-                radial,
-            };
-            // Build output: [header][packed_codes]
-            let mut bytes = Vec::with_capacity(Self::size(dim));
-            bytes.extend_from_slice(bytemuck::bytes_of(&header));
-            bytes.extend_from_slice(&packed);
-            return Self(bytes);
-        }
-
-        // Multi-bit ray-walk: find optimal grid point maximizing cosine similarity
-        // max_t is when the largest magnitude component reaches max code
+        // Multi-bit ray-walk: find optimal grid point maximizing cosine similarity.
+        // max_t is when the largest magnitude component reaches max code.
         let r_abs = r.iter().copied().map(f32::abs).collect::<Vec<_>>();
         let max_t = (f32::from(Self::CEIL) - 1.0 + f32::EPSILON)
             / r_abs.iter().copied().fold(f32::EPSILON, f32::max);
@@ -482,8 +300,8 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             }
         }
 
-        // Reconstruct codes from best_t
-        // At best_t, we crossed integer g = best_t * |r[i]| and entered cell g + 0.5
+        // Reconstruct codes from best_t.
+        // At best_t, we crossed integer g = best_t * |r[i]| and entered cell g + 0.5.
         // For positive r[i]: grid = g + 0.5, stored code = g + CEIL
         // For negative r[i]: grid = -(g + 0.5), stored code = CEIL - 1 - g
         for (code, val) in code.iter_mut().zip(&r) {
@@ -500,31 +318,446 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
         let g = code.iter().map(|&c| c as f32 - offset).collect::<Vec<_>>();
         let correction = f32::dot(&g, &r).unwrap_or(0.0) as f32 / norm;
 
-        // Pad to multiple of BLOCK_LEN
-        code.resize(Self::padded_dim(dim), 0);
-
-        // Pack using bitpacking
+        // Pad to multiple of BLOCK_LEN and pack using bitpacking.
+        code.resize(padded_dim_4bit(dim), 0);
         let bitpacker = BitPacker8x::new();
         let mut packed = vec![0u8; Self::packed_len(dim)];
-
         for (i, chunk) in code.chunks(BitPacker8x::BLOCK_LEN).enumerate() {
-            let offset = i * BitPacker8x::compressed_block_size(BITS);
-            bitpacker.compress(chunk, &mut packed[offset..], BITS);
+            let off = i * BitPacker8x::compressed_block_size(Self::BITS);
+            bitpacker.compress(chunk, &mut packed[off..], Self::BITS);
         }
 
-        // Build output: [header][packed_codes]
-        let header = CodeHeader {
+        let mut bytes = Vec::with_capacity(Self::size(dim));
+        bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader {
             correction,
             norm,
             radial,
-        };
-        let mut bytes = Vec::with_capacity(Self::size(dim));
-        bytes.extend_from_slice(bytemuck::bytes_of(&header));
+        }));
         bytes.extend_from_slice(&packed);
-
         Self(bytes)
     }
 }
+
+/// 4-bit code, for backward compatibility.
+pub type Code<T> = Code4Bit<T>;
+
+// ── Code1Bit ──────────────────────────────────────────────────────────────────
+
+/// 1-bit RaBitQ quantized code.
+///
+/// Byte layout: `[CodeHeader1 (16 bytes)][packed sign bits]`
+///
+/// One bit per dimension, packed LSB-first. Bit `i` is 1 when the residual
+/// `r[i] ≥ 0` and 0 otherwise — i.e. `g[i] = +0.5` when bit=1, `−0.5` when
+/// bit=0.
+///
+/// The header stores `signed_sum = 2·popcount(x_b) − dim`, precomputed at
+/// index time and used by both `distance_query` and `distance_query_bitwise`.
+pub struct Code1Bit<T = Vec<u8>>(T);
+
+impl<T: AsRef<[u8]>> RabitqCode for Code1Bit<T> {
+    fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    }
+    fn packed(&self) -> &[u8] {
+        &self.0.as_ref()[size_of::<CodeHeader1>()..]
+    }
+}
+
+impl<T> Code1Bit<T> {
+    /// Wraps existing bytes as a 1-bit code.
+    pub fn new(bytes: T) -> Self {
+        Self(bytes)
+    }
+}
+
+impl<T: AsRef<[u8]>> Code1Bit<T> {
+    /// Precomputed `signed_sum = 2·popcount(x_b) − dim`, stored in the header.
+    pub fn signed_sum(&self) -> i32 {
+        bytemuck::pod_read_unaligned::<i32>(&self.0.as_ref()[12..16])
+    }
+
+    /// Estimates distance between two original data vectors `d_a` and `d_b`.
+    ///
+    /// For 1-bit codes, computes `⟨g_a, g_b⟩` via Hamming distance:
+    /// ```text
+    /// ⟨g_a, g_b⟩ = 0.25 · (dim − 2·hamming(a, b))
+    /// ```
+    /// since each g[i] ∈ {−0.5, +0.5}: agreeing bits contribute +0.25,
+    /// disagreeing bits contribute −0.25.
+    pub fn distance_code<U: AsRef<[u8]>>(
+        &self,
+        distance_fn: &DistanceFunction,
+        other: &Code1Bit<U>,
+        c_norm: f32,
+        dim: usize,
+    ) -> f32 {
+        let hamming = hamming_distance(self.packed(), other.packed());
+        let g_a_dot_g_b = 0.25 * (dim as f32 - 2.0 * hamming as f32);
+        rabitq_distance_code(g_a_dot_g_b, self, other, c_norm, distance_fn)
+    }
+
+    /// Estimates distance from data vector `d` to query `q` (float query path).
+    ///
+    /// Computes `⟨g, r_q⟩ = 0.5 · signed_dot(packed, r_q)`:
+    /// each bit contributes `+r_q[i]` (bit=1) or `−r_q[i]` (bit=0).
+    pub fn distance_query(
+        &self,
+        distance_fn: &DistanceFunction,
+        r_q: &[f32],
+        c_norm: f32,
+        c_dot_q: f32,
+        q_norm: f32,
+    ) -> f32 {
+        // For BITS=1, g[i] is +0.5 when bit=1 and −0.5 when bit=0.
+        // ⟨g, r_q⟩ = Σ g[i] · r_q[i]
+        //           = 0.5 · Σ_{bit=1} r_q[i]  −  0.5 · Σ_{bit=0} r_q[i]
+        //           = 0.5 · Σ sign(g[i]) · r_q[i]
+        let g_dot_r_q = 0.5 * signed_dot(self.packed(), r_q);
+        rabitq_distance_query(g_dot_r_q, self, c_norm, c_dot_q, q_norm, distance_fn)
+    }
+
+    // ── Bitwise query path (paper Section 3.3) ───────────────────────────────
+
+    /// Bitwise distance estimation using the paper's Section 3.3 approach.
+    ///
+    /// ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+    ///
+    /// Instead of expanding packed bits to f32 signs and running a float dot
+    /// product, this computes `⟨x_bar_b, q_bar_u⟩` using B_q rounds of
+    /// AND + popcount on D-bit strings, then recovers the full distance
+    /// estimate from the scalar factors.
+    ///
+    /// # Derivation: Equation 20 to our code
+    ///
+    /// **Step 1 — Paper Equation 20** (unit vectors, ō[i] = ±1/√D):
+    /// ```text
+    /// ⟨x̄, q̄⟩ = (2Δ/√D)·⟨x_b, q_u⟩ + (2v_l/√D)·Σ x_b[i] - (Δ/√D)·Σ q_u[i] - √D·v_l
+    /// ```
+    ///
+    /// **Step 2 — Our scaling** (residuals, g[i] = ±0.5):
+    /// Replace 1/√D with 0.5, √D with dim. We want ⟨g, r_q⟩ where r_q[i] ≈ Δ·q_u[i] + v_l:
+    /// ```text
+    /// ⟨g, r_q⟩ = 0.5·(2Δ·⟨x_b, q_u⟩ + 2·v_l·popcount(x_b) - Δ·Σ q_u[i] - dim·v_l)
+    /// ```
+    ///
+    /// **Step 3 — Factor** (group Δ terms and v_l terms):
+    /// ```text
+    /// ⟨g, r_q⟩ = 0.5·(Δ·(2·⟨x_b, q_u⟩ - Σ q_u[i]) + v_l·(2·popcount(x_b) - dim))
+    /// ```
+    ///
+    /// **Step 4 — Substitute** sign[i] = 2·x_b[i] − 1:
+    /// ```text
+    /// signed_dot_qu = Σ sign[i]·q_u[i] = 2·⟨x_b, q_u⟩ − Σ q_u[i]
+    /// signed_sum    = Σ sign[i]        = 2·popcount(x_b) − dim
+    /// ⟨g, r_q⟩      = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+    /// ```
+    ///
+    /// # Notation
+    ///
+    /// - v_l = min(r_q[i])
+    /// - v_r = max(r_q[i])
+    /// - x_b = data code (packed bits), g[i] = +0.5 when x_b[i]=1 else −0.5
+    /// - q_u = quantized query, r_q[i] ≈ Δ·q_u[i] + v_l
+    /// - Δ = (v_r − v_l) / (2^B_q − 1)
+    /// - ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
+    pub fn distance_query_bitwise(
+        &self,
+        distance_fn: &DistanceFunction,
+        qq: &QuantizedQuery,
+    ) -> f32 {
+        let packed = self.packed();
+
+        // Compute ⟨x_b, q_u⟩ (the binary versions of g and r_q) via bit planes.
+        // ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
+        // Each AND+popcount operates on the full D-bit string.
+        let mut xb_dot_qu = 0u32;
+        for (j, plane) in qq.bit_planes.iter().enumerate() {
+            let mut plane_pop = 0u32;
+            debug_assert!(packed.len() <= plane.len());
+            for i in (0..packed.len()).step_by(8) {
+                let x_word = u64::from_le_bytes(packed[i..i + 8].try_into().unwrap());
+                let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
+                plane_pop += (x_word & q_word).count_ones();
+            }
+            xb_dot_qu += plane_pop << j;
+        }
+
+        // signed_sum = 2·popcount(x_b) − dim, precomputed at index time
+        let signed_sum = self.signed_sum() as f32;
+        let signed_dot_qu = 2.0 * xb_dot_qu as f32 - qq.sum_q_u as f32;
+        // ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
+
+        rabitq_distance_query(
+            g_dot_r_q,
+            self,
+            qq.c_norm,
+            qq.c_dot_q,
+            qq.q_norm,
+            distance_fn,
+        )
+    }
+}
+
+impl<T: AsRef<[u8]>> AsRef<[u8]> for Code1Bit<T> {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
+    }
+}
+
+impl Code1Bit {
+    const GRID_OFFSET: f32 = 0.5;
+
+    /// Padded byte length for a given dimension.
+    pub fn packed_len(dim: usize) -> usize {
+        padded_dim_1bit(dim) / 8
+    }
+
+    /// Total byte size of the code buffer for a given dimension.
+    pub fn size(dim: usize) -> usize {
+        size_of::<CodeHeader1>() + Self::packed_len(dim)
+    }
+
+    /// Quantizes a data vector relative to its cluster centroid (1-bit path).
+    ///
+    /// 1-bit quantization uses sign-based coding — no ray-walk needed.
+    /// See section 3.1.3 of the paper.
+    pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
+        let r = embedding
+            .iter()
+            .zip(centroid)
+            .map(|(e, c)| e - c)
+            .collect::<Vec<_>>();
+        let dim = r.len();
+        let norm = (f32::dot(&r, &r).unwrap_or(0.0) as f32).sqrt();
+        let radial = f32::dot(&r, centroid).unwrap_or(0.0) as f32;
+
+        // Early return for near-zero residual
+        if dim == 0 || norm < f32::EPSILON {
+            let mut bytes = Vec::with_capacity(Self::size(dim));
+            bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader1 {
+                correction: 1.0,
+                norm,
+                radial,
+                signed_sum: -(dim as i32),
+            }));
+            bytes.resize(Self::size(dim), 0);
+            return Self(bytes);
+        }
+
+        // 1-bit: sign-based quantization (no ray-walk needed). See section 3.1.3 of the paper.
+        // The embedding is already rotated, so we only need to take the sign
+        // of each bit.
+        //
+        // Computing the Quantized Codes of Data Vectors
+        // - normalize the data vector -> o'
+        // - Have a "codebook" of unit vectors. Stored as a rotation matrix P
+        // - Find the nearest the nearest unrotated unit vector
+        //     1. Apply P⁻¹ to the data vector (unrotate).
+        //         - P⁻¹ = Pᵀ for orthonormal matrices
+        //         - since we only ever use P⁻¹, that's what we store in index.rotation
+        //         - We do this instead of rotating the data vector because it's faster and equivalent: Equation 8 in the paper: ⟨o,P xˉ⟩=⟨P−1 o, xˉ⟩
+        //         - The inner product between the data vector o and a rotated codebook entry Px̄, equals the inner product between the inverse-rotated data vector P⁻¹o and the unrotated codebook entry x̄.
+        //     2. Take the sign of each bit of the inverse-rotated data vector.
+        //         - This gives the nearest unrotated unit vector.
+        //         - we can do this instead of rotating all 2^D vectors in C, because x̄ ∈ C has entries ±1/√D, the argmax over C is just the sign of each component of P⁻¹o:
+        //         - xˉ[i] = sign((P⁻¹o)[i]) / √D,
+        //     - The whole point of the "de-rotate the data instead of rotating the codebook" trick is precisely that you never need Px̄ (AKA ō) explicitly (because Px̄ is expensive to store and compute with, it's not binary-valued) — you just keep everything in the P⁻¹-rotated coordinate frame, where x̄ is just a sign vector and inner products can be computed with popcount.
+        //
+        // Notation:
+        // TODO align with notation above
+        // o — the normalized data vector (in the original space, after subtracting centroid and normalizing to unit length)
+        // ō - the rotated, quantized data vector (Px̄)
+        // P — the random orthogonal rotation matrix used to construct the randomized codebook C_rand
+        // x̄ — a candidate vector from the unrotated codebook C = {±1/√D}^D (axis-aligned, bi-valued)
+        // Px̄ — the rotated codebook vector, i.e., the candidate from C_rand (the actual quantized vector ō lives here)
+        // P⁻¹ — the inverse rotation (which equals Pᵀ since P is orthogonal)
+        // P⁻¹o — the data vector inversely transformed into the unrotated codebook space
+
+        // Build packed codes: [sign_bits]
+        // Pack sign bits branchlessly, 8 floats → 1 byte at a time.
+        // For each f32, the IEEE-754 sign bit is bit 31: 1 = negative, 0 = positive.
+        // We want the packed bit to be 1 when val >= 0, so we invert the sign bit.
+        // Processing a full chunk per byte eliminates all i/8 and i%8 index arithmetic
+        // as used previously: `packed[i / 8] |= 1 << (i % 8);`
+        // TODO benchmark branchless vs previous conditional
+        // f32.sign?
+        let mut packed = vec![0u8; Self::packed_len(dim)];
+        for (byte_ref, chunk) in packed.iter_mut().zip(r.chunks(8)) {
+            let mut byte = 0u8;
+            for (j, &val) in chunk.iter().enumerate() {
+                let sign = (val.to_bits() >> 31) as u8; // 1 if negative, 0 if non-negative
+                byte |= (sign ^ 1) << j;
+            }
+            *byte_ref = byte;
+        }
+
+        // abs_sum is computed in its own loop so rustc/LLVM can auto-vectorize it
+        // with VABSPS + VADDPS (or equivalent).
+        //
+        // auto-vectorization can happen when a loop body has:
+        // - No cross-iteration dependencies
+        // - Pure float operations (abs + add)
+        // - Sequential memory access over a contiguous slice
+        //
+        // So this line will get converted into:
+        // - Load 8 floats at once into a 256-bit AVX register (YMM register)
+        // - Apply VABSPS — "Vector ABSolute value Packed Single" — to all 8 lanes simultaneously (this is literally just masking off the sign bit on each f32 in parallel)
+        // - Accumulate into a running sum register with VADDPS — "Vector ADD Packed Single"
+        // - At the end, do a horizontal reduction across the 8 lanes to collapse into a single f32
+        //
+        // For a 1024-dimensional vector that's 128 iterations instead of 1024 scalar operations.
+        let abs_sum: f32 = r.iter().map(|v| v.abs()).sum();
+
+        // correction = ⟨g, n⟩
+        //            = ⟨g, r⟩ / ‖r‖
+        //            = Σ g[i] * r[i] / ‖r‖
+        //               - for BITS=1, g[i] always has the same sign as r[i]
+        //                  g[i] = +0.5   if r[i] >= 0
+        //                  g[i] = -0.5   if r[i] <  0
+        //               - Therefore g[i] * r[i] = sign(r[i]) * 0.5 * r[i] = 0.5 * |r[i]|
+        //            = Σ 0.5 * |r[i]| / ‖r‖
+        //            = 0.5 * Σ |r[i]| / ‖r‖
+        //            = GRID_OFFSET * abs_sum / norm
+        let correction = Self::GRID_OFFSET * abs_sum / norm;
+
+        // Popcount via u64 words — one POPCNT instruction per word.
+        let popcount: u32 = packed
+            .chunks_exact(8)
+            .map(|c| u64::from_le_bytes(c.try_into().unwrap()).count_ones())
+            .sum();
+        let signed_sum = 2 * popcount as i32 - dim as i32;
+
+        let mut bytes = Vec::with_capacity(Self::size(dim));
+        bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader1 {
+            correction,
+            norm,
+            radial,
+            signed_sum,
+        }));
+        bytes.extend_from_slice(&packed);
+        Self(bytes)
+    }
+}
+
+// ── Shared math helpers ───────────────────────────────────────────────────────
+//
+// Called by both Code1Bit and Code4Bit after computing their type-specific
+// inner product kernel. Factoring out the shared formulas keeps the
+// DistanceFunction match arms in one place.
+
+/// Estimates distance from data vector `d` to query `q`.
+///
+/// `g_dot_r_q` is the inner product `⟨g, r_q⟩`, computed differently by
+/// each code type before calling this helper.
+///
+/// See module-level documentation for the derivation.
+fn rabitq_distance_query(
+    g_dot_r_q: f32,
+    code: &impl RabitqCode,
+    c_norm: f32,
+    c_dot_q: f32,
+    q_norm: f32,
+    distance_fn: &DistanceFunction,
+) -> f32 {
+    let norm = code.norm();
+    let radial = code.radial();
+    let correction = code.correction();
+
+    // ⟨r, r_q⟩ ≈ ‖r‖ · ⟨g, r_q⟩ / ⟨g, n⟩
+    let r_dot_r_q = norm * g_dot_r_q / correction;
+    // ⟨d, q⟩ = ⟨c, q⟩ + ⟨r, c⟩ + ⟨r, r_q⟩
+    let d_dot_q = c_dot_q + radial + r_dot_r_q;
+    // ‖d‖² = ‖c‖² + 2⟨r, c⟩ + ‖r‖²
+    let d_norm_sq = c_norm * c_norm + 2.0 * radial + norm * norm;
+
+    match distance_fn {
+        DistanceFunction::Cosine => 1.0 - d_dot_q / (d_norm_sq.sqrt() * q_norm).max(f32::EPSILON),
+        DistanceFunction::Euclidean => d_norm_sq + q_norm * q_norm - 2.0 * d_dot_q,
+        DistanceFunction::InnerProduct => 1.0 - d_dot_q,
+    }
+}
+
+/// Estimates distance between two data vectors `d_a` and `d_b`.
+///
+/// `g_a_dot_g_b` is the inner product `⟨g_a, g_b⟩`, computed differently by
+/// each code type before calling this helper.
+///
+/// See module-level documentation for the derivation.
+fn rabitq_distance_code(
+    g_a_dot_g_b: f32,
+    code_a: &impl RabitqCode,
+    code_b: &impl RabitqCode,
+    c_norm: f32,
+    distance_fn: &DistanceFunction,
+) -> f32 {
+    let norm_a = code_a.norm();
+    let norm_b = code_b.norm();
+    let radial_a = code_a.radial();
+    let radial_b = code_b.radial();
+    let correction_a = code_a.correction();
+    let correction_b = code_b.correction();
+
+    // 3.2 Constructing an Unbiased Estimator for Distance Estimation
+    // The key achievement is estimating the product of the data and query vectors:
+    //     ⟨o, q⟩ in the paper and ⟨d_a, d_b⟩ in our code.
+    // Theorem 3.2:
+    //     ⟨o, q⟩ = E[⟨o¯, q⟩ / ⟨o¯, o⟩]
+    //
+    //     Where the error is bounded by O(1/√D) with high probability.
+    //     Namely, as D → ∞, the error approaches 0.
+    //     The constant factor of O depends on the norms of the data and query vectors.
+    // Error sources
+    // - Angular displacement caused by mapping o to the nearest hypercube vertex.
+    // - Norm of the data and query vectors being non-unit.
+    // How they are corrected:
+    // - The division by ⟨ō, o⟩ corrects on average (in expectation) for
+    //     the angular displacement caused by mapping o to the nearest hypercube vertex.
+    //     - Without the division, ⟨ō, q⟩ underestimates ⟨o, q⟩ because ⟨ō, o⟩ is less than 1 — the quantization rotated ō away from o, attenuating the signal. Dividing by ⟨ō, o⟩ undoes that attenuation, recovering ⟨o, q⟩ from the signal term.
+    // - The error that remains after the correction is the noise term ⟨ō, q⊥⟩ divided by ⟨ō, o⟩
+    //     (which is bounded by O(1/√D))
+
+    // ⟨n_a, n_b⟩ ≈ ⟨g_a, g_b⟩ / (⟨g_a, n_a⟩ · ⟨g_b, n_b⟩)
+    let n_a_dot_n_b = g_a_dot_g_b / (correction_a * correction_b);
+    // ⟨d_a, d_b⟩ = ‖c‖² + ⟨r_a, c⟩ + ⟨r_b, c⟩ + ‖r_a‖·‖r_b‖·⟨n_a, n_b⟩
+    let d_a_dot_d_b = c_norm * c_norm + radial_a + radial_b + norm_a * norm_b * n_a_dot_n_b;
+
+    // ‖d‖² = ‖c‖² + 2⟨r, c⟩ + ‖r‖²
+    let d_a_norm_sq = c_norm * c_norm + 2.0 * radial_a + norm_a * norm_a;
+    let d_b_norm_sq = c_norm * c_norm + 2.0 * radial_b + norm_b * norm_b;
+
+    match distance_fn {
+        DistanceFunction::Cosine => {
+            1.0 - d_a_dot_d_b / (d_a_norm_sq.sqrt() * d_b_norm_sq.sqrt()).max(f32::EPSILON)
+        }
+        DistanceFunction::Euclidean => d_a_norm_sq + d_b_norm_sq - 2.0 * d_a_dot_d_b,
+        DistanceFunction::InnerProduct => 1.0 - d_a_dot_d_b,
+    }
+}
+
+// ── Sizing helpers (private) ──────────────────────────────────────────────────
+//
+// These are module-level functions rather than methods to avoid Rust's
+// "can't infer T" error when calling Code1Bit::size(dim) without a concrete T.
+
+/// Padded dimension for 1-bit codes (multiple of 64 for u64 popcount alignment).
+fn padded_dim_1bit(dim: usize) -> usize {
+    dim.div_ceil(64) * 64
+}
+
+/// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
+fn padded_dim_4bit(dim: usize) -> usize {
+    dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
+}
+
+// ── Private helpers ───────────────────────────────────────────────────────────
 
 /// Computes hamming distance between two packed bit vectors.
 ///
@@ -707,7 +940,6 @@ impl QuantizedQuery {
             }
         }
 
-        // Do we need
         Self {
             bit_planes,
             v_l,
@@ -717,118 +949,6 @@ impl QuantizedQuery {
             c_norm,
             c_dot_q,
             q_norm,
-        }
-    }
-}
-
-impl<T: AsRef<[u8]>> Code<T, 1> {
-    /// Bitwise distance estimation using the paper's Section 3.3 approach.
-    ///
-    /// ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
-    ///
-    /// Instead of expanding packed bits to f32 signs and running a float dot
-    /// product, this computes `⟨x_bar_b, q_bar_u⟩` using B_q rounds of
-    /// AND + popcount on D-bit strings, then recovers the full distance
-    /// estimate from the scalar factors.
-    ///
-    /// # Derivation: Equation 20 to our code
-    ///
-    /// **Step 1 — Paper Equation 20** (unit vectors, ō[i] = ±1/√D):
-    /// ```text
-    /// ⟨x̄, q̄⟩ = (2Δ/√D)·⟨x_b, q_u⟩ + (2v_l/√D)·Σ x_b[i] - (Δ/√D)·Σ q_u[i] - √D·v_l
-    /// ```
-    ///
-    /// **Step 2 — Our scaling** (residuals, g[i] = ±0.5):
-    /// Replace 1/√D with 0.5, √D with dim. We want ⟨g, r_q⟩ where r_q[i] ≈ Δ·q_u[i] + v_l:
-    /// ```text
-    /// ⟨g, r_q⟩ = 0.5·(2Δ·⟨x_b, q_u⟩ + 2·v_l·popcount(x_b) - Δ·Σ q_u[i] - dim·v_l)
-    /// ```
-    ///
-    /// **Step 3 — Factor** (group Δ terms and v_l terms):
-    /// ```text
-    /// ⟨g, r_q⟩ = 0.5·(Δ·(2·⟨x_b, q_u⟩ - Σ q_u[i]) + v_l·(2·popcount(x_b) - dim))
-    /// ```
-    ///
-    /// **Step 4 — Substitute** sign[i] = 2·x_b[i] − 1:
-    /// ```text
-    /// signed_dot_qu = Σ sign[i]·q_u[i] = 2·⟨x_b, q_u⟩ − Σ q_u[i]
-    /// signed_sum    = Σ sign[i]        = 2·popcount(x_b) − dim
-    /// ⟨g, r_q⟩      = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
-    /// ```
-    ///
-    /// **Step 5 — Code** (see `g_dot_r_q` below):
-    /// ```text
-    /// g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum)
-    /// ```
-    ///
-    /// # Notation
-    ///
-    /// - v_l = min(r_q[i])
-    /// - v_r = max(r_q[i])
-    /// - x_b = data code (packed bits), g[i] = +0.5 when x_b[i]=1 else −0.5
-    /// - q_u = quantized query, r_q[i] ≈ Δ·q_u[i] + v_l
-    /// - Δ = (v_r − v_l) / (2^B_q − 1)
-    /// - ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
-    pub fn distance_query_bitwise(
-        &self,
-        distance_function: &DistanceFunction,
-        qq: &QuantizedQuery,
-        dim: usize,
-    ) -> f32 {
-        let norm = self.norm();
-        let radial = self.radial();
-        let correction = self.correction();
-        let packed = self.packed();
-
-        // Compute ⟨x_b, q_u⟩ (the binary verstions of g and r_q) via bit planes
-        // ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
-        // Each AND+popcount operates on the full D-bit string.
-        let mut xb_dot_qu = 0u32;
-        for (j, plane) in qq.bit_planes.iter().enumerate() {
-            let mut plane_pop = 0u32;
-            debug_assert!(packed.len() <= plane.len());
-            for i in (0..packed.len()).step_by(8) {
-                let x_word = u64::from_le_bytes(packed[i..i + 8].try_into().unwrap());
-                let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
-                plane_pop += (x_word & q_word).count_ones();
-            }
-            xb_dot_qu += plane_pop << j;
-        }
-
-        // popcount(x_b) = number of set bits in the data code
-        // TODO - OPTIMIZATION: this can be precomputed in Code::quantize.
-        // Alternatively, we could store the signed_sum in the header.
-        // Requires changing the header size.
-        // TODO make single instruction popcount
-        let popcount_xb = {
-            let mut count = 0u32;
-            for i in (0..packed.len()).step_by(8) {
-                let word = u64::from_le_bytes(packed[i..i + 8].try_into().unwrap());
-                count += word.count_ones();
-            }
-            count
-        };
-
-        let signed_dot_qu = 2.0 * xb_dot_qu as f32 - qq.sum_q_u as f32;
-        let signed_sum = 2.0 * popcount_xb as f32 - dim as f32;
-        // Compute ⟨g, r_q⟩ from the quantized inner product. Equation 20.
-        // ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
-        let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
-
-        // From here on, same as the existing distance_query.
-        let r_dot_r_q = norm * g_dot_r_q / correction;
-        let d_dot_q = qq.c_dot_q + radial + r_dot_r_q;
-
-        match distance_function {
-            DistanceFunction::Cosine => {
-                let d_norm_sq = qq.c_norm * qq.c_norm + 2.0 * radial + norm * norm;
-                1.0 - d_dot_q / (d_norm_sq.sqrt() * qq.q_norm).max(f32::EPSILON)
-            }
-            DistanceFunction::Euclidean => {
-                let d_norm_sq = qq.c_norm * qq.c_norm + 2.0 * radial + norm * norm;
-                d_norm_sq + qq.q_norm * qq.q_norm - 2.0 * d_dot_q
-            }
-            DistanceFunction::InnerProduct => 1.0 - d_dot_q,
         }
     }
 }
@@ -940,20 +1060,11 @@ impl BatchQueryLuts {
     ///
     /// For each nibble of the packed data code, look up the partial inner
     /// product from the LUT and accumulate.  Then recover the full distance.
-    pub fn distance_query(
-        &self,
-        code: &Code<&[u8], 1>,
-        distance_function: &DistanceFunction,
-    ) -> f32 {
-        let norm = code.norm();
-        let radial = code.radial();
-        let correction = code.correction();
+    pub fn distance_query(&self, code: &Code1Bit<&[u8]>, distance_fn: &DistanceFunction) -> f32 {
         let packed = code.packed();
 
         // ⟨x_b, q_u⟩ via LUT: iterate over nibbles of packed data.
         let mut xb_dot_qu = 0u32;
-        let mut popcount_xb = 0u32;
-
         for (nib_idx, lut) in self.luts.iter().enumerate() {
             let byte_idx = nib_idx / 2;
             let byte = if byte_idx < packed.len() {
@@ -967,28 +1078,20 @@ impl BatchQueryLuts {
                 byte >> 4
             };
             xb_dot_qu += lut[nibble as usize] as u32;
-            popcount_xb += nibble.count_ones();
         }
 
         let signed_dot_qu = 2.0 * xb_dot_qu as f32 - self.sum_q_u as f32;
-        let signed_sum = 2.0 * popcount_xb as f32 - self.dim as f32;
-
+        let signed_sum = code.signed_sum() as f32;
         let g_dot_r_q = 0.5 * (self.delta * signed_dot_qu + self.v_l * signed_sum);
 
-        let r_dot_r_q = norm * g_dot_r_q / correction;
-        let d_dot_q = self.c_dot_q + radial + r_dot_r_q;
-
-        match distance_function {
-            DistanceFunction::Cosine => {
-                let d_norm_sq = self.c_norm * self.c_norm + 2.0 * radial + norm * norm;
-                1.0 - d_dot_q / (d_norm_sq.sqrt() * self.q_norm).max(f32::EPSILON)
-            }
-            DistanceFunction::Euclidean => {
-                let d_norm_sq = self.c_norm * self.c_norm + 2.0 * radial + norm * norm;
-                d_norm_sq + self.q_norm * self.q_norm - 2.0 * d_dot_q
-            }
-            DistanceFunction::InnerProduct => 1.0 - d_dot_q,
-        }
+        rabitq_distance_query(
+            g_dot_r_q,
+            code,
+            self.c_norm,
+            self.c_dot_q,
+            self.q_norm,
+            distance_fn,
+        )
     }
 }
 
@@ -1004,7 +1107,7 @@ mod tests {
         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
         let centroid = (0..300).map(|i| i as f32 * 0.5).collect::<Vec<_>>();
 
-        let code = Code::<Vec<u8>>::quantize(&embedding, &centroid);
+        let code = Code4Bit::quantize(&embedding, &centroid);
 
         // Verify accessors return finite values
         assert!(code.correction().is_finite());
@@ -1025,22 +1128,22 @@ mod tests {
         assert!((code.radial() - expected_radial).abs() < f32::EPSILON);
 
         // Verify buffer size
-        assert_eq!(code.as_ref().len(), Code::<Vec<u8>>::size(embedding.len()));
+        assert_eq!(code.as_ref().len(), Code4Bit::size(embedding.len()));
     }
 
     #[test]
     fn test_size() {
         // Exactly one block (256)
-        assert_eq!(Code::<Vec<u8>>::packed_len(256), 256 * 4 / 8); // 128 bytes
-        assert_eq!(Code::<Vec<u8>>::size(256), 12 + 128); // 3 floats + packed
+        assert_eq!(Code4Bit::packed_len(256), 256 * 4 / 8); // 128 bytes
+        assert_eq!(Code4Bit::size(256), 12 + 128); // 3 floats + packed
 
         // Non-aligned (300) - should pad to 512
-        assert_eq!(Code::<Vec<u8>>::packed_len(300), 512 * 4 / 8); // 256 bytes
-        assert_eq!(Code::<Vec<u8>>::size(300), 12 + 256);
+        assert_eq!(Code4Bit::packed_len(300), 512 * 4 / 8); // 256 bytes
+        assert_eq!(Code4Bit::size(300), 12 + 256);
 
         // Two blocks (512)
-        assert_eq!(Code::<Vec<u8>>::packed_len(512), 512 * 4 / 8); // 256 bytes
-        assert_eq!(Code::<Vec<u8>>::size(512), 12 + 256);
+        assert_eq!(Code4Bit::packed_len(512), 512 * 4 / 8); // 256 bytes
+        assert_eq!(Code4Bit::size(512), 12 + 256);
     }
 
     #[test]
@@ -1048,13 +1151,13 @@ mod tests {
         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
 
         // Exactly zero residual
-        let code = Code::<Vec<u8>>::quantize(&embedding, &embedding);
+        let code = Code4Bit::quantize(&embedding, &embedding);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
 
         // Near-zero residual
         let centroid = embedding.iter().map(|x| x + 1e-10).collect::<Vec<_>>();
-        let code = Code::<Vec<u8>>::quantize(&embedding, &centroid);
+        let code = Code4Bit::quantize(&embedding, &centroid);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
     }
@@ -1083,7 +1186,7 @@ mod tests {
                             continue;
                         }
 
-                        let code = Code::<Vec<u8>, 4>::quantize(&embedding, &centroid);
+                        let code = Code4Bit::quantize(&embedding, &centroid);
                         let dist = code.distance_query(
                             &DistanceFunction::Cosine,
                             &embedding,
@@ -1110,7 +1213,7 @@ mod tests {
         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
         let centroid = (0..300).map(|i| i as f32 * 0.5).collect::<Vec<_>>();
 
-        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+        let code = Code1Bit::quantize(&embedding, &centroid);
 
         // Verify accessors return finite values
         assert!(code.correction().is_finite());
@@ -1141,29 +1244,26 @@ mod tests {
         );
 
         // Verify buffer size
-        assert_eq!(
-            code.as_ref().len(),
-            Code::<Vec<u8>, 1>::size(embedding.len())
-        );
+        assert_eq!(code.as_ref().len(), Code1Bit::size(embedding.len()));
     }
 
     #[test]
     fn test_1bit_size() {
         // 64-aligned (256 dims)
-        assert_eq!(Code::<Vec<u8>, 1>::packed_len(256), 256 / 8); // 32 bytes
-        assert_eq!(Code::<Vec<u8>, 1>::size(256), 12 + 32);
+        assert_eq!(Code1Bit::packed_len(256), 256 / 8); // 32 bytes
+        assert_eq!(Code1Bit::size(256), 16 + 32); // CodeHeader1 (16 bytes) + packed
 
         // Non-aligned (300) - should pad to 320 (5 * 64)
-        assert_eq!(Code::<Vec<u8>, 1>::packed_len(300), 320 / 8); // 40 bytes
-        assert_eq!(Code::<Vec<u8>, 1>::size(300), 12 + 40);
+        assert_eq!(Code1Bit::packed_len(300), 320 / 8); // 40 bytes
+        assert_eq!(Code1Bit::size(300), 16 + 40);
 
         // 1024 dims
-        assert_eq!(Code::<Vec<u8>, 1>::packed_len(1024), 128);
-        assert_eq!(Code::<Vec<u8>, 1>::size(1024), 12 + 128);
+        assert_eq!(Code1Bit::packed_len(1024), 128);
+        assert_eq!(Code1Bit::size(1024), 16 + 128);
 
         // 4096 dims
-        assert_eq!(Code::<Vec<u8>, 1>::packed_len(4096), 512);
-        assert_eq!(Code::<Vec<u8>, 1>::size(4096), 12 + 512);
+        assert_eq!(Code1Bit::packed_len(4096), 512);
+        assert_eq!(Code1Bit::size(4096), 16 + 512);
     }
 
     #[test]
@@ -1171,20 +1271,20 @@ mod tests {
         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
 
         // Exactly zero residual
-        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &embedding);
+        let code = Code1Bit::quantize(&embedding, &embedding);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
 
         // Near-zero residual
         let centroid = embedding.iter().map(|x| x + 1e-10).collect::<Vec<_>>();
-        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+        let code = Code1Bit::quantize(&embedding, &centroid);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
     }
 
     /// Reads bit `i` from packed 1-bit codes and returns the grid value (±0.5).
-    fn read_1bit_grid(code: &Code<Vec<u8>, 1>, dim: usize) -> Vec<f32> {
-        let packed = &code.as_ref()[size_of::<CodeHeader>()..];
+    fn read_1bit_grid(code: &Code1Bit<Vec<u8>>, dim: usize) -> Vec<f32> {
+        let packed = code.packed();
         (0..dim)
             .map(|i| {
                 let bit = (packed[i / 8] >> (i % 8)) & 1;
@@ -1201,7 +1301,7 @@ mod tests {
         // residual: [2.0, -2.0, -0.5, -3.0, -1.0, 0.0, -1.1, -0.9]
         // expected bits: [1, 0, 0, 0, 0, 1, 0, 0] (bit 5 is 1 because r=0.0 >= 0)
 
-        let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+        let code = Code1Bit::quantize(&embedding, &centroid);
         let grid = read_1bit_grid(&code, 8);
 
         let r: Vec<f32> = embedding
@@ -1268,7 +1368,7 @@ mod tests {
                 continue;
             }
 
-            let code = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
+            let code = Code1Bit::quantize(&embedding, &centroid);
             let dist = code.distance_query(
                 &DistanceFunction::Cosine,
                 &embedding,
@@ -1315,18 +1415,18 @@ mod tests {
         let c_dot_q = f32::dot(&centroid, &query).unwrap_or(0.0) as f32;
         let q_norm = (f32::dot(&query, &query).unwrap_or(0.0) as f32).sqrt();
 
-        let padded_bytes = Code::<Vec<u8>, 1>::packed_len(dim);
+        let padded_bytes = Code1Bit::packed_len(dim);
         let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, c_norm, c_dot_q, q_norm);
         let luts = BatchQueryLuts::new(&r_q, c_norm, c_dot_q, q_norm);
         let df = DistanceFunction::Euclidean;
 
         for _ in 0..100 {
             let emb: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
-            let code_owned = Code::<Vec<u8>, 1>::quantize(&emb, &centroid);
-            let code = Code::<&[u8], 1>::new(code_owned.as_ref());
+            let code_owned = Code1Bit::quantize(&emb, &centroid);
+            let code = Code1Bit::new(code_owned.as_ref());
 
             let float_dist = code.distance_query(&df, &r_q, c_norm, c_dot_q, q_norm);
-            let bitwise_dist = code.distance_query_bitwise(&df, &qq, dim);
+            let bitwise_dist = code.distance_query_bitwise(&df, &qq);
             let lut_dist = luts.distance_query(&code, &df);
 
             let tol = float_dist.abs() * 0.05 + 1.0;
@@ -1350,15 +1450,7 @@ mod tests {
     #[test]
     fn test_error_bound_bits_1() {
         for k in [1.0, 2.0, 4.0] {
-            assert_error_bound::<1>(1024, k, 128);
-        }
-    }
-
-    /// BITS=3: P95 relative error bound 2.0%, observed ~1.5% (code), ~1.0% (query)
-    #[test]
-    fn test_error_bound_bits_3() {
-        for k in [1.0, 2.0, 4.0] {
-            assert_error_bound::<3>(1024, k, 128);
+            assert_error_bound_1bit(1024, k, 128);
         }
     }
 
@@ -1366,38 +1458,14 @@ mod tests {
     #[test]
     fn test_error_bound_bits_4() {
         for k in [1.0, 2.0, 4.0] {
-            assert_error_bound::<4>(1024, k, 128);
+            assert_error_bound_4bit(1024, k, 128);
         }
     }
 
-    /// BITS=5: P95 relative error bound 0.5%, observed ~0.30% (code), ~0.21% (query)
-    #[test]
-    fn test_error_bound_bits_5() {
-        for k in [1.0, 2.0, 4.0] {
-            assert_error_bound::<5>(1024, k, 128);
-        }
-    }
-
-    /// BITS=6: P95 relative error bound 0.25%, observed ~0.14% (code), ~0.10% (query)
-    #[test]
-    fn test_error_bound_bits_6() {
-        for k in [1.0, 2.0, 4.0] {
-            assert_error_bound::<6>(1024, k, 128);
-        }
-    }
-
-    /// Asserts that quantization error is within expected bounds.
-    ///
-    /// Tests both `distance_code` and `distance_query` across all distance functions,
-    /// verifying P95 relative error is below `0.16 / 2^BITS`.
-    fn assert_error_bound<const BITS: u8>(dim: usize, k: f32, n_vectors: usize) {
+    fn assert_error_bound_1bit(dim: usize, k: f32, n_vectors: usize) {
         let mut rng = StdRng::seed_from_u64(42);
-
-        // Generate centroid
         let centroid = (0..dim).map(|_| rng.gen_range(-k..k)).collect::<Vec<_>>();
         let c_norm = (f32::dot(&centroid, &centroid).unwrap_or(0.0) as f32).sqrt();
-
-        // Generate vectors shifted by centroid
         let vectors = (0..n_vectors)
             .map(|_| {
                 centroid
@@ -1406,18 +1474,50 @@ mod tests {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-
-        // Quantize all vectors
         let codes = vectors
             .iter()
-            .map(|v| Code::<Vec<u8>, BITS>::quantize(v, &centroid))
+            .map(|v| Code1Bit::quantize(v, &centroid))
             .collect::<Vec<_>>();
+        assert_error_bound(&vectors, &codes, &centroid, c_norm, dim, 0.16 / 2.0);
+    }
 
-        // Error bound: 0.16 / 2^BITS
-        // BITS=2: 4.0%, BITS=3: 2.0%, BITS=4: 1.0%, BITS=5: 0.5%, BITS=6: 0.25%
-        let max_p95_rel_error = 0.16 / (1 << BITS) as f32;
+    fn assert_error_bound_4bit(dim: usize, k: f32, n_vectors: usize) {
+        let mut rng = StdRng::seed_from_u64(42);
+        let centroid = (0..dim).map(|_| rng.gen_range(-k..k)).collect::<Vec<_>>();
+        let c_norm = (f32::dot(&centroid, &centroid).unwrap_or(0.0) as f32).sqrt();
+        let vectors = (0..n_vectors)
+            .map(|_| {
+                centroid
+                    .iter()
+                    .map(|c| c + rng.gen_range(-k..k))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let codes = vectors
+            .iter()
+            .map(|v| Code4Bit::quantize(v, &centroid))
+            .collect::<Vec<_>>();
+        assert_error_bound(&vectors, &codes, &centroid, c_norm, dim, 0.16 / 16.0);
+    }
 
-        // Test all distance functions
+    /// Asserts P95 relative error of distance_code and distance_query is within bound.
+    ///
+    /// `codes` must implement [`RabitqCode`] and expose `distance_code` and
+    /// `distance_query`. Since those aren't part of the trait (their signatures differ
+    /// between Code1Bit and Code4Bit), this helper is called from type-specific wrappers.
+    fn assert_error_bound<C>(
+        vectors: &[Vec<f32>],
+        codes: &[C],
+        centroid: &[f32],
+        c_norm: f32,
+        dim: usize,
+        max_p95_rel_error: f32,
+    ) where
+        C: RabitqCode + AsRef<[u8]>,
+        C: for<'a> HasDistances<'a>,
+    {
+        let n_vectors = vectors.len();
+
         for distance_fn in [
             DistanceFunction::Cosine,
             DistanceFunction::Euclidean,
@@ -1426,10 +1526,8 @@ mod tests {
             let mut rel_errors_code = Vec::new();
             let mut rel_errors_query = Vec::new();
 
-            // For each pair of vectors
             for i in 0..n_vectors {
                 for j in (i + 1)..n_vectors {
-                    // Exact distance using simsimd
                     let exact = match distance_fn {
                         DistanceFunction::Cosine => {
                             SpatialSimilarity::cos(&vectors[i], &vectors[j]).unwrap_or(0.0) as f32
@@ -1443,53 +1541,108 @@ mod tests {
                         }
                     };
 
-                    // distance_code estimation
                     let estimated_code =
-                        codes[i].distance_code(&distance_fn, &codes[j], c_norm, dim);
-                    let abs_err_code = (exact - estimated_code).abs();
-                    rel_errors_code.push(abs_err_code / exact.abs().max(f32::EPSILON));
+                        codes[i].distance_code_dyn(&distance_fn, &codes[j], c_norm, dim);
+                    rel_errors_code
+                        .push((exact - estimated_code).abs() / exact.abs().max(f32::EPSILON));
 
-                    // distance_query estimation (treat vectors[j] as query)
                     let q = &vectors[j];
                     let q_norm = (f32::dot(q, q).unwrap_or(0.0) as f32).sqrt();
-                    let c_dot_q = f32::dot(&centroid, q).unwrap_or(0.0) as f32;
-                    let r_q = centroid
-                        .iter()
-                        .zip(q)
-                        .map(|(c, q)| q - c)
-                        .collect::<Vec<_>>();
+                    let c_dot_q = f32::dot(centroid, q).unwrap_or(0.0) as f32;
+                    let r_q: Vec<f32> = centroid.iter().zip(q).map(|(c, q)| q - c).collect();
                     let estimated_query =
-                        codes[i].distance_query(&distance_fn, &r_q, c_norm, c_dot_q, q_norm);
-                    let abs_err_query = (exact - estimated_query).abs();
-                    rel_errors_query.push(abs_err_query / exact.abs().max(f32::EPSILON));
+                        codes[i].distance_query_dyn(&distance_fn, &r_q, c_norm, c_dot_q, q_norm);
+                    rel_errors_query
+                        .push((exact - estimated_query).abs() / exact.abs().max(f32::EPSILON));
                 }
             }
 
-            // Calculate P95
             rel_errors_code.sort_by(|a, b| a.total_cmp(b));
             rel_errors_query.sort_by(|a, b| a.total_cmp(b));
             let p95_code = rel_errors_code[rel_errors_code.len() * 95 / 100];
             let p95_query = rel_errors_query[rel_errors_query.len() * 95 / 100];
 
-            // Assert error bounds
             assert!(
                 p95_code < max_p95_rel_error,
-                "BITS={}, k={}, {:?}: distance_code P95 rel error {:.4} exceeds bound {:.4}",
-                BITS,
-                k,
+                "{:?}: distance_code P95 rel error {:.4} exceeds bound {:.4}",
                 distance_fn,
                 p95_code,
                 max_p95_rel_error
             );
             assert!(
                 p95_query < max_p95_rel_error,
-                "BITS={}, k={}, {:?}: distance_query P95 rel error {:.4} exceeds bound {:.4}",
-                BITS,
-                k,
+                "{:?}: distance_query P95 rel error {:.4} exceeds bound {:.4}",
                 distance_fn,
                 p95_query,
                 max_p95_rel_error
             );
+        }
+    }
+
+    /// Helper trait used only in tests to call distance methods dynamically.
+    ///
+    /// Both Code1Bit and Code4Bit have `distance_code` and `distance_query`
+    /// with the same signature but they aren't part of `RabitqCode` (the public
+    /// trait only exposes header accessors). This test-only trait bridges the gap.
+    trait HasDistances<'a>: RabitqCode + Sized {
+        fn distance_code_dyn(
+            &self,
+            df: &DistanceFunction,
+            other: &Self,
+            c_norm: f32,
+            dim: usize,
+        ) -> f32;
+        fn distance_query_dyn(
+            &self,
+            df: &DistanceFunction,
+            r_q: &[f32],
+            c_norm: f32,
+            c_dot_q: f32,
+            q_norm: f32,
+        ) -> f32;
+    }
+
+    impl<'a, T: AsRef<[u8]>> HasDistances<'a> for Code1Bit<T> {
+        fn distance_code_dyn(
+            &self,
+            df: &DistanceFunction,
+            other: &Self,
+            c_norm: f32,
+            dim: usize,
+        ) -> f32 {
+            self.distance_code(df, other, c_norm, dim)
+        }
+        fn distance_query_dyn(
+            &self,
+            df: &DistanceFunction,
+            r_q: &[f32],
+            c_norm: f32,
+            c_dot_q: f32,
+            q_norm: f32,
+        ) -> f32 {
+            self.distance_query(df, r_q, c_norm, c_dot_q, q_norm)
+        }
+    }
+
+    impl<'a, T: AsRef<[u8]>> HasDistances<'a> for Code4Bit<T> {
+        fn distance_code_dyn(
+            &self,
+            df: &DistanceFunction,
+            other: &Self,
+            c_norm: f32,
+            dim: usize,
+        ) -> f32 {
+            self.distance_code(df, other, c_norm, dim)
+        }
+        fn distance_query_dyn(
+            &self,
+            df: &DistanceFunction,
+            r_q: &[f32],
+            c_norm: f32,
+            c_dot_q: f32,
+            q_norm: f32,
+        ) -> f32 {
+            self.distance_query(df, r_q, c_norm, c_dot_q, q_norm)
         }
     }
 }

@@ -31,7 +31,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    quantization::Code,
+    quantization::{Code4Bit, Code},
     spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
@@ -268,7 +268,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let code_size = Code::<&[u8]>::size(self.dimension);
+        let code_size = Code4Bit::size(self.dimension);
         if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
             if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted

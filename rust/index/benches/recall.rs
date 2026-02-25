@@ -37,7 +37,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use chroma_distance::DistanceFunction;
-use chroma_index::quantization::{Code, QuantizedQuery};
+use chroma_index::quantization::{Code1Bit, Code4Bit, QuantizedQuery};
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -193,21 +193,21 @@ fn run_recall(
     let centroid = compute_centroid(&vectors);
     let cn = c_norm(&centroid);
     let df = DistanceFunction::Euclidean;
-    let padded_bytes = Code::<&[u8], 1>::packed_len(dim);
+    let padded_bytes = Code1Bit::packed_len(dim);
 
     println!("  Quantizing {n} vectors ...");
 
     let t0 = Instant::now();
     let codes_4: Vec<Vec<u8>> = vectors
         .iter()
-        .map(|v| Code::<Vec<u8>, 4>::quantize(v, &centroid).as_ref().to_vec())
+        .map(|v| Code4Bit::quantize(v, &centroid).as_ref().to_vec())
         .collect();
     let t_q4 = t0.elapsed();
 
     let t0 = Instant::now();
     let codes_1: Vec<Vec<u8>> = vectors
         .iter()
-        .map(|v| Code::<Vec<u8>, 1>::quantize(v, &centroid).as_ref().to_vec())
+        .map(|v| Code1Bit::quantize(v, &centroid).as_ref().to_vec())
         .collect();
     let t_q1 = t0.elapsed();
 
@@ -230,7 +230,7 @@ fn run_recall(
                 codes_4
                     .iter()
                     .map(|cb| {
-                        Code::<&[u8], 4>::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn)
+                        Code4Bit::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn)
                     })
                     .collect()
             }),
@@ -243,7 +243,7 @@ fn run_recall(
                 codes_1
                     .iter()
                     .map(|cb| {
-                        Code::<&[u8], 1>::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn)
+                        Code1Bit::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn)
                     })
                     .collect()
             }),
@@ -257,8 +257,8 @@ fn run_recall(
                 codes_1
                     .iter()
                     .map(|cb| {
-                        Code::<&[u8], 1>::new(cb.as_slice())
-                            .distance_query_bitwise(&df, &qq, dim)
+                        Code1Bit::new(cb.as_slice())
+                            .distance_query_bitwise(&df, &qq)
                     })
                     .collect()
             }),

@@ -29,7 +29,7 @@
 use std::hint::black_box;
 
 use chroma_distance::DistanceFunction;
-use chroma_index::quantization::{BatchQueryLuts, Code, QuantizedQuery};
+use chroma_index::quantization::{BatchQueryLuts, Code1Bit, Code4Bit, QuantizedQuery};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
@@ -58,16 +58,26 @@ fn random_vec(rng: &mut impl Rng, dim: usize) -> Vec<f32> {
     (0..dim).map(|_| rng.gen_range(-1.0_f32..1.0)).collect()
 }
 
-fn make_codes<const BITS: u8>(dim: usize, n: usize) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32>>) {
+fn make_codes_1bit(dim: usize, n: usize) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32>>) {
     let mut rng = make_rng();
     let centroid = random_vec(&mut rng, dim);
     let codes: Vec<Vec<u8>> = (0..n)
+        .map(|_| Code1Bit::quantize(&random_vec(&mut rng, dim), &centroid).as_ref().to_vec())
+        .collect();
+    let queries: Vec<Vec<f32>> = (0..n)
         .map(|_| {
-            let emb = random_vec(&mut rng, dim);
-            Code::<Vec<u8>, BITS>::quantize(&emb, &centroid)
-                .as_ref()
-                .to_vec()
+            let q = random_vec(&mut rng, dim);
+            q.iter().zip(&centroid).map(|(q, c)| q - c).collect()
         })
+        .collect();
+    (centroid, codes, queries)
+}
+
+fn make_codes_4bit(dim: usize, n: usize) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32>>) {
+    let mut rng = make_rng();
+    let centroid = random_vec(&mut rng, dim);
+    let codes: Vec<Vec<u8>> = (0..n)
+        .map(|_| Code4Bit::quantize(&random_vec(&mut rng, dim), &centroid).as_ref().to_vec())
         .collect();
     let queries: Vec<Vec<f32>> = (0..n)
         .map(|_| {
@@ -108,6 +118,8 @@ fn bench_quantize(c: &mut Criterion) {
         let mut rng = make_rng();
         let centroid = random_vec(&mut rng, dim);
         let embeddings: Vec<Vec<f32>> = (0..BATCH).map(|_| random_vec(&mut rng, dim)).collect();
+        let padded_bytes = Code1Bit::packed_len(dim);
+        let cn = c_norm(&centroid);
 
         group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
 
@@ -118,7 +130,7 @@ fn bench_quantize(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("4bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for emb in &embeddings {
-                    black_box(Code::<Vec<u8>, 4>::quantize(emb, &centroid));
+                    black_box(Code4Bit::quantize(emb, &centroid));
                 }
             });
         });
@@ -130,7 +142,44 @@ fn bench_quantize(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("1bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for emb in &embeddings {
-                    black_box(Code::<Vec<u8>, 1>::quantize(emb, &centroid));
+                    black_box(Code1Bit::quantize(emb, &centroid));
+                }
+            });
+        });
+
+        // QuantizedQuery::new — builds 4 bit-planes from a quantized query residual.
+        // This is the per-query setup cost for the bitwise distance path (§3.3.1).
+        // Throughput accounts for the f32 query vector read (same denominator as Code::quantize).
+        desc!(
+            format!("quantize_query/bitwise/{dim}"),
+            format!("{BATCH} queries → QuantizedQuery (4-bit planes, §3.3.1)")
+        );
+        group.bench_with_input(BenchmarkId::new("quantize_query_bitwise", dim), &dim, |b, _| {
+            b.iter(|| {
+                for query in &embeddings {
+                    let r_q: Vec<f32> =
+                        query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
+                    let cdq = c_dot_q(&centroid, &r_q);
+                    let qn = q_norm(&centroid, &r_q);
+                    black_box(QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn));
+                }
+            });
+        });
+
+        // BatchQueryLuts::new — precomputes D/4 nibble LUTs for the LUT distance path (§3.3.2).
+        // Compared against QuantizedQuery::new to isolate which setup is cheaper.
+        desc!(
+            format!("quantize_query/lut/{dim}"),
+            format!("{BATCH} queries → BatchQueryLuts (nibble LUTs, §3.3.2)")
+        );
+        group.bench_with_input(BenchmarkId::new("quantize_query_lut", dim), &dim, |b, _| {
+            b.iter(|| {
+                for query in &embeddings {
+                    let r_q: Vec<f32> =
+                        query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
+                    let cdq = c_dot_q(&centroid, &r_q);
+                    let qn = q_norm(&centroid, &r_q);
+                    black_box(BatchQueryLuts::new(&r_q, cn, cdq, qn));
                 }
             });
         });
@@ -147,11 +196,11 @@ fn bench_distance_code(c: &mut Criterion) {
     let pairs = (BATCH / 2) as u64;
 
     for &dim in DIMS {
-        let (centroid, codes_1, _) = make_codes::<1>(dim, BATCH);
-        let (_, codes_4, _) = make_codes::<4>(dim, BATCH);
+        let (centroid, codes_1, _) = make_codes_1bit(dim, BATCH);
+        let (_, codes_4, _) = make_codes_4bit(dim, BATCH);
         let cn = c_norm(&centroid);
-        let code_bytes_1 = Code::<&[u8], 1>::size(dim);
-        let code_bytes_4 = Code::<&[u8], 4>::size(dim);
+        let code_bytes_1 = Code1Bit::size(dim);
+        let code_bytes_4 = Code4Bit::size(dim);
 
         group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_1 as u64));
         desc!(
@@ -161,8 +210,8 @@ fn bench_distance_code(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("1bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in (0..BATCH).step_by(2) {
-                    let a = Code::<&[u8], 1>::new(codes_1[i].as_slice());
-                    let bb = Code::<&[u8], 1>::new(codes_1[i + 1].as_slice());
+                    let a = Code1Bit::new(codes_1[i].as_slice());
+                    let bb = Code1Bit::new(codes_1[i + 1].as_slice());
                     black_box(a.distance_code(&df, &bb, cn, dim));
                 }
             });
@@ -176,8 +225,8 @@ fn bench_distance_code(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("4bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in (0..BATCH).step_by(2) {
-                    let a = Code::<&[u8], 4>::new(codes_4[i].as_slice());
-                    let bb = Code::<&[u8], 4>::new(codes_4[i + 1].as_slice());
+                    let a = Code4Bit::new(codes_4[i].as_slice());
+                    let bb = Code4Bit::new(codes_4[i + 1].as_slice());
                     black_box(a.distance_code(&df, &bb, cn, dim));
                 }
             });
@@ -213,13 +262,13 @@ fn bench_distance_query(c: &mut Criterion) {
 
     // ── Cold-query variant ────────────────────────────────────────────────────
     for &dim in DIMS {
-        let (centroid, codes_1, queries_1) = make_codes::<1>(dim, BATCH);
-        let (_, codes_4, queries_4) = make_codes::<4>(dim, BATCH);
+        let (centroid, codes_1, queries_1) = make_codes_1bit(dim, BATCH);
+        let (_, codes_4, queries_4) = make_codes_4bit(dim, BATCH);
         let cn = c_norm(&centroid);
-        let code_bytes_1 = Code::<&[u8], 1>::size(dim);
-        let code_bytes_4 = Code::<&[u8], 4>::size(dim);
+        let code_bytes_1 = Code1Bit::size(dim);
+        let code_bytes_4 = Code4Bit::size(dim);
         let query_bytes = dim * 4;
-        let padded_bytes = Code::<&[u8], 1>::packed_len(dim);
+        let padded_bytes = Code1Bit::packed_len(dim);
 
         // All 1-bit variants use the same throughput so GiB/s is comparable.
         let throughput_1bit = BATCH as u64 * (code_bytes_1 + query_bytes) as u64;
@@ -233,7 +282,7 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("4bit_float", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code::<&[u8], 4>::new(codes_4[i].as_slice());
+                    let code = Code4Bit::new(codes_4[i].as_slice());
                     let r_q = &queries_4[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
@@ -249,7 +298,7 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("1bit_float", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code::<&[u8], 1>::new(codes_1[i].as_slice());
+                    let code = Code1Bit::new(codes_1[i].as_slice());
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
@@ -266,12 +315,12 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("1bit_bitwise", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code::<&[u8], 1>::new(codes_1[i].as_slice());
+                    let code = Code1Bit::new(codes_1[i].as_slice());
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
                     let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                    black_box(code.distance_query_bitwise(&df, &qq, dim));
+                    black_box(code.distance_query_bitwise(&df, &qq));
                 }
             });
         });
@@ -284,7 +333,7 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("1bit_lut", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code::<&[u8], 1>::new(codes_1[i].as_slice());
+                    let code = Code1Bit::new(codes_1[i].as_slice());
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
@@ -312,13 +361,13 @@ fn bench_distance_query(c: &mut Criterion) {
         let qn = q_norm(&centroid, &r_q);
         let cn = c_norm(&centroid);
 
-        let (_, codes_1, _) = make_codes::<1>(SCAN_DIM, SCAN_N);
-        let (_, codes_4, _) = make_codes::<4>(SCAN_DIM, SCAN_N);
-        let padded_bytes = Code::<&[u8], 1>::packed_len(SCAN_DIM);
+        let (_, codes_1, _) = make_codes_1bit(SCAN_DIM, SCAN_N);
+        let (_, codes_4, _) = make_codes_4bit(SCAN_DIM, SCAN_N);
+        let padded_bytes = Code1Bit::packed_len(SCAN_DIM);
 
         // Throughput counts code bytes only; the query is amortized and stays in L1.
-        let tput_1bit = SCAN_N as u64 * Code::<&[u8], 1>::size(SCAN_DIM) as u64;
-        let tput_4bit = SCAN_N as u64 * Code::<&[u8], 4>::size(SCAN_DIM) as u64;
+        let tput_1bit = SCAN_N as u64 * Code1Bit::size(SCAN_DIM) as u64;
+        let tput_4bit = SCAN_N as u64 * Code4Bit::size(SCAN_DIM) as u64;
 
         group.throughput(Throughput::Bytes(tput_4bit));
         desc!(
@@ -330,7 +379,7 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_4
                     .iter()
                     .map(|cb| {
-                        let code = Code::<&[u8], 4>::new(cb.as_slice());
+                        let code = Code4Bit::new(cb.as_slice());
                         black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
                     })
                     .sum();
@@ -347,7 +396,7 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code::<&[u8], 1>::new(cb.as_slice());
+                        let code = Code1Bit::new(cb.as_slice());
                         black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
                     })
                     .sum();
@@ -365,8 +414,8 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code::<&[u8], 1>::new(cb.as_slice());
-                        black_box(code.distance_query_bitwise(&df, &qq, SCAN_DIM))
+                        let code = Code1Bit::new(cb.as_slice());
+                        black_box(code.distance_query_bitwise(&df, &qq))
                     })
                     .sum();
             });
@@ -383,7 +432,7 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code::<&[u8], 1>::new(cb.as_slice());
+                        let code = Code1Bit::new(cb.as_slice());
                         black_box(luts.distance_query(&code, &df))
                     })
                     .sum();
@@ -407,11 +456,11 @@ fn bench_thread_scaling(c: &mut Criterion) {
     let centroid: Vec<f32> = random_vec(&mut rng, DIM);
     let embeddings: Vec<Vec<f32>> = (0..N).map(|_| random_vec(&mut rng, DIM)).collect();
 
-    let (_, codes_1, queries_1) = make_codes::<1>(DIM, N);
-    let (_, codes_4, queries_4) = make_codes::<4>(DIM, N);
+    let (_, codes_1, queries_1) = make_codes_1bit(DIM, N);
+    let (_, codes_4, queries_4) = make_codes_4bit(DIM, N);
     let cn = c_norm(&centroid);
     let df = DistanceFunction::Euclidean;
-    let padded_bytes = Code::<&[u8], 1>::packed_len(DIM);
+    let padded_bytes = Code1Bit::packed_len(DIM);
 
     let mut group = c.benchmark_group("thread_scaling");
 
@@ -434,7 +483,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                 b.iter(|| {
                     pool.install(|| {
                         embeddings.par_iter().for_each(|emb| {
-                            black_box(Code::<Vec<u8>, 4>::quantize(emb, &centroid));
+                            black_box(Code4Bit::quantize(emb, &centroid));
                         });
                     });
                 });
@@ -452,7 +501,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                 b.iter(|| {
                     pool.install(|| {
                         embeddings.par_iter().for_each(|emb| {
-                            black_box(Code::<Vec<u8>, 1>::quantize(emb, &centroid));
+                            black_box(Code1Bit::quantize(emb, &centroid));
                         });
                     });
                 });
@@ -462,7 +511,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
 
 
         group.throughput(Throughput::Bytes(
-            (N * (Code::<&[u8], 4>::size(DIM) + DIM * 4)) as u64,
+            (N * (Code4Bit::size(DIM) + DIM * 4)) as u64,
         ));
         desc!(
             format!("thread_scaling/distance_query_4bit/{threads}"),
@@ -476,7 +525,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                     pool.install(|| {
                         codes_4.par_iter().zip(queries_4.par_iter()).for_each(
                             |(code_bytes, r_q)| {
-                                let code = Code::<&[u8], 4>::new(code_bytes.as_slice());
+                                let code = Code4Bit::new(code_bytes.as_slice());
                                 let cdq = c_dot_q(&centroid, r_q);
                                 let qn = q_norm(&centroid, r_q);
                                 black_box(code.distance_query(&df, r_q, cn, cdq, qn));
@@ -487,7 +536,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
             },
         );
         group.throughput(Throughput::Bytes(
-            (N * (Code::<&[u8], 1>::size(DIM) + DIM * 4)) as u64,
+            (N * (Code1Bit::size(DIM) + DIM * 4)) as u64,
         ));
         desc!(
             format!("thread_scaling/distance_query_1bit/{threads}"),
@@ -501,7 +550,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                     pool.install(|| {
                         codes_1.par_iter().zip(queries_1.par_iter()).for_each(
                             |(code_bytes, r_q)| {
-                                let code = Code::<&[u8], 1>::new(code_bytes.as_slice());
+                                let code = Code1Bit::new(code_bytes.as_slice());
                                 let cdq = c_dot_q(&centroid, r_q);
                                 let qn = q_norm(&centroid, r_q);
                                 black_box(code.distance_query(&df, r_q, cn, cdq, qn));
@@ -524,11 +573,11 @@ fn bench_thread_scaling(c: &mut Criterion) {
                     pool.install(|| {
                         codes_1.par_iter().zip(queries_1.par_iter()).for_each(
                             |(code_bytes, r_q)| {
-                                let code = Code::<&[u8], 1>::new(code_bytes.as_slice());
+                                let code = Code1Bit::new(code_bytes.as_slice());
                                 let cdq = c_dot_q(&centroid, r_q);
                                 let qn = q_norm(&centroid, r_q);
                                 let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                                black_box(code.distance_query_bitwise(&df, &qq, DIM));
+                                black_box(code.distance_query_bitwise(&df, &qq));
                             },
                         );
                     });
@@ -548,7 +597,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                     pool.install(|| {
                         codes_1.par_iter().zip(queries_1.par_iter()).for_each(
                             |(code_bytes, r_q)| {
-                                let code = Code::<&[u8], 1>::new(code_bytes.as_slice());
+                                let code = Code1Bit::new(code_bytes.as_slice());
                                 let cdq = c_dot_q(&centroid, r_q);
                                 let qn = q_norm(&centroid, r_q);
                                 let luts = BatchQueryLuts::new(r_q, cn, cdq, qn);
@@ -644,17 +693,17 @@ fn print_error_analysis() {
     let centroid = random_vec(&mut rng, DIM);
     let df = DistanceFunction::Euclidean;
     let cn = c_norm(&centroid);
-    let padded_bytes = Code::<&[u8], 1>::packed_len(DIM);
+    let padded_bytes = Code1Bit::packed_len(DIM);
 
     // Generate embeddings and keep the originals to compute d_true.
     let embeddings: Vec<Vec<f32>> = (0..N).map(|_| random_vec(&mut rng, DIM)).collect();
     let codes_1: Vec<Vec<u8>> = embeddings
         .iter()
-        .map(|emb| Code::<Vec<u8>, 1>::quantize(emb, &centroid).as_ref().to_vec())
+        .map(|emb| Code1Bit::quantize(emb, &centroid).as_ref().to_vec())
         .collect();
     let codes_4: Vec<Vec<u8>> = embeddings
         .iter()
-        .map(|emb| Code::<Vec<u8>, 4>::quantize(emb, &centroid).as_ref().to_vec())
+        .map(|emb| Code4Bit::quantize(emb, &centroid).as_ref().to_vec())
         .collect();
 
     let total = N * N_QUERIES;
@@ -687,10 +736,10 @@ fn print_error_analysis() {
         let qq   = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
         let luts = BatchQueryLuts::new(&r_q, cn, cdq, qn);
         // Quantize the query itself so distance_code can treat it as another data code.
-        let cq1_bytes = Code::<Vec<u8>, 1>::quantize(&query, &centroid).as_ref().to_vec();
-        let cq4_bytes = Code::<Vec<u8>, 4>::quantize(&query, &centroid).as_ref().to_vec();
-        let cq1 = Code::<&[u8], 1>::new(cq1_bytes.as_slice());
-        let cq4 = Code::<&[u8], 4>::new(cq4_bytes.as_slice());
+        let cq1_bytes = Code1Bit::quantize(&query, &centroid).as_ref().to_vec();
+        let cq4_bytes = Code4Bit::quantize(&query, &centroid).as_ref().to_vec();
+        let cq1 = Code1Bit::new(cq1_bytes.as_slice());
+        let cq4 = Code4Bit::new(cq4_bytes.as_slice());
 
         for i in 0..N {
             // True squared Euclidean distance from original unquantized embedding.
@@ -703,12 +752,12 @@ fn print_error_analysis() {
                 continue;
             }
 
-            let c1 = Code::<&[u8], 1>::new(codes_1[i].as_slice());
-            let c4 = Code::<&[u8], 4>::new(codes_4[i].as_slice());
+            let c1 = Code1Bit::new(codes_1[i].as_slice());
+            let c4 = Code4Bit::new(codes_4[i].as_slice());
 
             let d4  = c4.distance_query(&df, &r_q, cn, cdq, qn);
             let df1 = c1.distance_query(&df, &r_q, cn, cdq, qn);
-            let db  = c1.distance_query_bitwise(&df, &qq, DIM);
+            let db  = c1.distance_query_bitwise(&df, &qq);
             let dl  = luts.distance_query(&c1, &df);
             // distance_code: both vectors quantized; error comes from both sides.
             let dc4 = c4.distance_code(&df, &cq4, cn, DIM);
@@ -928,20 +977,23 @@ fn bench_primitives(c: &mut Criterion) {
         let b: Vec<u8> = (0..bytes).map(|_| rng.gen()).collect();
         let values: Vec<f32> = (0..padded).map(|_| rng.gen_range(-1.0f32..1.0)).collect();
 
+        // Code1Bit header is 16 bytes (CodeHeader1: correction, norm, radial, signed_sum).
+        // Prepend 16 zero bytes so packed() returns the correct a/b slice at offset 16.
+        let header_size = Code1Bit::size(padded) - bytes;
+        let mut code_a_buf = vec![0u8; header_size];
+        code_a_buf.extend_from_slice(&a);
+        let mut code_b_buf = vec![0u8; header_size];
+        code_b_buf.extend_from_slice(&b);
+
         group.throughput(Throughput::Bytes(2 * bytes as u64));
         desc!(
             format!("primitives/hamming_distance/{dim}"),
             "XOR + popcount over two packed bit vectors"
         );
         group.bench_with_input(BenchmarkId::new("hamming_distance", dim), &dim, |b_cr, _| {
+            let ca = Code1Bit::new(code_a_buf.as_slice());
+            let cb_code = Code1Bit::new(code_b_buf.as_slice());
             b_cr.iter(|| {
-                let header = [0u8; 12];
-                let mut code_a = header.to_vec();
-                code_a.extend_from_slice(&a);
-                let mut code_b = header.to_vec();
-                code_b.extend_from_slice(&b);
-                let ca = Code::<&[u8], 1>::new(code_a.as_slice());
-                let cb_code = Code::<&[u8], 1>::new(code_b.as_slice());
                 black_box(ca.distance_code(&DistanceFunction::InnerProduct, &cb_code, 0.0, padded));
             });
         });
@@ -957,8 +1009,8 @@ fn bench_primitives(c: &mut Criterion) {
                 let centroid = vec![0.0f32; padded];
                 let embedding: Vec<f32> =
                     (0..padded).map(|_| rng2.gen_range(-1.0f32..1.0)).collect();
-                let code_owned = Code::<Vec<u8>, 1>::quantize(&embedding, &centroid);
-                let code = Code::<&[u8], 1>::new(code_owned.as_ref());
+                let code_owned = Code1Bit::quantize(&embedding, &centroid);
+                let code = Code1Bit::new(code_owned.as_ref());
                 black_box(code.distance_query(
                     &DistanceFunction::InnerProduct,
                     &values[..padded],
