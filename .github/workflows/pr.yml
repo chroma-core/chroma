@@ -37,6 +37,7 @@ jobs:
             # documentation changes
             docs:
               - 'docs/**'
+              - '**/*.md'
             # Outside docs
             outside-docs:
               - '**'
