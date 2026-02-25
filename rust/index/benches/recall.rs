@@ -1,4 +1,4 @@
-//! Recall benchmark for RaBitQ quantization on real Cohere Wikipedia embeddings.
+//! Recall benchmark for RaBitQ quantization on real embedding datasets.
 //!
 //! Measures recall@K for three implementations:
 //!
@@ -13,16 +13,19 @@
 //! Data preparation (one-time):
 //!   cd rust/index/benches/recall
 //!   pip install datasets numpy tqdm
-//!   python prepare_dataset.py                       # all sizes
-//!   python prepare_dataset.py --sizes 10000         # just 10k
+//!   python prepare_dataset.py                       # cohere_wiki, all sizes
+//!   python prepare_dataset.py --dataset msmarco    # msmarco dataset
+//!   python prepare_dataset.py --dataset beir       # BEIR msmarco
+//!   python prepare_dataset.py --dataset sec_filings # SEC filings
 //!
 //! Run:
 //!   cargo bench -p chroma-index --bench recall
-//!   cargo bench -p chroma-index --bench recall -- --size 10000
+//!   cargo bench -p chroma-index --bench recall -- --dataset cohere_wiki --size 10000
 //!   cargo bench -p chroma-index --bench recall -- --size 10000 --k 100
 //!   cargo bench -p chroma-index --bench recall -- --size 100000 --k 100 --rerank 1,2,4,8,16
 //!
 //! CLI flags:
+//!   --dataset D       dataset slug (default: cohere_wiki; also: msmarco, beir, sec_filings)
 //!   --size N          database size to test (may repeat; default: all available)
 //!   --k K             recall@K to compute (default: 10; max: ground-truth K from prepare_dataset.py, default 100)
 //!   --rerank r1,r2,…  comma-separated rerank factors (default: 1,2,4,8,16,32,64)
@@ -38,17 +41,18 @@ use chroma_index::quantization::{Code, QuantizedQuery};
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
-const DIM: usize = 1024;
+const DEFAULT_DIM: usize = 1024;
 const DEFAULT_K: usize = 10;
 const DEFAULT_RERANK_FACTORS: &[usize] = &[1, 2, 4, 8, 16];
 const AVAILABLE_SIZES: &[usize] = &[10_000, 100_000, 1_000_000];
+const DEFAULT_DATASET: &str = "cohere_wiki";
 
-fn data_dir() -> PathBuf {
+fn data_dir(dataset: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("benches")
         .join("recall")
         .join("data__nogit")
-        .join("cohere_wiki")
+        .join(dataset)
 }
 
 // ── Binary file I/O ──────────────────────────────────────────────────────────
@@ -165,14 +169,16 @@ struct RecallResult {
 }
 
 fn run_recall(
+    dataset: &str,
     n: usize,
     k: usize,
     rerank_factors: &[usize],
 ) -> Vec<RecallResult> {
-    let dir = data_dir();
-    let vectors = load_f32_matrix(&dir.join(format!("vectors_{n}.bin")), DIM);
-    let queries = load_f32_matrix(&dir.join(format!("queries_{n}.bin")), DIM);
+    let dir = data_dir(dataset);
     let meta = load_meta(&dir.join(format!("meta_{n}.json")));
+    let dim = meta["dim"].as_u64().unwrap_or(DEFAULT_DIM as u64) as usize;
+    let vectors = load_f32_matrix(&dir.join(format!("vectors_{n}.bin")), dim);
+    let queries = load_f32_matrix(&dir.join(format!("queries_{n}.bin")), dim);
     let gt_k = meta["k"].as_u64().unwrap() as usize;
     let ground_truth = load_ground_truth(&dir.join(format!("ground_truth_{n}.bin")), gt_k);
 
@@ -187,7 +193,7 @@ fn run_recall(
     let centroid = compute_centroid(&vectors);
     let cn = c_norm(&centroid);
     let df = DistanceFunction::Euclidean;
-    let padded_bytes = Code::<&[u8], 1>::packed_len(DIM);
+    let padded_bytes = Code::<&[u8], 1>::packed_len(dim);
 
     println!("  Quantizing {n} vectors ...");
 
@@ -252,7 +258,7 @@ fn run_recall(
                     .iter()
                     .map(|cb| {
                         Code::<&[u8], 1>::new(cb.as_slice())
-                            .distance_query_bitwise(&df, &qq, DIM)
+                            .distance_query_bitwise(&df, &qq, dim)
                     })
                     .collect()
             }),
@@ -306,9 +312,10 @@ fn run_recall(
 
 // ── CLI + pretty-print ───────────────────────────────────────────────────────
 
-fn parse_args() -> (Vec<usize>, usize, Vec<usize>) {
+fn parse_args() -> (String, Vec<usize>, usize, Vec<usize>) {
     let args: Vec<String> = std::env::args().collect();
 
+    let mut dataset = DEFAULT_DATASET.to_string();
     let mut sizes = Vec::new();
     let mut k = DEFAULT_K;
     let mut rerank_factors = DEFAULT_RERANK_FACTORS.to_vec();
@@ -316,6 +323,12 @@ fn parse_args() -> (Vec<usize>, usize, Vec<usize>) {
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
+            "--dataset" | "-d" => {
+                i += 1;
+                if i < args.len() {
+                    dataset = args[i].clone();
+                }
+            }
             "--size" | "-s" => {
                 i += 1;
                 if i < args.len() {
@@ -343,8 +356,7 @@ fn parse_args() -> (Vec<usize>, usize, Vec<usize>) {
     }
 
     if sizes.is_empty() {
-        // Auto-detect available sizes from data directory.
-        let dir = data_dir();
+        let dir = data_dir(&dataset);
         for &sz in AVAILABLE_SIZES {
             if dir.join(format!("vectors_{sz}.bin")).exists() {
                 sizes.push(sz);
@@ -352,22 +364,24 @@ fn parse_args() -> (Vec<usize>, usize, Vec<usize>) {
         }
         if sizes.is_empty() {
             eprintln!("ERROR: No dataset files found in {}", dir.display());
-            eprintln!("       Run `python prepare_dataset.py` first.");
+            eprintln!("       Run `python prepare_dataset.py --dataset {dataset}` first.");
             eprintln!("       See rust/index/benches/recall/prepare_dataset.py");
             std::process::exit(1);
         }
     }
 
-    (sizes, k, rerank_factors)
+    (dataset, sizes, k, rerank_factors)
 }
 
-fn print_results(size: usize, results: &[RecallResult]) {
+fn print_results(dataset: &str, size: usize, results: &[RecallResult]) {
     let hr = "═".repeat(94);
     let sep = "─".repeat(94);
 
     println!("\n{hr}");
-    println!("  Recall@{k} on Cohere Wikipedia embeddings  (N={size}, dim={DIM})",
-             k = results[0].k);
+    println!(
+        "  Recall@{k} on {dataset}  (N={size})",
+        k = results[0].k
+    );
     println!("{sep}");
     println!(
         "  {:<16} {:>8} {:>10} {:>12} {:>12} {:>12} {:>14}",
@@ -396,14 +410,14 @@ fn print_results(size: usize, results: &[RecallResult]) {
 }
 
 fn main() {
-    let (sizes, k, rerank_factors) = parse_args();
+    let (dataset, sizes, k, rerank_factors) = parse_args();
 
     println!("\n=== RaBitQ Recall Benchmark ===");
-    println!("  K={k}, rerank_factors={rerank_factors:?}");
+    println!("  dataset={dataset}, K={k}, rerank_factors={rerank_factors:?}");
     println!("  sizes={sizes:?}\n");
 
     for &size in &sizes {
-        let results = run_recall(size, k, &rerank_factors);
-        print_results(size, &results);
+        let results = run_recall(&dataset, size, k, &rerank_factors);
+        print_results(&dataset, size, &results);
     }
 }
