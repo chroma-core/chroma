@@ -210,6 +210,7 @@
             "group": "Frameworks",
             "pages": [
               "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/google-adk",
               "integrations/frameworks/braintrust",
               "integrations/frameworks/contextual-ai",
               "integrations/frameworks/deepeval",
