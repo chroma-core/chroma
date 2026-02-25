@@ -1,0 +1,318 @@
+---
+title: Google ADK
+---
+
+import { Callout } from '/snippets/callout.mdx';
+
+The [Agent Development Kit (ADK)](https://google.github.io/adk-docs/) is Google's open-source framework for building AI agents. Chroma integrates with ADK via the [Chroma MCP server](https://github.com/chroma-core/chroma-mcp), giving your agents access to semantic memory, knowledge base retrieval, and persistent context across sessions.
+
+<Tabs>
+<Tab title="Python" icon="python">
+
+## Prerequisites
+
+- Python 3.10+
+- `uvx` installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+
+## Setup
+
+<Tabs>
+<Tab title="Chroma Cloud">
+
+<Callout>
+[Chroma Cloud](https://trychroma.com/signup?utm_source=docs-adk) is a fully managed, serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+</Callout>
+
+<Steps titleSize="h3">
+  <Step title="Install and log in">
+    <CodeGroup>
+    ```bash pip
+    pip install chromadb google-adk
+    ```
+    ```bash uv
+    uv pip install chromadb google-adk
+    ```
+    </CodeGroup>
+
+    Then authenticate with Chroma Cloud:
+
+    ```bash
+    chroma login
+    ```
+  </Step>
+
+  <Step title="Create a database">
+    ```bash
+    chroma db create my-adk-db
+    ```
+  </Step>
+
+  <Step title="Get your connection variables">
+    ```bash
+    chroma db connect my-adk-db --env-vars
+    ```
+
+    This will output your `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`. Use them in the code below.
+  </Step>
+
+  <Step title="Create your agent">
+    ```python Python
+    from google.adk.agents import Agent
+    from google.adk.tools.mcp_tool import McpToolset
+    from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
+    from mcp import StdioServerParameters
+
+    CHROMA_TENANT = "your-tenant-id"
+    CHROMA_DATABASE = "my-adk-db"
+    CHROMA_API_KEY = "your-api-key"
+
+    root_agent = Agent(
+        model="gemini-2.5-pro",
+        name="chroma_agent",
+        instruction="Help users store and retrieve information using semantic search.",
+        tools=[
+            McpToolset(
+                connection_params=StdioConnectionParams(
+                    server_params=StdioServerParameters(
+                        command="uvx",
+                        args=[
+                            "chroma-mcp",
+                            "--client-type", "cloud",
+                            "--tenant", CHROMA_TENANT,
+                            "--database", CHROMA_DATABASE,
+                            "--api-key", CHROMA_API_KEY,
+                        ],
+                    ),
+                    timeout=30,
+                ),
+            )
+        ],
+    )
+    ```
+  </Step>
+</Steps>
+
+</Tab>
+<Tab title="Local">
+
+Install the dependencies:
+
+<CodeGroup>
+```bash pip
+pip install chromadb google-adk
+```
+```bash uv
+uv pip install chromadb google-adk
+```
+</CodeGroup>
+
+Replace `/path/to/your/data/directory` with where you want Chroma to store its data.
+
+```python Python
+from google.adk.agents import Agent
+from google.adk.tools.mcp_tool import McpToolset
+from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
+from mcp import StdioServerParameters
+
+DATA_DIR = "/path/to/your/data/directory"
+
+root_agent = Agent(
+    model="gemini-2.5-pro",
+    name="chroma_agent",
+    instruction="Help users store and retrieve information using semantic search.",
+    tools=[
+        McpToolset(
+            connection_params=StdioConnectionParams(
+                server_params=StdioServerParameters(
+                    command="uvx",
+                    args=[
+                        "chroma-mcp",
+                        "--client-type", "persistent",
+                        "--data-dir", DATA_DIR,
+                    ],
+                ),
+                timeout=30,
+            ),
+        )
+    ],
+)
+```
+
+</Tab>
+</Tabs>
+</Tab>
+
+<Tab title="TypeScript" icon="js">
+
+## Prerequisites
+
+- Node.js 18+
+- `uvx` installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
+
+## Setup
+
+<Tabs>
+<Tab title="Chroma Cloud">
+
+<Callout>
+[Chroma Cloud](https://trychroma.com/signup?utm_source=docs-adk) is a fully managed, serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+</Callout>
+
+<Steps titleSize="h3">
+  <Step title="Install and log in">
+    Install the ADK package:
+
+    <CodeGroup>
+    ```bash npm
+    npm install @google/adk
+    ```
+    ```bash pnpm
+    pnpm add @google/adk
+    ```
+    ```bash yarn
+    yarn add @google/adk
+    ```
+    </CodeGroup>
+
+    Install the Chroma CLI and authenticate:
+
+    <CodeGroup>
+    ```bash pip
+    pip install chromadb
+    ```
+    ```bash uv
+    uv pip install chromadb
+    ```
+    </CodeGroup>
+
+    ```bash
+    chroma login
+    ```
+  </Step>
+
+  <Step title="Create a database">
+    ```bash
+    chroma db create my-adk-db
+    ```
+  </Step>
+
+  <Step title="Get your connection variables">
+    ```bash
+    chroma db connect my-adk-db --env-vars
+    ```
+
+    This will output your `CHROMA_TENANT`, `CHROMA_DATABASE`, and `CHROMA_API_KEY`. Use them in the code below.
+  </Step>
+
+  <Step title="Create your agent">
+    ```typescript TypeScript
+    import { LlmAgent, MCPToolset } from "@google/adk";
+
+    const CHROMA_TENANT = "your-tenant-id";
+    const CHROMA_DATABASE = "my-adk-db";
+    const CHROMA_API_KEY = "your-api-key";
+
+    const rootAgent = new LlmAgent({
+        model: "gemini-2.5-pro",
+        name: "chroma_agent",
+        instruction: "Help users store and retrieve information using semantic search.",
+        tools: [
+            new MCPToolset({
+                type: "StdioConnectionParams",
+                serverParams: {
+                    command: "uvx",
+                    args: [
+                        "chroma-mcp",
+                        "--client-type", "cloud",
+                        "--tenant", CHROMA_TENANT,
+                        "--database", CHROMA_DATABASE,
+                        "--api-key", CHROMA_API_KEY,
+                    ],
+                },
+            }),
+        ],
+    });
+    ```
+  </Step>
+</Steps>
+
+</Tab>
+<Tab title="Local">
+
+Install the ADK package:
+
+<CodeGroup>
+```bash npm
+npm install @google/adk
+```
+```bash pnpm
+pnpm add @google/adk
+```
+```bash yarn
+yarn add @google/adk
+```
+</CodeGroup>
+
+Replace `/path/to/your/data/directory` with where you want Chroma to store its data.
+
+```typescript TypeScript
+import { LlmAgent, MCPToolset } from "@google/adk";
+
+const DATA_DIR = "/path/to/your/data/directory";
+
+const rootAgent = new LlmAgent({
+    model: "gemini-2.5-pro",
+    name: "chroma_agent",
+    instruction: "Help users store and retrieve information using semantic search.",
+    tools: [
+        new MCPToolset({
+            type: "StdioConnectionParams",
+            serverParams: {
+                command: "uvx",
+                args: [
+                    "chroma-mcp",
+                    "--client-type", "persistent",
+                    "--data-dir", DATA_DIR,
+                ],
+            },
+        }),
+    ],
+});
+```
+
+</Tab>
+</Tabs>
+</Tab>
+</Tabs>
+
+## Available Tools
+
+Once connected, your ADK agent will have access to the following Chroma tools:
+
+### Collection Management
+
+| Tool | Description |
+| :--- | :--- |
+| `chroma_list_collections` | List all collections with pagination support |
+| `chroma_create_collection` | Create a new collection with optional HNSW configuration |
+| `chroma_get_collection_info` | Get detailed information about a collection |
+| `chroma_get_collection_count` | Get the number of documents in a collection |
+| `chroma_modify_collection` | Update a collection's name or metadata |
+| `chroma_delete_collection` | Delete a collection |
+| `chroma_peek_collection` | View a sample of documents in a collection |
+
+### Document Operations
+
+| Tool | Description |
+| :--- | :--- |
+| `chroma_add_documents` | Add documents with optional metadata and custom IDs |
+| `chroma_query_documents` | Query documents using semantic search with advanced filtering |
+| `chroma_get_documents` | Retrieve documents by IDs or filters with pagination |
+| `chroma_update_documents` | Update existing documents' content, metadata, or embeddings |
+| `chroma_delete_documents` | Delete specific documents from a collection |
+
+## Resources
+
+- [Google ADK Documentation](https://google.github.io/adk-docs/)
+- [ADK Chroma Integration Guide](https://google.github.io/adk-docs/integrations/chroma/)
+- [Chroma MCP Server](https://github.com/chroma-core/chroma-mcp)
