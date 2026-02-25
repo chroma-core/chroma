@@ -12,16 +12,17 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
-in_pydantic_v2 = False
 try:
     from pydantic import BaseSettings
-except ImportError:
-    in_pydantic_v2 = True
-    from pydantic.v1 import BaseSettings
-    from pydantic.v1 import validator
+    from pydantic import validator
 
-if not in_pydantic_v2:
-    from pydantic import validator  # type: ignore # noqa
+    PYDANTIC_V2 = False
+except ImportError:
+    from pydantic_settings import BaseSettings  # type: ignore[no-redef]
+    from pydantic_settings import SettingsConfigDict
+    from pydantic import field_validator
+
+    PYDANTIC_V2 = True
 
 # The thin client will have a flag to control which implementations to use
 is_thin_client = False
@@ -127,13 +128,24 @@ class Settings(BaseSettings):  # type: ignore
     # Can be "chromadb.api.segment.SegmentAPI" or "chromadb.api.fastapi.FastAPI" or "chromadb.api.rust.RustBindingsAPI"
     chroma_api_impl: str = "chromadb.api.rust.RustBindingsAPI"
 
-    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
-    def empty_str_to_none(cls, v: str) -> Optional[str]:
-        if type(v) is str and v.strip() == "":
-            return None
-        return v
-
     chroma_server_nofile: Optional[int] = None
+
+    if PYDANTIC_V2:
+
+        @field_validator("chroma_server_nofile", mode="before")
+        def empty_str_to_none(cls, v: Any) -> Optional[str]:
+            if isinstance(v, str) and v.strip() == "":
+                return None
+            return cast(Optional[str], v)
+
+    else:
+
+        @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
+        def empty_str_to_none(cls, v: Any) -> Optional[str]:
+            if isinstance(v, str) and v.strip() == "":
+                return None
+            return cast(Optional[str], v)
+
     # the number of maximum threads to handle synchronous tasks in the FastAPI server
     chroma_server_thread_pool_size: int = 40
 
@@ -323,9 +335,13 @@ class Settings(BaseSettings):  # type: ignore
             raise ValueError(LEGACY_ERROR)
         return val
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    else:
+
+        class Config:
+            env_file = ".env"
+            env_file_encoding = "utf-8"
 
 
 T = TypeVar("T", bound="Component")
