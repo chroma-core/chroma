@@ -60,7 +60,7 @@ fn data_dir(dataset: &str) -> PathBuf {
 fn load_f32_matrix(path: &std::path::Path, dim: usize) -> Vec<Vec<f32>> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| {
         eprintln!("ERROR: Cannot read {}: {e}", path.display());
-        eprintln!("       Run `python prepare_dataset.py` first.  See benches/recall/README.");
+        eprintln!("       Run `python prepare_dataset.py` first.  See benches/vector/recall/README.");
         std::process::exit(1);
     });
     assert_eq!(
@@ -82,8 +82,7 @@ fn load_ground_truth(path: &std::path::Path, k: usize) -> Vec<Vec<u32>> {
     });
     assert_eq!(bytes.len() % (k * 4), 0, "File size not a multiple of k*4");
     let n = bytes.len() / (k * 4);
-    let vals: &[u32] =
-        unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, n * k) };
+    let vals: &[u32] = unsafe { std::slice::from_raw_parts(bytes.as_ptr() as *const u32, n * k) };
     vals.chunks_exact(k).map(|c| c.to_vec()).collect()
 }
 
@@ -130,10 +129,7 @@ fn compute_centroid(vectors: &[Vec<f32>]) -> Vec<f32> {
 }
 
 /// Score all codes against one query, return top-R indices.
-fn top_r_by_estimated_distance(
-    scores: &[f32],
-    r: usize,
-) -> Vec<usize> {
+fn top_r_by_estimated_distance(scores: &[f32], r: usize) -> Vec<usize> {
     let mut indexed: Vec<(usize, f32)> = scores.iter().copied().enumerate().collect();
     indexed.sort_unstable_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     indexed.iter().take(r).map(|&(i, _)| i).collect()
@@ -168,12 +164,7 @@ struct RecallResult {
     score_time_ms: f64,
 }
 
-fn run_recall(
-    dataset: &str,
-    n: usize,
-    k: usize,
-    rerank_factors: &[usize],
-) -> Vec<RecallResult> {
+fn run_recall(dataset: &str, n: usize, k: usize, rerank_factors: &[usize]) -> Vec<RecallResult> {
     let dir = data_dir(dataset);
     let meta = load_meta(&dir.join(format!("meta_{n}.json")));
     let dim = meta["dim"].as_u64().unwrap_or(DEFAULT_DIM as u64) as usize;
@@ -229,9 +220,7 @@ fn run_recall(
                 let qn = q_norm(&centroid, r_q);
                 codes_4
                     .iter()
-                    .map(|cb| {
-                        Code4Bit::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn)
-                    })
+                    .map(|cb| Code4Bit::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn))
                     .collect()
             }),
         ),
@@ -243,7 +232,8 @@ fn run_recall(
                 codes_1
                     .iter()
                     .map(|cb| {
-                        Code1Bit::new(cb.as_slice()).distance_query(&df, r_q, cn, cdq, qn)
+                        Code1Bit::new(cb.as_slice())
+                            .distance_query_full_precision(&df, r_q, cn, cdq, qn)
                     })
                     .collect()
             }),
@@ -256,10 +246,7 @@ fn run_recall(
                 let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
                 codes_1
                     .iter()
-                    .map(|cb| {
-                        Code1Bit::new(cb.as_slice())
-                            .distance_query_bitwise(&df, &qq)
-                    })
+                    .map(|cb| Code1Bit::new(cb.as_slice()).distance_query(&df, &qq))
                     .collect()
             }),
         ),
@@ -365,7 +352,7 @@ fn parse_args() -> (String, Vec<usize>, usize, Vec<usize>) {
         if sizes.is_empty() {
             eprintln!("ERROR: No dataset files found in {}", dir.display());
             eprintln!("       Run `python prepare_dataset.py --dataset {dataset}` first.");
-            eprintln!("       See rust/index/benches/recall/prepare_dataset.py");
+            eprintln!("       See rust/index/benches/vector/recall/prepare_dataset.py");
             std::process::exit(1);
         }
     }
@@ -378,10 +365,7 @@ fn print_results(dataset: &str, size: usize, results: &[RecallResult]) {
     let sep = "─".repeat(94);
 
     println!("\n{hr}");
-    println!(
-        "  Recall@{k} on {dataset}  (N={size})",
-        k = results[0].k
-    );
+    println!("  Recall@{k} on {dataset}  (N={size})", k = results[0].k);
     println!("{sep}");
     println!(
         "  {:<16} {:>8} {:>10} {:>12} {:>12} {:>12} {:>14}",

@@ -77,8 +77,15 @@ harness = false
 
 [[bench]]
 name = "quantization"
+path = "benches/vector/quantization.rs"
 harness = false
 
 [[bench]]
 name = "recall"
+path = "benches/vector/recall.rs"
+harness = false
+
+[[bench]]
+name = "error"
+path = "benches/vector/error.rs"
 harness = false
