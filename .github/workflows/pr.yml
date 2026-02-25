@@ -38,11 +38,15 @@ jobs:
             docs:
               - 'docs/**'
               - '**/*.md'
+              - 'sample_apps/**'
+              - 'examples/**'
             # Outside docs
             outside-docs:
               - '**'
               - '!docs/**'
               - '!**/*.md'
+              - '!sample_apps/**'
+              - '!examples/**'
             # Helm chart changes
             helm-changes:
               - 'k8s/distributed-chroma/**'
