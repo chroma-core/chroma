@@ -26,6 +26,7 @@
           {
             "group": "Overview",
             "pages": [
+              "docs/overview/introduction",
               "docs/overview/getting-started",
               "docs/overview/architecture",
               "docs/overview/oss",

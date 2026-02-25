@@ -618,10 +618,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// Balance a cluster: scrub then trigger split/merge if needed.
     /// `depth` tracks recursion depth through balance → split/merge → reassign → balance chains.
     async fn balance(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
-        if depth > MAX_BALANCE_DEPTH {
-            return Ok(());
-        }
-
         if !self.balancing.insert(cluster_id) {
             return Ok(());
         }
@@ -789,6 +785,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     /// Merge a small cluster into a nearby cluster.
     async fn merge(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
         let _guard = stats::TimedGuard::new(&self.stats.merge);
+        if depth > MAX_BALANCE_DEPTH {
+            return Ok(());
+        }
+
         let Some(source_center) = self.centroid(cluster_id) else {
             return Ok(());
         };
@@ -1102,6 +1102,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             versions: right_group.iter().map(|(_, version, _)| *version).collect(),
         };
         let right_cluster_id = self.spawn(right_delta)?;
+
+        if depth > MAX_BALANCE_DEPTH {
+            return Ok(());
+        }
 
         // NPA check for split points
         let evaluated = DashSet::new();
