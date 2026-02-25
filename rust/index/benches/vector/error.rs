@@ -1,6 +1,14 @@
 use chroma_distance::DistanceFunction;
 use chroma_index::quantization::{BatchQueryLuts, Code1Bit, Code4Bit, QuantizedQuery};
 use criterion::{criterion_group, criterion_main, Criterion};
+use faer::{
+    col::ColRef,
+    stats::{
+        prelude::{Distribution, StandardNormal, ThreadRng},
+        UnitaryMat,
+    },
+    Mat,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 
 fn make_rng() -> StdRng {
@@ -9,6 +17,19 @@ fn make_rng() -> StdRng {
 
 fn random_vec(rng: &mut impl Rng, dim: usize) -> Vec<f32> {
     (0..dim).map(|_| rng.gen_range(-1.0_f32..1.0)).collect()
+}
+
+fn random_rotation(dim: usize) -> Mat<f32> {
+    let dist = UnitaryMat {
+        dim,
+        standard_normal: StandardNormal,
+    };
+    dist.sample(&mut ThreadRng::default())
+}
+
+fn rotate(rotation: &Mat<f32>, v: &[f32]) -> Vec<f32> {
+    let result = rotation * ColRef::from_slice(v);
+    result.iter().copied().collect()
 }
 
 fn c_norm(centroid: &[f32]) -> f32 {
@@ -32,6 +53,17 @@ fn q_norm(centroid: &[f32], r_q: &[f32]) -> f32 {
 // Not a timing benchmark.  Measures how accurately each implementation
 // estimates the true squared Euclidean distance.
 //
+// A random orthogonal rotation P is applied to all vectors (centroid,
+// embeddings, queries) before quantization, matching production behavior
+// (quantized_spann.rs::rotate).  The rotation is what makes the RaBitQ
+// estimator unbiased (Theorem 3.2): it decorrelates the sign quantization
+// g = sign(Pr) from any fixed direction, so E_P[⟨g, r_q_perp⟩] = 0.
+// d_true is computed from original (unrotated) vectors since P preserves L2.
+//
+// Queries are generated as centroid + noise so that query residuals r_q are
+// zero-mean, matching the paper's unbiasedness conditions.  Without this,
+// E[r_q] = -centroid creates a systematic bias that the rotation cannot fix.
+//
 // For every (embedding, query) pair we compute two metrics:
 //
 //   relative_error = (d_est − d_true) / d_true   [dimensionless, scale-free]
@@ -46,53 +78,15 @@ fn q_norm(centroid: &[f32], r_q: &[f32]) -> f32 {
 //
 // WHY THE RELATIVE-ERROR MEAN IS NON-ZERO (even for an unbiased estimator)
 // ─────────────────────────────────────────────────────────────────────────
-// The RaBitQ paper claims the estimator is unbiased in the ABSOLUTE sense:
+// Relative error ε/d_true has a strictly positive mean even for an unbiased
+// estimator, due to Jensen's inequality: E[1/X] > 1/E[X] when X > 0.
 //
-//   E[d_est − d_true] = 0
+//   • (d_est − d_true) / d_true ≥ −1  (hard floor: d_est ≥ 0)
+//   • no corresponding upper bound
 //
-// The 1-bit estimator approximates ⟨r, r_q⟩ ≈ ‖r‖ · ⟨g, r_q⟩ / ⟨g, n⟩
-// where g = sign(r)/√D and n = r/‖r‖.  Averaging over random r_q with
-// E[r_q] = 0, both the true inner product and its estimate have expectation
-// zero, so the absolute error E[d_est − d_true] is indeed zero.
-//
-// The RELATIVE error ε/d_true is a different story:
-//
-//   E[ε / d_true] = Cov(ε, d_true⁻¹)  ≠ 0  in general
-//
-// because d_true = ‖r − r_q‖² ≥ 0 is bounded below by zero, which makes
-// the relative-error distribution inherently right-skewed:
-//
-//   • (d_est − d_true) / d_true ≥ −1  (hard floor: d_est ≥ 0, so d_est/d_true − 1 ≥ −1)
-//   • no corresponding upper bound: d_est can overshoot by any amount
-//
-// In practice: for near pairs (small d_true), even a modest absolute
-// overestimate gets divided by a small denominator, producing a large
-// positive relative error.  For far pairs (large d_true), the same absolute
-// overestimate is a tiny relative error.  The net result is a positive mean
-// relative error even though the absolute error is zero on average.
-//
-// The 4-bit estimator shows near-zero mean relative error because its
-// absolute errors are ~8× smaller, making this asymmetry negligible.
-//
-// WHAT THE ABSOLUTE-ERROR TABLE ACTUALLY SHOWS
-// ─────────────────────────────────────────────
-// The paper's unbiasedness guarantee is: for a fixed query r_q, the
-// expected estimator over many random rotations P equals the true inner
-// product, i.e., E_P[⟨ĝ(Pr), r_q⟩ · ‖r‖ / ⟨ĝ(Pr), n̂⟩] = ⟨r, r_q⟩.
-//
-// Our test does NOT average over rotations.  Instead, we use ONE fixed
-// quantization (no rotation) and average over many RANDOM queries drawn
-// from U(-1,1)^D.  Because the queries are centered at the ORIGIN and the
-// centroid c is non-zero, the query residuals satisfy E[r_q] = -c ≠ 0.
-// That non-zero mean propagates differently through the true inner product
-// (⟨r, r_q⟩ → -⟨r, c⟩) and through the 1-bit estimator
-// (‖r‖²/‖r‖₁ · ⟨sign(r), r_q⟩ → -‖r‖²/‖r‖₁ · ⟨sign(r), c⟩), causing
-// a small systematic gap whenever |r_k| ≠ ‖r‖²/‖r‖₁ (i.e., always).
-//
-// In a real ANN workload queries are specific fixed vectors, not random,
-// so this is a test-setup artefact only.  The non-zero absolute mean is
-// small (≈ 0.3 % of d_true) compared to the std (≈ 2 %), confirming the
-// estimator is useful in practice.
+// For near pairs (small d_true), even a modest absolute overestimate
+// produces a large positive relative error.  The net result is a positive
+// mean relative error even when the absolute error is zero on average.
 //
 // Results are printed as a relative-error stats table, an absolute-error
 // summary, and per-method histograms (shared x-axis, directly comparable).
@@ -105,13 +99,17 @@ fn print_error_analysis() {
     const BAR_W: usize = 48; // max histogram bar width in chars
 
     let mut rng = make_rng();
-    let centroid = random_vec(&mut rng, DIM);
+    let p = random_rotation(DIM);
+
+    let centroid_raw = random_vec(&mut rng, DIM);
+    let centroid = rotate(&p, &centroid_raw);
     let df = DistanceFunction::Euclidean;
     let cn = c_norm(&centroid);
     let padded_bytes = Code1Bit::packed_len(DIM);
 
-    // Generate embeddings and keep the originals to compute d_true.
-    let embeddings: Vec<Vec<f32>> = (0..N).map(|_| random_vec(&mut rng, DIM)).collect();
+    // Generate embeddings. Keep originals for d_true (rotation preserves L2).
+    let embeddings_raw: Vec<Vec<f32>> = (0..N).map(|_| random_vec(&mut rng, DIM)).collect();
+    let embeddings: Vec<Vec<f32>> = embeddings_raw.iter().map(|e| rotate(&p, e)).collect();
     let codes_1: Vec<Vec<u8>> = embeddings
         .iter()
         .map(|emb| Code1Bit::quantize(emb, &centroid).as_ref().to_vec())
@@ -143,7 +141,10 @@ fn print_error_analysis() {
     let mut abs_code1 = Vec::with_capacity(total);
 
     for _ in 0..N_QUERIES {
-        let query = random_vec(&mut rng, DIM);
+        // Generate query as centroid + noise so that r_q is zero-mean.
+        let noise = random_vec(&mut rng, DIM);
+        let query_raw: Vec<f32> = centroid_raw.iter().zip(&noise).map(|(c, n)| c + n).collect();
+        let query = rotate(&p, &query_raw);
         let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
         let cdq = c_dot_q(&centroid, &r_q);
         let qn = q_norm(&centroid, &r_q);
@@ -157,10 +158,11 @@ fn print_error_analysis() {
         let cq4 = Code4Bit::new(cq4_bytes.as_slice());
 
         for i in 0..N {
-            // True squared Euclidean distance from original unquantized embedding.
-            let d_true: f32 = embeddings[i]
+            // True squared Euclidean distance from original unquantized vectors.
+            // Rotation preserves L2 distance, so we use the originals.
+            let d_true: f32 = embeddings_raw[i]
                 .iter()
-                .zip(&query)
+                .zip(&query_raw)
                 .map(|(e, q)| (e - q) * (e - q))
                 .sum();
             if d_true < f32::EPSILON {

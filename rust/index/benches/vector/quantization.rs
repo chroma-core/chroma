@@ -56,11 +56,24 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
 use simsimd::SpatialSimilarity;
 
-/// Print a one-line description of the benchmark that follows.
-/// Appears immediately before criterion's own "Benchmarking …" line.
+/// Criterion's filter: the first positional argument after `--`, if any.
+/// Benchmarks whose ID doesn't contain the filter are skipped by Criterion,
+/// so we skip the desc! print too.
+fn bench_filter() -> Option<String> {
+    // argv: <binary> [criterion-opts...] [filter]
+    // The filter is the last positional arg (no leading `-`).
+    std::env::args()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+}
+
+/// Print a one-line description of the benchmark that follows, but only when
+/// the benchmark ID matches the active filter (or no filter is set).
 macro_rules! desc {
     ($id:expr, $text:expr) => {
-        println!("  [{:48}] {}", $id, $text);
+        if bench_filter().map_or(true, |f| $id.contains(f.as_str())) {
+            println!("  [{:48}] {}", $id, $text);
+        }
     };
 }
 
@@ -623,9 +636,9 @@ fn bench_thread_scaling(c: &mut Criterion) {
 // Each primitive benchmark ID contains the parent function's tag (see header),
 // so filtering by tag pulls in both full-function and primitive benchmarks:
 //   cargo bench ... -- quant-1bit           # full quant-1bit + all its primitives
-//   cargo bench ... -- dq-float         # full dq-float + signed_dot, sign_expand
-//   cargo bench ... -- quant-query           # full quant-query + min_max, quantize_elements, ...
-//   cargo bench ... -- primitives       # ALL primitives only (no full-function groups)
+//   cargo bench ... -- dq-float             # full dq-float + signed_dot, sign_expand
+//   cargo bench ... -- quant-query          # full quant-query + min_max, quantize_elements, ...
+//   cargo bench ... -- primitives           # ALL primitives only (no full-function groups)
 //
 // Isolate every major computational primitive used by Code1Bit::quantize,
 // Code1Bit::distance_query, Code1Bit::distance_query_bitwise,

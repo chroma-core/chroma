@@ -11,7 +11,7 @@
 //! and intersected with the brute-force ground truth to measure recall.
 //!
 //! Data preparation (one-time):
-//!   cd rust/index/benches/recall
+//!   cd rust/index/benches/vector/recall
 //!   pip install datasets numpy tqdm
 //!   python prepare_dataset.py                       # cohere_wiki, all sizes
 //!   python prepare_dataset.py --dataset msmarco    # msmarco dataset
@@ -50,6 +50,7 @@ const DEFAULT_DATASET: &str = "cohere_wiki";
 fn data_dir(dataset: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("benches")
+        .join("vector")
         .join("recall")
         .join("data__nogit")
         .join(dataset)

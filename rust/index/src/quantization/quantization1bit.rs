@@ -238,31 +238,6 @@ impl Code1Bit {
         // The embedding is already rotated, so we only need to take the sign
         // of each bit.
         //
-        // Computing the Quantized Codes of Data Vectors
-        // - normalize the data vector -> o'
-        // - Have a "codebook" of unit vectors. Stored as a rotation matrix P
-        // - Find the nearest the nearest unrotated unit vector
-        //     1. Apply P⁻¹ to the data vector (unrotate).
-        //         - P⁻¹ = Pᵀ for orthonormal matrices
-        //         - since we only ever use P⁻¹, that's what we store in index.rotation
-        //         - We do this instead of rotating the data vector because it's faster and equivalent: Equation 8 in the paper: ⟨o,P xˉ⟩=⟨P−1 o, xˉ⟩
-        //         - The inner product between the data vector o and a rotated codebook entry Px̄, equals the inner product between the inverse-rotated data vector P⁻¹o and the unrotated codebook entry x̄.
-        //     2. Take the sign of each bit of the inverse-rotated data vector.
-        //         - This gives the nearest unrotated unit vector.
-        //         - we can do this instead of rotating all 2^D vectors in C, because x̄ ∈ C has entries ±1/√D, the argmax over C is just the sign of each component of P⁻¹o:
-        //         - xˉ[i] = sign((P⁻¹o)[i]) / √D,
-        //     - The whole point of the "de-rotate the data instead of rotating the codebook" trick is precisely that you never need Px̄ (AKA ō) explicitly (because Px̄ is expensive to store and compute with, it's not binary-valued) — you just keep everything in the P⁻¹-rotated coordinate frame, where x̄ is just a sign vector and inner products can be computed with popcount.
-        //
-        // Notation:
-        // TODO align with notation above
-        // o — the normalized data vector (in the original space, after subtracting centroid and normalizing to unit length)
-        // ō - the rotated, quantized data vector (Px̄)
-        // P — the random orthogonal rotation matrix used to construct the randomized codebook C_rand
-        // x̄ — a candidate vector from the unrotated codebook C = {±1/√D}^D (axis-aligned, bi-valued)
-        // Px̄ — the rotated codebook vector, i.e., the candidate from C_rand (the actual quantized vector ō lives here)
-        // P⁻¹ — the inverse rotation (which equals Pᵀ since P is orthogonal)
-        // P⁻¹o — the data vector inversely transformed into the unrotated codebook space
-
         // Build packed codes: [sign_bits]
         // Pack sign bits branchlessly, 8 floats → 1 byte at a time.
         // For each f32, the IEEE-754 sign bit is bit 31: 1 = negative, 0 = positive.
