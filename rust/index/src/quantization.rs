@@ -80,10 +80,32 @@ use simsimd::SpatialSimilarity;
 /// Header for quantized code containing metadata.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
+// muiltbit code header
 struct CodeHeader {
     correction: f32,
     norm: f32,
     radial: f32,
+}
+
+// single bit code header
+// returned when BITS == 1
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct CodeHeader1 {
+    correction: f32,
+    norm: f32,
+    radial: f32,
+    signed_sum: i32,
+}
+
+// generic code header
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+struct CodeHeaderGeneric<T> {
+    correction: f32,
+    norm: f32,
+    radial: f32,
+    signed_sum: i32,
 }
 
 /// Quantized representation of a data residual.
@@ -373,6 +395,8 @@ impl<const BITS: u8> Code<Vec<u8>, BITS> {
             // We want the packed bit to be 1 when val >= 0, so we invert the sign bit.
             // Processing a full chunk per byte eliminates all i/8 and i%8 index arithmetic
             // as used previously: `packed[i / 8] |= 1 << (i % 8);`
+            // TODO benchmark branchless vs previous conditional
+            // f32.sign?
             let mut packed = vec![0u8; Self::packed_len(dim)];
             for (byte_ref, chunk) in packed.iter_mut().zip(r.chunks(8)) {
                 let mut byte = 0u8;
@@ -572,7 +596,7 @@ fn signed_dot(packed: &[u8], values: &[f32]) -> f32 {
             let base = i * 8;
             let b = byte as u32;
             // Constant shifts → LLVM fully unrolls this block.
-            signs[base]     = f32::from_bits(0x3F800000 | (((b >> 0) & 1) ^ 1) << 31);
+            signs[base] = f32::from_bits(0x3F800000 | (((b >> 0) & 1) ^ 1) << 31);
             signs[base + 1] = f32::from_bits(0x3F800000 | (((b >> 1) & 1) ^ 1) << 31);
             signs[base + 2] = f32::from_bits(0x3F800000 | (((b >> 2) & 1) ^ 1) << 31);
             signs[base + 3] = f32::from_bits(0x3F800000 | (((b >> 3) & 1) ^ 1) << 31);
@@ -632,25 +656,48 @@ impl QuantizedQuery {
     ///
     /// `b_q` is the number of bits per query element (paper recommends 4).
     /// `padded_bytes` is the byte length of the packed data codes (for alignment).
-    pub fn new(r_q: &[f32], b_q: u8, padded_bytes: usize, c_norm: f32, c_dot_q: f32, q_norm: f32) -> Self {
+    pub fn new(
+        r_q: &[f32],
+        b_q: u8,
+        padded_bytes: usize,
+        c_norm: f32,
+        c_dot_q: f32,
+        q_norm: f32,
+    ) -> Self {
         let max_val = (1u32 << b_q) - 1;
 
         let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
         let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let range = v_r - v_l;
-        let delta = if range > f32::EPSILON { range / max_val as f32 } else { 1.0 };
+        let delta = if range > f32::EPSILON {
+            range / max_val as f32
+        } else {
+            1.0
+        };
 
         // Quantize each element to a B_q-bit unsigned integer (deterministic
         // rounding — we skip the randomized rounding from the paper since the
         // accuracy difference is negligible at B_q=4).
-        let q_u: Vec<u32> = r_q.iter().map(|&v| {
-            (((v - v_l) / delta).round() as u32).min(max_val)
-        }).collect();
+        // Confirmed this with own error benchmarking.
+        // If we want to use randomized rounding, resurect this commit:
+        // 3dd86c6f64bc57433cb112cbc3df526f1876adde,
+        // by reverting its revert: 101af74f96264bad85a54612f71f6cc6af7e8576
+        let q_u: Vec<u32> = r_q
+            .iter()
+            .map(|&v| (((v - v_l) / delta).round() as u32).min(max_val))
+            .collect();
 
         let sum_q_u: u32 = q_u.iter().sum();
 
         // Decompose into bit planes.  bit_planes[j][byte] holds the j-th bit
         // of q_u[i] for i in [byte*8 .. byte*8+8], packed LSB-first.
+        //
+        // Why this layout?
+        // For distance_query_bitwise, we compute ⟨x_b, q_u⟩ as:
+        // Σ_j 2^j · popcount(x_b AND bit_planes[j])
+        // The data code x_b and each bit_planes[j] share the same layout
+        // (one bit per dimension, LSB-first), so we can AND them byte-by-byte
+        // and popcount to get the inner product.
         let mut bit_planes = vec![vec![0u8; padded_bytes]; b_q as usize];
         for (i, &qu) in q_u.iter().enumerate() {
             for j in 0..b_q as usize {
@@ -660,34 +707,68 @@ impl QuantizedQuery {
             }
         }
 
-        Self { bit_planes, v_l, delta, sum_q_u, b_q, c_norm, c_dot_q, q_norm }
+        // Do we need
+        Self {
+            bit_planes,
+            v_l,
+            delta,
+            sum_q_u,
+            b_q,
+            c_norm,
+            c_dot_q,
+            q_norm,
+        }
     }
 }
 
 impl<T: AsRef<[u8]>> Code<T, 1> {
     /// Bitwise distance estimation using the paper's Section 3.3 approach.
     ///
+    /// ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+    ///
     /// Instead of expanding packed bits to f32 signs and running a float dot
     /// product, this computes `⟨x_bar_b, q_bar_u⟩` using B_q rounds of
     /// AND + popcount on D-bit strings, then recovers the full distance
     /// estimate from the scalar factors.
     ///
-    /// The inner product is derived from paper Equation 20:
-    ///   ⟨x_bar, q_bar⟩ = (2Δ/√D) · ⟨x_b, q_u⟩
-    ///                   + (2v_l/√D) · Σ x_b[i]
-    ///                   - (Δ/√D) · Σ q_u[i]
-    ///                   - √D · v_l
+    /// # Derivation: Equation 20 to our code
     ///
-    /// But since we work with residuals (not unit vectors) and our g[i] values
-    /// are ±0.5 (not ±1/√D), we adapt the derivation:
+    /// **Step 1 — Paper Equation 20** (unit vectors, ō[i] = ±1/√D):
+    /// ```text
+    /// ⟨x̄, q̄⟩ = (2Δ/√D)·⟨x_b, q_u⟩ + (2v_l/√D)·Σ x_b[i] - (Δ/√D)·Σ q_u[i] - √D·v_l
+    /// ```
     ///
-    ///   g[i] = sign(r[i]) × 0.5
-    ///   g[i] · r_q[i] ≈ g[i] · (Δ · q_u[i] + v_l)
+    /// **Step 2 — Our scaling** (residuals, g[i] = ±0.5):
+    /// Replace 1/√D with 0.5, √D with dim. We want ⟨g, r_q⟩ where r_q[i] ≈ Δ·q_u[i] + v_l:
+    /// ```text
+    /// ⟨g, r_q⟩ = 0.5·(2Δ·⟨x_b, q_u⟩ + 2·v_l·popcount(x_b) - Δ·Σ q_u[i] - dim·v_l)
+    /// ```
     ///
-    /// ⟨g, r_q⟩ ≈ 0.5 · (2Δ · ⟨x_b, q_u⟩ + 2·v_l · popcount(x_b)
-    ///                   - Δ · Σ q_u[i] - dim · v_l)
+    /// **Step 3 — Factor** (group Δ terms and v_l terms):
+    /// ```text
+    /// ⟨g, r_q⟩ = 0.5·(Δ·(2·⟨x_b, q_u⟩ - Σ q_u[i]) + v_l·(2·popcount(x_b) - dim))
+    /// ```
     ///
-    /// where ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
+    /// **Step 4 — Substitute** sign[i] = 2·x_b[i] − 1:
+    /// ```text
+    /// signed_dot_qu = Σ sign[i]·q_u[i] = 2·⟨x_b, q_u⟩ − Σ q_u[i]
+    /// signed_sum    = Σ sign[i]        = 2·popcount(x_b) − dim
+    /// ⟨g, r_q⟩      = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+    /// ```
+    ///
+    /// **Step 5 — Code** (see `g_dot_r_q` below):
+    /// ```text
+    /// g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum)
+    /// ```
+    ///
+    /// # Notation
+    ///
+    /// - v_l = min(r_q[i])
+    /// - v_r = max(r_q[i])
+    /// - x_b = data code (packed bits), g[i] = +0.5 when x_b[i]=1 else −0.5
+    /// - q_u = quantized query, r_q[i] ≈ Δ·q_u[i] + v_l
+    /// - Δ = (v_r − v_l) / (2^B_q − 1)
+    /// - ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
     pub fn distance_query_bitwise(
         &self,
         distance_function: &DistanceFunction,
@@ -699,6 +780,7 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
         let correction = self.correction();
         let packed = self.packed();
 
+        // Compute ⟨x_b, q_u⟩ (the binary verstions of g and r_q) via bit planes
         // ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
         // Each AND+popcount operates on the full D-bit string.
         let mut xb_dot_qu = 0u32;
@@ -714,6 +796,10 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
         }
 
         // popcount(x_b) = number of set bits in the data code
+        // TODO - OPTIMIZATION: this can be precomputed in Code::quantize.
+        // Alternatively, we could store the signed_sum in the header.
+        // Requires changing the header size.
+        // TODO make single instruction popcount
         let popcount_xb = {
             let mut count = 0u32;
             for i in (0..packed.len()).step_by(8) {
@@ -723,22 +809,10 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
             count
         };
 
-        // Recover ⟨g, r_q⟩ from the quantized inner product.
-        //
-        // g[i] = +0.5 when bit=1, −0.5 when bit=0
-        // r_q[i] ≈ Δ · q_u[i] + v_l
-        //
-        // ⟨g, r_q⟩ = Σ g[i] · r_q[i]
-        //           = 0.5 · Σ sign[i] · (Δ · q_u[i] + v_l)
-        //           = 0.5 · (Δ · Σ sign[i] · q_u[i] + v_l · Σ sign[i])
-        //
-        // Σ sign[i] · q_u[i] = 2 · ⟨x_b, q_u⟩ − Σ q_u[i]
-        //     (because sign[i] = 2·x_b[i] − 1, so sign[i]·q_u[i] = 2·x_b[i]·q_u[i] − q_u[i])
-        //
-        // Σ sign[i] = 2 · popcount(x_b) − dim
         let signed_dot_qu = 2.0 * xb_dot_qu as f32 - qq.sum_q_u as f32;
         let signed_sum = 2.0 * popcount_xb as f32 - dim as f32;
-
+        // Compute ⟨g, r_q⟩ from the quantized inner product. Equation 20.
+        // ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
         let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
 
         // From here on, same as the existing distance_query.
@@ -761,6 +835,15 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
 
 /// Pre-computed lookup tables for batch distance estimation (paper Section 3.3.2).
 ///
+/// Intuition:
+/// - BatchQueryLuts precomputes all possible _partial_ inner products and saves
+///   them in lookup tables:
+/// - For each group of 4 dimensions, a 16-entry table gives the partial
+///   ⟨x_b, q_u⟩ for every possible 4-bit chunk (nibble) of the data code (x_b)
+/// - At query time you only do nibble extraction and table lookups.
+/// - Results: Large table (8 KB for dim=1024), but less compute per code.
+///
+/// Specifically:
 /// Splits the D-bit data code into D/4 nibbles.  For each nibble position,
 /// precomputes a 16-entry LUT: the partial inner product between the nibble
 /// of x_b and the corresponding 4 elements of the quantized query.
@@ -768,10 +851,15 @@ impl<T: AsRef<[u8]>> Code<T, 1> {
 /// At scan time, each code's distance requires D/4 LUT lookups + accumulation
 /// (no float expansion, no AND+popcount).
 ///
-/// Why bitwise beats LUT:
+/// Why distance_query_bitwise beats BatchQueryLuts::distance_query:
 // The working set sizes explain the gap:
-//   - Bitwise: 4 bit planes x 128 bytes = 512 bytes of query data (fits in L1), plus 128 bytes per code. The inner loop is 4 rounds of 16 AND+popcount operations on u64 words -- 64 iterations of 3-instruction sequences.
-//   - LUT: 256 nibble positions x 32 bytes per LUT entry = 8 KB of LUT data, plus 128 bytes per code. The inner loop is 256 iterations of nibble extraction + array indexing + accumulation -- more iterations, more cache pressure, and indirect addressing (table lookup) prevents pipelining.
+//   - Bitwise: 4 bit planes x 128 bytes = 512 bytes of query data (fits in L1),
+//     plus 128 bytes per code. The inner loop is 4 rounds of 16 AND+popcount
+//     operations on u64 words -- 64 iterations of 3-instruction sequences.
+//   - LUT: 256 nibble positions x 32 bytes per LUT entry = 8 KB of LUT data,
+//     plus 128 bytes per code. The inner loop is 256 iterations of nibble extraction
+//     + array indexing + accumulation -- more iterations, more cache pressure, and
+//     indirect addressing (table lookup) prevents pipelining.
 // The bitwise approach reads less data, does fewer iterations, and each iteration is a simpler instruction sequence (AND, POPCNT, ADD) that modern CPUs pipeline perfectly.
 pub struct BatchQueryLuts {
     /// luts[nibble_idx][nibble_value] = partial ⟨x_b, q_u⟩ contribution.
@@ -796,15 +884,21 @@ impl BatchQueryLuts {
         let dim = r_q.len();
         let max_val = 15u32; // B_q = 4
 
+        // Quantize the query residual.
         let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
         let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let range = v_r - v_l;
-        let delta = if range > f32::EPSILON { range / max_val as f32 } else { 1.0 };
+        let delta = if range > f32::EPSILON {
+            range / max_val as f32
+        } else {
+            1.0
+        };
+        let q_u: Vec<u32> = r_q
+            .iter()
+            .map(|&v| (((v - v_l) / delta).round() as u32).min(max_val))
+            .collect();
 
-        let q_u: Vec<u32> = r_q.iter().map(|&v| {
-            (((v - v_l) / delta).round() as u32).min(max_val)
-        }).collect();
-
+        // Sum of quantized query values (Σ q_u[i]) for future distance computation.
         let sum_q_u: u32 = q_u.iter().sum();
 
         // Number of nibbles (each nibble = 4 bits = 4 dimensions).
@@ -830,7 +924,16 @@ impl BatchQueryLuts {
             }
         }
 
-        Self { luts, v_l, delta, sum_q_u, c_norm, c_dot_q, q_norm, dim }
+        Self {
+            luts,
+            v_l,
+            delta,
+            sum_q_u,
+            c_norm,
+            c_dot_q,
+            q_norm,
+            dim,
+        }
     }
 
     /// Score a single 1-bit code using the precomputed LUTs.
@@ -853,8 +956,16 @@ impl BatchQueryLuts {
 
         for (nib_idx, lut) in self.luts.iter().enumerate() {
             let byte_idx = nib_idx / 2;
-            let byte = if byte_idx < packed.len() { packed[byte_idx] } else { 0 };
-            let nibble = if nib_idx % 2 == 0 { byte & 0x0F } else { byte >> 4 };
+            let byte = if byte_idx < packed.len() {
+                packed[byte_idx]
+            } else {
+                0
+            };
+            let nibble = if nib_idx % 2 == 0 {
+                byte & 0x0F
+            } else {
+                byte >> 4
+            };
             xb_dot_qu += lut[nibble as usize] as u32;
             popcount_xb += nibble.count_ones();
         }
@@ -1118,24 +1229,23 @@ mod tests {
         for &dim in &[64, 300, 1024] {
             for _ in 0..10 {
                 let embedding: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
-                let centroid: Vec<f32>  = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
-                let r: Vec<f32> = embedding.iter().zip(&centroid).map(|(e, c)| e - c).collect();
+                let centroid: Vec<f32> = (0..dim).map(|_| rng.gen_range(-1.0..1.0)).collect();
+                let r: Vec<f32> = embedding
+                    .iter()
+                    .zip(&centroid)
+                    .map(|(e, c)| e - c)
+                    .collect();
 
                 // quantize_lyon logic: sign bit = (IEEE sign bit) XOR 1
-                let signs_lyon: Vec<u8> = r.iter()
-                    .map(|&v| (v.to_bits() >> 31) as u8 ^ 1)
-                    .collect();
+                let signs_lyon: Vec<u8> =
+                    r.iter().map(|&v| (v.to_bits() >> 31) as u8 ^ 1).collect();
 
                 // quantize logic: for BITS=1, CEIL=1, ray-walk collapses to
                 //   code[i] = 1 if r[i] >= 0, else 0
-                let signs_quantize: Vec<u8> = r.iter()
-                    .map(|&v| if v >= 0.0 { 1 } else { 0 })
-                    .collect();
+                let signs_quantize: Vec<u8> =
+                    r.iter().map(|&v| if v >= 0.0 { 1 } else { 0 }).collect();
 
-                assert_eq!(
-                    signs_lyon, signs_quantize,
-                    "sign mismatch at dim={dim}"
-                );
+                assert_eq!(signs_lyon, signs_quantize, "sign mismatch at dim={dim}");
             }
         }
     }
@@ -1190,7 +1300,6 @@ mod tests {
         c[0] = 0xFE; // flip bit 0
         assert_eq!(hamming_distance(&a, &c), 1);
     }
-
 
     /// Validates that distance_query_bitwise and BatchQueryLuts produce results
     /// close to the float-based distance_query (within query quantization error).
