@@ -23,6 +23,10 @@ tracing.workspace = true
 chroma-api-types.workspace = true
 chroma-error.workspace = true
 chroma-types.workspace = true
+biometrics = "0.12.0"
+biometrics_prometheus = "0.9.0"
+sig_fig_histogram = "0.6.0"
+utf8path = "0.9.1"
 
 [features]
 default = ["rustls", "ollama"]

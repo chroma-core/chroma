@@ -24,10 +24,11 @@
 //! - `CHROMA_DATABASE` - Database name (optional, will be auto-resolved)
 
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
+use biometrics::{Collector, Counter};
 use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaCollection;
 use chroma::ChromaHttpClient;
@@ -37,6 +38,21 @@ use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, Mutex, Semaphore};
+
+static UPSERT_LATENCY_US: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static UPSERT_LATENCY_US_SENSOR: biometrics::Histogram =
+    biometrics::Histogram::new("upsert.latency_ms.us", &UPSERT_LATENCY_US);
+
+static UPSERT_LATENCY_EU: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static UPSERT_LATENCY_EU_SENSOR: biometrics::Histogram =
+    biometrics::Histogram::new("upsert.latency_ms.eu", &UPSERT_LATENCY_EU);
+
+static UPSERT_SUCCESS_US: Counter = Counter::new("upsert.success.us");
+static UPSERT_FAILURE_US: Counter = Counter::new("upsert.failure.us");
+static UPSERT_SUCCESS_EU: Counter = Counter::new("upsert.success.eu");
+static UPSERT_FAILURE_EU: Counter = Counter::new("upsert.failure.eu");
 
 /// Default embedding dimension for the GMM.
 const EMBEDDING_DIM: usize = 1536;
@@ -179,6 +195,9 @@ struct WorkerContext {
     start_time: Instant,
     duration: Duration,
     pacing_rx: Arc<Mutex<mpsc::Receiver<()>>>,
+    latency_sensor: &'static biometrics::Histogram,
+    success_counter: &'static Counter,
+    failure_counter: &'static Counter,
 }
 
 /// Creates a client with the specified base URL, using credentials from environment.
@@ -377,11 +396,18 @@ async fn run_worker(
             .collect();
 
         // Perform upsert
+        let upsert_start = Instant::now();
         match collection.upsert(ids, embeddings, None, None, None).await {
             Ok(_) => {
+                ctx.latency_sensor
+                    .observe(upsert_start.elapsed().as_secs_f64() * 1_000.0);
+                ctx.success_counter.click();
                 ctx.stats.record_upsert(ctx.batch_size as u64);
             }
             Err(e) => {
+                ctx.latency_sensor
+                    .observe(upsert_start.elapsed().as_secs_f64() * 1_000.0);
+                ctx.failure_counter.click();
                 eprintln!("[{}] Upsert error: {}", id_prefix, e);
             }
         }
@@ -482,6 +508,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Collections ready. Starting load generation...\n");
 
+    // Set up biometrics collector and emitter for latency histograms
+    let collector = Collector::new();
+    collector.register_histogram(&UPSERT_LATENCY_US_SENSOR);
+    collector.register_histogram(&UPSERT_LATENCY_EU_SENSOR);
+    collector.register_counter(&UPSERT_SUCCESS_US);
+    collector.register_counter(&UPSERT_FAILURE_US);
+    collector.register_counter(&UPSERT_SUCCESS_EU);
+    collector.register_counter(&UPSERT_FAILURE_EU);
+    let done = Arc::new(AtomicBool::new(false));
+    let done_emitter = Arc::clone(&done);
+    let emitter_handle = std::thread::spawn(move || {
+        let mut emitter = biometrics_prometheus::Emitter::new(biometrics_prometheus::Options {
+            segment_size: 64 * 1024 * 1024 * 1024,
+            flush_interval: Duration::from_secs(86_400),
+            prefix: utf8path::Path::new("load-generator-scattered."),
+        });
+        let mut target = Instant::now() + Duration::from_secs(30);
+        while !done_emitter.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            if now < target {
+                if let Some(wait) = target.checked_duration_since(now) {
+                    std::thread::sleep(wait);
+                }
+            }
+            target += Duration::from_secs(30);
+            collector
+                .emit(
+                    &mut emitter,
+                    SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("system time before UNIX epoch")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp overflow"),
+                )
+                .unwrap();
+        }
+    });
+
     // Create per-collection semaphores to limit outstanding operations
     let semaphores_us: Vec<Arc<Semaphore>> = (0..args.collections)
         .map(|_| Arc::new(Semaphore::new(args.max_outstanding_ops)))
@@ -523,6 +588,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             start_time,
             duration,
             pacing_rx: Arc::clone(&pacing_rx),
+            latency_sensor: &UPSERT_LATENCY_US_SENSOR,
+            success_counter: &UPSERT_SUCCESS_US,
+            failure_counter: &UPSERT_FAILURE_US,
         };
         let handle = tokio::spawn(run_worker(
             collections_us.clone(),
@@ -541,6 +609,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             start_time,
             duration,
             pacing_rx: Arc::clone(&pacing_rx),
+            latency_sensor: &UPSERT_LATENCY_EU_SENSOR,
+            success_counter: &UPSERT_SUCCESS_EU,
+            failure_counter: &UPSERT_FAILURE_EU,
         };
         let handle = tokio::spawn(run_worker(
             collections_eu.clone(),
@@ -617,6 +688,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     report_handle.abort();
     pacing_handle.abort();
+    done.store(true, Ordering::Relaxed);
+    emitter_handle.join().unwrap();
 
     let elapsed = start_time.elapsed();
     let elapsed_secs = elapsed.as_secs_f64();

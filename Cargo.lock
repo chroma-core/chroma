@@ -1222,6 +1222,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "biometrics"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45f7064e02662745f850952e2193fbb22ee2c9375b1e16b57978f46074f62473"
+dependencies = [
+ "sig_fig_histogram",
+]
+
+[[package]]
+name = "biometrics_prometheus"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dad9021158242167447bd24c39e1fe7eb8d9de7f60aea8aa3ac7a045fdcdd962"
+dependencies = [
+ "biometrics",
+ "libc",
+ "utf8path",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1511,6 +1531,8 @@ version = "0.13.1"
 dependencies = [
  "async-trait",
  "backon",
+ "biometrics",
+ "biometrics_prometheus",
  "bon",
  "chroma-api-types",
  "chroma-error",
@@ -1527,10 +1549,12 @@ dependencies = [
  "rust-stemmers",
  "serde",
  "serde_json",
+ "sig_fig_histogram",
  "test-log",
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+ "utf8path",
  "uuid",
 ]
 
@@ -8416,6 +8440,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sig_fig_histogram"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2261fd0eac75e2887b4ccceb4a11aa9dbb99e27b5f9011f8f7029da16bbb3e43"
+
+[[package]]
 name = "signal-hook"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10127,6 +10157,12 @@ name = "utf8parse"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
+
+[[package]]
+name = "utf8path"
+version = "0.9.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cad5b5c443269ddcc79f700407f8d2fcda4b1610c76d7da4a9278d1bce6e6083"
 
 [[package]]
 name = "utoipa"
