@@ -7,10 +7,6 @@ Reference implementations examined:
 
 - **gaoj0017/RaBitQ** — original author's C++/Python code
   (`data/rabitq.py`, `src/space.h`, `src/ivf_rabitq.h`)
-- **VectorDB-NTU/RaBitQ-Library** — Nanyang Technological University C++
-  (`include/rabitqlib/quantization/rabitq_impl.hpp`,
-   `include/rabitqlib/quantization/data_layout.hpp`)
-
 ---
 
 ## Distance-Estimation Formula
@@ -69,7 +65,6 @@ random `P`).
 | Implementation | Rotation applied? |
 |---|---|
 | gaoj0017 | Yes — `XP` computed once at index time |
-| VectorDB-NTU | Yes — similarly precomputed |
 | **Our production code** (`quantized_spann.rs::rotate`) | **Yes** — `self.rotation` matrix applied before `Code::quantize` |
 | **Our benchmarks** (`benches/quantization.rs`) | **No** — `random_vec` produces unrotated inputs |
 
@@ -88,7 +83,6 @@ The term `⟨r, c⟩` is required at query time for every code.
 | Implementation | How ⟨r, c⟩ is stored |
 |---|---|
 | gaoj0017 | Exact f32, precomputed at index time |
-| VectorDB-NTU | **Approximated** via quantized codes (`f_add` term) |
 | **Ours** (`CodeHeader::radial`) | **Exact** f32, precomputed at index time |
 
 Storing the exact value is a strict accuracy advantage over the NTU library,
@@ -97,10 +91,6 @@ which introduces additional quantization error in this term.
 ---
 
 ## Precomputed Signed Sum (`factor_ppc` / `signed_sum`)
-
-This is worth a 17% speedup in the 1-bit bitwise distance_query path.
-
-This was implemented in c6524f42e4bf18d9b125a2654aa53955be90bcef, then reverted for code simplicity and maintining compatibility with existing Code (saving the signed_sum increases the CodeHeader size).
 
 The signed sum `Σ sign[i] = 2·popcount(x_b) − D` appears in the bitwise
 distance estimator for any query that uses `QuantizedQuery` or `BatchQueryLuts`.
@@ -141,7 +131,7 @@ before this change are **not** compatible with the updated reader.
 ((v - v_l) / delta).round()
 ```
 
-Both gaoj0017 and VectorDB-NTU use stochastic dithering (random rounding) for
+Both gaoj0017 use stochastic dithering (random rounding) for
 query quantization.  At `B_q = 4` bits the accuracy difference is negligible;
 deterministic rounding is simpler and removes a source of non-determinism.
 
@@ -150,10 +140,7 @@ deterministic rounding is simpler and removes a source of non-determinism.
 ## 4-Bit Codebook Structure
 
 Our 4-bit implementation uses a ray-walk algorithm to find the optimal grid
-point along `r` that maximises cosine similarity.  The NTU library uses a sign
-+ magnitude bit decomposition.  Both approaches target comparable optimality;
-the NTU decomposition enables SIMD-friendly popcount operations for multi-bit
-query scoring.
+point along `r` that maximises cosine similarity.
 
 ---
 
@@ -186,11 +173,11 @@ standard deviation of ≈ 2 %, making it negligible for ranking purposes.
 
 ## Summary of Differences
 
-| Aspect | gaoj0017 | VectorDB-NTU | Ours |
-|---|---|---|---|
-| Random rotation | Yes | Yes | Yes (production); No (benchmarks) |
-| `⟨r, c⟩` storage | Exact | Approximated | Exact |
-| `signed_sum` precomputed | Yes (`factor_ppc`) | Not examined | Yes |
-| Query dithering | Stochastic | Stochastic | Deterministic |
-| 4-bit codebook | N/A | Sign + magnitude | Ray-walk |
-| Multi-bit query scoring | Bit-plane (same) | Bit-plane (same) | Bit-plane (same) |
+| Aspect | gaoj0017 (original paper) |  Ours |
+|---|---|---|
+| Random rotation | Yes | Yes (production); No (benchmarks) |
+| `⟨r, c⟩` storage | Exact | Exact |
+| `signed_sum` precomputed | Yes (`factor_ppc`) | Yes |
+| Query dithering | Stochastic | Deterministic |
+| 4-bit codebook | N/A | Ray-walk |
+| Multi-bit query scoring | Bit-plane (same) | Bit-plane (same) |
