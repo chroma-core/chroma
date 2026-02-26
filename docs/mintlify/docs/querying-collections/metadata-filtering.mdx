@@ -312,7 +312,7 @@ For example, here we get all records whose `color` metadata field is `red` or `b
 ```python Python
 collection.get(
     where={
-        "or": [
+        "$or": [
             {"color": "red"},
             {"color": "blue"},
         ]
@@ -323,7 +323,7 @@ collection.get(
 ```typescript TypeScript
 await collection.get({
   where: {
-    or: [{ color: "red" }, { color: "blue" }],
+    "$or": [{ "color": "red" }, { "color": "blue" }],
   },
 });
 ```
