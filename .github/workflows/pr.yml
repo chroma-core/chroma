@@ -147,6 +147,7 @@ jobs:
     uses: ./.github/workflows/_python-tests.yml
     secrets: inherit
     with:
+      python_versions: '["3.9", "3.14"]'
       property_testing_preset: 'normal'
 
   python-vulnerability-scan:
