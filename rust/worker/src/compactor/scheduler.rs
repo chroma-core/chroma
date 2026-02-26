@@ -198,77 +198,88 @@ impl Scheduler {
                 }
                 collection_infos.push(collection_info);
             }
-            let mut ids = Vec::with_capacity(collection_infos.len());
-            ids.extend(collection_infos.iter().map(|c| c.collection_id));
-            let result = self
-                .sysdb
-                .get_collections(GetCollectionsOptions {
-                    collection_ids: Some(ids),
-                    database_or_topology: topology.clone(),
-                    limit: Some(collection_infos.len() as u32),
-                    offset: 0,
-                    include_soft_deleted: false,
-                    collection_id: None,
-                    name: None,
-                    tenant: None,
-                })
-                .await;
-
-            match result {
-                Ok(collections) => {
-                    if collections.len() != collection_infos.len() {
-                        tracing::warn!(
-                            "returned collection info does not match number of input collections"
-                        );
+            const BATCH_SIZE: usize = 1_000;
+            let ids: Vec<CollectionUuid> =
+                collection_infos.iter().map(|c| c.collection_id).collect();
+            let mut all_collections = Vec::new();
+            let mut had_error = false;
+            for batch in ids.chunks(BATCH_SIZE) {
+                let result = self
+                    .sysdb
+                    .get_collections(GetCollectionsOptions {
+                        collection_ids: Some(batch.to_vec()),
+                        database_or_topology: topology.clone(),
+                        limit: Some(batch.len() as u32),
+                        offset: 0,
+                        include_soft_deleted: false,
+                        collection_id: None,
+                        name: None,
+                        tenant: None,
+                    })
+                    .await;
+                match result {
+                    Ok(collections) => {
+                        all_collections.extend(collections);
                     }
-                    let mut with_infos = vec![];
-                    for collection in collections.into_iter() {
-                        let Some(info) = collection_infos
-                            .iter()
-                            .find(|c| c.collection_id == collection.collection_id)
-                        else {
-                            self.deleted_collections.insert(collection.collection_id);
-                            continue;
-                        };
-                        if collection.compaction_failure_count >= self.max_failure_count {
-                            tracing::info!(
-                                "Ignoring collection {} - too many compaction failures ({}/{})",
-                                collection.collection_id,
-                                collection.compaction_failure_count,
-                                self.max_failure_count
-                            );
-                        } else {
-                            with_infos.push((collection, info));
-                        }
-                    }
-                    for (collection, info) in with_infos.into_iter() {
-                        // offset in log is the first offset in the log that has not been compacted. Note that
-                        // since the offset is the first offset of log we get from the log service, we should
-                        // use this offset to pull data from the log service.
-                        if collection.log_position + 1 < info.first_log_offset {
-                            tracing::error!(
-                                collection = collection.collection_id.to_string(),
-                                sysdb_log_position = (collection.log_position + 1),
-                                collection_log_position = info.first_log_offset,
-                                name = "offset in sysdb is less than offset in log"
-                            )
-                        } else {
-                            collection_records.push(CollectionRecord {
-                                collection_id: collection.collection_id,
-                                tenant_id: collection.tenant.clone(),
-                                database_name: collection.database.clone(),
-                                last_compaction_time: Default::default(),
-                                first_record_time: info.first_log_ts,
-                                offset: collection.log_position + 1,
-                                collection_version: collection.version,
-                                collection_logical_size_bytes: collection
-                                    .size_bytes_post_compaction,
-                            });
-                        }
+                    Err(e) => {
+                        tracing::error!("error fetching for topo = {topology:?}: {e}");
+                        had_error = true;
+                        break;
                     }
                 }
-                Err(e) => {
-                    tracing::error!("error fetching for topo = {topology:?}: {e}");
+            }
+            if had_error {
+                continue;
+            }
+            if all_collections.len() != collection_infos.len() {
+                tracing::warn!(
+                    "returned collection info does not match number of input collections"
+                );
+            }
+            let mut info_map: HashMap<_, _> = collection_infos
+                .into_iter()
+                .map(|c| (c.collection_id, c))
+                .collect();
+            let mut with_infos = vec![];
+            for collection in all_collections.into_iter() {
+                if let Some(info) = info_map.remove(&collection.collection_id) {
+                    if collection.compaction_failure_count >= self.max_failure_count {
+                        tracing::info!(
+                            "Ignoring collection {} - too many compaction failures ({}/{})",
+                            collection.collection_id,
+                            collection.compaction_failure_count,
+                            self.max_failure_count
+                        );
+                    } else {
+                        with_infos.push((collection, info));
+                    }
+                }
+            }
+            for (id, _) in info_map {
+                self.deleted_collections.insert(id);
+            }
+            for (collection, info) in with_infos.into_iter() {
+                // offset in log is the first offset in the log that has not been compacted. Note that
+                // since the offset is the first offset of log we get from the log service, we should
+                // use this offset to pull data from the log service.
+                if collection.log_position + 1 < info.first_log_offset {
+                    tracing::error!(
+                        collection = collection.collection_id.to_string(),
+                        sysdb_log_position = (collection.log_position + 1),
+                        collection_log_position = info.first_log_offset,
+                        name = "offset in sysdb is less than offset in log"
+                    )
+                } else {
+                    collection_records.push(CollectionRecord {
+                        collection_id: collection.collection_id,
+                        tenant_id: collection.tenant.clone(),
+                        database_name: collection.database.clone(),
+                        last_compaction_time: Default::default(),
+                        first_record_time: info.first_log_ts,
+                        offset: collection.log_position + 1,
+                        collection_version: collection.version,
+                        collection_logical_size_bytes: collection.size_bytes_post_compaction,
+                    });
                 }
             }
         }
@@ -883,6 +894,51 @@ mod tests {
             records[0].offset, expected_offset,
             "offset must be log_position + 1 ({expected_offset}), not first_log_offset ({first_log_offset}); \
              using first_log_offset would rewind compaction and reprocess already-compacted records"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_sysdb_collections_marked_as_deleted() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // Ask to enrich two collections, but remove collection_2 from sysdb
+        // so it won't be returned.
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.remove_collection(f.collection_uuid_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let collection_infos = vec![
+            CollectionInfo {
+                collection_id: f.collection_uuid_1,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 1,
+            },
+            CollectionInfo {
+                collection_id: f.collection_uuid_2,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 2,
+            },
+        ];
+
+        let records = f
+            .scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        assert_eq!(records.len(), 1, "only collection_1 should be enriched");
+        assert_eq!(records[0].collection_id, f.collection_uuid_1);
+
+        let deleted = f.scheduler.drain_deleted_collections();
+        assert_eq!(deleted.len(), 1, "collection_2 should be marked as deleted");
+        assert_eq!(
+            deleted[0], f.collection_uuid_2,
+            "the deleted collection should be collection_2"
         );
     }
 
