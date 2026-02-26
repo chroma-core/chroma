@@ -2154,10 +2154,8 @@ impl LogServer {
             "Pulling logs",
         );
 
-        let read_fragments_span = tracing::info_span!("read_fragments");
         let fragments = match self
             .read_fragments(topology_name.as_ref(), collection_id, &pull_logs)
-            .instrument(read_fragments_span)
             .await
         {
             Ok(fragments) => fragments,
@@ -2200,10 +2198,8 @@ impl LogServer {
                 }
             })
             .collect::<Vec<_>>();
-        let try_join_all_span = tracing::info_span!("join all");
         let record_batches = if !fragment_futures.is_empty() {
             futures::future::try_join_all(fragment_futures)
-                .instrument(try_join_all_span)
                 .await
                 .map_err(|err: Error| Status::new(err.code().into(), err.to_string()))?
         } else {
@@ -2211,8 +2207,6 @@ impl LogServer {
             vec![]
         };
         let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
-        let record_batch_iter = tracing::info_span!("record_batch_iter");
-        let _guard = record_batch_iter.enter();
         for record_batch in record_batches.into_iter() {
             for (log_offset, record_bytes) in record_batch.into_iter() {
                 if log_offset.offset() < pull_logs.start_from_offset as u64
