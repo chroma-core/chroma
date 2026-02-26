@@ -1,8 +1,8 @@
 export const Callout = ({ title, children }) => (
   <div className="my-6">
     <div className="relative pr-1.5 pb-1.5">
-      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-blue-500" />
-      <div className="relative border border-black dark:border-white px-5 py-4 bg-white dark:bg-neutral-900">
+      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-blue-500 dark:bg-blue-600" />
+      <div className="relative border border-black dark:border-gray-500 px-5 py-4 bg-white dark:bg-neutral-900">
         {title && <p className="block mb-2"><strong>{title}</strong></p>}
         {children}
       </div>
@@ -13,8 +13,8 @@ export const Callout = ({ title, children }) => (
 export const Warning = ({ title, children }) => (
   <div className="my-6">
     <div className="relative pr-1.5 pb-1.5">
-      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-yellow-500" />
-      <div className="relative border border-black dark:border-white px-5 py-4 bg-white dark:bg-neutral-900">
+      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-yellow-500 dark:bg-yellow-600" />
+      <div className="relative border border-black dark:border-gray-500 px-5 py-4 bg-white dark:bg-neutral-900">
         {title && <p className="block mb-2"><strong>{title}</strong></p>}
         {children}
       </div>
@@ -25,8 +25,8 @@ export const Warning = ({ title, children }) => (
 export const Danger = ({ title, children }) => (
   <div className="my-6">
     <div className="relative pr-1.5 pb-1.5">
-      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-red-500" />
-      <div className="relative border border-black dark:border-white px-5 py-4 bg-white dark:bg-neutral-900">
+      <div className="absolute top-1.5 left-1.5 right-0 bottom-0 bg-red-500 bg-red-600" />
+      <div className="relative border border-black dark:border-gray-500 px-5 py-4 bg-white dark:bg-neutral-900">
         {title && <p className="block mb-2"><strong>{title}</strong></p>}
         {children}
       </div>
