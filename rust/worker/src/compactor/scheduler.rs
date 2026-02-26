@@ -520,7 +520,6 @@ mod tests {
     /// Shared setup for scheduler tests.
     struct SchedulerFixture {
         scheduler: Scheduler,
-        sysdb: SysDb,
         collection_uuid_1: CollectionUuid,
         collection_uuid_2: CollectionUuid,
         my_member: Member,
@@ -636,7 +635,6 @@ mod tests {
 
             Self {
                 scheduler,
-                sysdb,
                 collection_uuid_1,
                 collection_uuid_2,
                 my_member,
