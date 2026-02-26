@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, TopologyName};
 use thiserror::Error;
 use tokio::time::{error::Elapsed, timeout};
 
@@ -29,7 +29,7 @@ pub struct PurgeDirtyLog {
 
 #[derive(Clone, Debug)]
 pub struct PurgeDirtyLogInput {
-    pub collection_uuids: Vec<CollectionUuid>,
+    pub collection_uuids: Vec<(CollectionUuid, Option<TopologyName>)>,
 }
 
 pub type PurgeDirtyLogOutput = ();
@@ -70,6 +70,7 @@ impl Operator<PurgeDirtyLogInput, PurgeDirtyLogOutput> for PurgeDirtyLog {
                 .purge_dirty_for_collection(input.collection_uuids.clone()),
         )
         .await??;
+
         Ok(())
     }
 }
