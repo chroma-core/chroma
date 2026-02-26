@@ -1437,6 +1437,7 @@ impl LogServer {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for (collection_id, rollup) in need_to_compact_s3.iter() {
                 if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
                     backpressure.push(*collection_id);
                 }
             }
@@ -1445,6 +1446,7 @@ impl LogServer {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for ((_, collection_id), rollup) in need_to_compact_repl.iter() {
                 if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
                     backpressure.push(*collection_id);
                 }
             }
