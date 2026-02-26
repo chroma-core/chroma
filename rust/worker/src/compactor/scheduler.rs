@@ -895,7 +895,7 @@ mod tests {
         // log_position = 10 (offsets 0..=10 already compacted).
         let first_log_offset: i64 = 0;
         let collection_infos = vec![CollectionInfo {
-            collection_id: collection_id,
+            collection_id,
             topology_name: None,
             first_log_offset,
             first_log_ts: 1,
