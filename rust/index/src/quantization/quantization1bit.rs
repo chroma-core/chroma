@@ -212,16 +212,46 @@ impl Code1Bit {
     /// 1-bit quantization uses sign-based coding — no ray-walk needed.
     /// See section 3.1.3 of the paper.
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
-        let r = embedding
-            .iter()
-            .zip(centroid)
-            .map(|(e, c)| e - c)
-            .collect::<Vec<_>>();
-        let dim = r.len();
-        let norm = (f32::dot(&r, &r).unwrap_or(0.0) as f32).sqrt();
-        let radial = f32::dot(&r, centroid).unwrap_or(0.0) as f32;
+        let dim = embedding.len();
+        let mut packed = vec![0u8; Self::packed_len(dim)];
+        let mut abs_sum = 0.0f32;
+        let mut norm_sq = 0.0f32;
+        let mut radial = 0.0f32;
+        let mut popcount = 0u32;
 
-        // Early return for near-zero residual
+        // Single fused pass over (embedding, centroid) — no intermediate `r` allocation.
+        //
+        // Each outer iteration processes 8 elements → 1 byte of packed output, computing:
+        //   - sign bits  → packed codes (bit=1 when r[i] ≥ 0, bit=0 otherwise)
+        //   - |r[i]|     → abs_sum     (for correction factor ⟨g, n⟩)
+        //   - r[i]²      → norm_sq     (for ‖r‖)
+        //   - r[i]·c[i]  → radial      (for ⟨r, c⟩)
+        //   - popcount    → signed_sum  (2·popcount(x_b) − dim)
+        //
+        // Compared to the prior four-pass approach (vec_sub alloc, sign_pack, abs_sum, popcount),
+        // this eliminates the 4 KB intermediate `r` allocation and three re-reads of it.
+        // The four scalar accumulators (abs_sum, norm_sq, radial, popcount) are independent
+        // across iterations and auto-vectorize to VABSPS/VFMADD on AVX2/AVX-512.
+        for (byte_ref, (emb_chunk, cen_chunk)) in packed
+            .iter_mut()
+            .zip(embedding.chunks(8).zip(centroid.chunks(8)))
+        {
+            let mut byte = 0u8;
+            for (j, (&e, &c)) in emb_chunk.iter().zip(cen_chunk).enumerate() {
+                let val = e - c;
+                let sign = (val.to_bits() >> 31) as u8; // 1 if negative, 0 if non-negative
+                byte |= (sign ^ 1) << j;
+                abs_sum += val.abs();
+                norm_sq += val * val;
+                radial += val * c;
+            }
+            popcount += byte.count_ones();
+            *byte_ref = byte;
+        }
+
+        let norm = norm_sq.sqrt();
+
+        // Early return for dim == 0 or near-zero residual (same semantics as before).
         if dim == 0 || norm < f32::EPSILON {
             let mut bytes = Vec::with_capacity(Self::size(dim));
             bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader1 {
@@ -234,45 +264,6 @@ impl Code1Bit {
             return Self(bytes);
         }
 
-        // 1-bit: sign-based quantization (no ray-walk needed). See section 3.1.3 of the paper.
-        // The embedding is already rotated, so we only need to take the sign
-        // of each bit.
-        //
-        // Build packed codes: [sign_bits]
-        // Pack sign bits branchlessly, 8 floats → 1 byte at a time.
-        // For each f32, the IEEE-754 sign bit is bit 31: 1 = negative, 0 = positive.
-        // We want the packed bit to be 1 when val >= 0, so we invert the sign bit.
-        // Processing a full chunk per byte eliminates all i/8 and i%8 index arithmetic
-        // as used previously: `packed[i / 8] |= 1 << (i % 8);`
-        // TODO benchmark branchless vs previous conditional
-        // f32.sign?
-        let mut packed = vec![0u8; Self::packed_len(dim)];
-        for (byte_ref, chunk) in packed.iter_mut().zip(r.chunks(8)) {
-            let mut byte = 0u8;
-            for (j, &val) in chunk.iter().enumerate() {
-                let sign = (val.to_bits() >> 31) as u8; // 1 if negative, 0 if non-negative
-                byte |= (sign ^ 1) << j;
-            }
-            *byte_ref = byte;
-        }
-
-        // abs_sum is computed in its own loop so rustc/LLVM can auto-vectorize it
-        // with VABSPS + VADDPS (or equivalent).
-        //
-        // auto-vectorization can happen when a loop body has:
-        // - No cross-iteration dependencies
-        // - Pure float operations (abs + add)
-        // - Sequential memory access over a contiguous slice
-        //
-        // So this line will get converted into:
-        // - Load 8 floats at once into a 256-bit AVX register (YMM register)
-        // - Apply VABSPS — "Vector ABSolute value Packed Single" — to all 8 lanes simultaneously (this is literally just masking off the sign bit on each f32 in parallel)
-        // - Accumulate into a running sum register with VADDPS — "Vector ADD Packed Single"
-        // - At the end, do a horizontal reduction across the 8 lanes to collapse into a single f32
-        //
-        // For a 1024-dimensional vector that's 128 iterations instead of 1024 scalar operations.
-        let abs_sum: f32 = r.iter().map(|v| v.abs()).sum();
-
         // correction = ⟨g, n⟩
         //            = ⟨g, r⟩ / ‖r‖
         //            = Σ g[i] * r[i] / ‖r‖
@@ -284,12 +275,6 @@ impl Code1Bit {
         //            = 0.5 * Σ |r[i]| / ‖r‖
         //            = GRID_OFFSET * abs_sum / norm
         let correction = Self::GRID_OFFSET * abs_sum / norm;
-
-        // Popcount via u64 words — one POPCNT instruction per word.
-        let popcount: u32 = packed
-            .chunks_exact(8)
-            .map(|c| u64::from_le_bytes(c.try_into().unwrap()).count_ones())
-            .sum();
         let signed_sum = 2 * popcount as i32 - dim as i32;
 
         let mut bytes = Vec::with_capacity(Self::size(dim));

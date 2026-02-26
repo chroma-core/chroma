@@ -657,39 +657,20 @@ fn bench_thread_scaling(c: &mut Criterion) {
 //
 // Code1Bit::quantize
 // ──────────────────
-//   Current cost breakdown (dim=1024):
-//     1. vec_sub:   r = emb − centroid                    (read 8 KB, write 4 KB)
-//     2. dot × 2:   norm² = ⟨r,r⟩, radial = ⟨r,c⟩       (read 4 KB each)
-//     3. sign_pack: 8 f32 → 1 byte via IEEE bit extract   (read 4 KB, write 128 B)
-//     4. abs_sum:   Σ|r[i]|                                (read 4 KB)
-//     5. popcount:  over 128 packed bytes                  (read 128 B)
-//     6. alloc:     Vec::with_capacity + extend_from_slice
+//   Current cost breakdown (dim=1024):  [Q1 implemented]
+//     1. fused pass: emb−centroid, sign_pack, abs_sum, norm², radial, popcount
+//                    (read 8 KB, write 128 B — no intermediate r allocation)
+//     2. alloc:      Vec::with_capacity for the output code buffer (144 B)
 //
-//   Improvements:
-//     [Q1] Fuse vec_sub + sign_pack + abs_sum into one pass. Today we read `r`
-//          three times (sign_pack, abs_sum, dot) and write it once. A single-pass
-//          kernel that computes residual, extracts sign, and accumulates |r[i]|
-//          would cut memory traffic from ~20 KB to ~12 KB and eliminate the 4 KB
-//          intermediate `r` allocation. The two simsimd dots (norm², radial) can
-//          be piggybacked onto the same pass with dual accumulators; however
-//          simsimd's SIMD dispatch is hard to beat, so benchmark before fusing.
+//   Prior cost (before Q1): vec_sub alloc (4 KB), simsimd dot ×2 (8 KB reads),
+//   sign_pack (4 KB read), abs_sum (4 KB read), popcount (128 B read) — ~5 passes.
 //
-//     [Q2] Avoid `r` heap allocation entirely. Currently `let r: Vec<f32> = ...`
-//          allocates 4 KB. If the caller provides a scratch buffer or the output
-//          buffer is pre-allocated, this can be eliminated. For batch quantize
-//          paths (indexing), a thread-local arena (e.g. bumpalo) removes all
-//          per-call malloc overhead.
-//
-//     [Q3] Write output directly. The final buffer assembly copies the header
-//          (16 B) and packed bytes (128 B) into a fresh Vec. If quantize wrote
-//          into a caller-provided `&mut [u8]` slice, the alloc + copy disappears.
-//          Relevant for indexing where millions of codes are produced.
-//
-//     [Q4] ARM/Graviton: sign_pack's IEEE bit-trick (val.to_bits() >> 31) is
-//          portable, but NEON offers CMLT (compare-less-than-zero) → bitwise
-//          select which may be faster. abs_sum maps to FABS + FADD which is
-//          well-supported. The main risk is `f32::dot` — ensure simsimd
-//          dispatches to NEON FMLA or SVE FMA, not scalar.
+// No further improvements identified for Code1Bit::quantize.
+//   [Q3] Investigated on Apple M-series (ARM): replacing the IEEE bit-trick
+//        (val.to_bits() >> 31) with a float comparison (val >= 0.0) to avoid
+//        the FMOV domain-crossing was +2.7% on sign_pack and +5.7% on the full
+//        function — i.e., the bit-trick is faster. LLVM auto-vectorizes it well
+//        on both x86 and ARM. See notes/FUTURE_IMPROVEMENTS.md § OPT-2.
 //
 // Code1Bit::distance_query
 // ────────────────────────
