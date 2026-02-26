@@ -60,6 +60,17 @@ def http_api_factory(
                 yield cast(HttpAPIFactory, factory)
 
 
+@pytest.fixture()
+def http_api(http_api_factory: HttpAPIFactory) -> Generator[ClientAPI, None, None]:
+    if os.environ.get("CHROMA_SERVER_HTTP_PORT") is not None:
+        port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT"))  # type: ignore
+        client = http_api_factory(port=port)
+    else:
+        client = http_api_factory()
+    yield client
+    client.clear_system_cache()
+
+
 def test_ephemeral_client(ephemeral_api: ClientAPI) -> None:
     settings = ephemeral_api.get_settings()
     assert settings.is_persistent is False
