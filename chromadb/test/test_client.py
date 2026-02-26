@@ -51,25 +51,13 @@ def http_api_factory(
                         loop = asyncio.get_event_loop()
                     except RuntimeError:
                         loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                        asyncio.set_event_loop(loop)
                     cls = loop.run_until_complete(
                         chromadb.AsyncHttpClient(*args, **kwargs)
                     )
                     return cls
 
                 yield cast(HttpAPIFactory, factory)
-
-
-@pytest.fixture()
-def http_api(http_api_factory: HttpAPIFactory) -> Generator[ClientAPI, None, None]:
-    if os.environ.get("CHROMA_SERVER_HTTP_PORT") is not None:
-        port = int(os.environ.get("CHROMA_SERVER_HTTP_PORT"))  # type: ignore
-        client = http_api_factory(port=port)
-    else:
-        client = http_api_factory()
-    yield client
-    client.clear_system_cache()
-
 
 def test_ephemeral_client(ephemeral_api: ClientAPI) -> None:
     settings = ephemeral_api.get_settings()
