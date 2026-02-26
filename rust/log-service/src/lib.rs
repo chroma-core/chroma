@@ -2433,23 +2433,50 @@ impl LogServer {
             .map_err(|err| {
                 Status::invalid_argument(format!("Failed to parse collection id: {err}"))
             })?;
-        tracing::info!("Purging collections in dirty log: [{collection_ids:?}]");
-        let dirty_marker_json_blobs = collection_ids
-            .into_iter()
-            .map(|collection_id| {
-                serde_json::to_string(&DirtyMarker::Purge { collection_id }).map(String::into_bytes)
-            })
-            .collect::<Result<_, _>>()
-            .map_err(|err| Status::internal(format!("Failed to serialize dirty marker: {err}")))?;
-        if let Some(dirty_log) = self.dirty_log.as_ref() {
-            dirty_log
-                .append_many(dirty_marker_json_blobs)
+        let topology_name = request
+            .topology_name
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|err| Status::invalid_argument(format!("Invalid topology name: {err}")))?;
+        tracing::info!(
+            "Purging collections in dirty log: [{collection_ids:?}] topology={topology_name:?}"
+        );
+        if let Some(topology_name) = topology_name {
+            let Some((_regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+                return Err(Status::not_found(format!(
+                    "topology not found: {topology_name}"
+                )));
+            };
+            for collection_id in &collection_ids {
+                ReplManifestManager::purge_dirty_for_collection(
+                    &topology.config.spanner,
+                    collection_id.0,
+                )
                 .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
+            }
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
-            tracing::error!("dirty log not set and purge dirty received");
-            Err(Status::failed_precondition("dirty log not configured"))
+            let dirty_marker_json_blobs = collection_ids
+                .into_iter()
+                .map(|collection_id| {
+                    serde_json::to_string(&DirtyMarker::Purge { collection_id })
+                        .map(String::into_bytes)
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    Status::internal(format!("Failed to serialize dirty marker: {err}"))
+                })?;
+            if let Some(dirty_log) = self.dirty_log.as_ref() {
+                dirty_log
+                    .append_many(dirty_marker_json_blobs)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+            } else {
+                tracing::error!("dirty log not set and purge dirty received");
+                Err(Status::failed_precondition("dirty log not configured"))
+            }
         }
     }
 
