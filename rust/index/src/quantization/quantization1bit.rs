@@ -118,8 +118,6 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
     ///          = 0.5 · Σ sign(g[i]) · r_q[i]
     ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
     ///          = 0.5 · (Σ_{g[i]=+0.5} r_q[i] − Σ_{g[i]=−0.5} r_q[i])
-    ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
-    ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
     pub fn distance_query_full_precision(
         &self,
         distance_fn: &DistanceFunction,
@@ -482,14 +480,12 @@ impl Code1Bit {
     }
 }
 
-// ── Sizing helper (private) ───────────────────────────────────────────────────
+// ── Private helpers ───────────────────────────────────────────────────────────
 
 /// Padded dimension for 1-bit codes (multiple of 64 for u64 popcount alignment).
 fn padded_dim_1bit(dim: usize) -> usize {
     dim.div_ceil(64) * 64
 }
-
-// ── Private helpers ───────────────────────────────────────────────────────────
 
 /// Computes hamming distance between two packed bit vectors.
 ///
@@ -508,6 +504,33 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     <u8 as BinarySimilarity>::hamming(a, b).expect("slices have equal length") as u32
 }
 
+/// Precomputed sign expansion: for each byte value 0..256, the 8 f32 signs
+/// (+1.0 or −1.0) for bits 0..7. Bit j = 1 → +1.0, bit j = 0 → −1.0.
+const fn sign_table_entry(byte: u8) -> [f32; 8] {
+    let b = byte as u32;
+    [
+        f32::from_bits(0x3F800000 | (((b >> 0) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 1) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 2) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 3) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 4) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 5) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 6) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((b >> 7) & 1) ^ 1) << 31),
+    ]
+}
+
+static SIGN_TABLE: [[f32; 8]; 256] = {
+    let mut table = [[0.0f32; 8]; 256];
+    let mut i = 0u8;
+    while i < 255 {
+        table[i as usize] = sign_table_entry(i);
+        i += 1;
+    }
+    table[255] = sign_table_entry(255);
+    table
+};
+
 /// Computes `Σ sign[i] · values[i]` where sign[i] = +1.0 if bit i is set
 /// in `packed`, −1.0 otherwise.
 ///
@@ -516,45 +539,21 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 ///
 /// # SIMD strategy
 ///
-/// **Step 1 — sign expansion (integer bit trick).**
-/// +1.0f32 and −1.0f32 differ only in bit 31 of their IEEE 754 representation
-/// (0x3F800000 vs 0xBF800000).  For each extracted bit b ∈ {0, 1}:
-///
-/// ```text
-///   sign_bit = (b ^ 1) & 1      // 1 when b=0 (want −1), 0 when b=1 (want +1)
-///   f32_bits = 0x3F800000 | (sign_bit << 31)
-/// ```
-///
-/// All shift amounts are compile-time constants (0..7), so LLVM fully unrolls
-/// the 8-element inner body.  The operations are pure integer (XOR, AND, OR,
-/// shift) until the final `f32::from_bits` reinterpretation — no
-/// integer-to-float conversion or arithmetic is required.
+/// **Step 1 — sign expansion (lookup table).**
+/// A precomputed `SIGN_TABLE[256][8]` maps each byte to its 8 f32 signs
+/// (+1.0 or −1.0). One table lookup + `copy_from_slice` replaces 8
+/// `f32::from_bits` calls per byte. The 8 KB table stays in L1.
 ///
 /// **Step 2 — dot product (simsimd).**
 /// The sign array and the value chunk are passed to `f32::dot`, which
 /// dispatches to the platform's best FMA kernel (AVX2, AVX-512, etc.).
-///
-/// The expansion uses a 256-byte stack buffer (8 bytes × 8 floats × 4 bytes)
-/// and is processed 64 floats at a time to avoid heap allocation.
 fn signed_dot(packed: &[u8], values: &[f32]) -> f32 {
-    const CHUNK: usize = 8; // bytes per outer iteration → 64 floats
-    let mut signs = [0.0f32; CHUNK * 8];
+    let mut signs = [0.0f32; 64];
     let mut sum = 0.0f32;
-
-    for (packed_chunk, val_chunk) in packed.chunks(CHUNK).zip(values.chunks(CHUNK * 8)) {
+    for (packed_chunk, val_chunk) in packed.chunks(8).zip(values.chunks(64)) {
         let n = val_chunk.len();
         for (i, &byte) in packed_chunk.iter().enumerate() {
-            let base = i * 8;
-            let b = byte as u32;
-            // Constant shifts → LLVM fully unrolls this block.
-            signs[base] = f32::from_bits(0x3F800000 | (((b >> 0) & 1) ^ 1) << 31);
-            signs[base + 1] = f32::from_bits(0x3F800000 | (((b >> 1) & 1) ^ 1) << 31);
-            signs[base + 2] = f32::from_bits(0x3F800000 | (((b >> 2) & 1) ^ 1) << 31);
-            signs[base + 3] = f32::from_bits(0x3F800000 | (((b >> 3) & 1) ^ 1) << 31);
-            signs[base + 4] = f32::from_bits(0x3F800000 | (((b >> 4) & 1) ^ 1) << 31);
-            signs[base + 5] = f32::from_bits(0x3F800000 | (((b >> 5) & 1) ^ 1) << 31);
-            signs[base + 6] = f32::from_bits(0x3F800000 | (((b >> 6) & 1) ^ 1) << 31);
-            signs[base + 7] = f32::from_bits(0x3F800000 | (((b >> 7) & 1) ^ 1) << 31);
+            signs[i * 8..(i + 1) * 8].copy_from_slice(&SIGN_TABLE[byte as usize]);
         }
         sum += f32::dot(&signs[..n], val_chunk).unwrap_or(0.0) as f32;
     }

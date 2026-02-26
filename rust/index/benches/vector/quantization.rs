@@ -50,6 +50,33 @@
 use std::hint::black_box;
 
 use chroma_distance::DistanceFunction;
+
+/// Lookup table for signed_dot sign expansion (benchmark variant only).
+const fn sign_table_entry(b: u8) -> [f32; 8] {
+    let bb = b as u32;
+    [
+        f32::from_bits(0x3F800000 | (((bb >> 0) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 1) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 2) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 3) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 4) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 5) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 6) & 1) ^ 1) << 31),
+        f32::from_bits(0x3F800000 | (((bb >> 7) & 1) ^ 1) << 31),
+    ]
+}
+
+static SIGN_LUT: [[f32; 8]; 256] = {
+    let mut t = [[0.0f32; 8]; 256];
+    let mut i = 0u8;
+    while i < 255 {
+        t[i as usize] = sign_table_entry(i);
+        i += 1;
+    }
+    t[255] = sign_table_entry(255);
+    t
+};
+
 use chroma_index::quantization::{BatchQueryLuts, Code1Bit, Code4Bit, QuantizedQuery};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use itertools::izip;
@@ -649,161 +676,6 @@ fn bench_thread_scaling(c: &mut Criterion) {
 // reveals overhead (allocation, scalar math, cache effects) that the
 // "full function" benchmarks in earlier groups cannot isolate.
 //
-// ── Performance improvement opportunities ────────────────────────────────────
-//
-// Target hardware:
-//   Query:  r6id.8xlarge  (32 vCPU Ice Lake, AVX-512 + VPOPCNTDQ + VNNI)
-//   Index:  r6id.32xlarge (128 vCPU Ice Lake)
-//   Future: Graviton 3/4  (ARM Neoverse V1/V2, NEON + SVE)
-//
-// Code1Bit::quantize
-// ──────────────────
-//   Current cost breakdown (dim=1024):  [Q1 implemented]
-//     1. fused pass: emb−centroid, sign_pack, abs_sum, norm², radial, popcount
-//                    (read 8 KB, write 128 B — no intermediate r allocation)
-//     2. alloc:      Vec::with_capacity for the output code buffer (144 B)
-//
-//   Prior cost (before Q1): vec_sub alloc (4 KB), simsimd dot ×2 (8 KB reads),
-//   sign_pack (4 KB read), abs_sum (4 KB read), popcount (128 B read) — ~5 passes.
-//
-// No further improvements identified for Code1Bit::quantize.
-//   [Q3] Investigated on Apple M-series (ARM): replacing the IEEE bit-trick
-//        (val.to_bits() >> 31) with a float comparison (val >= 0.0) to avoid
-//        the FMOV domain-crossing was +2.7% on sign_pack and +5.7% on the full
-//        function — i.e., the bit-trick is faster. LLVM auto-vectorizes it well
-//        on both x86 and ARM. See notes/FUTURE_IMPROVEMENTS.md § OPT-2.
-//
-// Code1Bit::distance_query_full_precision
-// ────────────────────────
-//   The sole hot primitive is signed_dot (bits → ±1.0 expansion + simsimd dot).
-//
-//   Improvements:
-//     [D1] Eliminate sign expansion entirely. Instead of building a ±1.0 f32
-//          array and calling simsimd dot, operate directly on the packed bits
-//          and the f32 values. For each u64 word of packed bits:
-//            - Compute positive_sum = Σ values[i] where bit=1
-//            - result = 2 * positive_sum - total_sum
-//          where total_sum = Σ values[i] is precomputed once for the query.
-//          This replaces 1024 f32::from_bits + 1024-element dot with 16 iterations
-//          of masked sum. On AVX-512 with VMASKMOV, this is ~2 instructions per
-//          64 values. On ARM, NEON BSL (bitwise select) serves the same role.
-//
-//     [D2] Alternative: use SIMD sign-flip via XOR. For each lane, XOR the f32
-//          value with 0x80000000 when the corresponding bit is 0 (negate), then
-//          sum all values. No expansion needed, no intermediate array. This is
-//          the most promising single optimization for distance_query:
-//            sign_mask = broadcast packed bit to each f32 lane's sign position
-//            flipped = values XOR sign_mask
-//            sum += horizontal_add(flipped)
-//
-//     [D3] Graviton: ARM NEON lacks a direct equivalent to AVX-512 mask ops,
-//          but NEON BSL (Bit Select) + FNEG is a clean alternative. The signed_dot
-//          IEEE bit trick (0x3F800000 | sign << 31) compiles to BFI + FMOV on ARM
-//          which is reasonable but not optimal; [D2]'s XOR approach is better.
-//
-// Code1Bit::distance_code
-// ───────────────────────
-//   Primitive: hamming_distance via simsimd::BinarySimilarity::hamming.
-//
-//   [C1] IMPLEMENTED. Replaced scalar u64 XOR + POPCNT loop with simsimd,
-//        which dispatches at runtime to AVX-512 VPOPCNTDQ (x86) or NEON CNT
-//        (ARM). Measured on Apple M-series (NEON):
-//
-//          primitives/dc-1bit/hamming/scalar/1024:  10.60 ns  22.5 GiB/s
-//          primitives/dc-1bit/hamming/simsimd/1024:  6.69 ns  35.6 GiB/s  (+58%)
-//          distance_code/dc-1bit/1024 (256 pairs):  2.58 µs  26.6 GiB/s  (+42% vs 3.66 µs)
-//
-//        On x86 production (r6id / AVX-512 VPOPCNTDQ) the gain should be
-//        larger: VPOPCNTDQ processes 512 bits/cycle vs NEON's 128.
-//
-//   [C2] RESOLVED by C1. ARM64 has no single-instruction u64 popcount; the
-//        compiler emits FMOV→CNT→UADDLV→FMOV (4 ops/u64) for scalar
-//        count_ones(). simsimd's binary backend uses NEON CNT over a full
-//        vector register, eliminating the scalar round-trip entirely.
-//
-// Code1Bit::distance_query
-// ────────────────────────────────
-//   Primitive: 4 rounds of AND+popcount over 128-byte strings.
-//
-//   [B1] IMPLEMENTED. Interleaved: read x_b once, AND all 4 planes per word.
-//        Removes 3 redundant re-reads of x_b (128 B × 3 = 384 B saved).
-//        At dim=1024 x_b fits in L1 regardless; at higher dims the saving grows.
-//
-//   [B2] IMPLEMENTED. Replaced step_by(8)+index with chunks_exact(8).
-//        Exposes iteration structure to LLVM, enabling auto-vectorization.
-//        B2 alone: 44.4 ns → 18.8 ns (2.4×). B1+B2 combined: 16.7 ns (2.7×).
-//        End-to-end hot scan (2048 codes, dim=1024):
-//          baseline:  98.0 µs  2.8 GiB/s
-//          B2 only:   43.9 µs  6.3 GiB/s  (+126%)
-//          B1+B2:     41.0 µs  6.7 GiB/s  (+143% vs baseline)
-//
-//   [B3] RESOLVED by B2. The auto-vectorization enabled by chunks_exact likely
-//        causes LLVM to use NEON vector registers for the count_ones() calls,
-//        avoiding the per-u64 FMOV→CNT→ADDV→FMOV sequence that ARM64 emits
-//        for scalar count_ones(). The 2.4× speedup from B2 is consistent with
-//        this interpretation. The `<< j` shift dependent chain at the end is
-//        4 operations (negligible) and is now absorbed into the b_q=4 unrolled
-//        fast path.
-//
-// QuantizedQuery::new
-// ───────────────────
-//   [P1] REJECTED. Two separate folds (min then max) auto-vectorise to
-//        independent SIMD reductions (FMINV/FMAXV on ARM, VMINPS horizontal
-//        on x86). A combined tuple fold `(min, max)` creates a pair dependency
-//        that LLVM cannot vectorise the same way — measured 3.77× SLOWER on
-//        Apple M-series (614 ns vs 163 ns). Keep two-pass.
-//
-//   [P2+P4] IMPLEMENTED.
-//        Prior: Vec<u32> alloc (4 KB) + quantize pass + sum pass + 4×Vec<u8>
-//               alloc + scatter with per-bit branch = ~5 500 ns.
-//        After: two-pass min/max (163 ns) + fused quantize+sum+byte_chunks
-//               scatter into 1 flat Vec<u8> = ~1 034 ns.
-//        Total: −81% / 5.35× faster on Apple M-series.
-//
-//        Scatter approach: process 8 elements→1 byte per plane (byte_chunks).
-//        Branchless bit extraction. b_q=4 fast-path hardcodes 4 accumulators
-//        so LLVM unrolls and vectorises the inner loop.
-//
-//        Benchmarked scatter variants at dim=1024:
-//          baseline (4×Vec alloc + branch scatter):  2 339 ns
-//          flat_alloc (1 Vec alloc + branch scatter): 2 351 ns  ← alloc NOT bottleneck
-//          byte_chunks (flat + branchless, generic):    707 ns  (3.3×)
-//          full/two_pass_fused (production approach): 1 034 ns  (5.35×)
-//
-//   [P3] RESOLVED by P2's byte_chunks pattern. The b_q=4 unrolled inner loop
-//        (subtract, multiply, round, clamp, 4 bit extractions) auto-vectorises
-//        on both ARM NEON and x86 AVX via standard LLVM vectorisation.
-//        No manual SIMD intrinsics needed.
-//
-//   [P5] RESOLVED by [P2+P4]. The two-pass min/max folds already use NEON
-//        FMIN/FMAX vector reductions on Graviton. The scatter uses generic f32
-//        arithmetic that also vectorises to NEON FRINTN equivalent via LLVM.
-//
-// Cross-cutting
-// ─────────────
-//     [X1] Batch API for cluster scan: provide `distance_query_batch` that takes
-//          a slice of code byte slices and returns distances. Enables software
-//          prefetching of the next code while processing the current one, hiding
-//          LLC latency (relevant at N > L1-capacity / code_size ≈ 200 codes).
-//
-//     [X2] Alignment: ensure packed byte arrays are 64-byte aligned for optimal
-//          AVX-512 loads. Currently heap-allocated with default alignment (16B
-//          on most allocators). `aligned_vec` crate or manual Layout allocation.
-//
-//     [X3] Thread-local scratch buffers: for the indexing path, a thread-local
-//          arena (bumpalo) eliminates all per-quantize allocation overhead.
-//          At 128 vCPUs on r6id.32xlarge, malloc contention can be significant.
-//
-//     [X4] Graviton migration checklist:
-//          - Verify simsimd dispatches to NEON/SVE (not scalar fallback) for
-//            f32::dot, hamming. Build with RUSTFLAGS="-C target-cpu=neoverse-v1".
-//          - Benchmark count_ones() on Graviton; if slow, use NEON vcnt intrinsic.
-//          - signed_dot [D2] XOR approach is better on ARM than the current
-//            IEEE bit trick.
-//          - r6id ICE LAKE has 2 × 512-bit FMA units; Graviton 3 has 4 × 128-bit
-//            NEON units. Per-core throughput may be lower but Graviton has more
-//            cores per dollar — measure end-to-end QPS, not single-core ns/op.
-
 fn bench_primitives(c: &mut Criterion) {
     let mut group = c.benchmark_group("primitives");
 
@@ -897,36 +769,19 @@ fn bench_primitives(c: &mut Criterion) {
         group.throughput(Throughput::Bytes((bytes + dim * 4) as u64));
         desc!(
             format!("dq-float/signed_dot/{dim}"),
-            "bits→±1.0 expand + simsimd dot  [distance_query: THE hot kernel]"
+            "SIGN_TABLE lookup + simsimd dot  [distance_query: THE hot kernel]"
         );
         group.bench_with_input(
             BenchmarkId::new("dq-float/signed_dot", dim),
             &dim,
             |b, _| {
                 b.iter(|| {
-                    const CHUNK: usize = 8;
-                    let mut signs = [0.0f32; CHUNK * 8];
+                    let mut signs = [0.0f32; 64];
                     let mut sum = 0.0f32;
-                    for (pc, vc) in packed_a.chunks(CHUNK).zip(values.chunks(CHUNK * 8)) {
+                    for (pc, vc) in packed_a.chunks(8).zip(values.chunks(64)) {
                         let n = vc.len();
                         for (i, &byte) in pc.iter().enumerate() {
-                            let base = i * 8;
-                            let bb = byte as u32;
-                            signs[base] = f32::from_bits(0x3F800000 | (((bb >> 0) & 1) ^ 1) << 31);
-                            signs[base + 1] =
-                                f32::from_bits(0x3F800000 | (((bb >> 1) & 1) ^ 1) << 31);
-                            signs[base + 2] =
-                                f32::from_bits(0x3F800000 | (((bb >> 2) & 1) ^ 1) << 31);
-                            signs[base + 3] =
-                                f32::from_bits(0x3F800000 | (((bb >> 3) & 1) ^ 1) << 31);
-                            signs[base + 4] =
-                                f32::from_bits(0x3F800000 | (((bb >> 4) & 1) ^ 1) << 31);
-                            signs[base + 5] =
-                                f32::from_bits(0x3F800000 | (((bb >> 5) & 1) ^ 1) << 31);
-                            signs[base + 6] =
-                                f32::from_bits(0x3F800000 | (((bb >> 6) & 1) ^ 1) << 31);
-                            signs[base + 7] =
-                                f32::from_bits(0x3F800000 | (((bb >> 7) & 1) ^ 1) << 31);
+                            signs[i * 8..(i + 1) * 8].copy_from_slice(&SIGN_LUT[byte as usize]);
                         }
                         sum += f32::dot(&signs[..n], vc).unwrap_or(0.0) as f32;
                     }

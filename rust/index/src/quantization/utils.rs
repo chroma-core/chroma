@@ -99,7 +99,9 @@ pub fn rabitq_distance_code(
     let correction_a = code_a.correction();
     let correction_b = code_b.correction();
 
-    // 3.2 Constructing an Unbiased Estimator for Distance Estimation
+    // Constructing an Unbiased Estimator for Distance Estimation
+    // Section 3.2 of the paper
+    //
     // The key achievement is estimating the product of the data and query vectors:
     //     ⟨o, q⟩ in the paper and ⟨d_a, d_b⟩ in our code.
     // Theorem 3.2:
@@ -108,15 +110,6 @@ pub fn rabitq_distance_code(
     //     Where the error is bounded by O(1/√D) with high probability.
     //     Namely, as D → ∞, the error approaches 0.
     //     The constant factor of O depends on the norms of the data and query vectors.
-    // Error sources
-    // - Angular displacement caused by mapping o to the nearest hypercube vertex.
-    // - Norm of the data and query vectors being non-unit.
-    // How they are corrected:
-    // - The division by ⟨ō, o⟩ corrects on average (in expectation) for
-    //     the angular displacement caused by mapping o to the nearest hypercube vertex.
-    //     - Without the division, ⟨ō, q⟩ underestimates ⟨o, q⟩ because ⟨ō, o⟩ is less than 1 — the quantization rotated ō away from o, attenuating the signal. Dividing by ⟨ō, o⟩ undoes that attenuation, recovering ⟨o, q⟩ from the signal term.
-    // - The error that remains after the correction is the noise term ⟨ō, q⊥⟩ divided by ⟨ō, o⟩
-    //     (which is bounded by O(1/√D))
 
     // ⟨n_a, n_b⟩ ≈ ⟨g_a, g_b⟩ / (⟨g_a, n_a⟩ · ⟨g_b, n_b⟩)
     let n_a_dot_n_b = g_a_dot_g_b / (correction_a * correction_b);
