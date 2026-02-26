@@ -54,7 +54,7 @@ use chroma_index::quantization::{BatchQueryLuts, Code1Bit, Code4Bit, QuantizedQu
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use rayon::prelude::*;
-use simsimd::SpatialSimilarity;
+use simsimd::{BinarySimilarity, SpatialSimilarity};
 
 /// Criterion's filter: the first positional argument after `--`, if any.
 /// Benchmarks whose ID doesn't contain the filter are skipped by Criterion,
@@ -246,7 +246,7 @@ fn bench_distance_code(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_1 as u64));
         desc!(
             format!("dc-1bit/{dim}"),
-            format!("{pairs} pairs; XOR + popcount")
+            format!("{pairs} pairs; simsimd hamming (NEON CNT / AVX-512 VPOPCNTDQ)")
         );
         group.bench_with_input(BenchmarkId::new("dc-1bit", dim), &dim, |b, _| {
             b.iter(|| {
@@ -702,17 +702,23 @@ fn bench_thread_scaling(c: &mut Criterion) {
 //
 // Code1Bit::distance_code
 // ───────────────────────
-//   Primitive: hamming_distance (XOR + popcount on 128 bytes).
+//   Primitive: hamming_distance via simsimd::BinarySimilarity::hamming.
 //
-//   Improvements:
-//     [C1] Use simsimd's hamming distance function (simsimd::BinarySimilarity::hamming)
-//          which has AVX-512 VPOPCNTDQ and ARM NEON CNT backends. Our scalar
-//          loop processes 64 bits/iteration; VPOPCNTDQ processes 512 bits.
-//          For dim=1024 that's 2 iterations vs 16.
+//   [C1] IMPLEMENTED. Replaced scalar u64 XOR + POPCNT loop with simsimd,
+//        which dispatches at runtime to AVX-512 VPOPCNTDQ (x86) or NEON CNT
+//        (ARM). Measured on Apple M-series (NEON):
 //
-//     [C2] Graviton: ARM NEON has `vcnt` (byte-level popcount) but no u64
-//          popcount instruction. The scalar `count_ones()` may compile to a
-//          software implementation. simsimd's binary backend should handle this.
+//          primitives/dc-1bit/hamming/scalar/1024:  10.60 ns  22.5 GiB/s
+//          primitives/dc-1bit/hamming/simsimd/1024:  6.69 ns  35.6 GiB/s  (+58%)
+//          distance_code/dc-1bit/1024 (256 pairs):  2.58 µs  26.6 GiB/s  (+42% vs 3.66 µs)
+//
+//        On x86 production (r6id / AVX-512 VPOPCNTDQ) the gain should be
+//        larger: VPOPCNTDQ processes 512 bits/cycle vs NEON's 128.
+//
+//   [C2] RESOLVED by C1. ARM64 has no single-instruction u64 popcount; the
+//        compiler emits FMOV→CNT→UADDLV→FMOV (4 ops/u64) for scalar
+//        count_ones(). simsimd's binary backend uses NEON CNT over a full
+//        vector register, eliminating the scalar round-trip entirely.
 //
 // Code1Bit::distance_query_bitwise
 // ────────────────────────────────
@@ -962,20 +968,42 @@ fn bench_primitives(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(2 * bytes as u64));
         desc!(
-            format!("dc-1bit/hamming/{dim}"),
-            "raw XOR + popcount  [distance_code kernel]"
+            format!("dc-1bit/hamming/scalar/{dim}"),
+            "scalar u64 XOR + POPCNT  [distance_code kernel, baseline]"
         );
-        group.bench_with_input(BenchmarkId::new("dc-1bit/hamming", dim), &dim, |b, _| {
-            b.iter(|| {
-                let mut count = 0u32;
-                for i in (0..packed_a.len()).step_by(8) {
-                    let a_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
-                    let b_word = u64::from_le_bytes(packed_b[i..i + 8].try_into().unwrap());
-                    count += (a_word ^ b_word).count_ones();
-                }
-                black_box(count);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("dc-1bit/hamming/scalar", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let mut count = 0u32;
+                    for i in (0..packed_a.len()).step_by(8) {
+                        let a_word =
+                            u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                        let b_word =
+                            u64::from_le_bytes(packed_b[i..i + 8].try_into().unwrap());
+                        count += (a_word ^ b_word).count_ones();
+                    }
+                    black_box(count);
+                });
+            },
+        );
+
+        desc!(
+            format!("dc-1bit/hamming/simsimd/{dim}"),
+            "simsimd::BinarySimilarity::hamming (NEON CNT / AVX-512 VPOPCNTDQ)  [C1]"
+        );
+        group.bench_with_input(
+            BenchmarkId::new("dc-1bit/hamming/simsimd", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let d =
+                        <u8 as BinarySimilarity>::hamming(&packed_a, &packed_b).unwrap_or(0.0);
+                    black_box(d);
+                });
+            },
+        );
 
         // ── Code1Bit::distance_query_bitwise primitives ──────────────────────
 

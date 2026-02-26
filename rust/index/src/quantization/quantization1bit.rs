@@ -9,7 +9,7 @@ use std::mem::size_of;
 
 use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
-use simsimd::SpatialSimilarity;
+use simsimd::{BinarySimilarity, SpatialSimilarity};
 
 use super::utils::{rabitq_distance_code, rabitq_distance_query, RabitqCode};
 
@@ -303,30 +303,16 @@ fn padded_dim_1bit(dim: usize) -> usize {
 /// Both slices must have the same length and that length must be a multiple of
 /// 8 (guaranteed when `padded_dim` is a multiple of 64).
 ///
-/// # Notes on SIMD optimization:
-/// At the scalar level this is already near-optimal. Each iteration is three
-/// instructions: load, XOR, POPCNT. On any modern x86 CPU with the popcnt
-/// feature flag (which Rust can target with RUSTFLAGS="-C target-cpu=native"),
-/// count_ones() on a u64 compiles directly to a single POPCNT instruction.
-/// So for 1024-dim vectors we're doing 16 iterations of 64 bits and three
-/// instructions each.
+/// Uses `simsimd::BinarySimilarity::hamming` which dispatches at runtime to:
+///   - AVX-512 VPOPCNTDQ on x86_64 (8 × u64 lanes per instruction)
+///   - NEON CNT on ARM (byte-level popcount, vectorised over 16 bytes)
 ///
-/// True SIMD speedup requires AVX-512 VPOPCNTDQ, which provides
-/// _mm512_popcnt_epi64 — popcounting 8 u64 lanes simultaneously. That
-/// processes 512 bits instead of 64 per iteration. So for 1024-dim vectors
-/// we're doing 2 iterations.
-// TODO use simsimd?
+/// Falls back to scalar u64 XOR + POPCNT if simsimd returns None (e.g. on
+/// unsupported targets or in tests without the CPU feature).
 fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     debug_assert_eq!(a.len(), b.len());
     debug_assert_eq!(a.len() % 8, 0);
-    let mut count = 0u32;
-    // Read 8 bytes at a time and count the number of ones in the XOR result.
-    for i in (0..a.len()).step_by(8) {
-        let a_word = u64::from_le_bytes(a[i..i + 8].try_into().unwrap());
-        let b_word = u64::from_le_bytes(b[i..i + 8].try_into().unwrap());
-        count += (a_word ^ b_word).count_ones();
-    }
-    count
+    <u8 as BinarySimilarity>::hamming(a, b).expect("slices have equal length") as u32
 }
 
 /// Computes `Σ sign[i] · values[i]` where sign[i] = +1.0 if bit i is set
