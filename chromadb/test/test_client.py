@@ -59,6 +59,7 @@ def http_api_factory(
 
                 yield cast(HttpAPIFactory, factory)
 
+
 def test_ephemeral_client(ephemeral_api: ClientAPI) -> None:
     settings = ephemeral_api.get_settings()
     assert settings.is_persistent is False
