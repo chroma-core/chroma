@@ -3,7 +3,6 @@
 //! Measures recall@K for three implementations:
 //!
 //!   4bit_float   — 4-bit data quantization, f32 query (quality ceiling)
-//!   1bit_float   — 1-bit data quantization, f32 query (signed_dot)
 //!   1bit_bitwise — 1-bit data quantization, quantized query (AND+popcount, §3.3.1)
 //!
 //! For each, the entire database is quantized, then every query is scored
@@ -215,7 +214,7 @@ fn run_recall(dataset: &str, n: usize, k: usize, rerank_factors: &[usize]) -> Ve
     // ── Score all queries with each method ────────────────────────────────
     let methods: Vec<(&str, Box<dyn Fn(&[f32]) -> Vec<f32>>)> = vec![
         (
-            "4bit_float",
+            "4bit",
             Box::new(|r_q: &[f32]| -> Vec<f32> {
                 let cdq = c_dot_q(&centroid, r_q);
                 let qn = q_norm(&centroid, r_q);
@@ -226,21 +225,7 @@ fn run_recall(dataset: &str, n: usize, k: usize, rerank_factors: &[usize]) -> Ve
             }),
         ),
         (
-            "1bit_float",
-            Box::new(|r_q: &[f32]| -> Vec<f32> {
-                let cdq = c_dot_q(&centroid, r_q);
-                let qn = q_norm(&centroid, r_q);
-                codes_1
-                    .iter()
-                    .map(|cb| {
-                        Code1Bit::new(cb.as_slice())
-                            .distance_query_full_precision(&df, r_q, cn, cdq, qn)
-                    })
-                    .collect()
-            }),
-        ),
-        (
-            "1bit_bitwise",
+            "1bit",
             Box::new(|r_q: &[f32]| -> Vec<f32> {
                 let cdq = c_dot_q(&centroid, r_q);
                 let qn = q_norm(&centroid, r_q);

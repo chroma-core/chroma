@@ -1,5 +1,5 @@
 use chroma_distance::DistanceFunction;
-use chroma_index::quantization::{BatchQueryLuts, Code1Bit, Code4Bit, QuantizedQuery};
+use chroma_index::quantization::{Code1Bit, Code4Bit, QuantizedQuery};
 use criterion::{criterion_group, criterion_main, Criterion};
 use faer::{
     col::ColRef,
@@ -70,11 +70,10 @@ fn q_norm(centroid: &[f32], r_q: &[f32]) -> f32 {
 //   absolute_error = d_est − d_true               [in units of squared distance]
 //
 // where d_true = Σ(eᵢ − qᵢ)² (true squared L2 from original floats) and
-// d_est comes from each quantized estimator.  Comparing the four methods
+// d_est comes from each quantized estimator.  Comparing the methods
 // isolates two distinct error sources:
 //
-//   data quantization alone : 4bit_float  vs  1bit_float
-//   + query quantization    : 1bit_float  vs  1bit_bitwise / 1bit_lut
+//   data quantization alone : 4bit_float  vs  1bit_bitwise (1-bit data + 4-bit quantized query)
 //
 // WHY THE RELATIVE-ERROR MEAN IS NON-ZERO (even for an unbiased estimator)
 // ─────────────────────────────────────────────────────────────────────────
@@ -121,9 +120,7 @@ fn print_error_analysis() {
 
     let total = N * N_QUERIES;
     let mut err_4bit = Vec::with_capacity(total);
-    let mut err_1float = Vec::with_capacity(total);
     let mut err_1bitw = Vec::with_capacity(total);
-    let mut err_1lut = Vec::with_capacity(total);
     // distance_code: both the data vector and the query are quantized codes.
     // This stacks the error from quantizing both sides, isolating the combined
     // code-vs-code estimation error vs. the one-sided code-vs-query methods.
@@ -134,9 +131,7 @@ fn print_error_analysis() {
     // unbiasedness claim.  Comparing against the relative-error means above
     // shows that the non-zero relative mean is a metric artefact, not a bug.
     let mut abs_4bit = Vec::with_capacity(total);
-    let mut abs_1float = Vec::with_capacity(total);
     let mut abs_1bitw = Vec::with_capacity(total);
-    let mut abs_1lut = Vec::with_capacity(total);
     let mut abs_code4 = Vec::with_capacity(total);
     let mut abs_code1 = Vec::with_capacity(total);
 
@@ -148,9 +143,8 @@ fn print_error_analysis() {
         let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
         let cdq = c_dot_q(&centroid, &r_q);
         let qn = q_norm(&centroid, &r_q);
-        // QuantizedQuery and LUTs are built once per query, amortized over all N codes.
+        // QuantizedQuery built once per query, amortized over all N codes.
         let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
-        let luts = BatchQueryLuts::new(&r_q, cn, cdq, qn);
         // Quantize the query itself so distance_code can treat it as another data code.
         let cq1_bytes = Code1Bit::quantize(&query, &centroid).as_ref().to_vec();
         let cq4_bytes = Code4Bit::quantize(&query, &centroid).as_ref().to_vec();
@@ -173,25 +167,19 @@ fn print_error_analysis() {
             let c4 = Code4Bit::new(codes_4[i].as_slice());
 
             let d4 = c4.distance_query(&df, &r_q, cn, cdq, qn);
-            let df1 = c1.distance_query_full_precision(&df, &r_q, cn, cdq, qn);
             let db = c1.distance_query(&df, &qq);
-            let dl = luts.distance_query(&c1, &df);
             // distance_code: both vectors quantized; error comes from both sides.
             let dc4 = c4.distance_code(&df, &cq4, cn, DIM);
             let dc1 = c1.distance_code(&df, &cq1, cn, DIM);
 
             // Relative error: positive = overestimate, negative = underestimate.
             err_4bit.push((d4 - d_true) / d_true);
-            err_1float.push((df1 - d_true) / d_true);
             err_1bitw.push((db - d_true) / d_true);
-            err_1lut.push((dl - d_true) / d_true);
             err_code4.push((dc4 - d_true) / d_true);
             err_code1.push((dc1 - d_true) / d_true);
 
             abs_4bit.push(d4 - d_true);
-            abs_1float.push(df1 - d_true);
             abs_1bitw.push(db - d_true);
-            abs_1lut.push(dl - d_true);
             abs_code4.push(dc4 - d_true);
             abs_code1.push(dc1 - d_true);
         }
@@ -229,9 +217,7 @@ fn print_error_analysis() {
     };
 
     let s4 = compute_stats(&mut err_4bit);
-    let sf = compute_stats(&mut err_1float);
     let sb = compute_stats(&mut err_1bitw);
-    let sl = compute_stats(&mut err_1lut);
     let sc4 = compute_stats(&mut err_code4);
     let sc1 = compute_stats(&mut err_code1);
 
@@ -245,16 +231,8 @@ fn print_error_analysis() {
             "distance_query, 4-bit data code, raw f32 query (most accurate)",
         ),
         (
-            "1bit_float",
-            "distance_query, 1-bit data code, raw f32 query",
-        ),
-        (
             "1bit_bitwise",
             "distance_query_bitwise, 1-bit data + 4-bit quantized query (QuantizedQuery)",
-        ),
-        (
-            "1bit_lut",
-            "BatchQueryLuts::distance_query, 1-bit data + nibble LUT query",
         ),
         (
             "4bit_code",
@@ -292,9 +270,7 @@ fn print_error_analysis() {
         );
     };
     row("4bit_float", &s4);
-    row("1bit_float", &sf);
     row("1bit_bitwise", &sb);
-    row("1bit_lut", &sl);
     println!("{sep}");
     row("4bit_code", &sc4);
     row("1bit_code", &sc1);
@@ -321,14 +297,12 @@ fn print_error_analysis() {
         println!("  {:<20} {:>+12.4} {:>12.4}", name, mean, std);
     };
     abs_row("4bit_float", &abs_4bit);
-    abs_row("1bit_float", &abs_1float);
     abs_row("1bit_bitwise", &abs_1bitw);
-    abs_row("1bit_lut", &abs_1lut);
     abs_row("4bit_code", &abs_code4);
     abs_row("1bit_code", &abs_code1);
 
     // ── Histograms ────────────────────────────────────────────────────────────
-    // All four methods share the same bin edges and the same bar scale
+    // All methods share the same bin edges and the same bar scale
     // (global_max across all bins and methods), so bar lengths are directly
     // comparable across histograms.
     //
@@ -344,9 +318,7 @@ fn print_error_analysis() {
             abs[idx]
         };
         let max_p99 = p99_abs(&err_4bit)
-            // .max(p99_abs(&err_1float))
-            // .max(p99_abs(&err_1bitw))
-            // .max(p99_abs(&err_1lut))
+            .max(p99_abs(&err_1bitw))
             .max(p99_abs(&err_code4))
             .max(p99_abs(&err_code1));
         // Round up to nearest 0.01 so bin edges are clean numbers.
@@ -377,17 +349,13 @@ fn print_error_analysis() {
     };
 
     let h4 = make_hist(&err_4bit);
-    let hf = make_hist(&err_1float);
     let hb = make_hist(&err_1bitw);
-    let hl = make_hist(&err_1lut);
     let hc4 = make_hist(&err_code4);
     let hc1 = make_hist(&err_code1);
 
     let global_max = h4
         .iter()
-        .chain(&hf)
         .chain(&hb)
-        .chain(&hl)
         .chain(&hc4)
         .chain(&hc1)
         .copied()
@@ -413,9 +381,7 @@ fn print_error_analysis() {
 
     let methods: &[(&str, &[usize])] = &[
         ("4bit_float", &h4),
-        ("1bit_float", &hf),
         ("1bit_bitwise", &hb),
-        ("1bit_lut", &hl),
         ("4bit_code", &hc4),
         ("1bit_code", &hc1),
     ];
