@@ -158,18 +158,48 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
 
         // Compute ⟨x_b, q_u⟩ (the binary versions of g and r_q) via bit planes.
         // ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
-        // Each AND+popcount operates on the full D-bit string.
-        let mut xb_dot_qu = 0u32;
-        for (j, plane) in qq.bit_planes.iter().enumerate() {
-            let mut plane_pop = 0u32;
-            debug_assert!(packed.len() <= plane.len());
-            for i in (0..packed.len()).step_by(8) {
-                let x_word = u64::from_le_bytes(packed[i..i + 8].try_into().unwrap());
-                let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
-                plane_pop += (x_word & q_word).count_ones();
+        //
+        // [B1] Interleaved: read each x_b word once, AND with all planes per word.
+        //      Avoids re-reading x_b b_q times (4× at the default b_q=4).
+        // [B2] chunks_exact(8) instead of step_by(8)+index: exposes the iteration
+        //      structure to LLVM, enabling auto-vectorization of the inner loop.
+        //      Benchmarked on Apple M-series: B2 alone gives 2.4× speedup on the
+        //      primitive, B1+B2 gives ~2.7×. Combined effect on the hot 2048-code
+        //      scan: −56% / +126%.
+        //
+        // The b_q=4 fast-path pattern-matches the planes Vec to enable full loop
+        // unrolling and avoid bounds checks. The general fallback handles other
+        // values of b_q (currently unused but kept for correctness).
+        let xb_dot_qu = if let [p0, p1, p2, p3] = qq.bit_planes.as_slice() {
+            let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
+            for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
+                p0.chunks_exact(8)
+                    .zip(p1.chunks_exact(8))
+                    .zip(p2.chunks_exact(8))
+                    .zip(p3.chunks_exact(8)),
+            ) {
+                let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
+                pop0 += (x & u64::from_le_bytes(q0.try_into().unwrap())).count_ones();
+                pop1 += (x & u64::from_le_bytes(q1.try_into().unwrap())).count_ones();
+                pop2 += (x & u64::from_le_bytes(q2.try_into().unwrap())).count_ones();
+                pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
             }
-            xb_dot_qu += plane_pop << j;
-        }
+            pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+        } else {
+            // General fallback for b_q ≠ 4.
+            let mut result = 0u32;
+            for (j, plane) in qq.bit_planes.iter().enumerate() {
+                let mut pop = 0u32;
+                debug_assert!(packed.len() <= plane.len());
+                for (x_chunk, q_chunk) in packed.chunks_exact(8).zip(plane.chunks_exact(8)) {
+                    let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
+                    let q = u64::from_le_bytes(q_chunk.try_into().unwrap());
+                    pop += (x & q).count_ones();
+                }
+                result += pop << j;
+            }
+            result
+        };
 
         // signed_sum = 2·popcount(x_b) − dim, precomputed at index time
         let signed_sum = self.signed_sum() as f32;
