@@ -673,7 +673,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
 //        function — i.e., the bit-trick is faster. LLVM auto-vectorizes it well
 //        on both x86 and ARM. See notes/FUTURE_IMPROVEMENTS.md § OPT-2.
 //
-// Code1Bit::distance_query
+// Code1Bit::distance_query_full_precision
 // ────────────────────────
 //   The sole hot primitive is signed_dot (bits → ±1.0 expansion + simsimd dot).
 //
@@ -721,7 +721,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
 //        count_ones(). simsimd's binary backend uses NEON CNT over a full
 //        vector register, eliminating the scalar round-trip entirely.
 //
-// Code1Bit::distance_query_bitwise
+// Code1Bit::distance_query
 // ────────────────────────────────
 //   Primitive: 4 rounds of AND+popcount over 128-byte strings.
 //

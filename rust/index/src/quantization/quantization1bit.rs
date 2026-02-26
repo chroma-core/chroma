@@ -13,6 +13,8 @@ use simsimd::{BinarySimilarity, SpatialSimilarity};
 
 use super::utils::{rabitq_distance_code, rabitq_distance_query, RabitqCode};
 
+const B_Q: u8 = 4;
+
 // ── Header ────────────────────────────────────────────────────────────────────
 
 /// Header for 1-bit codes. Extends the 4-bit layout with `signed_sum`
@@ -75,8 +77,22 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
     /// ```text
     /// ⟨g_a, g_b⟩ = 0.25 · (dim − 2·hamming(a, b))
     /// ```
-    /// since each g[i] ∈ {−0.5, +0.5}: agreeing bits contribute +0.25,
-    /// disagreeing bits contribute −0.25.
+    ///
+    /// # Derivation
+    ///
+    /// Each `g[i] ∈ {−0.5, +0.5}` (bit=1 → +0.5, bit=0 → −0.5). So each term
+    /// `g_a[i]·g_b[i]` is:
+    /// - **+0.25** when the bits agree (both 1 or both 0)
+    /// - **−0.25** when they disagree
+    ///
+    /// Let `agree` = number of agreeing positions, `disagree` = hamming(a,b).
+    /// Then `dim = agree + disagree` and:
+    /// ```text
+    /// ⟨g_a, g_b⟩ = agree·0.25 + disagree·(−0.25)
+    ///            = 0.25·(agree − disagree)
+    ///            = 0.25·((dim − hamming) − hamming)
+    ///            = 0.25·(dim − 2·hamming(a, b))
+    /// ```
     pub fn distance_code<U: AsRef<[u8]>>(
         &self,
         distance_fn: &DistanceFunction,
@@ -89,10 +105,21 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
         rabitq_distance_code(g_a_dot_g_b, self, other, c_norm, distance_fn)
     }
 
-    /// Estimates distance from data vector `d` to query `q` (float query path).
+    /// Estimates distance from data vector `d` to full-precision query `q`.
     ///
-    /// Computes `⟨g, r_q⟩ = 0.5 · signed_dot(packed, r_q)`:
-    /// each bit contributes `+r_q[i]` (bit=1) or `−r_q[i]` (bit=0).
+    /// Computes `⟨g, r_q⟩ = 0.5 · signed_dot(packed, r_q)`: each bit contributes
+    /// `+r_q[i]` (bit=1) or `−r_q[i]` (bit=0).
+    ///
+    /// # Derivation
+    ///
+    /// For BITS=1, `g[i]` is `+0.5` when bit=1 and `−0.5` when bit=0. So:
+    /// ```text
+    /// ⟨g, r_q⟩ = 0.5 · Σ g[i] · r_q[i]
+    ///          = 0.5 · Σ sign(g[i]) · r_q[i]
+    ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
+    ///          = 0.5 · (Σ_{g[i]=+0.5} r_q[i] − Σ_{g[i]=−0.5} r_q[i])
+    ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
+    ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
     pub fn distance_query_full_precision(
         &self,
         distance_fn: &DistanceFunction,
@@ -101,26 +128,38 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
         c_dot_q: f32,
         q_norm: f32,
     ) -> f32 {
-        // For BITS=1, g[i] is +0.5 when bit=1 and −0.5 when bit=0.
-        // ⟨g, r_q⟩ = Σ g[i] · r_q[i]
-        //           = 0.5 · Σ_{bit=1} r_q[i]  −  0.5 · Σ_{bit=0} r_q[i]
-        //           = 0.5 · Σ sign(g[i]) · r_q[i]
         let g_dot_r_q = 0.5 * signed_dot(self.packed(), r_q);
         rabitq_distance_query(g_dot_r_q, self, c_norm, c_dot_q, q_norm, distance_fn)
     }
 
-    // ── Bitwise query path (paper Section 3.3) ───────────────────────────────
+    // ── Bitwise query path ───────────────────────────────
 
-    /// Bitwise distance estimation using the paper's Section 3.3 approach.
+    /// Estimates distance from a stored data code to a quantized query.
     ///
-    /// ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+    /// # Paper equation 22 (Paper Section 3.3.2)
     ///
-    /// Instead of expanding packed bits to f32 signs and running a float dot
-    /// product, this computes `⟨x_bar_b, q_bar_u⟩` using B_q rounds of
-    /// AND + popcount on D-bit strings, then recovers the full distance
-    /// estimate from the scalar factors.
+    /// The paper estimates the inner product `⟨x̄, q̄⟩` between the quantized
+    /// data vector and a quantized query using `B_q` rounds of AND + popcount
+    /// on packed D-bit strings. The key identity is:
     ///
-    /// # Derivation: Equation 20 to our code
+    /// ```text
+    /// ⟨x_b, q_u⟩ = Σ_j  2^j · popcount(x_b AND q_u^(j))
+    /// ```
+    ///
+    /// where `q_u^(j)` is the `j`-th bit plane of the quantized query (the
+    /// `j`-th bit of each `q_u[i]` packed into a D-bit string), and `x_b` is
+    /// the 1-bit data code (the packed sign bits).
+    ///
+    /// The full estimator (Equation 20) recovers `⟨x̄, q̄⟩` from `⟨x_b, q_u⟩`:
+    ///
+    /// ```text
+    /// ⟨x̄, q̄⟩ = (2Δ/√D)·⟨x_b, q_u⟩ + (2v_l/√D)·Σ x_b[i] - (Δ/√D)·Σ q_u[i] - √D·v_l
+    /// ```
+    ///
+    /// # Our derivation of Equation 20
+    ///
+    /// We adapt to our conventions — residuals (`r_q = q − centroid`) and
+    /// `g[i] = ±0.5` — through four algebraic steps:
     ///
     /// **Step 1 — Paper Equation 20** (unit vectors, ō[i] = ±1/√D):
     /// ```text
@@ -128,7 +167,8 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
     /// ```
     ///
     /// **Step 2 — Our scaling** (residuals, g[i] = ±0.5):
-    /// Replace 1/√D with 0.5, √D with dim. We want ⟨g, r_q⟩ where r_q[i] ≈ Δ·q_u[i] + v_l:
+    /// Replace 1/√D with 0.5 and √D with dim. We want `⟨g, r_q⟩` where
+    /// `r_q[i] ≈ Δ·q_u[i] + v_l`:
     /// ```text
     /// ⟨g, r_q⟩ = 0.5·(2Δ·⟨x_b, q_u⟩ + 2·v_l·popcount(x_b) - Δ·Σ q_u[i] - dim·v_l)
     /// ```
@@ -138,41 +178,84 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
     /// ⟨g, r_q⟩ = 0.5·(Δ·(2·⟨x_b, q_u⟩ - Σ q_u[i]) + v_l·(2·popcount(x_b) - dim))
     /// ```
     ///
-    /// **Step 4 — Substitute** sign[i] = 2·x_b[i] − 1:
+    /// **Step 4 — Substitute** sign[i] = 2·x_b[i] − 1, and note that
+    /// `Σ x_b[i] = popcount(x_b)`:
     /// ```text
     /// signed_dot_qu = Σ sign[i]·q_u[i] = 2·⟨x_b, q_u⟩ − Σ q_u[i]
     /// signed_sum    = Σ sign[i]        = 2·popcount(x_b) − dim
     /// ⟨g, r_q⟩      = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
     /// ```
     ///
+    /// `signed_sum` is precomputed at index time and stored in the code header,
+    /// so this function only needs to compute `signed_dot_qu` via the
+    /// AND+popcount bit-plane expansion.
+    ///
     /// # Notation
     ///
-    /// - v_l = min(r_q[i])
-    /// - v_r = max(r_q[i])
-    /// - x_b = data code (packed bits), g[i] = +0.5 when x_b[i]=1 else −0.5
-    /// - q_u = quantized query, r_q[i] ≈ Δ·q_u[i] + v_l
-    /// - Δ = (v_r − v_l) / (2^B_q − 1)
-    /// - ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
+    /// - `v_l` = min(r_q[i]), `v_r` = max(r_q[i])
+    /// - `Δ` = (v_r − v_l) / (2^B_q − 1)
+    /// - `x_b` = 1-bit data code (packed sign bits), `g[i] = +0.5` when `x_b[i]=1` else `−0.5`
+    /// - `q_u` = quantized query, `r_q[i] ≈ Δ·q_u[i] + v_l`
+    /// - `q_u^(j)` = bit plane j of q_u (packed into D/8 bytes)
+    ///
+    /// # Naive pseudocode
+    ///
+    /// The straightforward implementation iterates over each bit plane separately,
+    /// re-reading `x_b` once per plane:
+    ///
+    /// ```text
+    /// xb_dot_qu = 0
+    /// for j in 0..B_q:
+    ///     plane_pop = 0
+    ///     for i in 0..packed_len step 8:
+    ///         x_word = u64(x_b[i..i+8])
+    ///         q_word = u64(q_u^(j)[i..i+8])
+    ///         plane_pop += popcount(x_word AND q_word)
+    ///     xb_dot_qu += plane_pop << j     // weight plane j by 2^j
+    ///
+    /// signed_sum    = self.signed_sum()   // precomputed: 2·popcount(x_b) − dim
+    /// signed_dot_qu = 2·xb_dot_qu − sum_q_u
+    /// g_dot_r_q     = 0.5 · (Δ · signed_dot_qu + v_l · signed_sum)
+    /// ```
+    ///
+    /// # Optimized implementation
+    ///
+    /// The production code applies two optimizations over the naive approach:
+    ///
+    /// **[B1] Interleaved planes**: instead of looping over planes in the outer
+    /// loop and re-reading `x_b` once per plane (4× for `B_q=4`), we fix
+    /// `B_q=4` and read each `x_b` word exactly once, ANDing it with all four
+    /// plane words in the same inner iteration. Four independent accumulators
+    /// (`pop0..pop3`) are summed with their weights at the end:
+    ///
+    /// ```text
+    /// for each 8-byte chunk (x, q0, q1, q2, q3):
+    ///     x    = u64(x_b chunk)
+    ///     pop0 += popcount(x AND u64(q0 chunk))
+    ///     pop1 += popcount(x AND u64(q1 chunk))
+    ///     pop2 += popcount(x AND u64(q2 chunk))
+    ///     pop3 += popcount(x AND u64(q3 chunk))
+    ///
+    /// xb_dot_qu = pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+    /// ```
+    ///
+    /// **[B2] `chunks_exact(8)` instead of `step_by(8)+index`**: exposes the
+    /// stride as a type-level invariant, lets LLVM eliminate bounds checks and
+    /// auto-vectorize the body to NEON/AVX-512. On Apple M-series, B2 alone
+    /// yields ~2.4× speedup on the primitive; B1+B2 combined yield ~2.7×,
+    /// and −56% / +126% on the full 2048-code hot scan.
+    ///
+    /// The `bit_planes` field is stored as a flat `Vec<u8>` (plane `j` at
+    /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
+    /// slices are contiguous and extracted with cheap slice indexing before
+    /// the loop.
     pub fn distance_query(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
         let packed = self.packed();
 
         // Compute ⟨x_b, q_u⟩ (the binary versions of g and r_q) via bit planes.
         // ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
-        //
-        // [B1] Interleaved: read each x_b word once, AND with all planes per word.
-        //      Avoids re-reading x_b b_q times (4× at the default b_q=4).
-        // [B2] chunks_exact(8) instead of step_by(8)+index: exposes the iteration
-        //      structure to LLVM, enabling auto-vectorization of the inner loop.
-        //      Benchmarked on Apple M-series: B2 alone gives 2.4× speedup on the
-        //      primitive, B1+B2 gives ~2.7×. Combined effect on the hot 2048-code
-        //      scan: −56% / +126%.
-        //
-        // bit_planes is now a flat Vec<u8>: plane j at [j*pb .. (j+1)*pb].
-        // The b_q=4 fast-path slices the flat buffer and uses B1+B2 (interleaved
-        // + chunks_exact) for full loop unrolling without bounds checks.
-        // The general fallback handles b_q ≠ 4 (currently unused).
         let pb = qq.padded_bytes;
-        let xb_dot_qu = if qq.b_q == 4 {
+        let xb_dot_qu: u32 = {
             let p0 = &qq.bit_planes[0 * pb..1 * pb];
             let p1 = &qq.bit_planes[1 * pb..2 * pb];
             let p2 = &qq.bit_planes[2 * pb..3 * pb];
@@ -191,20 +274,6 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
                 pop3 += (x & u64::from_le_bytes(q3.try_into().unwrap())).count_ones();
             }
             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
-        } else {
-            // General fallback for b_q ≠ 4.
-            let mut result = 0u32;
-            for j in 0..qq.b_q as usize {
-                let plane = &qq.bit_planes[j * pb..(j + 1) * pb];
-                let mut pop = 0u32;
-                for (x_chunk, q_chunk) in packed.chunks_exact(8).zip(plane.chunks_exact(8)) {
-                    let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
-                    let q = u64::from_le_bytes(q_chunk.try_into().unwrap());
-                    pop += (x & q).count_ones();
-                }
-                result += pop << j;
-            }
-            result
         };
 
         // signed_sum = 2·popcount(x_b) − dim, precomputed at index time
@@ -245,8 +314,105 @@ impl Code1Bit {
 
     /// Quantizes a data vector relative to its cluster centroid (1-bit path).
     ///
-    /// 1-bit quantization uses sign-based coding — no ray-walk needed.
-    /// See section 3.1.3 of the paper.
+    /// # Paper equation (Section 3.1.3)
+    ///
+    /// RaBitQ represents a data vector `o` with a 1-bit code `x_b` and a
+    /// corresponding quantized vector `g`:
+    ///
+    /// ```text
+    /// x_b[i] = 1     if o[i] >= 0
+    ///          0     otherwise
+    ///
+    /// g[i]   = +1/√D if x_b[i] = 1
+    ///          -1/√D if x_b[i] = 0
+    ///      i.e. g[i] = (2·x_b[i] − 1) / √D
+    /// ```
+    ///
+    /// The correction factor `⟨g, n⟩` (where `n = o / ‖o‖`) is stored so that
+    /// the distance estimator can recover an unbiased estimate of the true distance.
+    ///
+    /// # Our derivation
+    ///
+    /// We work with the **residual** `r = embedding − centroid` rather than the
+    /// raw data vector, because the SPANN index stores embeddings relative to
+    /// their cluster centroid. The math is identical: just substitute `r` for `o`.
+    ///
+    /// We also use a **different scale** for `g`. Instead of `±1/√D` we use
+    /// `±0.5` (= `GRID_OFFSET`). This is a fixed rescaling of the paper's `g`
+    /// by `√D / 2`, which cancels out uniformly across the distance formula and
+    /// simplifies all inner products. Under our scaling:
+    ///
+    /// ```text
+    /// g[i] = +0.5   if r[i] >= 0   (x_b[i] = 1)
+    ///        -0.5   if r[i] <  0   (x_b[i] = 0)
+    ///     i.e. g[i] = (2·x_b[i] − 1) · 0.5
+    /// ```
+    ///
+    /// Because `g[i]` always has the **same sign** as `r[i]`, we can simplify
+    /// each term of `⟨g, r⟩`:
+    ///
+    /// ```text
+    /// g[i] · r[i] = |g[i]| · |r[i]| = 0.5 · |r[i]|
+    /// ```
+    ///
+    /// so:
+    ///
+    /// ```text
+    /// correction = ⟨g, n⟩ = ⟨g, r⟩ / ‖r‖
+    ///           = (Σ g[i]·r[i]) / ‖r‖
+    ///           = (Σ 0.5·|r[i]|) / ‖r‖
+    ///           = 0.5 · abs_sum / norm
+    ///           = GRID_OFFSET · abs_sum / norm
+    /// ```
+    ///
+    /// We also precompute `signed_sum = 2·popcount(x_b) − dim`, which equals
+    /// `Σ (2·x_b[i] − 1)` — the sum of the ±1 signs over all dimensions.
+    /// This is used by `distance_query` to recover
+    /// `⟨g, r_q⟩` from a bitwise AND+popcount without expanding `g` to floats.
+    ///
+    /// # Naive pseudocode
+    ///
+    /// The straightforward multi-pass implementation makes 5 passes over the data:
+    ///
+    /// ```text
+    /// r        = embedding − centroid       // pass 1: 4 KB alloc + subtraction
+    /// norm     = sqrt(dot(r, r))            // pass 2: simsimd dot
+    /// radial   = dot(r, centroid)           // pass 3: simsimd dot
+    /// abs_sum  = sum(|r[i]|)               // pass 4: abs + accumulate
+    /// x_b      = pack_sign_bits(r)         // pass 5: sign extraction + byte pack
+    /// popcount = popcount(x_b)
+    ///
+    /// correction = GRID_OFFSET * abs_sum / norm
+    /// signed_sum = 2 * popcount - dim
+    /// return CodeHeader1{correction, norm, radial, signed_sum} ++ x_b
+    /// ```
+    ///
+    /// # Optimized implementation
+    ///
+    /// The production code fuses all five passes into **one loop** over `(embedding,
+    /// centroid)` in chunks of 8 elements — one chunk per output byte of `x_b`.
+    /// No intermediate `r` vector is allocated (saves 4 KB for dim=1024).
+    ///
+    /// For each chunk of 8 elements `(e[j], c[j])`:
+    ///
+    /// ```text
+    /// val = e[j] - c[j]                       // residual element, on the fly
+    ///
+    /// // Sign packing (IEEE-754 trick):
+    /// sign = val.to_bits() >> 31              // 1 if val < 0, 0 if val >= 0
+    /// byte |= (sign ^ 1) << j                // bit=1 when val >= 0
+    ///
+    /// // Scalar accumulators (auto-vectorized to VABSPS/VFMADD on AVX2):
+    /// abs_sum += |val|
+    /// norm_sq += val * val
+    /// radial  += val * c[j]
+    /// ```
+    ///
+    /// After all 8 elements are processed, `byte.count_ones()` contributes to
+    /// `popcount`. Since each accumulator (`abs_sum`, `norm_sq`, `radial`) is
+    /// independent across iterations, LLVM auto-vectorizes them to wide SIMD
+    /// instructions. Compared to the naive approach, memory reads drop from ~20 KB
+    /// (5 × 4 KB passes) to ~8 KB (one combined read of embedding + centroid).
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
         let dim = embedding.len();
         let mut packed = vec![0u8; Self::packed_len(dim)];
@@ -255,7 +421,7 @@ impl Code1Bit {
         let mut radial = 0.0f32;
         let mut popcount = 0u32;
 
-        // Single fused pass over (embedding, centroid) — no intermediate `r` allocation.
+        // Single fused pass over (embedding, centroid).
         //
         // Each outer iteration processes 8 elements → 1 byte of packed output, computing:
         //   - sign bits  → packed codes (bit=1 when r[i] ≥ 0, bit=0 otherwise)
@@ -263,11 +429,6 @@ impl Code1Bit {
         //   - r[i]²      → norm_sq     (for ‖r‖)
         //   - r[i]·c[i]  → radial      (for ⟨r, c⟩)
         //   - popcount    → signed_sum  (2·popcount(x_b) − dim)
-        //
-        // Compared to the prior four-pass approach (vec_sub alloc, sign_pack, abs_sum, popcount),
-        // this eliminates the 4 KB intermediate `r` allocation and three re-reads of it.
-        // The four scalar accumulators (abs_sum, norm_sq, radial, popcount) are independent
-        // across iterations and auto-vectorize to VABSPS/VFMADD on AVX2/AVX-512.
         for (byte_ref, (emb_chunk, cen_chunk)) in packed
             .iter_mut()
             .zip(embedding.chunks(8).zip(centroid.chunks(8)))
@@ -287,7 +448,7 @@ impl Code1Bit {
 
         let norm = norm_sq.sqrt();
 
-        // Early return for dim == 0 or near-zero residual (same semantics as before).
+        // Early return for dim == 0 or near-zero residual.
         if dim == 0 || norm < f32::EPSILON {
             let mut bytes = Vec::with_capacity(Self::size(dim));
             bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader1 {
@@ -303,10 +464,6 @@ impl Code1Bit {
         // correction = ⟨g, n⟩
         //            = ⟨g, r⟩ / ‖r‖
         //            = Σ g[i] * r[i] / ‖r‖
-        //               - for BITS=1, g[i] always has the same sign as r[i]
-        //                  g[i] = +0.5   if r[i] >= 0
-        //                  g[i] = -0.5   if r[i] <  0
-        //               - Therefore g[i] * r[i] = sign(r[i]) * 0.5 * r[i] = 0.5 * |r[i]|
         //            = Σ 0.5 * |r[i]| / ‖r‖
         //            = 0.5 * Σ |r[i]| / ‖r‖
         //            = GRID_OFFSET * abs_sum / norm
@@ -438,8 +595,6 @@ pub struct QuantizedQuery {
     pub delta: f32,
     /// Sum of quantized query values: Σ q_u[i]
     pub sum_q_u: u32,
-    /// Number of bits used per query element
-    pub b_q: u8,
     /// Precomputed query-level scalars
     pub c_norm: f32,
     pub c_dot_q: f32,
@@ -454,13 +609,13 @@ impl QuantizedQuery {
     /// `padded_bytes` is the byte length of the packed data codes (for alignment).
     pub fn new(
         r_q: &[f32],
-        b_q: u8,
+        _b_q: u8,
         padded_bytes: usize,
         c_norm: f32,
         c_dot_q: f32,
         q_norm: f32,
     ) -> Self {
-        let max_val = (1u32 << b_q) - 1;
+        let max_val = (1u32 << B_Q) - 1;
 
         // Two separate folds — each auto-vectorises to a SIMD reduction
         // (FMINV/FMAXV on ARM NEON, VMINPS horizontal on x86).
@@ -490,40 +645,24 @@ impl QuantizedQuery {
         //
         // Layout: plane j occupies flat_planes[j*padded_bytes .. (j+1)*padded_bytes].
         let inv_delta = 1.0 / delta;
-        let mut bit_planes = vec![0u8; b_q as usize * padded_bytes];
+        let mut bit_planes = vec![0u8; B_Q as usize * padded_bytes];
         let mut sum_q_u = 0u32;
         // b_q=4 fast path: hardcoded planes let LLVM unroll and vectorize the
         // inner byte loop. The general fallback handles other values of b_q.
-        if b_q == 4 {
-            for (byte_idx, chunk) in r_q.chunks(8).enumerate() {
-                let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
-                for (bit, &v) in chunk.iter().enumerate() {
-                    let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
-                    sum_q_u += qu;
-                    b0 |= (((qu >> 0) & 1) as u8) << bit;
-                    b1 |= (((qu >> 1) & 1) as u8) << bit;
-                    b2 |= (((qu >> 2) & 1) as u8) << bit;
-                    b3 |= (((qu >> 3) & 1) as u8) << bit;
-                }
-                bit_planes[0 * padded_bytes + byte_idx] = b0;
-                bit_planes[1 * padded_bytes + byte_idx] = b1;
-                bit_planes[2 * padded_bytes + byte_idx] = b2;
-                bit_planes[3 * padded_bytes + byte_idx] = b3;
+        for (byte_idx, chunk) in r_q.chunks(8).enumerate() {
+            let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
+            for (bit, &v) in chunk.iter().enumerate() {
+                let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                sum_q_u += qu;
+                b0 |= (((qu >> 0) & 1) as u8) << bit;
+                b1 |= (((qu >> 1) & 1) as u8) << bit;
+                b2 |= (((qu >> 2) & 1) as u8) << bit;
+                b3 |= (((qu >> 3) & 1) as u8) << bit;
             }
-        } else {
-            for (byte_idx, chunk) in r_q.chunks(8).enumerate() {
-                let mut bs = [0u8; 8]; // max b_q supported
-                for (bit, &v) in chunk.iter().enumerate() {
-                    let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
-                    sum_q_u += qu;
-                    for j in 0..b_q as usize {
-                        bs[j] |= (((qu >> j) & 1) as u8) << bit;
-                    }
-                }
-                for j in 0..b_q as usize {
-                    bit_planes[j * padded_bytes + byte_idx] = bs[j];
-                }
-            }
+            bit_planes[0 * padded_bytes + byte_idx] = b0;
+            bit_planes[1 * padded_bytes + byte_idx] = b1;
+            bit_planes[2 * padded_bytes + byte_idx] = b2;
+            bit_planes[3 * padded_bytes + byte_idx] = b3;
         }
 
         Self {
@@ -532,7 +671,6 @@ impl QuantizedQuery {
             v_l,
             delta,
             sum_q_u,
-            b_q,
             c_norm,
             c_dot_q,
             q_norm,
