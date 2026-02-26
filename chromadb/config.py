@@ -15,14 +15,9 @@ import platform
 try:
     from pydantic import BaseSettings
     from pydantic import validator
-
-    PYDANTIC_V2 = False
 except ImportError:
-    from pydantic_settings import BaseSettings  # type: ignore[no-redef]
-    from pydantic_settings import SettingsConfigDict
-    from pydantic import field_validator
-
-    PYDANTIC_V2 = True
+    from pydantic.v1 import BaseSettings
+    from pydantic.v1 import validator  # type: ignore[assignment]
 
 # The thin client will have a flag to control which implementations to use
 is_thin_client = False
@@ -130,21 +125,11 @@ class Settings(BaseSettings):  # type: ignore
 
     chroma_server_nofile: Optional[int] = None
 
-    if PYDANTIC_V2:
-
-        @field_validator("chroma_server_nofile", mode="before")
-        def empty_str_to_none(cls, v: Any) -> Optional[str]:
-            if isinstance(v, str) and v.strip() == "":
-                return None
-            return cast(Optional[str], v)
-
-    else:
-
-        @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
-        def empty_str_to_none(cls, v: Any) -> Optional[str]:
-            if isinstance(v, str) and v.strip() == "":
-                return None
-            return cast(Optional[str], v)
+    @validator("chroma_server_nofile", pre=True, always=True, allow_reuse=True)
+    def empty_str_to_none(cls, v: Any) -> Optional[str]:
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return cast(Optional[str], v)
 
     # the number of maximum threads to handle synchronous tasks in the FastAPI server
     chroma_server_thread_pool_size: int = 40
@@ -268,7 +253,7 @@ class Settings(BaseSettings):  # type: ignore
     chroma_memberlist_provider_impl: str = "chromadb.segment.impl.distributed.segment_directory.CustomResourceMemberlistProvider"
     worker_memberlist_name: str = "query-service-memberlist"
 
-    chroma_coordinator_host = "localhost"
+    chroma_coordinator_host: str = "localhost"
     # TODO this is the sysdb port. Should probably rename it.
     chroma_server_grpc_port: Optional[int] = None
     chroma_sysdb_impl: str = "chromadb.db.impl.sqlite.SqliteDB"
@@ -335,13 +320,9 @@ class Settings(BaseSettings):  # type: ignore
             raise ValueError(LEGACY_ERROR)
         return val
 
-    if PYDANTIC_V2:
-        model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
-    else:
-
-        class Config:
-            env_file = ".env"
-            env_file_encoding = "utf-8"
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 T = TypeVar("T", bound="Component")
