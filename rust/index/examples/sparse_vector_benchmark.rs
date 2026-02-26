@@ -201,29 +201,27 @@ async fn build_sparse_index(
     let batch_size = 65536;
     let num_chunks = sorted_documents.len().div_ceil(batch_size);
 
-    let pb = ProgressBar::new(num_chunks as u64);
+    let pb = ProgressBar::new(sorted_documents.len() as u64);
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
-                "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} chunks ({eta})",
+                "{spinner:.green} {msg} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} docs ({eta})",
             )
             .unwrap()
             .progress_chars("█▉▊▋▌▍▎▏  "),
     );
-    pb.set_message("Building index chunks");
+    pb.set_message("Building index");
 
     let mut max_writer_id = None;
     let mut offset_value_writer_id = None;
 
     for (chunk_idx, chunk) in sorted_documents.chunks(batch_size).enumerate() {
-        // Create writer options, forking if not the first chunk
-        let mut max_writer_options = BlockfileWriterOptions::new(SPARSE_MAX_PREFIX.to_string());
+        // Create writer options, forking offset_value from previous commit
+        let max_writer_options =
+            BlockfileWriterOptions::new(SPARSE_MAX_PREFIX.to_string()).ordered_mutations();
         let mut offset_value_writer_options =
-            BlockfileWriterOptions::new(SPARSE_OFFSET_VALUE_PREFIX.to_string());
+            BlockfileWriterOptions::new(SPARSE_OFFSET_VALUE_PREFIX.to_string()).ordered_mutations();
 
-        if let Some(id) = max_writer_id {
-            max_writer_options = max_writer_options.fork(id);
-        }
         if let Some(id) = offset_value_writer_id {
             offset_value_writer_options = offset_value_writer_options.fork(id);
         }
@@ -272,18 +270,42 @@ async fn build_sparse_index(
             sparse_reader,
         );
 
-        // Write documents in this chunk
-        for (idx, doc) in chunk.iter().enumerate() {
-            let offset = (chunk_idx * batch_size + idx) as u32;
-
-            // Convert CsVec to iterator of (dimension_id, value)
-            let sparse_iter = doc
-                .sparse_vector
-                .indices()
-                .iter()
-                .zip(doc.sparse_vector.data().iter())
-                .map(|(idx, val)| (*idx as u32, *val));
-            sparse_writer.set(offset, sparse_iter).await;
+        // Write documents in this chunk (parallel across CPU cores)
+        let num_partitions = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1);
+        let partition_size = chunk.len().div_ceil(num_partitions);
+        let handles = chunk
+            .chunks(partition_size)
+            .enumerate()
+            .map(|(part_idx, partition)| {
+                let base_offset = (chunk_idx * batch_size + part_idx * partition_size) as u32;
+                let writer = sparse_writer.clone();
+                let pb = pb.clone();
+                let docs = partition
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, doc)| {
+                        let pairs = doc
+                            .sparse_vector
+                            .indices()
+                            .iter()
+                            .zip(doc.sparse_vector.data().iter())
+                            .map(|(idx, val)| (*idx as u32, *val))
+                            .collect::<Vec<_>>();
+                        (base_offset + idx as u32, pairs)
+                    })
+                    .collect::<Vec<_>>();
+                tokio::spawn(async move {
+                    for (offset, pairs) in docs {
+                        writer.set(offset, pairs).await;
+                        pb.inc(1);
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.await.unwrap();
         }
 
         // Commit
@@ -305,8 +327,6 @@ async fn build_sparse_index(
             .clear()
             .await
             .map_err(|e| anyhow::anyhow!("Failed to clear cache: {:?}", e))?;
-
-        pb.inc(1);
     }
 
     pb.finish_with_message("✅ Index built");
