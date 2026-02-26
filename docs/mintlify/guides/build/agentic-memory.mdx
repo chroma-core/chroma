@@ -2,6 +2,15 @@
 title: Agentic Memory
 description: Persist agent context across runs for better performance and personalization.
 ---
+import { YouTube } from '/snippets/youtube.jsx';
+
+<YouTube
+  src="https://www.youtube.com/embed/RkI1SORvxdI?start=16"
+  title="YouTube video player"
+  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+  referrerPolicy="strict-origin-when-cross-origin"
+  allowFullScreen
+/>
 
 We've seen how tool calling and iterative searches over a Chroma collection can build context for an agent. While this works well for individual runs, agents start fresh each time-repeating expensive computations, re-learning user preferences, and rediscovering effective strategies they've already found.
 

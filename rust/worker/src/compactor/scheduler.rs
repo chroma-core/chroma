@@ -278,7 +278,7 @@ impl Scheduler {
         collection_records
     }
 
-    fn filter_collections(&mut self, collections: Vec<CollectionRecord>) -> Vec<CollectionRecord> {
+    fn filter_collections(&mut self, collections: Vec<CollectionInfo>) -> Vec<CollectionInfo> {
         let mut filtered_collections = Vec::new();
         let members = self.memberlist.as_ref().unwrap();
         let members_as_string = members
@@ -357,10 +357,9 @@ impl Scheduler {
             }
         }
 
-        let filtered_collections = self.filter_collections(scheduled_collections);
         self.job_queue.extend(
             self.policy
-                .determine(filtered_collections, self.max_concurrent_jobs as i32),
+                .determine(scheduled_collections, self.max_concurrent_jobs as i32),
         );
         self.job_queue
             .truncate(self.max_concurrent_jobs - self.in_progress_jobs.len());
@@ -487,7 +486,10 @@ impl Scheduler {
         if collections.is_empty() {
             return;
         }
-        let collection_records = self.verify_and_enrich_collections(collections).await;
+        let filtered_collections = self.filter_collections(collections);
+        let collection_records = self
+            .verify_and_enrich_collections(filtered_collections)
+            .await;
         self.schedule_internal(collection_records).await;
     }
 

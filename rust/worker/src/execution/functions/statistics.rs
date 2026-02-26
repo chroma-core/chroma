@@ -1359,6 +1359,7 @@ mod tests {
             collection_id,
             database_name,
             false,
+            std::collections::HashSet::new(),
             50,
             10,
             1000,

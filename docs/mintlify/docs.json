@@ -26,6 +26,7 @@
           {
             "group": "Overview",
             "pages": [
+              "docs/overview/introduction",
               "docs/overview/getting-started",
               "docs/overview/architecture",
               "docs/overview/oss",
@@ -209,6 +210,7 @@
             "group": "Frameworks",
             "pages": [
               "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/google-adk",
               "integrations/frameworks/braintrust",
               "integrations/frameworks/contextual-ai",
               "integrations/frameworks/deepeval",
