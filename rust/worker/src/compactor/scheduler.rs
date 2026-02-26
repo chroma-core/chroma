@@ -690,32 +690,6 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn schedule_orders_by_last_compaction_time() {
-        SchedulerFixture::clear_env_vars();
-        let mut f = SchedulerFixture::new();
-
-        // tenant_1 already has last_compaction_time = 2 from the fixture.
-        // Add tenant_2 with last_compaction_time = 1 (older).
-        match f.sysdb {
-            SysDb::Test(ref mut test_sysdb) => {
-                test_sysdb.add_tenant_last_compaction_time("tenant_2".to_string(), 1);
-            }
-            _ => panic!("Invalid sysdb type"),
-        }
-
-        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
-        f.scheduler.schedule().await;
-
-        let mut jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
-        jobs.sort_by_key(|j| j.collection_id);
-        assert_eq!(jobs.len(), 2);
-        // Both should appear; ordering is tested in scheduler_policy tests.
-        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
-        assert_eq!(jobs[1].collection_id, f.collection_uuid_2);
-    }
-
-    #[tokio::test]
-    #[serial]
     async fn disabled_collections_via_double_underscore_env_var() {
         SchedulerFixture::clear_env_vars();
         let mut f = SchedulerFixture::new();
