@@ -13,16 +13,14 @@ from overrides import override
 from typing_extensions import Literal
 import platform
 
-try:
-    from pydantic import BaseSettings
+if sys.version_info >= (3, 14):
     from pydantic import validator
-except ImportError:
-    if sys.version_info >= (3, 14):
-        from pydantic import BaseModel
-        from pydantic import validator  # type: ignore # noqa
-
-        BaseSettings = BaseModel
-    else:
+    from pydantic_settings import BaseSettings
+else:
+    try:
+        from pydantic import BaseSettings
+        from pydantic import validator
+    except ImportError:
         from pydantic.v1 import BaseSettings
         from pydantic.v1 import validator  # type: ignore # noqa
 
