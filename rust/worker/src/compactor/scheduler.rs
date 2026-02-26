@@ -259,7 +259,7 @@ impl Scheduler {
                                 database_name: collection.database.clone(),
                                 last_compaction_time: Default::default(),
                                 first_record_time: info.first_log_ts,
-                                offset: info.first_log_offset,
+                                offset: collection.log_position + 1,
                                 collection_version: collection.version,
                                 collection_logical_size_bytes: collection
                                     .size_bytes_post_compaction,
@@ -810,6 +810,108 @@ mod tests {
             "collection_1 should be excluded after max failures"
         );
         assert_eq!(jobs[0].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn enriched_offset_advances_past_sysdb_log_position() {
+        SchedulerFixture::clear_env_vars();
+
+        // Construct a scheduler with a single collection whose sysdb log_position
+        // is ahead of the log service's first_log_offset.  The enriched
+        // CollectionRecord.offset must be log_position + 1 (the next un-compacted
+        // offset), NOT first_log_offset (which would rewind compaction).
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut in_memory_log) => in_memory_log,
+            _ => panic!("Invalid log type"),
+        };
+
+        let tenant = "tenant_1".to_string();
+        let sysdb_log_position: i64 = 10;
+        let collection = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000001")
+                .unwrap(),
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: tenant.clone(),
+            database: "database_1".to_string(),
+            log_position: sysdb_log_position,
+            ..Default::default()
+        };
+        let collection_id = collection.collection_id;
+
+        in_memory_log.add_log(
+            collection_id,
+            InternalLogRecord {
+                collection_id,
+                log_offset: 0,
+                log_ts: 1,
+                record: LogRecord {
+                    log_offset: 0,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+            },
+        );
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.add_collection(collection);
+                test_sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_member.member_id.clone(),
+            log,
+            sysdb.clone(),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            3600,
+            3,
+        );
+
+        // The log service reports first_log_offset = 0, but sysdb says
+        // log_position = 10 (offsets 0..=10 already compacted).
+        let first_log_offset: i64 = 0;
+        let collection_infos = vec![CollectionInfo {
+            collection_id: collection_id,
+            topology_name: None,
+            first_log_offset,
+            first_log_ts: 1,
+        }];
+
+        let records = scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        assert_eq!(records.len(), 1, "should produce exactly one record");
+        let expected_offset = sysdb_log_position + 1;
+        assert_eq!(
+            records[0].offset, expected_offset,
+            "offset must be log_position + 1 ({expected_offset}), not first_log_offset ({first_log_offset}); \
+             using first_log_offset would rewind compaction and reprocess already-compacted records"
+        );
     }
 
     #[tokio::test]
