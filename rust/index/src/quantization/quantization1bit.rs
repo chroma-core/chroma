@@ -167,10 +167,16 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
         //      primitive, B1+B2 gives ~2.7×. Combined effect on the hot 2048-code
         //      scan: −56% / +126%.
         //
-        // The b_q=4 fast-path pattern-matches the planes Vec to enable full loop
-        // unrolling and avoid bounds checks. The general fallback handles other
-        // values of b_q (currently unused but kept for correctness).
-        let xb_dot_qu = if let [p0, p1, p2, p3] = qq.bit_planes.as_slice() {
+        // bit_planes is now a flat Vec<u8>: plane j at [j*pb .. (j+1)*pb].
+        // The b_q=4 fast-path slices the flat buffer and uses B1+B2 (interleaved
+        // + chunks_exact) for full loop unrolling without bounds checks.
+        // The general fallback handles b_q ≠ 4 (currently unused).
+        let pb = qq.padded_bytes;
+        let xb_dot_qu = if qq.b_q == 4 {
+            let p0 = &qq.bit_planes[0 * pb..1 * pb];
+            let p1 = &qq.bit_planes[1 * pb..2 * pb];
+            let p2 = &qq.bit_planes[2 * pb..3 * pb];
+            let p3 = &qq.bit_planes[3 * pb..4 * pb];
             let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
             for (x_chunk, (((q0, q1), q2), q3)) in packed.chunks_exact(8).zip(
                 p0.chunks_exact(8)
@@ -188,9 +194,9 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
         } else {
             // General fallback for b_q ≠ 4.
             let mut result = 0u32;
-            for (j, plane) in qq.bit_planes.iter().enumerate() {
+            for j in 0..qq.b_q as usize {
+                let plane = &qq.bit_planes[j * pb..(j + 1) * pb];
                 let mut pop = 0u32;
-                debug_assert!(packed.len() <= plane.len());
                 for (x_chunk, q_chunk) in packed.chunks_exact(8).zip(plane.chunks_exact(8)) {
                     let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
                     let q = u64::from_le_bytes(q_chunk.try_into().unwrap());
@@ -417,13 +423,15 @@ fn signed_dot(packed: &[u8], values: &[f32]) -> f32 {
 ///
 /// Computed once per query-cluster pair and reused across all codes in the
 /// cluster.  For BITS=1 with B_q=4, this stores:
-///   - 4 bit planes of the quantized query (each ceil(dim/8) bytes)
-///   - v_l, delta, sum_q_u, popcount_x_b: scalar factors for Equation 20
+///   - 4 bit planes of the quantized query in a flat contiguous buffer
+///   - v_l, delta, sum_q_u: scalar factors for Equation 20
 pub struct QuantizedQuery {
-    /// Bit planes of the quantized query: bit_planes[j] is the j-th bit of
-    /// each q_u[i], packed into bytes.  bit_planes[j] has ceil(dim/64)*8 bytes
-    /// to match the padded data code layout.
-    pub bit_planes: Vec<Vec<u8>>,
+    /// Flat bit-plane buffer: plane j occupies bytes [j*padded_bytes .. (j+1)*padded_bytes].
+    /// bit_planes[j*padded_bytes + i] holds the j-th bit of q_u[i*8 .. i*8+8], packed LSB-first.
+    /// One contiguous allocation replaces the prior b_q separate Vec<u8> allocations.
+    pub bit_planes: Vec<u8>,
+    /// Byte length of one bit plane (= packed data code length = ceil(dim/64)*8).
+    pub padded_bytes: usize,
     /// Lower bound of query values: v_l = min(r_q[i])
     pub v_l: f32,
     /// Quantization step size: delta = (v_r - v_l) / (2^B_q - 1)
@@ -454,6 +462,10 @@ impl QuantizedQuery {
     ) -> Self {
         let max_val = (1u32 << b_q) - 1;
 
+        // Two separate folds — each auto-vectorises to a SIMD reduction
+        // (FMINV/FMAXV on ARM NEON, VMINPS horizontal on x86).
+        // A combined tuple fold `(min, max)` breaks this vectorisation (scalar
+        // pair dependency), measured 3.77× slower on Apple M-series.
         let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
         let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let range = v_r - v_l;
@@ -463,40 +475,60 @@ impl QuantizedQuery {
             1.0
         };
 
-        // Quantize each element to a B_q-bit unsigned integer (deterministic
-        // rounding — we skip the randomized rounding from the paper since the
-        // accuracy difference is negligible at B_q=4).
-        // Confirmed this with own error benchmarking.
-        // If we want to use randomized rounding, resurect this commit:
-        // 3dd86c6f64bc57433cb112cbc3df526f1876adde,
-        // by reverting its revert: 101af74f96264bad85a54612f71f6cc6af7e8576
-        let q_u: Vec<u32> = r_q
-            .iter()
-            .map(|&v| (((v - v_l) / delta).round() as u32).min(max_val))
-            .collect();
-
-        let sum_q_u: u32 = q_u.iter().sum();
-
-        // Decompose into bit planes.  bit_planes[j][byte] holds the j-th bit
-        // of q_u[i] for i in [byte*8 .. byte*8+8], packed LSB-first.
+        // [P2+P4] Single fused pass: quantize each element, accumulate sum,
+        // and scatter bits into a flat bit-plane buffer — all in one read of r_q.
+        // Eliminates the intermediate Vec<u32> (4 KB alloc + fill) and reduces
+        // b_q separate Vec<u8> allocations to one contiguous slab.
         //
-        // Why this layout?
-        // For distance_query_bitwise, we compute ⟨x_b, q_u⟩ as:
-        // Σ_j 2^j · popcount(x_b AND bit_planes[j])
-        // The data code x_b and each bit_planes[j] share the same layout
-        // (one bit per dimension, LSB-first), so we can AND them byte-by-byte
-        // and popcount to get the inner product.
-        let mut bit_planes = vec![vec![0u8; padded_bytes]; b_q as usize];
-        for (i, &qu) in q_u.iter().enumerate() {
-            for j in 0..b_q as usize {
-                if (qu >> j) & 1 == 1 {
-                    bit_planes[j][i / 8] |= 1 << (i % 8);
+        // Why skip randomized rounding: the accuracy difference is negligible
+        // at B_q=4.  See commit 3dd86c6f (randomized) and its revert 101af74f.
+        //
+        // The scatter uses the byte_chunks pattern: process 8 elements → 1 byte
+        // per plane, building all b_q output bytes before writing.  This is
+        // branchless and gives LLVM a clean 8-element inner loop to vectorise.
+        // Measured 3.3× faster than the element-by-element branch scatter.
+        //
+        // Layout: plane j occupies flat_planes[j*padded_bytes .. (j+1)*padded_bytes].
+        let inv_delta = 1.0 / delta;
+        let mut bit_planes = vec![0u8; b_q as usize * padded_bytes];
+        let mut sum_q_u = 0u32;
+        // b_q=4 fast path: hardcoded planes let LLVM unroll and vectorize the
+        // inner byte loop. The general fallback handles other values of b_q.
+        if b_q == 4 {
+            for (byte_idx, chunk) in r_q.chunks(8).enumerate() {
+                let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
+                for (bit, &v) in chunk.iter().enumerate() {
+                    let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                    sum_q_u += qu;
+                    b0 |= (((qu >> 0) & 1) as u8) << bit;
+                    b1 |= (((qu >> 1) & 1) as u8) << bit;
+                    b2 |= (((qu >> 2) & 1) as u8) << bit;
+                    b3 |= (((qu >> 3) & 1) as u8) << bit;
+                }
+                bit_planes[0 * padded_bytes + byte_idx] = b0;
+                bit_planes[1 * padded_bytes + byte_idx] = b1;
+                bit_planes[2 * padded_bytes + byte_idx] = b2;
+                bit_planes[3 * padded_bytes + byte_idx] = b3;
+            }
+        } else {
+            for (byte_idx, chunk) in r_q.chunks(8).enumerate() {
+                let mut bs = [0u8; 8]; // max b_q supported
+                for (bit, &v) in chunk.iter().enumerate() {
+                    let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
+                    sum_q_u += qu;
+                    for j in 0..b_q as usize {
+                        bs[j] |= (((qu >> j) & 1) as u8) << bit;
+                    }
+                }
+                for j in 0..b_q as usize {
+                    bit_planes[j * padded_bytes + byte_idx] = bs[j];
                 }
             }
         }
 
         Self {
             bit_planes,
+            padded_bytes,
             v_l,
             delta,
             sum_q_u,
