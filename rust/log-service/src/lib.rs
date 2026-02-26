@@ -2447,14 +2447,10 @@ impl LogServer {
                     "topology not found: {topology_name}"
                 )));
             };
-            for collection_id in &collection_ids {
-                ReplManifestManager::purge_dirty_for_collection(
-                    &topology.config.spanner,
-                    collection_id.0,
-                )
+            let uuids: Vec<_> = collection_ids.iter().map(|id| id.0).collect();
+            ReplManifestManager::purge_dirty_for_collections(&topology.config.spanner, &uuids)
                 .await
                 .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
-            }
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
             let dirty_marker_json_blobs = collection_ids

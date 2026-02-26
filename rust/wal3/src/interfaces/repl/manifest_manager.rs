@@ -383,42 +383,52 @@ impl ManifestManager {
         Ok(results)
     }
 
-    /// Sets `ignore_dirty = true` for a collection in the manifests table.
+    /// Sets `ignore_dirty = true` for collections in the manifests table.
     ///
-    /// After this call, `get_dirty_logs` will no longer return this collection.
-    pub async fn purge_dirty_for_collection(
+    /// After this call, `get_dirty_logs` will no longer return these collections.
+    pub async fn purge_dirty_for_collections(
         spanner: &Client,
-        collection_id: Uuid,
+        collection_ids: &[Uuid],
     ) -> Result<(), Error> {
-        Self::set_ignore_dirty(spanner, collection_id, true).await
+        Self::set_ignore_dirty(spanner, collection_ids, true).await
     }
 
-    /// Sets `ignore_dirty = false` for a collection in the manifests table.
+    /// Sets `ignore_dirty = false` for collections in the manifests table.
     ///
-    /// After this call, `get_dirty_logs` will return this collection if it has uncompacted data.
-    pub async fn unpurge_dirty_for_collection(
+    /// After this call, `get_dirty_logs` will return these collections if they have uncompacted
+    /// data.
+    pub async fn unpurge_dirty_for_collections(
         spanner: &Client,
-        collection_id: Uuid,
+        collection_ids: &[Uuid],
     ) -> Result<(), Error> {
-        Self::set_ignore_dirty(spanner, collection_id, false).await
+        Self::set_ignore_dirty(spanner, collection_ids, false).await
     }
 
-    /// Sets the `ignore_dirty` flag for a collection in the manifests table.
+    /// Sets the `ignore_dirty` flag for collections in the manifests table.
     async fn set_ignore_dirty(
         spanner: &Client,
-        collection_id: Uuid,
+        collection_ids: &[Uuid],
         ignore_dirty: bool,
     ) -> Result<(), Error> {
-        let log_id_str = collection_id.to_string();
+        if collection_ids.is_empty() {
+            return Ok(());
+        }
+        let mutations: Vec<_> = collection_ids
+            .iter()
+            .map(|id| {
+                let log_id_str = id.to_string();
+                update(
+                    "manifests",
+                    &["log_id", "ignore_dirty"],
+                    &[&log_id_str, &ignore_dirty],
+                )
+            })
+            .collect();
         spanner
-            .read_write_transaction(|tx| {
-                let log_id_str = log_id_str.clone();
+            .read_write_transaction(move |tx| {
+                let mutations = mutations.clone();
                 Box::pin(async move {
-                    tx.buffer_write(vec![update(
-                        "manifests",
-                        &["log_id", "ignore_dirty"],
-                        &[&log_id_str, &ignore_dirty],
-                    )]);
+                    tx.buffer_write(mutations);
                     Ok::<_, google_cloud_spanner::session::SessionError>(())
                 })
             })
@@ -2264,9 +2274,9 @@ mod tests {
         );
     }
 
-    // Test that purge_dirty_for_collection sets ignore_dirty and excludes the collection.
+    // Test that purge_dirty_for_collections sets ignore_dirty and excludes the collection.
     #[tokio::test]
-    async fn test_k8s_mcmr_integration_purge_dirty_for_collection() {
+    async fn test_k8s_mcmr_integration_purge_dirty_for_collections() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2305,9 +2315,9 @@ mod tests {
         );
 
         // Purge the collection via the public API.
-        ManifestManager::purge_dirty_for_collection(&client, log_id)
+        ManifestManager::purge_dirty_for_collections(&client, &[log_id])
             .await
-            .expect("purge_dirty_for_collection failed");
+            .expect("purge_dirty_for_collections failed");
 
         // Verify the collection no longer appears in dirty logs.
         let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy")
@@ -2321,14 +2331,14 @@ mod tests {
         );
 
         println!(
-            "test_k8s_mcmr_integration_purge_dirty_for_collection: log_id={} purged",
+            "test_k8s_mcmr_integration_purge_dirty_for_collections: log_id={} purged",
             log_id
         );
     }
 
-    // Test that unpurge_dirty_for_collection clears ignore_dirty and re-includes the collection.
+    // Test that unpurge_dirty_for_collections clears ignore_dirty and re-includes the collection.
     #[tokio::test]
-    async fn test_k8s_mcmr_integration_unpurge_dirty_for_collection() {
+    async fn test_k8s_mcmr_integration_unpurge_dirty_for_collections() {
         let Some(client) = setup_spanner_client().await else {
             panic!("Spanner emulator not reachable. Is Tilt running?");
         };
@@ -2356,9 +2366,9 @@ mod tests {
             .expect("publish failed");
 
         // Purge the collection first.
-        ManifestManager::purge_dirty_for_collection(&client, log_id)
+        ManifestManager::purge_dirty_for_collections(&client, &[log_id])
             .await
-            .expect("purge_dirty_for_collection failed");
+            .expect("purge_dirty_for_collections failed");
 
         // Verify it is excluded from dirty logs.
         let dirty_purged = ManifestManager::get_dirty_logs(&client, "dummy")
@@ -2372,9 +2382,9 @@ mod tests {
         );
 
         // Unpurge the collection.
-        ManifestManager::unpurge_dirty_for_collection(&client, log_id)
+        ManifestManager::unpurge_dirty_for_collections(&client, &[log_id])
             .await
-            .expect("unpurge_dirty_for_collection failed");
+            .expect("unpurge_dirty_for_collections failed");
 
         // Verify it reappears in dirty logs.
         let dirty_unpurged = ManifestManager::get_dirty_logs(&client, "dummy")
@@ -2388,12 +2398,12 @@ mod tests {
         );
 
         println!(
-            "test_k8s_mcmr_integration_unpurge_dirty_for_collection: log_id={} unpurged",
+            "test_k8s_mcmr_integration_unpurge_dirty_for_collections: log_id={} unpurged",
             log_id
         );
     }
 
-    // Test that calling purge_dirty_for_collection twice does not error.
+    // Test that calling purge_dirty_for_collections twice does not error.
     #[tokio::test]
     async fn test_k8s_mcmr_integration_purge_dirty_idempotent() {
         let Some(client) = setup_spanner_client().await else {
@@ -2423,12 +2433,12 @@ mod tests {
             .expect("publish failed");
 
         // Purge twice; both calls should succeed.
-        ManifestManager::purge_dirty_for_collection(&client, log_id)
+        ManifestManager::purge_dirty_for_collections(&client, &[log_id])
             .await
-            .expect("first purge_dirty_for_collection failed");
-        ManifestManager::purge_dirty_for_collection(&client, log_id)
+            .expect("first purge_dirty_for_collections failed");
+        ManifestManager::purge_dirty_for_collections(&client, &[log_id])
             .await
-            .expect("second purge_dirty_for_collection failed");
+            .expect("second purge_dirty_for_collections failed");
 
         // Verify the collection is excluded after double purge.
         let dirty_after = ManifestManager::get_dirty_logs(&client, "dummy")
