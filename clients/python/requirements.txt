@@ -6,7 +6,9 @@ opentelemetry-sdk>=1.2.0
 orjson>=3.9.12
 overrides >= 7.3.1
 pybase64>=1.4.1
-pydantic>=1.9
+pydantic>=1.9; python_version < '3.14'
+pydantic>=2; python_version >= '3.14'
+pydantic-settings>=2.0.0; python_version >= '3.14'
 PyYAML>=6.0.0
 tenacity>=8.2.3
 typing_extensions >= 4.5.0
