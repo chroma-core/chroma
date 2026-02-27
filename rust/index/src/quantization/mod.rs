@@ -86,10 +86,63 @@
 //!
 //! [`Code<T>`] is a type alias for [`Code4Bit<T>`] for backward compatibility.
 
-mod utils;
-mod quantization4bit;
 mod quantization1bit;
+mod quantization4bit;
+mod utils;
 
-pub use utils::RabitqCode;
-pub use quantization4bit::{Code, Code4Bit};
+use chroma_distance::DistanceFunction;
+use std::sync::Arc;
+
 pub use quantization1bit::{BatchQueryLuts, Code1Bit, QuantizedQuery};
+pub use quantization4bit::{Code, Code4Bit};
+pub use utils::RabitqCode;
+
+/// Runtime selection of code format (1-bit or 4-bit). Create from config bits, then call
+/// `quantize`, `distance_query`, and `size` without dispatching at each call site.
+#[derive(Clone, Copy, Debug)]
+pub enum GenericCode {
+    OneBit,
+    FourBit,
+}
+
+impl GenericCode {
+    pub fn new(bits: u8) -> Self {
+        match bits {
+            1 => GenericCode::OneBit,
+            _ => GenericCode::FourBit,
+        }
+    }
+
+    pub fn size(&self, dim: usize) -> usize {
+        match self {
+            GenericCode::OneBit => Code1Bit::size(dim),
+            GenericCode::FourBit => Code4Bit::size(dim),
+        }
+    }
+
+    pub fn quantize(&self, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
+        match self {
+            GenericCode::OneBit => Code1Bit::quantize(embedding, centroid).as_ref().into(),
+            GenericCode::FourBit => Code4Bit::quantize(embedding, centroid).as_ref().into(),
+        }
+    }
+
+    pub fn distance_query(
+        &self,
+        code_bytes: &[u8],
+        distance_fn: &DistanceFunction,
+        r_q: &[f32],
+        c_norm: f32,
+        c_dot_q: f32,
+        q_norm: f32,
+    ) -> f32 {
+        match self {
+            GenericCode::OneBit => {
+                Code1Bit::new(code_bytes).distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm)
+            }
+            GenericCode::FourBit => {
+                Code4Bit::new(code_bytes).distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm)
+            }
+        }
+    }
+}

@@ -383,7 +383,7 @@ impl QuantizedSpannSegmentReader {
         let (spann_config, space) = schema.get_spann_config().ok_or_else(|| {
             QuantizedSpannSegmentError::Config("missing spann configuration".to_string())
         })?;
-        let distance_function: DistanceFunction = space.into();
+        let distance_function: DistanceFunction = space.clone().into();
 
         let dimension = collection.dimension.ok_or_else(|| {
             QuantizedSpannSegmentError::Config("collection dimension not set".to_string())
@@ -592,21 +592,12 @@ impl QuantizedSpannSegmentReader {
     }
 
     /// Find nearest cluster heads using the quantized centroid index.
-    /// `rotated_query` must be the output of `rotate()`.
-    pub fn navigate(
-        &self,
-        rotated_query: &[f32],
-        count: usize,
-    ) -> Result<Vec<u32>, QuantizedSpannSegmentError> {
-        self.navigate_with_rerank(rotated_query, count, 1)
-    }
-
-    /// Find nearest cluster heads, optionally reranking with exact (full-precision) distances.
     ///
-    /// Searches the quantized centroid index for `count * centroid_rerank_factor` candidates,
-    /// then re-scores each candidate using the raw (unquantized) centroid embedding and keeps
-    /// the top `count`. When `centroid_rerank_factor` is 1 no extra work is done.
-    pub fn navigate_with_rerank(
+    /// `rotated_query` must be the output of `rotate()`.
+    /// Searches for `count * centroid_rerank_factor` candidates, then optionally re-scores
+    /// each using the raw (unquantized) centroid embedding and keeps the top `count`.
+    /// When `centroid_rerank_factor` is 1 no reranking is done.
+    pub fn navigate(
         &self,
         rotated_query: &[f32],
         count: usize,
@@ -1046,9 +1037,9 @@ mod test {
         let rotated = reader.rotate(query).expect("rotate failed");
         assert_eq!(rotated.len(), DIMENSION);
 
-        // Navigate — request enough to cover all clusters.
+        // Navigate — request enough to cover all clusters (centroid_rerank_factor=1 for test).
         let navigate_ids = reader
-            .navigate(&rotated, TOTAL_POINTS)
+            .navigate(&rotated, TOTAL_POINTS, 1)
             .expect("navigate failed");
         assert!(!navigate_ids.is_empty());
 
@@ -1066,6 +1057,7 @@ mod test {
         use futures::future::try_join_all;
 
         let mut all_results = HashMap::new();
+        let data_bits = 4u8; // Test uses 4-bit quantization.
 
         for cluster_id in &all_clusters {
             let cluster = reader
@@ -1089,6 +1081,7 @@ mod test {
                 &cluster_ref,
                 &rotated,
                 reader.distance_function(),
+                data_bits,
                 |id, version| global_versions.get(&id) == Some(&version),
             );
 

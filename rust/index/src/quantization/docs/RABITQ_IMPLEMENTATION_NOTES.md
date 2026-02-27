@@ -234,7 +234,7 @@ Query
 
 ## Rerank Step 1: Centroids
 
-**Where:** `QuantizedSpannSegmentReader::navigate_with_rerank` in
+**Where:** `QuantizedSpannSegmentReader::navigate` in
 `rust/segment/src/quantized_spann.rs`.
 
 **What:** After the quantized centroid index returns `nprobe * centroid_rerank_factor`

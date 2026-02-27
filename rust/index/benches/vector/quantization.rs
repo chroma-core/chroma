@@ -40,12 +40,12 @@
 //!   dc-4bit        Code4Bit::distance_code                  dc-
 //!
 //! Run with:
-//!   cargo bench -p chroma-index --bench quantization
-//!   cargo bench -p chroma-index --bench quantization -- dq-
-//!   cargo bench -p chroma-index --bench quantization -- dq-bw
+//!   cargo bench -p chroma-index --bench quantization_performance
+//!   cargo bench -p chroma-index --bench quantization_performance -- dq-
+//!   cargo bench -p chroma-index --bench quantization_performance -- dq-bw
 //!
 //! For native CPU (POPCNT, AVX2, etc.):
-//!   RUSTFLAGS="-C target-cpu=native" cargo bench -p chroma-index --bench quantization
+//!   RUSTFLAGS="-C target-cpu=native" cargo bench -p chroma-index --bench quantization_performance
 
 use std::hint::black_box;
 
@@ -90,9 +90,7 @@ use simsimd::{BinarySimilarity, SpatialSimilarity};
 fn bench_filter() -> Option<String> {
     // argv: <binary> [criterion-opts...] [filter]
     // The filter is the last positional arg (no leading `-`).
-    std::env::args()
-        .skip(1)
-        .find(|a| !a.starts_with('-'))
+    std::env::args().skip(1).find(|a| !a.starts_with('-'))
 }
 
 /// Print a one-line description of the benchmark that follows, but only when
@@ -371,7 +369,7 @@ fn bench_distance_query(c: &mut Criterion) {
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
-                    black_box(code.distance_query_full_precision(&df, r_q, cn, cdq, qn));
+                    black_box(code.distance_query(&df, r_q, cn, cdq, qn));
                 }
             });
         });
@@ -389,7 +387,7 @@ fn bench_distance_query(c: &mut Criterion) {
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
                     let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                    black_box(code.distance_query(&df, &qq));
+                    black_box(code.distance_4bit_query(&df, &qq));
                 }
             });
         });
@@ -466,7 +464,7 @@ fn bench_distance_query(c: &mut Criterion) {
                     .iter()
                     .map(|cb| {
                         let code = Code1Bit::new(cb.as_slice());
-                        black_box(code.distance_query_full_precision(&df, &r_q, cn, cdq, qn))
+                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
                     })
                     .sum();
             });
@@ -484,7 +482,7 @@ fn bench_distance_query(c: &mut Criterion) {
                     .iter()
                     .map(|cb| {
                         let code = Code1Bit::new(cb.as_slice());
-                        black_box(code.distance_query(&df, &qq))
+                        black_box(code.distance_4bit_query(&df, &qq))
                     })
                     .sum();
             });
@@ -608,7 +606,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                             let code = Code1Bit::new(code_bytes.as_slice());
                             let cdq = c_dot_q(&centroid, r_q);
                             let qn = q_norm(&centroid, r_q);
-                            black_box(code.distance_query_full_precision(&df, r_q, cn, cdq, qn));
+                            black_box(code.distance_query(&df, r_q, cn, cdq, qn));
                         });
                 });
             });
@@ -629,7 +627,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                             let cdq = c_dot_q(&centroid, r_q);
                             let qn = q_norm(&centroid, r_q);
                             let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                            black_box(code.distance_query(&df, &qq));
+                            black_box(code.distance_4bit_query(&df, &qq));
                         });
                 });
             });
@@ -711,11 +709,15 @@ fn bench_primitives(c: &mut Criterion) {
             format!("quant-1bit/simsimd_dot/{dim}"),
             "⟨a, b⟩ via simsimd  [quantize: norm², radial]"
         );
-        group.bench_with_input(BenchmarkId::new("quant-1bit/simsimd_dot", dim), &dim, |b, _| {
-            b.iter(|| {
-                black_box(f32::dot(&values, &values2).unwrap_or(0.0) as f32);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/simsimd_dot", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    black_box(f32::dot(&values, &values2).unwrap_or(0.0) as f32);
+                });
+            },
+        );
 
         group.throughput(Throughput::Bytes(dim as u64 * 4));
         desc!(
@@ -734,35 +736,43 @@ fn bench_primitives(c: &mut Criterion) {
             format!("quant-1bit/sign_pack/{dim}"),
             "IEEE sign-bit extract + byte pack, 8 f32 → 1 byte  [quantize: packed codes]"
         );
-        group.bench_with_input(BenchmarkId::new("quant-1bit/sign_pack", dim), &dim, |b, _| {
-            b.iter(|| {
-                let mut packed = vec![0u8; bytes];
-                for (byte_ref, chunk) in packed.iter_mut().zip(values.chunks(8)) {
-                    let mut byte = 0u8;
-                    for (j, &val) in chunk.iter().enumerate() {
-                        let sign = (val.to_bits() >> 31) as u8;
-                        byte |= (sign ^ 1) << j;
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/sign_pack", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let mut packed = vec![0u8; bytes];
+                    for (byte_ref, chunk) in packed.iter_mut().zip(values.chunks(8)) {
+                        let mut byte = 0u8;
+                        for (j, &val) in chunk.iter().enumerate() {
+                            let sign = (val.to_bits() >> 31) as u8;
+                            byte |= (sign ^ 1) << j;
+                        }
+                        *byte_ref = byte;
                     }
-                    *byte_ref = byte;
-                }
-                black_box(packed);
-            });
-        });
+                    black_box(packed);
+                });
+            },
+        );
 
         group.throughput(Throughput::Bytes(bytes as u64));
         desc!(
             format!("quant-1bit/popcount/{dim}"),
             "u64 popcount over packed bytes  [quantize: signed_sum]"
         );
-        group.bench_with_input(BenchmarkId::new("quant-1bit/popcount", dim), &dim, |b, _| {
-            b.iter(|| {
-                let count: u32 = packed_a
-                    .chunks_exact(8)
-                    .map(|c| u64::from_le_bytes(c.try_into().unwrap()).count_ones())
-                    .sum();
-                black_box(count);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/popcount", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let count: u32 = packed_a
+                        .chunks_exact(8)
+                        .map(|c| u64::from_le_bytes(c.try_into().unwrap()).count_ones())
+                        .sum();
+                    black_box(count);
+                });
+            },
+        );
 
         // ── Code1Bit::distance_query primitives ──────────────────────────────
 
@@ -843,10 +853,8 @@ fn bench_primitives(c: &mut Criterion) {
                 b.iter(|| {
                     let mut count = 0u32;
                     for i in (0..packed_a.len()).step_by(8) {
-                        let a_word =
-                            u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
-                        let b_word =
-                            u64::from_le_bytes(packed_b[i..i + 8].try_into().unwrap());
+                        let a_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                        let b_word = u64::from_le_bytes(packed_b[i..i + 8].try_into().unwrap());
                         count += (a_word ^ b_word).count_ones();
                     }
                     black_box(count);
@@ -863,8 +871,7 @@ fn bench_primitives(c: &mut Criterion) {
             &dim,
             |b, _| {
                 b.iter(|| {
-                    let d =
-                        <u8 as BinarySimilarity>::hamming(&packed_a, &packed_b).unwrap_or(0.0);
+                    let d = <u8 as BinarySimilarity>::hamming(&packed_a, &packed_b).unwrap_or(0.0);
                     black_box(d);
                 });
             },
@@ -886,10 +893,8 @@ fn bench_primitives(c: &mut Criterion) {
                     for (j, plane) in bit_planes.iter().enumerate() {
                         let mut plane_pop = 0u32;
                         for i in (0..packed_a.len()).step_by(8) {
-                            let x_word =
-                                u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
-                            let q_word =
-                                u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
+                            let x_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                            let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
                             plane_pop += (x_word & q_word).count_ones();
                         }
                         xb_dot_qu += plane_pop << j;
@@ -910,16 +915,13 @@ fn bench_primitives(c: &mut Criterion) {
                 b.iter(|| {
                     let mut pops = [0u32; 4];
                     for i in (0..packed_a.len()).step_by(8) {
-                        let x_word =
-                            u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                        let x_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
                         for (j, plane) in bit_planes.iter().enumerate() {
-                            let q_word =
-                                u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
+                            let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
                             pops[j] += (x_word & q_word).count_ones();
                         }
                     }
-                    let xb_dot_qu =
-                        pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
+                    let xb_dot_qu = pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
                     black_box(xb_dot_qu);
                 });
             },
@@ -961,25 +963,21 @@ fn bench_primitives(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let mut pops = [0u32; 4];
-                    let plane_chunks: [_; 4] = std::array::from_fn(|j| {
-                        bit_planes[j].chunks_exact(8)
-                    });
-                    for (x_chunk, (p0, p1, p2, p3)) in
-                        packed_a.chunks_exact(8).zip(izip!(
-                            plane_chunks[0].clone(),
-                            plane_chunks[1].clone(),
-                            plane_chunks[2].clone(),
-                            plane_chunks[3].clone(),
-                        ))
-                    {
+                    let plane_chunks: [_; 4] =
+                        std::array::from_fn(|j| bit_planes[j].chunks_exact(8));
+                    for (x_chunk, (p0, p1, p2, p3)) in packed_a.chunks_exact(8).zip(izip!(
+                        plane_chunks[0].clone(),
+                        plane_chunks[1].clone(),
+                        plane_chunks[2].clone(),
+                        plane_chunks[3].clone(),
+                    )) {
                         let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
                         pops[0] += (x & u64::from_le_bytes(p0.try_into().unwrap())).count_ones();
                         pops[1] += (x & u64::from_le_bytes(p1.try_into().unwrap())).count_ones();
                         pops[2] += (x & u64::from_le_bytes(p2.try_into().unwrap())).count_ones();
                         pops[3] += (x & u64::from_le_bytes(p3.try_into().unwrap())).count_ones();
                     }
-                    let xb_dot_qu =
-                        pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
+                    let xb_dot_qu = pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
                     black_box(xb_dot_qu);
                 });
             },
@@ -1013,10 +1011,12 @@ fn bench_primitives(c: &mut Criterion) {
             &dim,
             |b, _| {
                 b.iter(|| {
-                    let (v_l, v_r) = values.iter().copied().fold(
-                        (f32::INFINITY, f32::NEG_INFINITY),
-                        |(lo, hi), v| (lo.min(v), hi.max(v)),
-                    );
+                    let (v_l, v_r) = values
+                        .iter()
+                        .copied()
+                        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+                            (lo.min(v), hi.max(v))
+                        });
                     black_box((v_l, v_r));
                 });
             },
@@ -1134,12 +1134,18 @@ fn bench_primitives(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     // P1: fused min+max in one pass
-                    let (v_l, v_r) = values.iter().copied().fold(
-                        (f32::INFINITY, f32::NEG_INFINITY),
-                        |(lo, hi), v| (lo.min(v), hi.max(v)),
-                    );
+                    let (v_l, v_r) = values
+                        .iter()
+                        .copied()
+                        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+                            (lo.min(v), hi.max(v))
+                        });
                     let range = v_r - v_l;
-                    let delta = if range > f32::EPSILON { range / 15.0 } else { 1.0 };
+                    let delta = if range > f32::EPSILON {
+                        range / 15.0
+                    } else {
+                        1.0
+                    };
                     let inv_delta = 1.0 / delta;
 
                     // P2+P4: flat planes, fuse quantize + sum + scatter
@@ -1178,7 +1184,11 @@ fn bench_primitives(c: &mut Criterion) {
                     let v_l = values.iter().copied().fold(f32::INFINITY, f32::min);
                     let v_r = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                     let range = v_r - v_l;
-                    let delta = if range > f32::EPSILON { range / 15.0 } else { 1.0 };
+                    let delta = if range > f32::EPSILON {
+                        range / 15.0
+                    } else {
+                        1.0
+                    };
                     let inv_delta = 1.0 / delta;
 
                     // P2+P4: flat planes, fuse quantize + sum + byte_chunks scatter
@@ -1233,13 +1243,7 @@ fn bench_primitives(c: &mut Criterion) {
         );
         group.bench_with_input(BenchmarkId::new("dq-float/full", dim), &dim, |b, _| {
             b.iter(|| {
-                black_box(code.distance_query_full_precision(
-                    &DistanceFunction::Euclidean,
-                    r_q,
-                    cn,
-                    cdq,
-                    qn,
-                ));
+                black_box(code.distance_query(&DistanceFunction::Euclidean, r_q, cn, cdq, qn));
             });
         });
 

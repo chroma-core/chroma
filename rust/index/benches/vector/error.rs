@@ -1,5 +1,17 @@
+//! Error analysis for RaBitQ quantization performance characteristics.
+//!
+//! Measures relative and absolute error of the distance estimator for 4-bit float,
+//! 1-bit float, and 1-bit bitwise (QuantizedQuery) methods.
+//!
+//! Run:
+//!   cargo bench -p chroma-index --bench quantization_error
+//!   cargo bench -p chroma-index --bench quantization_error -- --distance cosine
+//!   cargo bench -p chroma-index --bench quantization_error -- --distance ip
+//!
+//! CLI flags:
+//!   --distance D      distance function: euclidean (default), cosine, ip
 use chroma_distance::DistanceFunction;
-use chroma_index::quantization::{Code1Bit, Code4Bit, QuantizedQuery};
+use chroma_index::quantization::{Code1Bit, Code4Bit, QuantizedQuery, RabitqCode};
 use criterion::{criterion_group, criterion_main, Criterion};
 use faer::{
     col::ColRef,
@@ -120,6 +132,7 @@ fn print_error_analysis() {
 
     let total = N * N_QUERIES;
     let mut err_4bit = Vec::with_capacity(total);
+    let mut err_1bitf = Vec::with_capacity(total);
     let mut err_1bitw = Vec::with_capacity(total);
     // distance_code: both the data vector and the query are quantized codes.
     // This stacks the error from quantizing both sides, isolating the combined
@@ -131,20 +144,33 @@ fn print_error_analysis() {
     // unbiasedness claim.  Comparing against the relative-error means above
     // shows that the non-zero relative mean is a metric artefact, not a bug.
     let mut abs_4bit = Vec::with_capacity(total);
+    let mut abs_1bitf = Vec::with_capacity(total);
     let mut abs_1bitw = Vec::with_capacity(total);
     let mut abs_code4 = Vec::with_capacity(total);
     let mut abs_code1 = Vec::with_capacity(total);
 
+    // Unit-vector inner product errors: Δ(⟨n, n_q⟩) = -(d_est - d_true) / (2·‖r‖·‖r_q‖)
+    // The paper (Theorem 3.2, Eq. 15) bounds this as O(1/√D) with high probability.
+    // Extracting this from the Euclidean distance error isolates the RaBitQ estimator
+    // error from the norm scaling, letting us directly compare against the bound.
+    let mut ip_err_1bitf = Vec::with_capacity(total);
+    let mut ip_err_1bitw = Vec::with_capacity(total);
+
     for _ in 0..N_QUERIES {
         // Generate query as centroid + noise so that r_q is zero-mean.
         let noise = random_vec(&mut rng, DIM);
-        let query_raw: Vec<f32> = centroid_raw.iter().zip(&noise).map(|(c, n)| c + n).collect();
+        let query_raw: Vec<f32> = centroid_raw
+            .iter()
+            .zip(&noise)
+            .map(|(c, n)| c + n)
+            .collect();
         let query = rotate(&p, &query_raw);
         let r_q: Vec<f32> = query.iter().zip(&centroid).map(|(q, c)| q - c).collect();
         let cdq = c_dot_q(&centroid, &r_q);
         let qn = q_norm(&centroid, &r_q);
         // QuantizedQuery built once per query, amortized over all N codes.
         let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
+        let r_q_norm = r_q.iter().map(|x| x * x).sum::<f32>().sqrt();
         // Quantize the query itself so distance_code can treat it as another data code.
         let cq1_bytes = Code1Bit::quantize(&query, &centroid).as_ref().to_vec();
         let cq4_bytes = Code4Bit::quantize(&query, &centroid).as_ref().to_vec();
@@ -167,21 +193,31 @@ fn print_error_analysis() {
             let c4 = Code4Bit::new(codes_4[i].as_slice());
 
             let d4 = c4.distance_query(&df, &r_q, cn, cdq, qn);
-            let db = c1.distance_query(&df, &qq);
+            let d1f = c1.distance_query(&df, &r_q, cn, cdq, qn);
+            let db = c1.distance_4bit_query(&df, &qq);
             // distance_code: both vectors quantized; error comes from both sides.
             let dc4 = c4.distance_code(&df, &cq4, cn, DIM);
             let dc1 = c1.distance_code(&df, &cq1, cn, DIM);
 
             // Relative error: positive = overestimate, negative = underestimate.
             err_4bit.push((d4 - d_true) / d_true);
+            err_1bitf.push((d1f - d_true) / d_true);
             err_1bitw.push((db - d_true) / d_true);
             err_code4.push((dc4 - d_true) / d_true);
             err_code1.push((dc1 - d_true) / d_true);
 
             abs_4bit.push(d4 - d_true);
+            abs_1bitf.push(d1f - d_true);
             abs_1bitw.push(db - d_true);
             abs_code4.push(dc4 - d_true);
             abs_code1.push(dc1 - d_true);
+
+            // Extract unit-vector inner product error from the Euclidean distance error.
+            // d_est - d_true = -2·(⟨r, r_q⟩_est - ⟨r, r_q⟩_true)
+            // Δ(⟨n, n_q⟩) = -(d_est - d_true) / (2·‖r‖·‖r_q‖)
+            let denom = (2.0 * c1.norm() * r_q_norm).max(f32::EPSILON);
+            ip_err_1bitf.push(-(d1f - d_true) / denom);
+            ip_err_1bitw.push(-(db - d_true) / denom);
         }
     }
 
@@ -217,6 +253,7 @@ fn print_error_analysis() {
     };
 
     let s4 = compute_stats(&mut err_4bit);
+    let s1f = compute_stats(&mut err_1bitf);
     let sb = compute_stats(&mut err_1bitw);
     let sc4 = compute_stats(&mut err_code4);
     let sc1 = compute_stats(&mut err_code1);
@@ -227,25 +264,29 @@ fn print_error_analysis() {
     // Per-method descriptions printed in the header for quick reference.
     let methods_desc: &[(&str, &str)] = &[
         (
-            "4bit_float",
+            "4bit_data_full_query",
             "distance_query, 4-bit data code, raw f32 query (most accurate)",
         ),
         (
-            "1bit_bitwise",
+            "1bit_data_full_query",
+            "distance_query_full_precision, 1-bit data code, raw f32 query",
+        ),
+        (
+            "1bit_data_4bit_query",
             "distance_query_bitwise, 1-bit data + 4-bit quantized query (QuantizedQuery)",
         ),
         (
-            "4bit_code",
+            "4bit_data_4bit_query",
             "distance_code, 4-bit data code vs 4-bit query code (both sides quantized)",
         ),
         (
-            "1bit_code",
+            "1bit_data_1bit_query",
             "distance_code, 1-bit data code vs 1-bit query code (both sides quantized)",
         ),
     ];
 
     println!("\n{hr}");
-    println!("  Error analysis: relative_error = (d_est − d_true) / d_true");
+    println!("  Relative_error = (d_est − d_true) / d_true");
     println!(
         "  dim={DIM}, N={N} codes, {N_QUERIES} queries, {} samples/method",
         N * N_QUERIES
@@ -265,21 +306,22 @@ fn print_error_analysis() {
 
     let row = |name: &str, s: &Stats| {
         println!(
-            "  {:<20} {:>+8.3} {:>8.3} {:>8.3} {:>+8.3} {:>+8.3} {:>+8.3} {:>+8.3} {:>+8.3}",
+            "  {:<20} {:>+8.5} {:>8.5} {:>8.5} {:>+8.5} {:>+8.5} {:>+8.5} {:>+8.5} {:>+8.5}",
             name, s.mean, s.std, s.rmse, s.p5, s.p25, s.p50, s.p75, s.p95
         );
     };
-    row("4bit_float", &s4);
-    row("1bit_bitwise", &sb);
+    row("4bit_data_full_query", &s4);
+    row("1bit_data_full_query", &s1f);
+    row("1bit_data_4bit_query", &sb);
     println!("{sep}");
-    row("4bit_code", &sc4);
-    row("1bit_code", &sc1);
+    row("4bit_data_4bit_query", &sc4);
+    row("1bit_data_1bit_query", &sc1);
 
     // ── Absolute error summary ────────────────────────────────────────────────
     // See the block comment above the function for a full explanation of why
     // this mean may be non-zero in our random-query test setup.  In practice
     // (fixed queries, real data) the bias is not present.
-    println!("{sep}");
+    println!("\n{hr}");
     println!("  Absolute error (d_est − d_true)  [see comment re: test-setup bias]");
     println!("{sep}");
     println!("  {:<20} {:>12} {:>12}", "method", "mean", "std");
@@ -296,10 +338,47 @@ fn print_error_analysis() {
         let (mean, std) = abs_summary(v);
         println!("  {:<20} {:>+12.4} {:>12.4}", name, mean, std);
     };
-    abs_row("4bit_float", &abs_4bit);
-    abs_row("1bit_bitwise", &abs_1bitw);
-    abs_row("4bit_code", &abs_code4);
-    abs_row("1bit_code", &abs_code1);
+    abs_row("4bit_data_full_query", &abs_4bit);
+    abs_row("1bit_data_full_query", &abs_1bitf);
+    abs_row("1bit_data_4bit_query", &abs_1bitw);
+    abs_row("4bit_data_4bit_query", &abs_code4);
+    abs_row("1bit_data_1bit_query", &abs_code1);
+
+    // ── Unit-vector inner product error (paper's Theorem 3.2) ──────────────
+    //
+    // The paper bounds |⟨ō,q⟩/⟨ō,o⟩ - ⟨o,q⟩| = O(1/√D).
+    // In our variables: |⟨n, n_q⟩_est - ⟨n, n_q⟩_true| = O(1/√D)
+    // where n = r/‖r‖, n_q = r_q/‖r_q‖.
+    //
+    // We extract this from: Δ(⟨n, n_q⟩) = -(d_est - d_true) / (2·‖r‖·‖r_q‖)
+    // This works because all other terms in the Euclidean distance formula
+    // are exact; only ⟨r, r_q⟩ is estimated.
+    println!("\n{hr}");
+    println!(
+        "  Unit-vector inner product error: |⟨n,n_q⟩_est - ⟨n,n_q⟩_true|  (paper: O(1/√D) = O({:.4}))",
+        1.0 / (DIM as f32).sqrt()
+    );
+    println!("{sep}");
+    println!(
+        "  {:<20} {:>12} {:>12} {:>12} {:>12}",
+        "method", "mean", "std", "p95(|err|)", "p99(|err|)"
+    );
+    println!("{sep}");
+    let ip_summary = |name: &str, v: &mut Vec<f32>| {
+        let n = v.len() as f32;
+        let mean = v.iter().sum::<f32>() / n;
+        let std = (v.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / n).sqrt();
+        let mut abs_v: Vec<f32> = v.iter().map(|x| x.abs()).collect();
+        abs_v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let p95 = abs_v[((0.95 * n) as usize).min(abs_v.len() - 1)];
+        let p99 = abs_v[((0.99 * n) as usize).min(abs_v.len() - 1)];
+        println!(
+            "  {:<20} {:>+12.6} {:>12.6} {:>12.6} {:>12.6}",
+            name, mean, std, p95, p99
+        );
+    };
+    ip_summary("1bit_data_full_query", &mut ip_err_1bitf);
+    ip_summary("1bit_data_4bit_query", &mut ip_err_1bitw);
 
     // ── Histograms ────────────────────────────────────────────────────────────
     // All methods share the same bin edges and the same bar scale
@@ -318,6 +397,7 @@ fn print_error_analysis() {
             abs[idx]
         };
         let max_p99 = p99_abs(&err_4bit)
+            .max(p99_abs(&err_1bitf))
             .max(p99_abs(&err_1bitw))
             .max(p99_abs(&err_code4))
             .max(p99_abs(&err_code1));
@@ -325,7 +405,7 @@ fn print_error_analysis() {
         ((max_p99 / 0.01).ceil() * 0.01).clamp(0.01, 1.0)
     };
 
-    println!("{sep}");
+    println!("\n{hr}");
     println!(
         "  Histograms  (±{:.0}% range, {N_BINS} bins, bars scaled to global max)",
         range * 100.0
@@ -349,12 +429,14 @@ fn print_error_analysis() {
     };
 
     let h4 = make_hist(&err_4bit);
+    let h1f = make_hist(&err_1bitf);
     let hb = make_hist(&err_1bitw);
     let hc4 = make_hist(&err_code4);
     let hc1 = make_hist(&err_code1);
 
     let global_max = h4
         .iter()
+        .chain(&h1f)
         .chain(&hb)
         .chain(&hc4)
         .chain(&hc1)
@@ -380,10 +462,11 @@ fn print_error_analysis() {
     };
 
     let methods: &[(&str, &[usize])] = &[
-        ("4bit_float", &h4),
-        ("1bit_bitwise", &hb),
-        ("4bit_code", &hc4),
-        ("1bit_code", &hc1),
+        ("4bit_data_full_query", &h4),
+        ("1bit_data_full_query", &h1f),
+        ("1bit_data_4bit_query", &hb),
+        ("4bit_data_4bit_query", &hc4),
+        ("1bit_data_1bit_query", &hc1),
     ];
 
     for (name, hist) in methods {
@@ -401,14 +484,13 @@ fn print_error_analysis() {
         }
     }
 
-    println!("\n{hr}\n");
+    println!("\n{hr}");
 }
 
 fn bench_error_analysis(c: &mut Criterion) {
     let _ = c;
     print_error_analysis();
 }
-
 
 criterion_group!(benches, bench_error_analysis);
 criterion_main!(benches);

@@ -118,7 +118,7 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
     ///          = 0.5 · Σ sign(g[i]) · r_q[i]
     ///          = 0.5 · (Σ_{bit=1} r_q[i] − Σ_{bit=0} r_q[i])
     ///          = 0.5 · (Σ_{g[i]=+0.5} r_q[i] − Σ_{g[i]=−0.5} r_q[i])
-    pub fn distance_query_full_precision(
+    pub fn distance_query(
         &self,
         distance_fn: &DistanceFunction,
         r_q: &[f32],
@@ -247,7 +247,7 @@ impl<T: AsRef<[u8]>> Code1Bit<T> {
     /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
     /// slices are contiguous and extracted with cheap slice indexing before
     /// the loop.
-    pub fn distance_query(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
+    pub fn distance_4bit_query(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
         let packed = self.packed();
 
         // Compute ⟨x_b, q_u⟩ (the binary versions of g and r_q) via bit planes.
@@ -989,7 +989,7 @@ mod tests {
             }
 
             let code = Code1Bit::quantize(&embedding, &centroid);
-            let dist = code.distance_query_full_precision(
+            let dist = code.distance_query(
                 &DistanceFunction::Cosine,
                 &embedding,
                 c_norm,
@@ -1045,8 +1045,8 @@ mod tests {
             let code_owned = Code1Bit::quantize(&emb, &centroid);
             let code = Code1Bit::new(code_owned.as_ref());
 
-            let float_dist = code.distance_query_full_precision(&df, &r_q, c_norm, c_dot_q, q_norm);
-            let bitwise_dist = code.distance_query(&df, &qq);
+            let float_dist = code.distance_query(&df, &r_q, c_norm, c_dot_q, q_norm);
+            let bitwise_dist = code.distance_4bit_query(&df, &qq);
             let lut_dist = luts.distance_query(&code, &df);
 
             let tol = float_dist.abs() * 0.05 + 1.0;
@@ -1126,13 +1126,8 @@ mod tests {
                     let q_norm = (f32::dot(q, q).unwrap_or(0.0) as f32).sqrt();
                     let c_dot_q = f32::dot(&centroid, q).unwrap_or(0.0) as f32;
                     let r_q: Vec<f32> = centroid.iter().zip(q).map(|(c, q)| q - c).collect();
-                    let estimated_query = codes[i].distance_query_full_precision(
-                        &distance_fn,
-                        &r_q,
-                        c_norm,
-                        c_dot_q,
-                        q_norm,
-                    );
+                    let estimated_query =
+                        codes[i].distance_query(&distance_fn, &r_q, c_norm, c_dot_q, q_norm);
                     rel_errors_query
                         .push((exact - estimated_query).abs() / exact.abs().max(f32::EPSILON));
                 }
