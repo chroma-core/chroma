@@ -7,7 +7,11 @@ use rand::{seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng};
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
-use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
+use crate::{
+    hnsw_provider::HnswIndexRef,
+    quantization::GenericCode,
+    SearchResult,
+};
 
 /// A point with its ID, version, and embedding.
 pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
@@ -803,6 +807,7 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
 /// Query a quantized cluster, returning deduplicated, sorted results.
 ///
 /// Uses RaBitQ distance estimation between the query and each quantized point.
+/// `data_bits` selects the code format: 1 for `Code1Bit`, 4 for `Code4Bit`.
 /// The `predicate` receives `(id, version)` for each entry and should return
 /// `true` to include the entry in the results. Duplicate IDs are skipped
 /// (first valid occurrence wins).
@@ -810,13 +815,14 @@ pub fn query_quantized_cluster(
     cluster: &QuantizedCluster<'_>,
     query: &[f32],
     distance_function: &DistanceFunction,
+    data_bits: u8,
     predicate: impl Fn(u32, u32) -> bool,
 ) -> SearchResult {
     if cluster.ids.is_empty() {
         return SearchResult::default();
     }
 
-    // Precompute query-related values.
+    let dim = cluster.center.len();
     let c_norm = (f32::dot(cluster.center, cluster.center).unwrap_or(0.0) as f32).sqrt();
     let c_dot_q = f32::dot(cluster.center, query).unwrap_or(0.0) as f32;
     let q_norm = (f32::dot(query, query).unwrap_or(0.0) as f32).sqrt();
@@ -826,7 +832,9 @@ pub fn query_quantized_cluster(
         .map(|(q, c)| q - c)
         .collect::<Vec<_>>();
 
-    let code_size = Code::<&[u8]>::size(cluster.center.len());
+    let code = GenericCode::new(data_bits);
+    let code_size = code.size(dim);
+
     let mut seen = HashSet::new();
     let mut keys = Vec::new();
     let mut distances = Vec::new();
@@ -840,8 +848,14 @@ pub fn query_quantized_cluster(
         if !predicate(*id, *version) || !seen.insert(*id) {
             continue;
         }
-        let code = Code::<&[u8]>::new(code_bytes);
-        let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
+        let distance = code.distance_query(
+            code_bytes,
+            distance_function,
+            &r_q,
+            c_norm,
+            c_dot_q,
+            q_norm,
+        );
         keys.push(*id);
         distances.push(distance);
     }

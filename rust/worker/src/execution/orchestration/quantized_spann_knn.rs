@@ -7,7 +7,7 @@ use chroma_system::{
     OrchestratorContext, TaskMessage, TaskResult,
 };
 use chroma_types::{
-    default_search_nprobe,
+    default_search_nprobe, InternalSpannConfiguration,
     operator::{Knn, KnnOutput, Merge, RecordMeasure},
     CollectionAndSegments,
 };
@@ -33,6 +33,10 @@ use crate::execution::operators::{
         QuantizedSpannLoadClusterError, QuantizedSpannLoadClusterInput,
         QuantizedSpannLoadClusterOperator, QuantizedSpannLoadClusterOutput,
     },
+    quantized_spann_rerank::{
+        QuantizedSpannRerankError, QuantizedSpannRerankInput, QuantizedSpannRerankOperator,
+        QuantizedSpannRerankOutput,
+    },
 };
 
 use super::knn_filter::{KnnError, KnnFilterOutput};
@@ -47,6 +51,13 @@ pub struct QuantizedSpannKnnOrchestrator {
     reader: Option<QuantizedSpannSegmentReader>,
     rotated_query: Option<Arc<[f32]>>,
     spann_provider: SpannProvider,
+
+    // Rerank factors read from collection config (1 = disabled).
+    centroid_rerank_factor: usize,
+    vector_rerank_factor: usize,
+
+    /// Data quantization bits (1 or 4), derived from the Quantization variant.
+    data_bits: u8,
 
     // State tracking.
     // num_bruteforces is set when either there is no reader (0) or center search completes.
@@ -66,6 +77,23 @@ impl QuantizedSpannKnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
     ) -> Self {
+        // Derive configuration from the collection's SPANN schema.
+        let spann_index_config = collection_and_segments
+            .collection
+            .schema
+            .as_ref()
+            .and_then(|s| s.get_spann_config());
+
+        let spann_config: InternalSpannConfiguration = spann_index_config
+            .as_ref()
+            .map(|(config, space)| InternalSpannConfiguration::from((Some(space), config)))
+            .unwrap_or_default();
+
+        let data_bits = spann_index_config
+            .as_ref()
+            .and_then(|(config, _)| config.quantize.data_bits())
+            .unwrap_or(4);
+
         Self {
             collection_and_segments,
             context: OrchestratorContext::new(dispatcher),
@@ -75,6 +103,9 @@ impl QuantizedSpannKnnOrchestrator {
             reader: None,
             rotated_query: None,
             spann_provider,
+            centroid_rerank_factor: spann_config.centroid_rerank_factor as usize,
+            vector_rerank_factor: spann_config.vector_rerank_factor as usize,
+            data_bits,
             num_bruteforces: None,
             log_and_bruteforce_results: Vec::new(),
             result_channel: None,
@@ -87,8 +118,11 @@ impl QuantizedSpannKnnOrchestrator {
             .num_bruteforces
             .is_some_and(|num_bruteforces| self.log_and_bruteforce_results.len() > num_bruteforces)
         {
+            // Merge up to k * vector_rerank_factor candidates; the rerank step (if enabled)
+            // will then trim to k with exact distances.
+            let merge_k = (self.knn.fetch as usize * self.vector_rerank_factor) as u32;
             let task = wrap(
-                Box::new(Merge { k: self.knn.fetch }),
+                Box::new(Merge { k: merge_k }),
                 KnnMergeInput {
                     batch_measures: std::mem::take(&mut self.log_and_bruteforce_results),
                 },
@@ -219,6 +253,7 @@ impl Handler<TaskResult<QuantizedSpannLoadCenterOutput, QuantizedSpannLoadCenter
             Box::new(self.knn.clone()),
             QuantizedSpannCenterSearchInput {
                 count: search_nprobe,
+                centroid_rerank_factor: self.centroid_rerank_factor,
                 reader: output.reader,
             },
             ctx.receiver(),
@@ -303,8 +338,13 @@ impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClust
             .expect("rotated_query must be set when load cluster succeeds")
             .clone();
 
+        // Fetch k * vector_rerank_factor candidates per cluster; the merge + rerank steps
+        // will then trim to k with exact distances.
+        let bf_count = self.knn.fetch as usize * self.vector_rerank_factor;
+
         let bf_operator = QuantizedSpannBruteforceOperator {
-            count: self.knn.fetch as usize,
+            count: bf_count,
+            data_bits: self.data_bits,
             distance_function,
             filter: self
                 .knn_filter_output
@@ -352,6 +392,48 @@ impl Handler<TaskResult<KnnMergeOutput, KnnMergeError>> for QuantizedSpannKnnOrc
     async fn handle(
         &mut self,
         message: TaskResult<KnnMergeOutput, KnnMergeError>,
+        ctx: &ComponentContext<Self>,
+    ) {
+        let output = match self.ok_or_terminate(message.into_inner(), ctx).await {
+            Some(output) => output,
+            None => return,
+        };
+
+        if self.vector_rerank_factor <= 1 {
+            // No vector reranking: return the merged approximate results directly.
+            self.terminate_with_result(Ok(output.measures), ctx).await;
+            return;
+        }
+
+        // Dispatch the rerank operator to re-score candidates with exact distances.
+        let rerank_operator = QuantizedSpannRerankOperator {
+            k: self.knn.fetch as usize,
+            embedding: self.knn.embedding.clone(),
+            distance_function: self.knn_filter_output.distance_function.clone(),
+            blockfile_provider: self.spann_provider.blockfile_provider.clone(),
+            record_segment: self.collection_and_segments.record_segment.clone(),
+        };
+
+        let rerank_task = wrap(
+            Box::new(rerank_operator),
+            QuantizedSpannRerankInput {
+                candidates: output.measures,
+            },
+            ctx.receiver(),
+            self.context.task_cancellation_token.clone(),
+        );
+        self.send(rerank_task, ctx, Some(Span::current())).await;
+    }
+}
+
+#[async_trait]
+impl Handler<TaskResult<QuantizedSpannRerankOutput, QuantizedSpannRerankError>>
+    for QuantizedSpannKnnOrchestrator
+{
+    type Result = ();
+    async fn handle(
+        &mut self,
+        message: TaskResult<QuantizedSpannRerankOutput, QuantizedSpannRerankError>,
         ctx: &ComponentContext<Self>,
     ) {
         let output = match self.ok_or_terminate(message.into_inner(), ctx).await {

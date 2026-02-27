@@ -1,0 +1,315 @@
+cargo bench -p chroma-index --bench quantization
+
+================================================================================
+Thread Scaling Summary (1 thread vs 8 threads, N=1024, dim=1024)
+================================================================================
+Run: cargo bench -p chroma-index --bench quantization -- thread_scaling
+
+                    | What it does                          | 1 thread      | 8 threads     | Speedup |
+--------------------|---------------------------------------|---------------|---------------|---------|
+quant-4bit           | 4-bit data encode (ray-walk)          | 54 ms, 74 MiB/s  | 8.0 ms, 500 MiB/s  | ~6.7x  |
+quant-1bit           | 1-bit data encode (sign-bit)          | 1.0 ms, 3.8 GiB/s | 0.21 ms, 18 GiB/s | ~4.8x  |
+dq-4f (cold)        | 4-bit code vs f32 query (grid unpack)  | 2.3 ms, 1.9 GiB/s | 0.37 ms, 12 GiB/s | ~6.3x  |
+dq-float (cold)     | 1-bit code vs f32 query (signed_dot)   | 2.1 ms, 2.0 GiB/s | 0.32 ms, 13 GiB/s | ~6.5x  |
+dq-bw (cold)        | 1-bit code vs QuantizedQuery (AND+pop) | 2.9 ms, 1.4 GiB/s | 0.49 ms, 8.3 GiB/s| ~6.0x  |
+d-lut (cold)        | 1-bit code vs BatchQueryLuts (LUT)     | 10.2 ms, 405 MiB/s | 1.6 ms, 2.5 GiB/s | ~6.2x  |
+
+4-bit quantization scales near-linearly (~6.7x with 8 threads). 1-bit quantize
+scales ~4.8x (likely memory-bandwidth bound; sign_pack/abs_sum dominate).
+Distance-query methods scale ~6x; dq-bw and d-lut benefit from parallel
+QuantizedQuery/LUT build amortized across threads.
+
+================================================================================
+
+  [quant-4bit/1024] 512 embeddings → 4-bit ray-walk codes
+quantize/quant-4bit/1024
+                        time:   [39.088 ms 42.087 ms 45.279 ms]
+                        thrpt:  [44.171 MiB/s 47.521 MiB/s 51.167 MiB/s]
+
+  [quant-1bit/1024] 512 embeddings → sign-bit codes
+quantize/quant-1bit/1024
+                        time:   [519.76 µs 531.90 µs 549.80 µs]
+                        thrpt:  [3.5524 GiB/s 3.6720 GiB/s 3.7577 GiB/s]
+
+  [quant-query/1024] 512 queries → QuantizedQuery (4-bit planes, §3.3.1)
+Benchmarking quantize/quant-query/1024: Warming up for 3.0000 s
+quantize/quant-query/1024
+                        time:   [1.5188 ms 1.5356 ms 1.5645 ms]
+                        thrpt:  [1.2484 GiB/s 1.2719 GiB/s 1.2859 GiB/s]
+
+  [quant-lut/1024] 512 queries → BatchQueryLuts (nibble LUTs, §3.3.2)
+quantize/quant-lut/1024 time:   [5.1125 ms 5.1256 ms 5.1389 ms]
+                        thrpt:  [389.19 MiB/s 390.20 MiB/s 391.20 MiB/s]
+
+
+  [dc-1bit/1024] 256 pairs; simsimd hamming (NEON CNT / AVX-512 VPOPCNTDQ)
+distance_code/dc-1bit/1024
+                        time:   [2.4514 µs 2.4543 µs 2.4574 µs]
+                        thrpt:  [27.942 GiB/s 27.977 GiB/s 28.011 GiB/s]
+
+
+  [dc-4bit/1024] 256 pairs; nibble unpack + dot
+distance_code/dc-4bit/1024
+                        time:   [174.11 µs 174.41 µs 174.76 µs]
+                        thrpt:  [1.4297 GiB/s 1.4326 GiB/s 1.4351 GiB/s]
+
+
+  [dq-4f/1024] cold 512 queries; grid unpack + f32 dot (reference quality ceiling)
+Benchmarking distance_query/dq-4f/1024: Warming up for 3.0000 s
+distance_query/dq-4f/1024
+                        time:   [1.1354 ms 1.1396 ms 1.1452 ms]
+                        thrpt:  [1.9238 GiB/s 1.9332 GiB/s 1.9403 GiB/s]
+
+  [dq-float/1024] cold 512 queries; signed_dot (bits→±1.0 f32, simsimd dot)
+Benchmarking distance_query/dq-float/1024: Warming up for 3.0000 s
+distance_query/dq-float/1024
+                        time:   [1.0192 ms 1.0222 ms 1.0257 ms]
+                        thrpt:  [1.9712 GiB/s 1.9779 GiB/s 1.9837 GiB/s]
+
+  [dq-bw/1024] cold 512 queries; QuantizedQuery build + AND+popcount (§3.3.1)
+Benchmarking distance_query/dq-bw/1024: Warming up for 3.0000 s
+distance_query/dq-bw/1024
+                        time:   [1.4466 ms 1.4578 ms 1.4788 ms]
+                        thrpt:  [1.3671 GiB/s 1.3869 GiB/s 1.3976 GiB/s]
+
+  [d-lut/1024] cold 512 queries; BatchQueryLuts build + nibble lookup (§3.3.2)
+distance_query/d-lut/1024
+                        time:   [5.1299 ms 5.1414 ms 5.1534 ms]
+                        thrpt:  [401.73 MiB/s 402.67 MiB/s 403.58 MiB/s]
+
+  [dq-4f/scan] hot 2048 codes @ dim=1024; grid unpack + f32 dot (quality ceiling)
+Benchmarking distance_query/dq-4f/scan: Warming up for 3.0000 s
+distance_query/dq-4f/scan
+                        time:   [1.0113 ms 1.0292 ms 1.0606 ms]
+                        thrpt:  [964.93 MiB/s 994.41 MiB/s 1012.0 MiB/s]
+
+
+  [dq-float/scan] hot 2048 codes @ dim=1024; signed_dot; query in L1 (baseline)
+distance_query/dq-float/scan
+                        time:   [435.42 µs 437.75 µs 441.71 µs]
+                        thrpt:  [636.73 MiB/s 642.49 MiB/s 645.93 MiB/s]
+
+  [dq-bw/scan] hot 2048 codes @ dim=1024; QuantizedQuery built once, AND+popcount (§3.3.1)
+distance_query/dq-bw/scan
+                        time:   [39.809 µs 40.626 µs 42.185 µs]
+                        thrpt:  [6.5109 GiB/s 6.7606 GiB/s 6.8994 GiB/s]
+
+  [d-lut/scan] hot 2048 codes @ dim=1024; BatchQueryLuts built once, nibble lookup (§3.3.2)
+distance_query/d-lut/scan
+                        time:   [350.40 µs 354.36 µs 362.00 µs]
+                        thrpt:  [776.94 MiB/s 793.70 MiB/s 802.66 MiB/s]
+
+
+  [quant-4bit/1t] 1024 embeddings → 4-bit, 1 thread(s)
+Benchmarking thread_scaling/quant-4bit/1: Warming up for 3.0000 s
+thread_scaling/quant-4bit/1
+                        time:   [53.451 ms 54.044 ms 54.958 ms]
+                        thrpt:  [72.783 MiB/s 74.014 MiB/s 74.835 MiB/s]
+
+
+  [quant-1bit/1t] 1024 embeddings → 1-bit, 1 thread(s)
+Benchmarking thread_scaling/quant-1bit/1: Warming up for 3.0000 s
+thread_scaling/quant-1bit/1
+                        time:   [1.0229 ms 1.0282 ms 1.0334 ms]
+                        thrpt:  [3.7800 GiB/s 3.7991 GiB/s 3.8188 GiB/s]
+
+
+  [dq-4f/1t] 1024 cold 4-bit queries, 1 thread(s)
+thread_scaling/dq-4f/1  time:   [2.3117 ms 2.3341 ms 2.3651 ms]
+                        thrpt:  [1.8629 GiB/s 1.8877 GiB/s 1.9059 GiB/s]
+
+  [dq-float/1t] 1024 cold 1-bit queries, 1 thread(s)
+thread_scaling/dq-float/1
+                        time:   [2.0573 ms 2.0596 ms 2.0622 ms]
+                        thrpt:  [1.9608 GiB/s 1.9633 GiB/s 1.9655 GiB/s]
+
+  [dq-bw/1t] 1024 cold 1-bit queries (AND+popcount §3.3.1), 1 thread(s)
+thread_scaling/dq-bw/1  time:   [2.8888 ms 2.8992 ms 2.9116 ms]
+                        thrpt:  [1.3888 GiB/s 1.3947 GiB/s 1.3997 GiB/s]
+
+
+  [d-lut/1t] 1024 cold 1-bit queries (nibble LUT §3.3.2), 1 thread(s)
+thread_scaling/d-lut/1  time:   [10.208 ms 10.227 ms 10.248 ms]
+                        thrpt:  [404.06 MiB/s 404.89 MiB/s 405.63 MiB/s]
+
+  [quant-4bit/8t] 1024 embeddings → 4-bit, 8 thread(s)
+thread_scaling/quant-4bit/8
+                        time:   [7.9610 ms 8.0219 ms 8.0880 ms]
+                        thrpt:  [494.56 MiB/s 498.64 MiB/s 502.45 MiB/s]
+
+  [quant-1bit/8t] 1024 embeddings → 1-bit, 8 thread(s)
+thread_scaling/quant-1bit/8
+                        time:   [205.96 µs 213.61 µs 224.26 µs]
+                        thrpt:  [17.418 GiB/s 18.287 GiB/s 18.966 GiB/s]
+
+  [dq-4f/8t] 1024 cold 4-bit queries, 8 thread(s)
+thread_scaling/dq-4f/8  time:   [369.80 µs 371.10 µs 372.45 µs]
+                        thrpt:  [11.830 GiB/s 11.873 GiB/s 11.914 GiB/s]
+
+
+  [dq-float/8t] 1024 cold 1-bit queries, 8 thread(s)
+thread_scaling/dq-float/8
+                        time:   [315.14 µs 315.96 µs 316.84 µs]
+                        thrpt:  [12.762 GiB/s 12.798 GiB/s 12.831 GiB/s]
+
+  [dq-bw/8t] 1024 cold 1-bit queries (AND+popcount §3.3.1), 8 thread(s)
+thread_scaling/dq-bw/8  time:   [470.76 µs 486.55 µs 508.05 µs]
+                        thrpt:  [7.9590 GiB/s 8.3108 GiB/s 8.5894 GiB/s]
+
+  [d-lut/8t] 1024 cold 1-bit queries (nibble LUT §3.3.2), 8 thread(s)
+Benchmarking thread_scaling/d-lut/8: Warming up for 3.0000 s
+thread_scaling/d-lut/8  time:   [1.5478 ms 1.6350 ms 1.7506 ms]
+                        thrpt:  [2.3098 GiB/s 2.4732 GiB/s 2.6124 GiB/s]
+
+
+  [quant-1bit/vec_sub/1024] r = emb − centroid  [quantize step 1]
+Benchmarking primitives/quant-1bit/vec_sub/1024: Collecting 100 samples in estimated 5.0003 s (57M iterati
+primitives/quant-1bit/vec_sub/1024
+                        time:   [87.765 ns 88.485 ns 89.338 ns]
+                        thrpt:  [85.399 GiB/s 86.223 GiB/s 86.929 GiB/s]
+
+
+  [quant-1bit/simsimd_dot/1024] ⟨a, b⟩ via simsimd  [quantize: norm², radial]
+Benchmarking primitives/quant-1bit/simsimd_dot/1024: Collecting 100 samples in estimated 5.0006 s (19M ite
+primitives/quant-1bit/simsimd_dot/1024
+                        time:   [255.86 ns 256.13 ns 256.41 ns]
+                        thrpt:  [29.754 GiB/s 29.788 GiB/s 29.818 GiB/s]
+
+
+  [quant-1bit/abs_sum/1024] Σ|r[i]|, auto-vectorizes to VABSPS+VADDPS  [quantize: correction]
+Benchmarking primitives/quant-1bit/abs_sum/1024: Collecting 100 samples in estimated 5.0000 s (6.0M iterat
+primitives/quant-1bit/abs_sum/1024
+                        time:   [837.88 ns 840.93 ns 843.88 ns]
+                        thrpt:  [4.5204 GiB/s 4.5363 GiB/s 4.5528 GiB/s]
+
+  [quant-1bit/sign_pack/1024] IEEE sign-bit extract + byte pack, 8 f32 → 1 byte  [quantize: packed codes]
+Benchmarking primitives/quant-1bit/sign_pack/1024: Collecting 100 samples in estimated 5.0007 s (16M itera
+primitives/quant-1bit/sign_pack/1024
+                        time:   [321.08 ns 326.32 ns 335.93 ns]
+                        thrpt:  [11.356 GiB/s 11.690 GiB/s 11.881 GiB/s]
+
+
+  [quant-1bit/popcount/1024] u64 popcount over packed bytes  [quantize: signed_sum]
+Benchmarking primitives/quant-1bit/popcount/1024: Collecting 100 samples in estimated 5.0000 s (1.6B itera
+primitives/quant-1bit/popcount/1024
+                        time:   [3.1691 ns 3.1738 ns 3.1788 ns]
+                        thrpt:  [37.501 GiB/s 37.560 GiB/s 37.616 GiB/s]
+
+
+  [dq-float/signed_dot/1024] SIGN_TABLE lookup + simsimd dot  [distance_query: THE hot kernel]
+Benchmarking primitives/dq-float/signed_dot/1024: Collecting 100 samples in estimated 5.0002 s (25M iterat
+primitives/dq-float/signed_dot/1024
+                        time:   [194.84 ns 195.10 ns 195.38 ns]
+                        thrpt:  [20.134 GiB/s 20.163 GiB/s 20.190 GiB/s]
+
+  [dq-float/sign_expand/1024] bits→±1.0 expansion only (no dot)  [signed_dot step 1 of 2]
+Benchmarking primitives/dq-float/sign_expand/1024: Collecting 100 samples in estimated 5.0004 s (22M itera
+primitives/dq-float/sign_expand/1024
+                        time:   [222.55 ns 223.28 ns 224.03 ns]
+                        thrpt:  [544.89 MiB/s 546.72 MiB/s 548.50 MiB/s]
+
+
+  [dc-1bit/hamming/scalar/1024] scalar u64 XOR + POPCNT  [distance_code kernel, baseline]
+Benchmarking primitives/dc-1bit/hamming/scalar/1024: Collecting 100 samples in estimated 5.0000 s (476M it
+primitives/dc-1bit/hamming/scalar/1024
+                        time:   [10.404 ns 10.415 ns 10.428 ns]
+                        thrpt:  [22.864 GiB/s 22.891 GiB/s 22.915 GiB/s]
+
+
+  2 (2.00%) low severe
+  [dc-1bit/hamming/simsimd/1024] simsimd::BinarySimilarity::hamming (NEON CNT / AVX-512 VPOPCNTDQ)  [C1]
+Benchmarking primitives/dc-1bit/hamming/simsimd/1024: Collecting 100 samples in estimated 5.0000 s (787M i
+primitives/dc-1bit/hamming/simsimd/1024
+                        time:   [6.6601 ns 6.8188 ns 7.0056 ns]
+                        thrpt:  [34.033 GiB/s 34.965 GiB/s 35.798 GiB/s]
+
+  [dq-bw/and_popcount/sequential/1024] 4 sequential passes over x_b (baseline)  [distance_query_bitwise kernel]
+Benchmarking primitives/dq-bw/and_popcount/sequential/1024: Collecting 100 samples in estimated 5.0002 s (
+primitives/dq-bw/and_popcount/sequential/1024
+                        time:   [47.139 ns 48.118 ns 49.358 ns]
+                        thrpt:  [12.076 GiB/s 12.387 GiB/s 12.645 GiB/s]
+
+  [dq-bw/and_popcount/interleaved/1024] [B1] 1 pass over x_b, 4 planes per word  [distance_query_bitwise kernel]
+Benchmarking primitives/dq-bw/and_popcount/interleaved/1024: Collecting 100 samples in estimated 5.0002 s
+primitives/dq-bw/and_popcount/interleaved/1024
+                        time:   [41.816 ns 43.332 ns 44.907 ns]
+                        thrpt:  [13.273 GiB/s 13.755 GiB/s 14.254 GiB/s]
+
+  [dq-bw/and_popcount/chunks/1024] [B2] chunks_exact(8) — eliminates index bounds check  [distance_query_bitwise kernel]
+Benchmarking primitives/dq-bw/and_popcount/chunks/1024: Collecting 100 samples in estimated 5.0000 s (210M
+primitives/dq-bw/and_popcount/chunks/1024
+                        time:   [19.617 ns 20.363 ns 21.325 ns]
+                        thrpt:  [27.950 GiB/s 29.271 GiB/s 30.384 GiB/s]
+
+  [dq-bw/and_popcount/interleaved_chunks/1024] [B1+B2] interleaved + chunks_exact  [distance_query_bitwise kernel]
+Benchmarking primitives/dq-bw/and_popcount/interleaved_chunks/1024: Collecting 100 samples in estimated 5.
+primitives/dq-bw/and_popcount/interleaved_chunks/1024
+                        time:   [17.847 ns 18.776 ns 19.827 ns]
+                        thrpt:  [30.063 GiB/s 31.746 GiB/s 33.397 GiB/s]
+
+  [quant-query/min_max/two_pass/1024] two separate fold passes for min and max (baseline)
+Benchmarking primitives/quant-query/min_max/two_pass/1024: Collecting 100 samples in estimated 5.0003 s (2
+primitives/quant-query/min_max/two_pass/1024
+                        time:   [163.93 ns 165.28 ns 166.93 ns]
+                        thrpt:  [22.851 GiB/s 23.080 GiB/s 23.271 GiB/s]
+
+  [quant-query/min_max/fused/1024] [P1] single fold pass for min+max simultaneously
+Benchmarking primitives/quant-query/min_max/fused/1024: Collecting 100 samples in estimated 5.0021 s (6.6M
+primitives/quant-query/min_max/fused/1024
+                        time:   [639.16 ns 652.89 ns 670.73 ns]
+                        thrpt:  [5.6873 GiB/s 5.8428 GiB/s 5.9683 GiB/s]
+
+  [quant-query/quantize_elements/1024] round((v-v_l)/delta), clamp to 0..15 — allocates Vec<u32>  [baseline]
+Benchmarking primitives/quant-query/quantize_elements/1024: Collecting 100 samples in estimated 5.0008 s (
+primitives/quant-query/quantize_elements/1024
+                        time:   [165.02 ns 165.47 ns 165.94 ns]
+                        thrpt:  [22.988 GiB/s 23.054 GiB/s 23.116 GiB/s]
+
+
+  [quant-query/bit_plane_decompose/baseline/1024] 4 × Vec alloc + scatter with branch  [baseline]
+Benchmarking primitives/quant-query/bit_plane_decompose/baseline/1024: Collecting 100 samples in estimated
+primitives/quant-query/bit_plane_decompose/baseline/1024
+                        time:   [2.2839 µs 2.2904 µs 2.2996 µs]
+                        thrpt:  [1.6589 GiB/s 1.6655 GiB/s 1.6703 GiB/s]
+
+  [quant-query/bit_plane_decompose/flat_alloc/1024] [P4] 1 flat Vec alloc + scatter with branch
+Benchmarking primitives/quant-query/bit_plane_decompose/flat_alloc/1024: Collecting 100 samples in estimat
+primitives/quant-query/bit_plane_decompose/flat_alloc/1024
+                        time:   [2.3176 µs 2.3850 µs 2.4928 µs]
+                        thrpt:  [1.5303 GiB/s 1.5994 GiB/s 1.6460 GiB/s]
+
+  [quant-query/bit_plane_decompose/byte_chunks/1024] [P4+] flat alloc + process 8 elements→1 byte per plane
+Benchmarking primitives/quant-query/bit_plane_decompose/byte_chunks/1024: Collecting 100 samples in estima
+primitives/quant-query/bit_plane_decompose/byte_chunks/1024
+                        time:   [703.40 ns 704.44 ns 705.59 ns]
+                        thrpt:  [5.4064 GiB/s 5.4152 GiB/s 5.4233 GiB/s]
+
+  [quant-query/full/fused/1024] [P1+P2+P4] single pass: fused min/max + quantize + scatter, flat alloc
+Benchmarking primitives/quant-query/full/fused/1024: Collecting 100 samples in estimated 5.0073 s (3.4M it
+primitives/quant-query/full/fused/1024
+                        time:   [1.4800 µs 1.4843 µs 1.4908 µs]
+                        thrpt:  [2.5588 GiB/s 2.5700 GiB/s 2.5776 GiB/s]
+
+  [quant-query/full/two_pass_fused/1024] [P2+P4] two-pass min/max + fused quantize+sum+scatter  [expected production]
+Benchmarking primitives/quant-query/full/two_pass_fused/1024: Collecting 100 samples in estimated 5.0012 s
+primitives/quant-query/full/two_pass_fused/1024
+                        time:   [991.37 ns 994.95 ns 1.0012 µs]
+                        thrpt:  [3.8102 GiB/s 3.8341 GiB/s 3.8479 GiB/s]
+
+  [quant-1bit/full/1024] Code1Bit::quantize end-to-end  [compare vs sum of primitives]
+Benchmarking primitives/quant-1bit/full/1024: Collecting 100 samples in estimated 5.0040 s (5.0M iteration
+primitives/quant-1bit/full/1024
+                        time:   [989.09 ns 992.42 ns 997.68 ns]
+                        thrpt:  [7.6472 GiB/s 7.6877 GiB/s 7.7135 GiB/s]
+
+
+  [dq-float/full/1024] Code1Bit::distance_query end-to-end  [compare vs signed_dot]
+primitives/dq-float/full/1024
+                        time:   [212.38 ns 213.17 ns 214.36 ns]
+                        thrpt:  [18.421 GiB/s 18.525 GiB/s 18.593 GiB/s]
+
+  [quant-query/full/1024] QuantizedQuery::new end-to-end  [compare vs sum of primitives]
+Benchmarking primitives/quant-query/full/1024: Collecting 100 samples in estimated 5.0010 s (4.9M iteratio
+primitives/quant-query/full/1024
+                        time:   [993.00 ns 1.0102 µs 1.0433 µs]
+                        thrpt:  [3.6562 GiB/s 3.7763 GiB/s 3.8416 GiB/s]

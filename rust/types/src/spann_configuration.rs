@@ -72,6 +72,14 @@ pub fn default_center_drift_threshold() -> f32 {
     0.125
 }
 
+pub fn default_centroid_rerank_factor() -> u32 {
+    1
+}
+
+pub fn default_vector_rerank_factor() -> u32 {
+    1
+}
+
 fn default_space_spann() -> Space {
     Space::L2
 }
@@ -143,6 +151,14 @@ pub struct InternalSpannConfiguration {
     #[serde(default = "default_m_spann")]
     #[validate(range(max = 64))]
     pub max_neighbors: usize,
+    /// How many extra centroid candidates to fetch for reranking (1 = no rerank).
+    #[serde(default = "default_centroid_rerank_factor")]
+    #[validate(range(min = 1, max = 64))]
+    pub centroid_rerank_factor: u32,
+    /// How many extra vector candidates to fetch per cluster for reranking (1 = no rerank).
+    #[serde(default = "default_vector_rerank_factor")]
+    #[validate(range(min = 1, max = 64))]
+    pub vector_rerank_factor: u32,
 }
 
 impl Default for InternalSpannConfiguration {
@@ -187,6 +203,8 @@ impl From<(Option<&Space>, &SpannIndexConfig)> for InternalSpannConfiguration {
             ef_search: config.ef_search.unwrap_or(default_search_ef_spann()),
             max_neighbors: config.max_neighbors.unwrap_or(default_m_spann()),
             space: space.unwrap_or(&default_space()).clone(),
+            centroid_rerank_factor: default_centroid_rerank_factor(),
+            vector_rerank_factor: default_vector_rerank_factor(),
         }
     }
 }
@@ -238,6 +256,8 @@ impl From<SpannConfiguration> for InternalSpannConfiguration {
                 .unwrap_or(default_reassign_neighbor_count()),
             split_threshold: config.split_threshold.unwrap_or(default_split_threshold()),
             merge_threshold: config.merge_threshold.unwrap_or(default_merge_threshold()),
+            centroid_rerank_factor: default_centroid_rerank_factor(),
+            vector_rerank_factor: default_vector_rerank_factor(),
             ..Default::default()
         }
     }

@@ -10,6 +10,7 @@ use thiserror::Error;
 #[derive(Debug)]
 pub struct QuantizedSpannCenterSearchInput {
     pub count: usize,
+    pub centroid_rerank_factor: usize,
     pub reader: QuantizedSpannSegmentReader,
 }
 
@@ -42,7 +43,11 @@ impl Operator<QuantizedSpannCenterSearchInput, QuantizedSpannCenterSearchOutput>
         input: &QuantizedSpannCenterSearchInput,
     ) -> Result<QuantizedSpannCenterSearchOutput, QuantizedSpannCenterSearchError> {
         let rotated_query = input.reader.rotate(&self.embedding)?;
-        let cluster_ids = input.reader.navigate(&rotated_query, input.count)?;
+        let cluster_ids = input.reader.navigate(
+            &rotated_query,
+            input.count,
+            input.centroid_rerank_factor,
+        )?;
         Ok(QuantizedSpannCenterSearchOutput {
             cluster_ids,
             rotated_query: rotated_query.into(),

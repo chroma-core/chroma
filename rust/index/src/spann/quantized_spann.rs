@@ -31,7 +31,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    quantization::Code,
+    quantization::{Code, GenericCode},
     spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
@@ -134,6 +134,10 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
 }
 
 impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
+    fn get_code(&self) -> GenericCode {
+        GenericCode::new(self.config.quantize.data_bits().unwrap_or(4))
+    }
+
     pub async fn add(&self, id: u32, embedding: &[f32]) -> Result<(), QuantizedSpannError> {
         if embedding.len() != self.dimension {
             return Err(QuantizedSpannError::DimensionMismatch {
@@ -273,7 +277,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let code_size = Code::<&[u8]>::size(self.dimension);
+        let code_size = self.get_code().size(self.dimension);
         if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
             if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted
@@ -359,9 +363,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let dist_to_source = self.distance(&embedding, &source_center);
 
             if dist_to_target <= dist_to_source {
-                let code = Code::<Vec<u8>>::quantize(&embedding, &target_center)
-                    .as_ref()
-                    .into();
+                let code = self.get_code().quantize(&embedding, &target_center);
                 if self
                     .append(nearest_cluster_id, *id, *version, code)
                     .is_none()
@@ -435,9 +437,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                 continue;
             };
 
-            let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
-                .as_ref()
-                .into();
+            let code = self.get_code().quantize(&embedding, &centroid);
 
             let Some(len) = self.append(*cluster_id, id, version, code) else {
                 continue;
@@ -455,9 +455,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         }
 
         if !registered {
-            let code = Code::<Vec<u8>>::quantize(&embedding, &embedding)
-                .as_ref()
-                .into();
+            let code = self.get_code().quantize(&embedding, &embedding);
             let delta = QuantizedDelta {
                 center: embedding,
                 codes: vec![code],
@@ -611,7 +609,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: left_center.clone(),
             codes: left_group
                 .iter()
-                .map(|(_, _, emb)| Code::<Vec<u8>>::quantize(emb, &left_center).as_ref().into())
+                .map(|(_, _, emb)| self.get_code().quantize(emb, &left_center))
                 .collect(),
             ids: left_group.iter().map(|(id, _, _)| *id).collect(),
             length: left_group.len(),
@@ -623,11 +621,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: right_center.clone(),
             codes: right_group
                 .iter()
-                .map(|(_, _, emb)| {
-                    Code::<Vec<u8>>::quantize(emb, &right_center)
-                        .as_ref()
-                        .into()
-                })
+                .map(|(_, _, emb)| self.get_code().quantize(emb, &right_center))
                 .collect(),
             ids: right_group.iter().map(|(id, _, _)| *id).collect(),
             length: right_group.len(),
@@ -752,9 +746,11 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     continue;
                 }
 
-                let code = Code::<&[u8]>::new(code.as_ref());
+                let code_bytes = code.as_ref();
+                let code = self.get_code();
 
                 let left_dist = code.distance_query(
+                    code_bytes,
                     &self.distance_function,
                     &left_r_q,
                     c_norm,
@@ -762,6 +758,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     left_q_norm,
                 );
                 let right_dist = code.distance_query(
+                    code_bytes,
                     &self.distance_function,
                     &right_r_q,
                     c_norm,
@@ -769,6 +766,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     right_q_norm,
                 );
                 let neighbor_dist = code.distance_query(
+                    code_bytes,
                     &self.distance_function,
                     &neighbor_r_q,
                     c_norm,
@@ -781,6 +779,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                 }
 
                 let old_dist = code.distance_query(
+                    code_bytes,
                     &self.distance_function,
                     &old_r_q,
                     c_norm,
@@ -1041,6 +1040,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Create centroid indexes
@@ -1214,6 +1214,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            quantization_bits: 4,
         };
 
         // Step 1: Open centroid indexes
@@ -1417,6 +1418,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 expansion_add: ef_construction,
                 expansion_search: ef_search,
                 quantization_center: None,
+                quantization_bits: 4,
             };
 
             // Rebuild raw centroid index
