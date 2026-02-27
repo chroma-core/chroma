@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Union, Optional, TypedDict
 import os
 import numpy as np
 import warnings
+from chromadb.utils.muvera import create_fdes
 import importlib
 import base64
 import io
@@ -37,6 +38,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         dimensions: Optional[int] = None,
         embedding_type: Optional[str] = None,
         normalized: Optional[bool] = None,
+        return_multivector: Optional[bool] = None,
         query_config: Optional[JinaQueryConfig] = None,
     ):
         """
@@ -101,6 +103,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         self.dimensions = dimensions
         self.embedding_type = embedding_type
         self.normalized = normalized
+        self.return_multivector = return_multivector
         self.query_config = query_config
 
         self._api_url = "https://api.jina.ai/v1/embeddings"
@@ -149,6 +152,8 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
             payload["embedding_type"] = self.embedding_type
         if self.normalized is not None:
             payload["normalized"] = self.normalized
+        if self.return_multivector is not None:
+            payload["return_multivector"] = self.return_multivector
 
         # overwrite parameteres when query payload is used
         if is_query and self.query_config is not None:
@@ -169,6 +174,35 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         """
         if "data" not in resp:
             raise RuntimeError(resp.get("detail", "Unknown error"))
+
+        if self.return_multivector:
+            # if it gives back multivector embeddings
+            multi_embeddings_data: List[Dict[str, Any]] = resp["data"]
+            sorted_multi_embeddings = sorted(
+                multi_embeddings_data, key=lambda e: e["index"]
+            )
+            multi_embeddings: List[Embeddings] = [
+                [
+                    np.array(vec, dtype=np.float32)
+                    for vec in multi_embedding_obj["embeddings"]
+                ]
+                for multi_embedding_obj in sorted_multi_embeddings
+            ]
+
+            if not multi_embeddings or not multi_embeddings[0]:
+                raise RuntimeError(
+                    "Invalid multivector embeddings format from Jina API"
+                )
+
+            dims = len(multi_embeddings[0][0])
+            fdes = create_fdes(
+                multi_embeddings,
+                dims=dims,
+                is_query=is_query,
+                fill_empty_partitions=not is_query,
+            )
+
+            return fdes
 
         embeddings_data: List[Dict[str, Union[int, List[float]]]] = resp["data"]
 
@@ -231,6 +265,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
         dimensions = config.get("dimensions")
         embedding_type = config.get("embedding_type")
         normalized = config.get("normalized")
+        return_multivector = config.get("return_multivector")
         query_config = config.get("query_config")
 
         if api_key_env_var is None or model_name is None:
@@ -245,6 +280,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
             dimensions=dimensions,
             embedding_type=embedding_type,
             normalized=normalized,
+            return_multivector=return_multivector,
             query_config=query_config,
         )
 
@@ -258,6 +294,7 @@ class JinaEmbeddingFunction(EmbeddingFunction[Embeddable]):
             "dimensions": self.dimensions,
             "embedding_type": self.embedding_type,
             "normalized": self.normalized,
+            "return_multivector": self.return_multivector,
             "query_config": self.query_config,
         }
 
