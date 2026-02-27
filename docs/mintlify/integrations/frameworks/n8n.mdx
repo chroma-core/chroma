@@ -1,0 +1,123 @@
+---
+title: "n8n"
+sidebarTitle: "n8n"
+---
+
+import { Callout } from "/snippets/callout.mdx";
+
+[n8n](https://n8n.io/) allows you to build complex workflows by connecting various nodes together. The Chroma integration enables you to use vector search and storage capabilities directly within your automation pipelines.
+
+<Callout>
+  View n8n's [Advanced AI documentation](https://docs.n8n.io/advanced-ai/) for
+  distinct details on their AI features.
+</Callout>
+
+## Prerequisites
+
+Before using the Chroma nodes in n8n, ensure you have:
+
+1.  A running [Chroma](https://www.trychroma.com/) instance.
+    - See [Running Chroma in Client-Server Mode](/docs/run-chroma/client-server) for setup instructions.
+
+## Authentication Setup
+
+You can authenticate with your Chroma instance using either an API Key or the Instance URL directly.
+
+### Option 1: Using API Key
+
+To configure this credential, you'll need a [Chroma](https://trychroma.com/signup?utm_source=docs-getting-started) account with:
+
+- An **API Key**
+- Your **Tenant ID**
+- Your **Database Name**
+
+**Setup Steps:**
+
+1.  Go to the **Cloud Dashboard**.
+2.  Create a **Database**.
+3.  Click **Settings** for the database you want to access.
+4.  Click **Create API key and copy code**.
+5.  Enter your **API Key**, **Tenant ID**, and **Database Name** into the n8n credential fields.
+
+### Option 2: Using Instance URL
+
+To configure this credential, you'll need the **Base URL** of your Chroma instance.
+
+- **Default URL**: `http://localhost:8000`
+- This connects n8n to your self-hosted or local Chroma instance.
+- **Note**: If running n8n in a Docker container, use `http://host.docker.internal:8000` (on Mac/Windows) or your host IP to connect.
+
+## Node Usage Patterns
+
+The Chroma node in n8n supports several patterns depending on your use case.
+
+### 1. Regular Vector Store Operations
+
+Use the Chroma node as a regular step in your workflow to:
+
+- **Insert Documents**: Load data into your collection.
+- **Get Documents**: Retrieve documents based on similarity search.
+
+This pattern works independently of AI Agents.
+
+### 2. Connect to AI Agent as a Tool
+
+Connect the Chroma node directly to the **Tools** connector of an [AI Agent](https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.agent/).
+
+- **Flow**: `AI Agent (tools connector) -> Chroma Vector Store node`
+- **Purpose**: Allows the agent to query the vector store as a resource when answering user queries.
+
+### 3. Use with a Retriever
+
+Combine the Chroma node with a [Vector Store Retriever](https://docs.n8n.io/integrations/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.retrievervectorstore/) to fetch context.
+
+- **Flow**: `Question & Answer Chain (Retriever connector) -> Vector Store Retriever (Vector Store connector) -> Chroma Vector Store`
+- **Purpose**: Often used in RAG chains to fetch documents matching a query.
+
+### 4. Vector Store QA Tool
+
+Use the [Vector Store Question Answer Tool](https://docs.n8n.io/integrations/builtin/cluster-nodes/sub-nodes/n8n-nodes-langchain.toolvectorstore/) to summarize results.
+
+- **Flow**: `AI Agent (tools connector) -> Vector Store QA Tool (Vector Store connector) -> Chroma Vector Store`
+- **Purpose**: The tool handles summarization of the retrieved data before passing it back to the agent.
+
+## Node Parameters
+
+Since n8n is a visual workflow builder, configuration is done via node parameters.
+
+### Operation Modes
+
+The node supports four primary modes:
+
+| Mode                      | Description                                                                   |
+| :------------------------ | :---------------------------------------------------------------------------- |
+| **Get Many**              | Retrieve multiple documents similar to a prompt. Useful for fetching context. |
+| **Insert Documents**      | Add new documents/embeddings to the database.                                 |
+| **Retrieve (Chain/Tool)** | Use as a backend for a Retriever node in a chain.                             |
+| **Retrieve (Agent Tool)** | Use as a direct tool for an AI Agent.                                         |
+
+### Configuration Details
+
+Each mode has specific settings:
+
+- **Collection Name**: Select from the list fetched from your Chroma instance.
+- **Limit**: Number of results to return (e.g., `5`).
+- **Prompt** (Get Many): The search query text.
+- **Description** (Agent Tool): Explain to the LLM what this tool does to improve selection accuracy.
+
+<Callout>
+  **Pro Tip**: You can enable
+  [Reranking](https://docs.n8n.io/glossary/#ai-reranking) to improve search
+  relevance. This requires connecting a Reranking node to the vector store.
+</Callout>
+
+### Metadata Filtering
+
+Available in **Get Many** mode. Use this to filter results based on document metadata (AND logic).
+
+## Related Resources
+
+- [LangChain's Chroma Documentation](https://docs.langchain.com/oss/javascript/integrations/vectorstores/chroma)
+- [n8n Advanced AI Docs](https://docs.n8n.io/advanced-ai/)
+- [Chroma Cloud Docs](/cloud/getting-started)
+- [Chroma Node Documentation](https://docs.n8n.io/integrations/builtin/cluster-nodes/root-nodes/n8n-nodes-langchain.vectorstorechroma/)
