@@ -214,7 +214,7 @@ fn run_recall(dataset: &str, n: usize, k: usize, rerank_factors: &[usize]) -> Ve
     // ── Score all queries with each method ────────────────────────────────
     let methods: Vec<(&str, Box<dyn Fn(&[f32]) -> Vec<f32>>)> = vec![
         (
-            "4bit",
+            "4bit-code-full-query",
             Box::new(|r_q: &[f32]| -> Vec<f32> {
                 let cdq = c_dot_q(&centroid, r_q);
                 let qn = q_norm(&centroid, r_q);
@@ -225,7 +225,7 @@ fn run_recall(dataset: &str, n: usize, k: usize, rerank_factors: &[usize]) -> Ve
             }),
         ),
         (
-            "1bit",
+            "1bit-code-4bit-query",
             Box::new(|r_q: &[f32]| -> Vec<f32> {
                 let cdq = c_dot_q(&centroid, r_q);
                 let qn = q_norm(&centroid, r_q);
@@ -233,6 +233,17 @@ fn run_recall(dataset: &str, n: usize, k: usize, rerank_factors: &[usize]) -> Ve
                 codes_1
                     .iter()
                     .map(|cb| Code1Bit::new(cb.as_slice()).distance_query(&df, &qq))
+                    .collect()
+            }),
+        ),
+        (
+            "1bit-code-1bit-query",
+            Box::new(|r_q: &[f32]| -> Vec<f32> {
+                let full_q: Vec<f32> = r_q.iter().zip(&centroid).map(|(r, c)| r + c).collect();
+                let cq = Code1Bit::quantize(&full_q, &centroid);
+                codes_1
+                    .iter()
+                    .map(|cb| Code1Bit::new(cb.as_slice()).distance_code(&df, &cq, cn, dim))
                     .collect()
             }),
         ),
