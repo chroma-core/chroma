@@ -28,7 +28,7 @@ class PerplexityEmbeddingFunction(EmbeddingFunction[Documents]):
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Perplexity API.
-                Defaults to "Perplexity_API_KEY".
+                Defaults to "PERPLEXITY_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
                 Defaults to "pplx-embed-v1-0.6b".
             api_key (str, optional): API key for the Perplexity API. If not provided, will look for it in the environment variable.
@@ -111,7 +111,7 @@ class PerplexityEmbeddingFunction(EmbeddingFunction[Documents]):
         return {
             "api_key_env_var": self.api_key_env_var,
             "model_name": self.model_name,
-            "dimensions": self.input_type,
+            "dimensions": self.dimensions,
         }
 
     def validate_config_update(
