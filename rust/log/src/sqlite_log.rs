@@ -29,7 +29,7 @@ pub enum SqlitePullLogsError {
     InvalidMetadata(#[from] serde_json::Error),
     #[error("Failed to parse document from metadata: unexpected type")]
     InvalidDocumentType,
-    #[error("Method {0} is not implemented")],
+    #[error("Method {0} is not implemented")]
     NotImplemented(String),
 }
 
@@ -40,7 +40,7 @@ impl ChromaError for SqlitePullLogsError {
             SqlitePullLogsError::InvalidEncoding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidEmbedding(_) => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::InvalidMetadata(_) => ErrorCodes::InvalidArgument,
-            SqlitePullLogsError::InvalidDocumentType(_) => ErrorCodes::InvalidArgument,
+            SqlitePullLogsError::InvalidDocumentType => ErrorCodes::InvalidArgument,
             SqlitePullLogsError::NotImplemented(_) => ErrorCodes::Internal,
         }
     }
