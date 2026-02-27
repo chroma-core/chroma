@@ -386,6 +386,13 @@ impl ManifestManager {
     /// Sets `ignore_dirty = true` for collections in the manifests table.
     ///
     /// After this call, `get_dirty_logs` will no longer return these collections.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any collection ID does not have a corresponding row in the manifests
+    /// table.  Callers should only pass collection IDs obtained from `get_dirty_logs` or other
+    /// queries against the manifests table.  The Spanner `update` mutation requires the row to
+    /// exist; if any row is missing, the entire transaction fails and no rows are updated.
     pub async fn purge_dirty_for_collections(
         spanner: &Client,
         collection_ids: &[Uuid],
@@ -397,6 +404,12 @@ impl ManifestManager {
     ///
     /// After this call, `get_dirty_logs` will return these collections if they have uncompacted
     /// data.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any collection ID does not have a corresponding row in the manifests
+    /// table.  The Spanner `update` mutation requires the row to exist; if any row is missing,
+    /// the entire transaction fails and no rows are updated.
     pub async fn unpurge_dirty_for_collections(
         spanner: &Client,
         collection_ids: &[Uuid],
@@ -405,6 +418,10 @@ impl ManifestManager {
     }
 
     /// Sets the `ignore_dirty` flag for collections in the manifests table.
+    ///
+    /// Uses Spanner's `update` mutation, which requires every targeted row to already exist.  If
+    /// any collection ID is missing from the manifests table, the entire transaction fails
+    /// atomically and no rows are modified.
     async fn set_ignore_dirty(
         spanner: &Client,
         collection_ids: &[Uuid],
