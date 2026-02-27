@@ -2870,8 +2870,18 @@ impl LogServerWrapper {
                     return;
                 }
             };
-            sigterm.recv().await;
-            tracing::info!("Received SIGTERM, waiting for grace period...");
+            let mut sigint = match signal(SignalKind::interrupt()) {
+                Ok(sigint) => sigint,
+                Err(e) => {
+                    tracing::error!("Failed to create signal handler: {:?}", e);
+                    return;
+                }
+            };
+            let signal_name = tokio::select! {
+                _ = sigterm.recv() => "SIGTERM",
+                _ = sigint.recv() => "SIGINT",
+            };
+            tracing::info!("Received {}, waiting for grace period...", signal_name);
             // Note: gRPC calls can still be successfully made during this period. We rely on the memberlist updating to stop clients from sending new requests. Ideally there would be a Tower layer that rejected new requests during this period with UNAVAILABLE or similar.
             tokio::time::sleep(shutdown_grace_period).await;
             tracing::info!("Grace period ended, shutting down server...");
