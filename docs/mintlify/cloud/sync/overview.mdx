@@ -10,9 +10,11 @@ Chroma Sync has three primary concepts: **source types**, **sources** and **invo
 
 # Source Types
 
-A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. An example of a source type-and notably the only currently supported one-is a GitHub repository. Each source type defines its own schema for configuring sources of its type. For example, the sources of the GitHub repository type allow developers to define a parameter `include_globs`, which is an array of glob patterns for which matching files will be synced.
+A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. Each source type defines its own schema for configuring sources of its type. Chroma Sync currently supports three source types: **S3 buckets**, **GitHub repositories**, and **web scraping**. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
-Other examples of (future) source types may be S3 buckets, web pages, Notion workspaces, or any other corpus of continually updated content. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+## S3
+
+The S3 source type allows developers to sync files from Amazon S3 buckets into Chroma. It supports documents (PDFs, Office files, images, ebooks), code, and plain text. S3 sources can be configured with auto-sync to automatically index files as they are uploaded to S3. For a detailed walkthrough, see [S3 Sync docs](/cloud/sync/s3).
 
 ## GitHub Repositories
 
@@ -51,6 +53,60 @@ The global source configuration schema requires the following parameters:
 
 - `database_name` defines the Chroma database in which collections should be created by invocations run on this source. A database must exist before creating sources that point to it.
 - `embedding.dense.model` defines the embedding model that should be used to generate dense embeddings for chunked documents. Currently, only the [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) model is supported, but if there is a model you would like to use, please let us know by reaching out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+
+You can optionally configure sparse embeddings alongside dense embeddings:
+
+```json
+{
+  "embedding": {
+    "dense": {
+      "model": "Qwen/Qwen3-Embedding-0.6B"
+    },
+    "sparse": {
+      "model": "Chroma/BM25",
+      "key": "sparse_embedding"
+    }
+  }
+}
+```
+
+- `embedding.sparse.model` defines the sparse embedding model. Supported models: `Chroma/BM25`, `prithivida/Splade_PP_en_v1`.
+- `embedding.sparse.key` defines the metadata key under which sparse embeddings are stored.
+
+You can also configure chunking behavior:
+
+```json
+{
+  "chunking": {
+    "type": "tree_sitter",
+    "max_size_bytes": 8192
+  }
+}
+```
+
+- `chunking.type` can be `tree_sitter` (syntax-aware, with `max_size_bytes`) or `lines` (line-based, with `max_lines` and `max_size_bytes`).
+
+## S3
+
+A source of the S3 type is configured with a bucket name, region, collection name, and AWS credentials:
+
+```json
+{
+    "bucket_name": "string",
+    "region": "string",
+    "collection_name": "string",
+    "aws_credential_id": 0,
+    "path_prefix": "string",
+    "auto_sync": "none"
+}
+```
+
+- `bucket_name` is the name of the S3 bucket to sync from.
+- `region` is the AWS region of the bucket.
+- `collection_name` is the default target collection name for synced data.
+- `aws_credential_id` is the ID of AWS credentials created in the Chroma dashboard.
+- `path_prefix` (optional) limits which S3 keys can be synced. Only keys starting with this prefix are allowed.
+- `auto_sync` (optional) sets the auto-sync mode: `none` (default), `direct`, or `metadata`. See [S3 Auto-Sync](/cloud/sync/s3#auto-sync).
 
 ## GitHub Repositories
 
@@ -96,6 +152,24 @@ The global invocation configuration parameters are:
 ```
 
 - `target_collection_name` defines the name of the Chroma collection in which synced data should be stored. This must be a collection that does not already exist with synced data. Chroma Sync uses the metadata key `finished_ingest` to indicate whether a collection contains synced data. If an invocation creation request is received for a collection with metadata in which this key is present and set to true, the API will return a 409 Conflict.
+
+## S3
+
+Invocations on sources of the S3 type sync individual files from the bucket. The configuration parameters specific to S3 invocations are:
+
+```json
+{
+    "object_key": "string",
+    "custom_id": "string",
+    "metadata": {},
+    "target_collection_name": "string"
+}
+```
+
+- `object_key` (required) is the full S3 object key to sync. Must include the `path_prefix` if one is configured on the source.
+- `custom_id` (optional) is a custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`.
+- `metadata` (optional) is additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null).
+- `target_collection_name` (optional) overrides the source's `collection_name`. If not provided, defaults to the `collection_name` configured on the source.
 
 ## GitHub Repositories
 
@@ -165,6 +239,27 @@ For a web source:
     "web_scrape": {
         "starting_url": "https://docs.trychroma.com",
         "page_limit": 5
+    }
+}
+```
+
+For an S3 source:
+
+```json
+{
+    "database_name": "string",
+    "embedding": {
+        "dense": {
+            "model": "Qwen/Qwen3-Embedding-0.6B"
+        }
+    },
+    "s3": {
+        "bucket_name": "my-bucket",
+        "region": "us-east-1",
+        "collection_name": "my-collection",
+        "aws_credential_id": 1,
+        "path_prefix": "docs/",
+        "auto_sync": "none"
     }
 }
 ```
@@ -247,7 +342,7 @@ List sources with optional filtering.
 
 **Query Parameters**
 - `database_name` allows callers to optionally filter sources by their database.
-- `source_type` allows callers to optionally filter sources by their type. If provided, must be one of `[github]`.
+- `source_type` allows callers to optionally filter sources by their type. If provided, must be one of `[github, web_scrape, s3]`.
 - `github.app_id` allows callers to optionally filter GitHub sources by their app ID. If provided, `source_type` must be `github`.
 - `github.repository` allows callers to optionally filter GitHub sources by their repository. If provided, `source_type` must be `github`.
 - `limit` specifies the maximum number of results to return. Defaults to 100.
@@ -333,6 +428,8 @@ Creates a new invocation on the specified source with the provided configuration
 
 **Request Body**
 
+For a GitHub source:
+
 ```json
 {
     "target_collection_name": "string",
@@ -344,6 +441,19 @@ Creates a new invocation on the specified source with the provided configuration
     }
 }
 ```
+
+For an S3 source:
+
+```json
+{
+    "object_key": "path/to/file.pdf",
+    "custom_id": "my-document-id",
+    "metadata": {"author": "Jane Doe"},
+    "target_collection_name": "my-collection"
+}
+```
+
+Only `object_key` is required for S3 invocations. If `target_collection_name` is not provided, it defaults to the `collection_name` configured on the source.
 
 **Responses**
 - `200 OK` If the invocation is successfully created.
@@ -439,7 +549,7 @@ List invocations with optional filtering.
 **Query Parameters**
 - `source_id` allows callers to optionally filter invocations by their source.
 - `status` allows callers to optionally filter invocations by their status. If provided, must be one of `[pending, processing, complete, failed, cancelled]`.
-- `source_type` allows callers to optionally filter invocations by their source's type. If provided, must be one of `[github]`.
+- `source_type` allows callers to optionally filter invocations by their source's type. If provided, must be one of `[github, web_scrape, s3]`.
 - `github.app_id` allows callers to optionally filter invocations on sources of the GitHub repository source type by their source's app ID. If provided, `source_type` must be `github`.
 - `github.repository` allows callers to optionally filter invocations on sources of the GitHub repository source type by their source's repository. If provided, `source_type` must be `github`.
 - `limit` specifies the maximum number of results to return. Defaults to 100.
