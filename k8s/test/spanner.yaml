@@ -17,6 +17,11 @@ spec:
       containers:
         - name: spanner
           image: gcr.io/cloud-spanner-emulator/emulator:1.5.45
+          resources:
+            requests:
+              cpu: "100m"
+            limits:
+              cpu: "100m"
           ports:
             - containerPort: 9010
               name: grpc

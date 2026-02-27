@@ -63,6 +63,11 @@ spec:
       containers:
         - name: grafana
           image: grafana/grafana-oss:11.1.4
+          resources:
+            requests:
+              cpu: "50m"
+            limits:
+              cpu: "50m"
           ports:
             - containerPort: 3000
               name: http-port
