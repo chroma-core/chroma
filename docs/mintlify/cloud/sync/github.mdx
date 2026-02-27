@@ -7,6 +7,8 @@ import { Warning } from '/snippets/callout.mdx';
 
 ## Walkthrough
 
+When syncing a new version of a repository, Chroma forks the existing collection using copy-on-write and only processes the diff, so re-syncs are fast and storage-efficient.
+
 ## Direct Sync
 
 Direct Sync is the default syncing method, which uses the Chroma Cloud GitHub app. To use your own custom GitHub app, use [Platform Sync](/cloud/sync/github#platform-sync).

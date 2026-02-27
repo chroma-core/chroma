@@ -1,0 +1,198 @@
+---
+title: S3 Sync
+description: Sync files from Amazon S3 into Chroma Cloud.
+---
+
+S3 Sync lets you connect an Amazon S3 bucket to Chroma Cloud and sync files into collections. It supports documents (PDFs, Office files, images, ebooks), code, and plain text. Collections are created automatically if they don't already exist.
+
+S3 Sync is designed for **append-only** workloads — it indexes new files but does not handle updates or deletes. If you re-sync the same object key, a new copy will be indexed. Creating a source does not automatically sync existing files in the bucket. Each file must be synced individually via an invocation. Configure [Auto-sync](#auto-sync) to automatically sync new uploads.
+
+
+For the full list of endpoints (creating, listing, and deleting sources and invocations), see the [Sync API Reference](/reference/sync-api) and the [Sync Overview](/cloud/sync/overview#endpoints).
+
+## Walkthrough
+
+### Creating an S3 Source via the Dashboard
+
+1. Navigate to a database in Chroma Cloud and select **Sync** from the menu.
+2. Click **Create** and select **S3** as the source type.
+3. Enter your AWS credentials (created in the Chroma dashboard), AWS region, and bucket name.
+4. Configure a collection name and optional path prefix to limit which keys can be synced.
+5. Click **Sync** and enter an S3 object key to index.
+
+### Creating an S3 Source via the API
+
+AWS credentials must be created in the Chroma dashboard first. When creating a source via the API, you reference an existing credential by its `aws_credential_id`. If you need to programmatically create sources with new credentials, contact [support@trychroma.com](mailto:support@trychroma.com).
+
+```bash
+curl -X POST https://sync.trychroma.com/api/v1/sources \
+    -H "x-chroma-token: <YOUR_CHROMA_API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "database_name": "<YOUR_DATABASE_NAME>",
+        "embedding": {
+            "dense": {
+                "model": "Qwen/Qwen3-Embedding-0.6B"
+            }
+        },
+        "s3": {
+            "bucket_name": "my-bucket",
+            "region": "us-east-1",
+            "collection_name": "my-collection",
+            "aws_credential_id": 1
+        }
+    }'
+```
+
+### Creating an Invocation (Syncing a File)
+
+```bash
+curl -X POST https://sync.trychroma.com/api/v1/sources/{source_id}/invocations \
+    -H "x-chroma-token: <YOUR_CHROMA_API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "object_key": "docs/report.pdf"
+    }'
+```
+
+### Invocation with Custom ID and Metadata
+
+```bash
+curl -X POST https://sync.trychroma.com/api/v1/sources/{source_id}/invocations \
+    -H "x-chroma-token: <YOUR_CHROMA_API_KEY>" \
+    -H "Content-Type: application/json" \
+    -d '{
+        "object_key": "docs/report.pdf",
+        "custom_id": "report-2024-q4",
+        "metadata": {
+            "author": "Jane Doe",
+            "department": "engineering"
+        },
+        "target_collection_name": "quarterly-reports"
+    }'
+```
+
+## S3 Source Configuration
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `bucket_name` | Yes | S3 bucket name. |
+| `region` | Yes | AWS region of the bucket. |
+| `collection_name` | Yes | Default target collection name for synced data. |
+| `aws_credential_id` | Yes | ID of AWS credentials created in the Chroma dashboard. |
+| `path_prefix` | No | Limits which S3 keys can be synced. Only keys starting with this prefix are allowed. Useful for [multi-tenant setups](#multi-tenant-buckets). |
+| `auto_sync` | No | Auto-sync mode: `none` (default), `direct`, or `metadata`. Configured by Chroma during [Auto-Sync](#auto-sync) setup. |
+
+See the [Create Source API reference](/reference/sync-api/post-apiv1sources) for the full schema.
+
+## S3 Invocation Parameters
+
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `object_key` | Yes | Full S3 object key to sync. This is always relative to the bucket root, even if a `path_prefix` is configured on the source. The key must start with the `path_prefix` or the invocation will be rejected. |
+| `custom_id` | No | Custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`. Stored as `custom_id` metadata on each chunk. |
+| `metadata` | No | Additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null). No arrays or objects. |
+| `target_collection_name` | No | Overrides the source's `collection_name`. Collection is created if it doesn't exist. |
+
+See the [Create Invocation API reference](/reference/sync-api/post-apiv1sourcessource-idinvocations) for the full schema.
+
+## Supported File Types
+
+File types are detected by filename suffix.
+
+### Document Types
+
+Document files are converted to markdown and incur a \$0.01/page extraction fee. Tables, headings, and structure are preserved. Images within documents get text descriptions extracted, but the images themselves are not stored.
+
+| Format | Extensions |
+|--------|-----------|
+| PDF | `.pdf` |
+| Word | `.doc`, `.docx`, `.odt` |
+| Spreadsheets | `.xls`, `.xlsx`, `.xlsm`, `.xltx`, `.csv`, `.ods` |
+| Presentations | `.ppt`, `.pptx`, `.odp` |
+| HTML | `.html` |
+| Ebooks | `.epub` |
+| Images | `.png`, `.jpg`, `.jpeg`, `.webp`, `.gif`, `.tiff`, `.tif` |
+
+### Other Files
+
+All other files must contain valid UTF-8 text. Non-UTF-8 files will fail.
+
+### Limits
+
+- **Region**: Currently available for databases in the AWS `us-east-1` region only.
+- **Maximum file size**: 200 MB per file.
+- **Maximum document pages**: 7,000 pages per document. Documents exceeding this limit will fail.
+
+Contact [support@trychroma.com](mailto:support@trychroma.com) if you need these limits raised.
+
+## Chunking
+
+Files are chunked using a three-stage pipeline:
+
+1. **Tree-sitter syntax-aware chunking** — if the file extension maps to a known programming language, chunking respects function boundaries, class definitions, and code structure.
+2. **Tree-sitter markdown chunking** — if the content is markdown (e.g. from document extraction), chunking respects headings, sections, and paragraph boundaries.
+3. **Line-based chunking** — fallback for other text content (max 10 lines, max 4096 bytes per chunk).
+
+## Auto-Sync
+
+Auto-sync lets S3 file uploads automatically trigger indexing without manual API calls.
+
+### Setup
+
+Chroma runs one SQS queue per AWS region. To enable auto-sync:
+
+1. Contact Chroma at [support@trychroma.com](mailto:support@trychroma.com) with your AWS region.
+2. Chroma will provide the SQS queue ARN for your region.
+3. Configure [S3 Event Notifications](https://docs.aws.amazon.com/AmazonS3/latest/userguide/enable-event-notifications.html) on your bucket to send `s3:ObjectCreated:*` events to that queue.
+
+### Direct Mode
+
+When Chroma configures your source for direct mode (`auto_sync: "direct"`), every file upload to your bucket triggers indexing of that file. This is the simplest setup when filenames are stable identifiers. If a `.meta.json` file is uploaded, it is processed as metadata mode for that file.
+
+### Metadata Mode
+
+When Chroma configures your source for metadata mode (`auto_sync: "metadata"`), only `.meta.json` file uploads trigger indexing. This gives you low-level control over each file's document ID, additional metadata, and target collection. It also lets you choose which files to index — only files referenced by a `.meta.json` are processed.
+
+### Metadata File Format
+
+A metadata file is any file with a `.meta.json` suffix. It can have any name and be in any folder, as long as it falls within the source's `path_prefix` (if one is configured).
+
+```json
+{
+  "version": "chroma-v1",
+  "id": "unique-document-id",
+  "path": "path/to/document.pdf",
+  "target_collection_name": "my-collection",
+  "metadata": {
+    "author": "Jane Doe",
+    "year": 2024
+  }
+}
+```
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `version` | Yes | Must be `"chroma-v1"`. |
+| `id` | Yes | Custom ID for the document in Chroma. |
+| `path` | Yes | Full S3 object key of the document to index. |
+| `target_collection_name` | No | Override target collection (created if it doesn't exist). |
+| `metadata` | No | Additional metadata. Values must be scalars only. |
+
+### Example Workflow
+
+```bash
+# Upload document
+aws s3 cp report.pdf s3://my-bucket/docs/report.pdf
+
+# Upload metadata file to trigger indexing
+aws s3 cp report.meta.json s3://my-bucket/docs/report.meta.json
+```
+
+## Multi-Tenant Buckets
+
+S3 Sync supports multi-tenant setups where a single bucket serves multiple tenants.
+
+**Path prefixes** restrict which S3 keys a source can sync. When a `path_prefix` is configured, only objects whose key starts with that prefix can be synced — invocations for keys outside the prefix will be rejected. Create one source per tenant with a distinct prefix (e.g. `tenant-a/`, `tenant-b/`) to enforce isolation within a shared bucket.
+
+**Metadata files** offer another approach to multi-tenancy. In metadata mode, each `.meta.json` file can specify a `target_collection_name`, routing different files to different collections. This lets you partition data per tenant at the collection level without needing separate sources or path prefixes.
