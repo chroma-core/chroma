@@ -18,6 +18,7 @@ required-version = "23.3.0"                 # Black will refuse to run if it's n
 target-version = ['py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 
