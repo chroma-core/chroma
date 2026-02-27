@@ -26,6 +26,7 @@ import morphSchema from "../../../../../../schemas/embedding_functions/morph.jso
 import chromaCloudQwenSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-qwen.json";
 import chromaCloudSpladeSchema from "../../../../../../schemas/embedding_functions/chroma-cloud-splade.json";
 import chromaBm25Schema from "../../../../../../schemas/embedding_functions/chroma_bm25.json";
+import perplexitySchema from "../../../../../../schemas/embedding_functions/perplexity.json";
 import Ajv from "ajv";
 
 // Define a common interface for all schemas
@@ -76,6 +77,7 @@ const schemaMap = {
 	"chroma-cloud-qwen": chromaCloudQwenSchema as Schema,
 	"chroma-cloud-splade": chromaCloudSpladeSchema as Schema,
 	chroma_bm25: chromaBm25Schema as Schema,
+	perplexity: perplexitySchema as Schema,
 };
 
 /**

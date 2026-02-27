@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Perplexity Embedding Function Schema",
+  "description": "Schema for the perplexity embedding function configuration",
+  "version": "1.0.0",
+  "type": "object",
+  "properties": {
+    "model_name": {
+      "type": "string",
+      "description": "Parameter model_name for the perplexity embedding function"
+    },
+    "api_key_env_var": {
+      "type": "string",
+      "description": "Parameter api_key_env_var for the perplexity embedding function"
+    },
+    "dimensions": {
+      "type": "number",
+      "description": "Matryoshka dimension (128-1024 for 0.6b, 128-2560 for 4b)"
+    }
+  },
+  "required": [
+    "api_key_env_var",
+    "model_name"
+  ],
+  "additionalProperties": false
+}

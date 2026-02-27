@@ -127,6 +127,7 @@ _all_classes: Set[str] = {
     "ChromaCloudQwenEmbeddingFunction",
     "ChromaCloudSpladeEmbeddingFunction",
     "ChromaBm25EmbeddingFunction",
+    "PerplexityEmbeddingFunction"
 }
 
 
