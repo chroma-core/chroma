@@ -628,9 +628,7 @@ impl GrpcLog {
                     client
                         .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
                             collection_ids: ids_clone.iter().map(ToString::to_string).collect(),
-                            topology_name: topology_name_clone
-                                .map(|t| t.to_string())
-                                .unwrap_or_default(),
+                            topology_name: topology_name_clone.map(|t| t.to_string()),
                         })
                         .await
                         .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
