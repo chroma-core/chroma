@@ -124,6 +124,7 @@
             "group": "Sync",
             "pages": [
               "cloud/sync/overview",
+              "cloud/sync/s3",
               "cloud/sync/github",
               "cloud/sync/web"
             ]
