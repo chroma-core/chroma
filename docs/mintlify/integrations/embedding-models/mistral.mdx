@@ -34,6 +34,31 @@ const embedder = new MistralEmbeddingFunction({
 ```
 
 </Tab>
+
+<Tab title="Go" icon="golang">
+
+```go Go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/mistral"
+)
+
+// Create Mistral embedding function
+ef, err := mistral.NewMistralEmbeddingFunction(
+    os.Getenv("MISTRAL_API_KEY"),
+    mistral.WithModel("mistral-embed"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+</Tab>
 </Tabs>
 
 You must pass in a `model` argument, which selects the Mistral embedding model to use. You can see the supported embedding types and models in Mistral's docs [here](https://docs.mistral.ai/capabilities/embeddings/overview/)

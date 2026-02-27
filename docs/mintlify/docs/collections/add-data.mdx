@@ -50,6 +50,18 @@ collection.add(
     None,
 ).await?;
 ```
+
+```go Go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithTexts("lorem ipsum...", "doc2", "doc3"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+)
+```
 </CodeGroup>
 
 
@@ -95,6 +107,23 @@ collection.add(
     None,
 ).await?;
 ```
+
+```go Go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithEmbeddings(
+        []float32{1.1, 2.3, 3.2},
+        []float32{4.5, 6.9, 4.4},
+        []float32{1.1, 2.3, 3.2},
+    ),
+    chroma.WithTexts("lorem ipsum...", "doc2", "doc3"),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+)
+```
 </CodeGroup>
 
 If your documents are stored elsewhere, you can add just embeddings and metadata. Use the `ids` to associate records with your external documents.
@@ -131,6 +160,22 @@ collection.add(
     None,
 ).await?;
 ```
+
+```go Go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1", "id2", "id3"),
+    chroma.WithEmbeddings(
+        []float32{1.1, 2.3, 3.2},
+        []float32{4.5, 6.9, 4.4},
+        []float32{1.1, 2.3, 3.2},
+    ),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 16)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 3), chroma.NewIntAttribute("verse", 5)),
+        chroma.NewDocumentMetadata(chroma.NewIntAttribute("chapter", 29), chroma.NewIntAttribute("verse", 11)),
+    ),
+)
+```
 </CodeGroup>
 
 ## Metadata
@@ -160,6 +205,20 @@ await collection.add({
         scores: [1, 2, 3],
     }],
 });
+```
+
+```go Go
+err := collection.Add(ctx,
+    chroma.WithIDs("id1"),
+    chroma.WithTexts("lorem ipsum..."),
+    chroma.WithMetadatas(
+        chroma.NewDocumentMetadata(
+            chroma.NewIntAttribute("chapter", 3),
+            chroma.NewStringArrayAttribute("tags", []string{"fiction", "adventure"}),
+            chroma.NewIntArrayAttribute("scores", []int64{1, 2, 3}),
+        ),
+    ),
+)
 ```
 
 ```rust Rust

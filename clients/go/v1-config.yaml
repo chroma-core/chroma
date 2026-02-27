@@ -1,0 +1,11 @@
+########################
+# HTTP server settings #
+########################
+port: 8000
+listen_address: "0.0.0.0"
+
+####################
+# General settings #
+####################
+persist_path: "/data"
+allow_reset: true
