@@ -93,6 +93,12 @@ impl TestSysDb {
             .insert(collection.collection_id, collection);
     }
 
+    /// Remove a collection from the test sysdb.
+    pub fn remove_collection(&mut self, collection_id: CollectionUuid) {
+        let mut inner = self.inner.lock();
+        inner.collections.remove(&collection_id);
+    }
+
     pub fn update_collection_size(&mut self, collection_id: CollectionUuid, collection_size: u64) {
         let mut inner = self.inner.lock();
         let coll = inner

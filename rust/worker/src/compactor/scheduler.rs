@@ -170,108 +170,116 @@ impl Scheduler {
         &mut self,
         collections: Vec<CollectionInfo>,
     ) -> Vec<CollectionRecord> {
-        let mut collection_records = Vec::new();
+        let mut by_topology: HashMap<Option<DatabaseOrTopology>, Vec<CollectionInfo>> =
+            HashMap::new();
         for collection_info in collections {
-            if self
-                .disabled_collections
-                .contains(&collection_info.collection_id)
-            {
-                tracing::info!(
-                    "Ignoring collection: {:?} because it is disabled for compaction",
-                    collection_info.collection_id
-                );
+            let entry = by_topology
+                .entry(
+                    collection_info
+                        .topology_name
+                        .clone()
+                        .map(DatabaseOrTopology::Topology),
+                )
+                .or_default();
+            entry.push(collection_info);
+        }
+        let mut collection_records = Vec::new();
+        for (topology, mut collection_infos) in by_topology {
+            for collection_info in std::mem::take(&mut collection_infos).into_iter() {
+                if self
+                    .disabled_collections
+                    .contains(&collection_info.collection_id)
+                {
+                    tracing::info!(
+                        "Ignoring collection: {:?} because it is disabled for compaction",
+                        collection_info.collection_id
+                    );
+                    continue;
+                }
+                collection_infos.push(collection_info);
+            }
+            const BATCH_SIZE: usize = 1_000;
+            let ids: Vec<CollectionUuid> =
+                collection_infos.iter().map(|c| c.collection_id).collect();
+            let mut all_collections = Vec::new();
+            let mut had_error = false;
+            for batch in ids.chunks(BATCH_SIZE) {
+                let result = self
+                    .sysdb
+                    .get_collections(GetCollectionsOptions {
+                        collection_ids: Some(batch.to_vec()),
+                        database_or_topology: topology.clone(),
+                        limit: Some(batch.len() as u32),
+                        offset: 0,
+                        include_soft_deleted: false,
+                        collection_id: None,
+                        name: None,
+                        tenant: None,
+                    })
+                    .await;
+                match result {
+                    Ok(collections) => {
+                        all_collections.extend(collections);
+                    }
+                    Err(e) => {
+                        tracing::error!("error fetching for topo = {topology:?}: {e}");
+                        had_error = true;
+                        break;
+                    }
+                }
+            }
+            if had_error {
                 continue;
             }
-            // TODO: add a cache to avoid fetching the same collection multiple times
-            let result = self
-                .sysdb
-                .get_collections(GetCollectionsOptions {
-                    collection_ids: Some(vec![collection_info.collection_id]),
-                    database_or_topology: collection_info
-                        .topology_name
-                        .map(DatabaseOrTopology::Topology),
-                    limit: Some(1),
-                    offset: 0,
-                    ..Default::default()
-                })
-                .await;
-
-            match result {
-                Ok(collection) => {
-                    if collection.is_empty() {
-                        self.deleted_collections
-                            .insert(collection_info.collection_id);
-                        continue;
-                    }
-
-                    // Skip collections that have failed too many times
-                    if collection[0].compaction_failure_count >= self.max_failure_count {
+            if all_collections.len() != collection_infos.len() {
+                tracing::warn!(
+                    "returned collection info does not match number of input collections"
+                );
+            }
+            let mut info_map: HashMap<_, _> = collection_infos
+                .into_iter()
+                .map(|c| (c.collection_id, c))
+                .collect();
+            let mut with_infos = vec![];
+            for collection in all_collections.into_iter() {
+                if let Some(info) = info_map.remove(&collection.collection_id) {
+                    if collection.compaction_failure_count >= self.max_failure_count {
                         tracing::info!(
-                            "Ignoring collection {:?} - too many compaction failures ({}/{})",
-                            collection_info.collection_id,
-                            collection[0].compaction_failure_count,
+                            "Ignoring collection {} - too many compaction failures ({}/{})",
+                            collection.collection_id,
+                            collection.compaction_failure_count,
                             self.max_failure_count
                         );
-                        continue;
-                    }
-
-                    // TODO: make querying the last compaction time in batch
-                    let log_position_in_collection = collection[0].log_position;
-                    let tenant_ids = vec![collection[0].tenant.clone()];
-                    let tenant = self.sysdb.get_last_compaction_time(tenant_ids).await;
-
-                    let last_compaction_time = match tenant {
-                        Ok(tenant) => {
-                            if tenant.is_empty() {
-                                tracing::info!(
-                                    "Ignoring collection: {:?}",
-                                    collection_info.collection_id
-                                );
-                                continue;
-                            }
-                            tenant[0].last_compaction_time
-                        }
-                        Err(e) => {
-                            tracing::error!("Error: {:?}", e);
-                            // Ignore this collection id for this compaction iteration
-                            tracing::info!(
-                                "Ignoring collection: {:?}",
-                                collection_info.collection_id
-                            );
-                            continue;
-                        }
-                    };
-
-                    let mut offset = collection_info.first_log_offset;
-                    // offset in log is the first offset in the log that has not been compacted. Note that
-                    // since the offset is the first offset of log we get from the log service, we should
-                    // use this offset to pull data from the log service.
-                    if log_position_in_collection + 1 < offset {
-                        panic!(
-                            "offset in sysdb ({}) is less than offset in log ({}) for {}",
-                            log_position_in_collection + 1,
-                            offset,
-                            collection[0].collection_id,
-                        )
                     } else {
-                        // The offset in sysdb is the last offset that has been compacted.
-                        // We need to start from the next offset.
-                        offset = log_position_in_collection + 1;
+                        with_infos.push((collection, info));
                     }
-
-                    collection_records.push(CollectionRecord {
-                        collection_id: collection[0].collection_id,
-                        tenant_id: collection[0].tenant.clone(),
-                        database_name: collection[0].database.clone(),
-                        last_compaction_time,
-                        first_record_time: collection_info.first_log_ts,
-                        offset,
-                        collection_version: collection[0].version,
-                        collection_logical_size_bytes: collection[0].size_bytes_post_compaction,
-                    });
                 }
-                Err(e) => {
-                    tracing::error!("Error: {:?}", e);
+            }
+            for (id, _) in info_map {
+                self.deleted_collections.insert(id);
+            }
+            for (collection, info) in with_infos.into_iter() {
+                // offset in log is the first offset in the log that has not been compacted. Note that
+                // since the offset is the first offset of log we get from the log service, we should
+                // use this offset to pull data from the log service.
+                if collection.log_position + 1 < info.first_log_offset {
+                    tracing::error!(
+                        collection = collection.collection_id.to_string(),
+                        sysdb_log_position = (collection.log_position + 1),
+                        collection_log_position = info.first_log_offset,
+                        name = "offset in sysdb is less than offset in log"
+                    )
+                } else {
+                    collection_records.push(CollectionRecord {
+                        collection_id: collection.collection_id,
+                        tenant_id: collection.tenant.clone(),
+                        database_name: collection.database.clone(),
+                        last_compaction_time: Default::default(),
+                        first_record_time: info.first_log_ts,
+                        offset: collection.log_position + 1,
+                        collection_version: collection.version,
+                        collection_logical_size_bytes: collection.size_bytes_post_compaction,
+                    });
                 }
             }
         }
@@ -508,6 +516,8 @@ impl Scheduler {
 mod tests {
     use std::str::FromStr;
 
+    use serial_test::serial;
+
     use super::*;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
@@ -516,30 +526,306 @@ mod tests {
     use chroma_sysdb::TestSysDb;
     use chroma_types::{Collection, LogRecord, Operation, OperationRecord};
 
+    /// Shared setup for scheduler tests.
+    struct SchedulerFixture {
+        scheduler: Scheduler,
+        collection_uuid_1: CollectionUuid,
+        collection_uuid_2: CollectionUuid,
+        my_member: Member,
+    }
+
+    impl SchedulerFixture {
+        fn new() -> Self {
+            Self::with_max_failure_count(3)
+        }
+
+        fn with_max_failure_count(max_failure_count: i32) -> Self {
+            let mut log = Log::InMemory(InMemoryLog::new());
+            let in_memory_log = match log {
+                Log::InMemory(ref mut in_memory_log) => in_memory_log,
+                _ => panic!("Invalid log type"),
+            };
+
+            let tenant_1 = "tenant_1".to_string();
+            let collection_1 = Collection {
+                collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000001")
+                    .unwrap(),
+                name: "collection_1".to_string(),
+                dimension: Some(1),
+                tenant: tenant_1.clone(),
+                database: "database_1".to_string(),
+                ..Default::default()
+            };
+            let collection_uuid_1 = collection_1.collection_id;
+
+            in_memory_log.add_log(
+                collection_uuid_1,
+                InternalLogRecord {
+                    collection_id: collection_uuid_1,
+                    log_offset: 0,
+                    log_ts: 1,
+                    record: LogRecord {
+                        log_offset: 0,
+                        record: OperationRecord {
+                            id: "embedding_id_1".to_string(),
+                            embedding: None,
+                            encoding: None,
+                            metadata: None,
+                            document: None,
+                            operation: Operation::Add,
+                        },
+                    },
+                },
+            );
+
+            let tenant_2 = "tenant_2".to_string();
+            let collection_2 = Collection {
+                collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000002")
+                    .unwrap(),
+                name: "collection_2".to_string(),
+                dimension: Some(1),
+                tenant: tenant_2.clone(),
+                database: "database_2".to_string(),
+                ..Default::default()
+            };
+            let collection_uuid_2 = collection_2.collection_id;
+
+            in_memory_log.add_log(
+                collection_uuid_2,
+                InternalLogRecord {
+                    collection_id: collection_uuid_2,
+                    log_offset: 0,
+                    log_ts: 2,
+                    record: LogRecord {
+                        log_offset: 0,
+                        record: OperationRecord {
+                            id: "embedding_id_2".to_string(),
+                            embedding: None,
+                            encoding: None,
+                            metadata: None,
+                            document: None,
+                            operation: Operation::Add,
+                        },
+                    },
+                },
+            );
+
+            let mut sysdb = SysDb::Test(TestSysDb::new());
+            match sysdb {
+                SysDb::Test(ref mut test_sysdb) => {
+                    test_sysdb.add_collection(collection_1);
+                    test_sysdb.add_collection(collection_2);
+                    test_sysdb.add_tenant_last_compaction_time(tenant_1, 2);
+                }
+                _ => panic!("Invalid sysdb type"),
+            }
+
+            let my_member = Member {
+                member_id: "member_1".to_string(),
+                member_ip: "10.0.0.1".to_string(),
+                member_node_name: "node_1".to_string(),
+            };
+
+            let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+            assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+            let scheduler = Scheduler::new(
+                my_member.member_id.clone(),
+                log,
+                sysdb.clone(),
+                Box::new(LasCompactionTimeSchedulerPolicy {}),
+                1000,
+                1,
+                assignment_policy,
+                HashSet::new(),
+                3600,
+                max_failure_count,
+            );
+
+            Self {
+                scheduler,
+                collection_uuid_1,
+                collection_uuid_2,
+                my_member,
+            }
+        }
+
+        /// Clear env vars that may leak between tests.
+        fn clear_env_vars() {
+            std::env::remove_var("CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS");
+            std::env::remove_var("CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS");
+            std::env::remove_var("CHROMA_COMPACTION_SERVICE.IRRELEVANT");
+        }
+    }
+
     #[tokio::test]
-    async fn test_k8s_integration_scheduler() {
+    #[serial]
+    async fn schedule_without_memberlist_produces_no_jobs() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.get_jobs().count(), 0, "no memberlist set");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_with_empty_memberlist_produces_no_jobs() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.set_memberlist(vec![]);
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.get_jobs().count(), 0, "empty memberlist");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn schedule_with_memberlist_produces_jobs_for_all_collections() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+        f.scheduler.schedule().await;
+
+        let mut jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        jobs.sort_by_key(|j| j.collection_id);
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
+        assert_eq!(jobs[1].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn disabled_collections_via_double_underscore_env_var() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            format!("[\"{}\"]", f.collection_uuid_1.0),
+        );
+
+        f.scheduler.schedule().await;
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_2);
+
+        SchedulerFixture::clear_env_vars();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn disabled_collections_via_dot_env_var() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            format!("[\"{}\"]", f.collection_uuid_2.0),
+        );
+        // Irrelevant env var should not affect the result.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
+            format!("[\"{}\"]", f.collection_uuid_1.0),
+        );
+
+        f.scheduler.schedule().await;
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_1);
+
+        SchedulerFixture::clear_env_vars();
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn filter_collections_with_multiple_members() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        let member_2 = Member {
+            member_id: "member_2".to_string(),
+            member_ip: "10.0.0.2".to_string(),
+            member_node_name: "node_2".to_string(),
+        };
+
+        f.scheduler
+            .set_memberlist(vec![f.my_member.clone(), member_2]);
+        f.scheduler.schedule().await;
+
+        // With two members, rendezvous hashing assigns a subset to this node.
+        assert_eq!(f.scheduler.get_jobs().count(), 1);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn collections_exceeding_failure_count_are_skipped() {
+        SchedulerFixture::clear_env_vars();
+        let max_failure_count = 3;
+        let mut f = SchedulerFixture::with_max_failure_count(max_failure_count);
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        for _ in 0..max_failure_count {
+            f.scheduler.schedule().await;
+            let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+            assert_eq!(
+                jobs.len(),
+                2,
+                "both collections scheduled before reaching max failures"
+            );
+            f.scheduler.fail_job(f.collection_uuid_1.into()).await;
+            f.scheduler.succeed_job(f.collection_uuid_2.into());
+        }
+
+        f.scheduler.schedule().await;
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "collection_1 should be excluded after max failures"
+        );
+        assert_eq!(jobs[0].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn enriched_offset_advances_past_sysdb_log_position() {
+        SchedulerFixture::clear_env_vars();
+
+        // Construct a scheduler with a single collection whose sysdb log_position
+        // is ahead of the log service's first_log_offset.  The enriched
+        // CollectionRecord.offset must be log_position + 1 (the next un-compacted
+        // offset), NOT first_log_offset (which would rewind compaction).
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
 
-        let tenant_1 = "tenant_1".to_string();
-        let collection_1 = Collection {
+        let tenant = "tenant_1".to_string();
+        let sysdb_log_position: i64 = 10;
+        let collection = Collection {
             collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000001")
                 .unwrap(),
             name: "collection_1".to_string(),
             dimension: Some(1),
-            tenant: tenant_1.clone(),
+            tenant: tenant.clone(),
             database: "database_1".to_string(),
+            log_position: sysdb_log_position,
             ..Default::default()
         };
-        let collection_uuid_1 = collection_1.collection_id;
+        let collection_id = collection.collection_id;
 
         in_memory_log.add_log(
-            collection_uuid_1,
+            collection_id,
             InternalLogRecord {
-                collection_id: collection_uuid_1,
+                collection_id,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -556,46 +842,11 @@ mod tests {
             },
         );
 
-        let tenant_2 = "tenant_2".to_string();
-        let collection_2 = Collection {
-            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000002")
-                .unwrap(),
-            name: "collection_2".to_string(),
-            dimension: Some(1),
-            tenant: tenant_2.clone(),
-            database: "database_2".to_string(),
-            ..Default::default()
-        };
-        let collection_uuid_2 = collection_2.collection_id;
-
-        in_memory_log.add_log(
-            collection_uuid_2,
-            InternalLogRecord {
-                collection_id: collection_uuid_2,
-                log_offset: 0,
-                log_ts: 2,
-                record: LogRecord {
-                    log_offset: 0,
-                    record: OperationRecord {
-                        id: "embedding_id_2".to_string(),
-                        embedding: None,
-                        encoding: None,
-                        metadata: None,
-                        document: None,
-                        operation: Operation::Add,
-                    },
-                },
-            },
-        );
-
         let mut sysdb = SysDb::Test(TestSysDb::new());
-
         match sysdb {
-            SysDb::Test(ref mut sysdb) => {
-                sysdb.add_collection(collection_1);
-                sysdb.add_collection(collection_2);
-                let last_compaction_time_1 = 2;
-                sysdb.add_tenant_last_compaction_time(tenant_1, last_compaction_time_1);
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.add_collection(collection);
+                test_sysdb.add_tenant_last_compaction_time(tenant, 1);
             }
             _ => panic!("Invalid sysdb type"),
         }
@@ -605,11 +856,6 @@ mod tests {
             member_ip: "10.0.0.1".to_string(),
             member_node_name: "node_1".to_string(),
         };
-        let scheduler_policy = Box::new(LasCompactionTimeSchedulerPolicy {});
-        let max_concurrent_jobs = 1000;
-        let max_failure_count = 3;
-
-        // Set assignment policy
         let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
         assignment_policy.set_members(vec![my_member.member_id.clone()]);
 
@@ -617,137 +863,85 @@ mod tests {
             my_member.member_id.clone(),
             log,
             sysdb.clone(),
-            scheduler_policy,
-            max_concurrent_jobs,
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
             1,
             assignment_policy,
             HashSet::new(),
-            3600,              // job_expiry_seconds
-            max_failure_count, // max_failure_count
-        );
-        // Scheduler does nothing without memberlist
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        assert_eq!(jobs.count(), 0);
-
-        // Set empty memberlist
-        // Scheduler does nothing with empty memberlist
-        scheduler.set_memberlist(vec![]);
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        assert_eq!(jobs.count(), 0);
-
-        // Set memberlist
-        scheduler.set_memberlist(vec![my_member.clone()]);
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        let jobs = jobs.collect::<Vec<&CompactionJob>>();
-        // Scheduler ignores collection that failed to fetch last compaction time
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
-        scheduler.succeed_job(collection_uuid_1.into());
-
-        // Add last compaction time for tenant_2
-        match sysdb {
-            SysDb::Test(ref mut sysdb) => {
-                let last_compaction_time_2 = 1;
-                sysdb.add_tenant_last_compaction_time(tenant_2, last_compaction_time_2);
-            }
-            _ => panic!("Invalid sysdb type"),
-        }
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        let jobs = jobs.collect::<Vec<&CompactionJob>>();
-        // Scheduler schedules collections based on last compaction time
-        assert_eq!(jobs.len(), 2);
-        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
-        assert_eq!(jobs[1].collection_id, collection_uuid_1,);
-        scheduler.succeed_job(collection_uuid_1.into());
-        scheduler.succeed_job(collection_uuid_2.into());
-
-        // Set disable list.
-        std::env::set_var(
-            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
-            format!("[\"{}\"]", collection_uuid_1.0),
-        );
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        let jobs = jobs.collect::<Vec<&CompactionJob>>();
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
-        scheduler.succeed_job(collection_uuid_2.into());
-        std::env::set_var(
-            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
-            "[]",
-        );
-        // Even . should work.
-        std::env::set_var(
-            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
-            format!("[\"{}\"]", collection_uuid_2.0),
-        );
-        std::env::set_var(
-            "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
-            format!("[\"{}\"]", collection_uuid_1.0),
-        );
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        let jobs = jobs.collect::<Vec<&CompactionJob>>();
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
-        scheduler.succeed_job(collection_uuid_1.into());
-        scheduler.succeed_job(collection_uuid_2.into());
-        std::env::set_var(
-            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
-            "[]",
+            3600,
+            3,
         );
 
-        // Test filter_collections
-        let member_1 = Member {
-            member_id: "member_1".to_string(),
-            member_ip: "10.0.0.1".to_string(),
-            member_node_name: "node_1".to_string(),
-        };
-        let member_2 = Member {
-            member_id: "member_2".to_string(),
-            member_ip: "10.0.0.2".to_string(),
-            member_node_name: "node_2".to_string(),
-        };
-        let members = vec![member_1.clone(), member_2.clone()];
-        scheduler.set_memberlist(members);
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        assert_eq!(jobs.count(), 1);
-        scheduler.succeed_job(collection_uuid_2.into());
+        // The log service reports first_log_offset = 0, but sysdb says
+        // log_position = 10 (offsets 0..=10 already compacted).
+        let first_log_offset: i64 = 0;
+        let collection_infos = vec![CollectionInfo {
+            collection_id,
+            topology_name: None,
+            first_log_offset,
+            first_log_ts: 1,
+        }];
 
-        let members = vec![member_1.clone()];
-        scheduler.set_memberlist(members);
-        // Test that collections with too many failures are skipped
-        // Failure count is now tracked in sysdb via compaction_failure_count
-        std::env::set_var(
-            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
-            "[]",
+        let records = scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        assert_eq!(records.len(), 1, "should produce exactly one record");
+        let expected_offset = sysdb_log_position + 1;
+        assert_eq!(
+            records[0].offset, expected_offset,
+            "offset must be log_position + 1 ({expected_offset}), not first_log_offset ({first_log_offset}); \
+             using first_log_offset would rewind compaction and reprocess already-compacted records"
         );
-        std::env::set_var("CHROMA_COMPACTION_SERVICE.IRRELEVANT", "[]");
-        for _ in 0..max_failure_count {
-            scheduler.schedule().await;
-            let jobs = scheduler.get_jobs();
-            let jobs = jobs.collect::<Vec<&CompactionJob>>();
-            assert_eq!(jobs.len(), 2);
-            scheduler.fail_job(collection_uuid_1.into()).await;
-            scheduler.succeed_job(collection_uuid_2.into());
-        }
-        scheduler.schedule().await;
-        let jobs = scheduler.get_jobs();
-        let jobs = jobs.collect::<Vec<&CompactionJob>>();
-        // After max_failure_count failures, collection_uuid_1 should be skipped
-        assert_eq!(jobs.len(), 1);
-        assert_eq!(jobs[0].collection_id, collection_uuid_2);
-        scheduler.succeed_job(collection_uuid_2.into());
     }
 
     #[tokio::test]
-    #[should_panic(expected = "is less than offset")]
-    async fn test_k8s_integration_scheduler_panic() {
+    async fn missing_sysdb_collections_marked_as_deleted() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // Ask to enrich two collections, but remove collection_2 from sysdb
+        // so it won't be returned.
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.remove_collection(f.collection_uuid_2);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let collection_infos = vec![
+            CollectionInfo {
+                collection_id: f.collection_uuid_1,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 1,
+            },
+            CollectionInfo {
+                collection_id: f.collection_uuid_2,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 2,
+            },
+        ];
+
+        let records = f
+            .scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        assert_eq!(records.len(), 1, "only collection_1 should be enriched");
+        assert_eq!(records[0].collection_id, f.collection_uuid_1);
+
+        let deleted = f.scheduler.drain_deleted_collections();
+        assert_eq!(deleted.len(), 1, "collection_2 should be marked as deleted");
+        assert_eq!(
+            deleted[0], f.collection_uuid_2,
+            "the deleted collection should be collection_2"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_integration_scheduler_invariant_violation() {
         let mut log = Log::InMemory(InMemoryLog::new());
         let in_memory_log = match log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
@@ -888,5 +1082,12 @@ mod tests {
 
         scheduler.set_memberlist(vec![my_member.clone()]);
         scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert!(
+            jobs.is_empty(),
+            "Expected no jobs when log offset precedes sysdb position, but got {} jobs",
+            jobs.len()
+        );
     }
 }
