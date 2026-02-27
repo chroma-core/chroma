@@ -52,13 +52,10 @@ machine_type        = "Standard_B1s"
 
 ### Step 4: Generate new Key Pairs
 Generate a new key pair in the ssh folder:
-- Windows:
-C:\Users\<YourUsername>\.ssh\
+- Windows: `C:\Users\<YourUsername>\.ssh\`
+- Linux/macOS: `~/.ssh/` (i.e. `$HOME/.ssh/`)
 
-- Linus/OSX:
-~/.ssh/ (i.e. $HOME/.ssh/)
-
-Please choose a strong passphrase
+Please choose a strong passphrase.
 ```bash
 ssh-keygen -t rsa -b 4096 -f id_rsa 
 ```
