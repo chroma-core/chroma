@@ -19,7 +19,7 @@ use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
-    RecordConversionError,
+    RecordConversionError, TopologyName,
 };
 use std::fmt::Debug;
 use std::time::Duration;
@@ -603,29 +603,40 @@ impl GrpcLog {
 
     pub(super) async fn purge_dirty_for_collection(
         &mut self,
-        collection_ids: Vec<CollectionUuid>,
+        collection_ids: Vec<(CollectionUuid, Option<TopologyName>)>,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
+        let mut by_topology: std::collections::HashMap<Option<TopologyName>, Vec<CollectionUuid>> =
+            std::collections::HashMap::new();
+        for (collection_id, topology_name) in collection_ids {
+            by_topology
+                .entry(topology_name)
+                .or_default()
+                .push(collection_id);
+        }
         let mut futures = vec![];
         let limiter = Arc::new(tokio::sync::Semaphore::new(10));
-        for client in self.client_assigner.all().into_iter() {
-            let mut client = client.clone();
-            let limiter = Arc::clone(&limiter);
-            let collection_ids_clone = collection_ids.clone();
-            let request = async move {
-                // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
-                // error-check.
-                let _permit = limiter.acquire().await;
-                client
-                    .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
-                        collection_ids: collection_ids_clone
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect(),
-                    })
-                    .await
-                    .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
-            };
-            futures.push(request);
+        for (topology_name, ids) in by_topology {
+            for client in self.client_assigner.all().into_iter() {
+                let mut client = client.clone();
+                let limiter = Arc::clone(&limiter);
+                let ids_clone = ids.clone();
+                let topology_name_clone = topology_name.clone();
+                let request = async move {
+                    // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
+                    // error-check.
+                    let _permit = limiter.acquire().await;
+                    client
+                        .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                            collection_ids: ids_clone.iter().map(ToString::to_string).collect(),
+                            topology_name: topology_name_clone
+                                .map(|t| t.to_string())
+                                .unwrap_or_default(),
+                        })
+                        .await
+                        .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
+                };
+                futures.push(request);
+            }
         }
         if !futures.is_empty() {
             futures::future::try_join_all(futures.into_iter()).await?;

@@ -107,6 +107,7 @@ message UpdateCollectionLogOffsetResponse {
 
 message PurgeDirtyForCollectionRequest {
   repeated string collection_ids = 1;
+  string topology_name = 5;
 }
 
 message PurgeDirtyForCollectionResponse {
