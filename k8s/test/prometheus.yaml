@@ -31,11 +31,6 @@ spec:
       containers:
         - name: prometheus
           image: prom/prometheus:v2.53.2
-          resources:
-            requests:
-              cpu: "50m"
-            limits:
-              cpu: "50m"
           ports:
             - containerPort: 9090
               name: http-port
