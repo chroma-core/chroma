@@ -1,7 +1,9 @@
+This document contains notes on the 1-bit RaBitQ implementation and performance.
+
 # RaBitQ Implementation Notes
 
 Findings from reviewing the Chroma RaBitQ implementation against the original
-paper and two reference implementations.
+paper.
 
 Reference implementations examined:
 
@@ -131,7 +133,7 @@ before this change are **not** compatible with the updated reader.
 ((v - v_l) / delta).round()
 ```
 
-Both gaoj0017 use stochastic dithering (random rounding) for
+The original paper (gaoj0017) uses stochastic dithering (random rounding) for
 query quantization.  At `B_q = 4` bits the accuracy difference is negligible;
 deterministic rounding is simpler and removes a source of non-determinism.
 
@@ -181,6 +183,100 @@ standard deviation of ≈ 2 %, making it negligible for ranking purposes.
 | Query dithering | Stochastic | Deterministic |
 | 4-bit codebook | N/A | Ray-walk |
 | Multi-bit query scoring | Bit-plane (same) | Bit-plane (same) |
+
+---
+
+# Reranking
+
+Quantized distance estimates are approximate. Reranking re-scores candidates with
+exact (full-precision) distances to improve recall. Two rerank steps exist in the
+quantized SPANN query path, controlled by `centroid_rerank_factor` and
+`vector_rerank_factor` in `InternalSpannConfiguration` (defaults: 1 = disabled).
+
+## Lifecycle / Trace
+
+```
+Query
+  |
+  v
+1. rotate(query)                                    [segment reader]
+  |
+  v
+2. quantized_centroid.search(query, nprobe * centroid_rerank_factor)
+   [segment reader]  Returns nprobe * factor cluster IDs (estimated distances)
+  |
+  v
+3. RERANK 1 (centroid): if centroid_rerank_factor > 1
+   - raw_centroid.get(id) for each candidate        [in-memory, no network]
+   - exact distance(query, centroid)
+   - sort, keep top nprobe
+  |
+  v
+4. For each cluster_id: load cluster from blockfile [network: S3 block fetch]
+  |
+  v
+5. query_quantized_cluster(cluster, query)
+   [index utils]  Score all codes (estimated distances), sort, keep top K * vector_rerank_factor
+  |
+  v
+6. Merge { k: K * vector_rerank_factor }            [worker: merge per-cluster batches]
+  |
+  v
+7. RERANK 2 (vector): if vector_rerank_factor > 1
+   - RecordSegmentReader::from_segment()            [opens blockfile metadata; no full data yet]
+   - for each candidate: get_data_for_offset_id()   [network: S3 block fetch on cache miss]
+   - exact distance(query, embedding)
+   - sort, truncate to K
+  |
+  v
+8. Return K results (exact distances)
+```
+
+## Rerank Step 1: Centroids
+
+**Where:** `QuantizedSpannSegmentReader::navigate_with_rerank` in
+`rust/segment/src/quantized_spann.rs`.
+
+**What:** After the quantized centroid index returns `nprobe * centroid_rerank_factor`
+candidates, we load each candidate's full-precision centroid from `raw_centroid`
+(USearch index), compute exact distance in rotated space, sort, and keep top
+`nprobe`.
+
+**Network:** None. `raw_centroid` is an in-memory USearch index. `.get(id)` is an
+in-process lookup (usearch `export`). The index is loaded once at reader creation
+from S3; subsequent queries do not hit the network for centroid rerank.
+
+**Memory:** The raw centroid index is only loaded when `centroid_rerank_factor > 1`.
+If loaded: `num_clusters × dim × 4 bytes` (e.g. 100K clusters × 1536 × 4 ≈ 600 MB).
+When factor is 1 (default), `raw_centroid` is `None` and no extra memory is used.
+
+## Rerank Step 2: Vectors
+
+**Where:** `QuantizedSpannRerankOperator::run` in
+`rust/worker/src/execution/operators/quantized_spann_rerank.rs`.
+
+**What:** After the merge step produces the top `K * vector_rerank_factor`
+candidates across all clusters (approximate distances), we open a
+`RecordSegmentReader`, fetch each candidate's full embedding from the record
+segment blockfile, compute exact distance, sort, and keep top K.
+
+**Network:** Each `get_data_for_offset_id(offset_id)` triggers a blockfile lookup.
+If the block containing that offset is not in the foyer cache, the blockfile
+provider fetches it from S3. Multiple embeddings share a block (~330 per 2 MB at
+dim=1536), so one S3 GET can satisfy several lookups. Fetches are sequential in
+the current implementation.
+
+**Memory:** The record segment blockfile reader holds metadata and a cache of
+recently accessed blocks. Rerank fetches `K * vector_rerank_factor` embeddings
+(e.g. 40 for K=10, factor=4); each is `dim × 4 bytes`. The blockfile cache
+(foyer) is shared across the process and sized by configuration.
+
+## Summary of Impact
+
+| Step        | When active              | Network (per query)              | Memory (extra)                          |
+|-------------|--------------------------|----------------------------------|----------------------------------------|
+| Centroid    | factor > 1               | None (index loaded at init)      | ~600 MB if loaded; 0 if factor=1        |
+| Vector      | factor > 1               | 1–4 S3 GETs (blocks, cache-dependent) | Blockfile cache (shared)            |
 
 ---
 

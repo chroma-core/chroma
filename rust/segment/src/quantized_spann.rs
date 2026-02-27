@@ -17,10 +17,11 @@ use chroma_index::{
 };
 use chroma_types::{
     default_construction_ef_spann, default_m_spann, default_search_ef_spann, Collection,
-    MaterializedLogOperation, QuantizedCluster, QuantizedClusterOwned, Schema, SchemaError,
-    Segment, SegmentScope, SegmentType, SegmentUuid, OFFSET_ID_TO_DATA, QUANTIZED_SPANN_CLUSTER,
-    QUANTIZED_SPANN_EMBEDDING_METADATA, QUANTIZED_SPANN_QUANTIZED_CENTROID,
-    QUANTIZED_SPANN_RAW_CENTROID, QUANTIZED_SPANN_SCALAR_METADATA,
+    InternalSpannConfiguration, MaterializedLogOperation, QuantizedCluster, QuantizedClusterOwned,
+    Schema, SchemaError, Segment, SegmentScope, SegmentType, SegmentUuid, OFFSET_ID_TO_DATA,
+    QUANTIZED_SPANN_CLUSTER, QUANTIZED_SPANN_EMBEDDING_METADATA,
+    QUANTIZED_SPANN_QUANTIZED_CENTROID, QUANTIZED_SPANN_RAW_CENTROID,
+    QUANTIZED_SPANN_SCALAR_METADATA,
 };
 use faer::{col::ColRef, Mat};
 use thiserror::Error;
@@ -338,8 +339,10 @@ impl QuantizedSpannSegmentFlusher {
 
 #[derive(Clone)]
 pub struct QuantizedSpannSegmentReader {
-    // Centroid index (for navigate)
+    // Centroid indexes
     quantized_centroid: USearchIndex,
+    /// Loaded only when `centroid_rerank_factor > 1`.
+    raw_centroid: Option<USearchIndex>,
 
     // Quantization parameters (for rotate + scoring)
     dimension: usize,
@@ -429,7 +432,7 @@ impl QuantizedSpannSegmentReader {
         let cluster_id = parsed[0].1;
         let embedding_metadata_id = parsed[1].1;
         let quantized_centroid_id = IndexUuid(parsed[2].1);
-        // parsed[3] is raw_centroid — not needed for the reader.
+        let raw_centroid_id = IndexUuid(parsed[3].1);
         let scalar_metadata_id = parsed[4].1;
 
         // Step 1: Open embedding_metadata → load rotation matrix + center.
@@ -494,6 +497,7 @@ impl QuantizedSpannSegmentReader {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: Some(center),
+            quantization_bits: 4,
         };
         let quantized_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Open(quantized_centroid_id))
@@ -508,7 +512,33 @@ impl QuantizedSpannSegmentReader {
                 ))
             })?;
 
-        // Step 3: Open quantized cluster blockfile reader.
+        // Step 3: Open raw centroid index (full-precision) only when centroid reranking is
+        // enabled (centroid_rerank_factor > 1). Skipping saves one S3 fetch and the
+        // in-memory index overhead when the default factor of 1 is in use.
+        let internal_config = InternalSpannConfiguration::from((Some(&space), &spann_config));
+        let raw_centroid = if internal_config.centroid_rerank_factor > 1 {
+            let raw_usearch_config = USearchIndexConfig {
+                quantization_center: None,
+                ..usearch_config
+            };
+            let index = usearch_provider
+                .open(&raw_usearch_config, OpenMode::Open(raw_centroid_id))
+                .instrument(tracing::trace_span!(
+                    "Open raw centroid index",
+                    index_id = %raw_centroid_id.0
+                ))
+                .await
+                .map_err(|e| {
+                    QuantizedSpannSegmentError::Data(format!(
+                        "failed to open raw centroid index: {e}"
+                    ))
+                })?;
+            Some(index)
+        } else {
+            None
+        };
+
+        // Step 5: Open quantized cluster blockfile reader.
         let cluster_options = BlockfileReaderOptions::new(cluster_id, prefix_path.clone());
         let quantized_cluster_reader =
             blockfile_provider
@@ -520,7 +550,7 @@ impl QuantizedSpannSegmentReader {
                     ))
                 })?;
 
-        // Step 4: Open scalar_metadata blockfile reader (for version lookups)
+        // Step 6: Open scalar_metadata blockfile reader (for version lookups)
         //         and preload all version blocks into the blockfile cache.
         let scalar_options = BlockfileReaderOptions::new(scalar_metadata_id, prefix_path.clone());
         let versions_reader = blockfile_provider.read(scalar_options).await.map_err(|e| {
@@ -534,6 +564,7 @@ impl QuantizedSpannSegmentReader {
             dimension,
             distance_function,
             quantized_centroid,
+            raw_centroid,
             quantized_cluster_reader,
             rotation,
             versions_reader,
@@ -567,6 +598,20 @@ impl QuantizedSpannSegmentReader {
         rotated_query: &[f32],
         count: usize,
     ) -> Result<Vec<u32>, QuantizedSpannSegmentError> {
+        self.navigate_with_rerank(rotated_query, count, 1)
+    }
+
+    /// Find nearest cluster heads, optionally reranking with exact (full-precision) distances.
+    ///
+    /// Searches the quantized centroid index for `count * centroid_rerank_factor` candidates,
+    /// then re-scores each candidate using the raw (unquantized) centroid embedding and keeps
+    /// the top `count`. When `centroid_rerank_factor` is 1 no extra work is done.
+    pub fn navigate_with_rerank(
+        &self,
+        rotated_query: &[f32],
+        count: usize,
+        centroid_rerank_factor: usize,
+    ) -> Result<Vec<u32>, QuantizedSpannSegmentError> {
         if rotated_query.len() != self.dimension {
             return Err(QuantizedSpannSegmentError::DimensionMismatch {
                 expected: self.dimension,
@@ -574,13 +619,42 @@ impl QuantizedSpannSegmentReader {
             });
         }
 
+        let candidates = count * centroid_rerank_factor.max(1);
         let result = self
             .quantized_centroid
-            .search(rotated_query, count)
+            .search(rotated_query, candidates)
             .map_err(|e| {
                 QuantizedSpannSegmentError::Data(format!("centroid search failed: {e}"))
             })?;
-        Ok(result.keys)
+
+        // If raw_centroid wasn't loaded (factor was 1 at reader creation time) or there are
+        // fewer candidates than requested, skip reranking.
+        let Some(raw_centroid) = &self.raw_centroid else {
+            return Ok(result.keys);
+        };
+
+        if result.keys.len() <= count {
+            return Ok(result.keys);
+        }
+
+        // Rerank: compute exact distance for each candidate using the raw centroid embedding.
+        // Both the rotated_query and the stored centroids are in the same rotated space, so
+        // the distance function applies directly.
+        let mut scored: Vec<(u32, f32)> = result
+            .keys
+            .iter()
+            .filter_map(|&id| {
+                raw_centroid
+                    .get(id)
+                    .ok()
+                    .flatten()
+                    .map(|centroid| (id, self.distance_function.distance(rotated_query, &centroid)))
+            })
+            .collect();
+
+        scored.sort_unstable_by(|a, b| a.1.total_cmp(&b.1));
+        scored.truncate(count);
+        Ok(scored.into_iter().map(|(id, _)| id).collect())
     }
 
     /// Read a single cluster from the blockfile.
