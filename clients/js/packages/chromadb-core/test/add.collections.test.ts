@@ -107,13 +107,9 @@ describe("add collections", () => {
         embeddingFunction: embedder,
       });
 
-      try {
-        await embedder.generate(DOCUMENTS);
-      } catch (e: any) {
-        expect(e.message).toMatch(
-          "This model does not support specifying dimensions.",
-        );
-      }
+      await expect(embedder.generate(DOCUMENTS)).rejects.toThrow(
+        "This model does not support specifying dimensions.",
+      );
     });
   }
 
@@ -180,9 +176,9 @@ describe("add collections", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    await expect(async () => {
-      await collection.add({ ids: IDS, embeddings: EMBEDDINGS });
-    }).rejects.toThrow(ChromaNotFoundError);
+    await expect(
+      collection.add({ ids: IDS, embeddings: EMBEDDINGS }),
+    ).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("It should return an error when inserting duplicate IDs in the same batch", async () => {
@@ -190,11 +186,9 @@ describe("add collections", () => {
     const ids = IDS.concat(["test1"]);
     const embeddings = EMBEDDINGS.concat([[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
     const metadatas = METADATAS.concat([{ test: "test1", float_value: 0.1 }]);
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("duplicates");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow(/duplicates/);
   });
 
   test("should error on empty embedding", async () => {
@@ -202,10 +196,8 @@ describe("add collections", () => {
     const ids = ["id1"];
     const embeddings = [[]];
     const metadatas = [{ test: "test1", float_value: 0.1 }];
-    try {
-      await collection.add({ ids, embeddings, metadatas });
-    } catch (e: any) {
-      expect(e.message).toMatch("got empty embedding at pos");
-    }
+    await expect(
+      collection.add({ ids, embeddings, metadatas }),
+    ).rejects.toThrow(/got empty embedding at pos/);
   });
 });
