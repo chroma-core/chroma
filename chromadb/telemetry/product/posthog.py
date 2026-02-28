@@ -53,9 +53,9 @@ class Posthog(ProductTelemetryClient):
     def _direct_capture(self, event: ProductTelemetryEvent) -> None:
         try:
             posthog.capture(
-                self.user_id,
-                event.name,
-                {**event.properties, **POSTHOG_EVENT_SETTINGS, **self.context},
+                distinct_id=self.user_id,
+                event=event.name,
+                properties={**event.properties, **POSTHOG_EVENT_SETTINGS, **self.context},
             )
         except Exception as e:
             logger.error(f"Failed to send telemetry event {event.name}: {e}")
