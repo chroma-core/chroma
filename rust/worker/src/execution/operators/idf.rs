@@ -80,12 +80,22 @@ impl Operator<IdfInput, IdfOutput> for Idf {
     async fn run(&self, input: &IdfInput) -> Result<IdfOutput, IdfError> {
         let mut n = 0;
         let mut nts = HashMap::new();
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
+
+        // Create both segment readers in parallel since they are independent
+        let record_segment_reader_fut = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
-        ))
-        .await
-        {
+        ));
+
+        let metadata_segment_reader_fut = Box::pin(MetadataSegmentReader::from_segment(
+            &input.metadata_segment,
+            &input.blockfile_provider,
+        ));
+
+        let (record_segment_reader_result, metadata_segment_reader_result) =
+            tokio::join!(record_segment_reader_fut, metadata_segment_reader_fut);
+
+        let record_segment_reader = match record_segment_reader_result {
             Ok(reader) => {
                 n += reader.count().await?;
                 Ok(Some(reader))
@@ -95,14 +105,9 @@ impl Operator<IdfInput, IdfOutput> for Idf {
             }
             Err(e) => Err(*e),
         }?;
+        let metadata_segment_reader = metadata_segment_reader_result?;
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
-
-        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
-            &input.metadata_segment,
-            &input.blockfile_provider,
-        ))
-        .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
             let encoded_dimensions = self

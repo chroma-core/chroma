@@ -607,19 +607,33 @@ impl Operator<FilterInput, FilterOutput> for Filter {
             input.logs.len(),
         );
 
-        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
+        // Create both segment readers in parallel since they are independent
+        let record_segment_reader_fut = Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
             &input.blockfile_provider,
         ))
-        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"))
-        .await
-        {
+        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"));
+
+        let metadata_segment_reader_fut = Box::pin(MetadataSegmentReader::from_segment(
+            &input.metadata_segment,
+            &input.blockfile_provider,
+        ))
+        .instrument(
+            tracing::trace_span!(parent: Span::current(), "Create metadata segment reader"),
+        );
+
+        let (record_segment_reader_result, metadata_segment_reader_result) =
+            tokio::join!(record_segment_reader_fut, metadata_segment_reader_fut);
+
+        let record_segment_reader = match record_segment_reader_result {
             Ok(reader) => Ok(Some(reader)),
             Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
                 Ok(None)
             }
             Err(e) => Err(*e),
         }?;
+        let metadata_segment_reader = metadata_segment_reader_result?;
+
         let cloned_record_segment_reader = record_segment_reader.clone();
         let materialized_logs =
             materialize_logs(&cloned_record_segment_reader, input.logs.clone(), None)
@@ -643,15 +657,8 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         }
 
         let log_metadata_provider = MetadataProvider::Log(&metadata_log_reader);
-
-        let metadata_segement_reader = Box::pin(MetadataSegmentReader::from_segment(
-            &input.metadata_segment,
-            &input.blockfile_provider,
-        ))
-        .instrument(tracing::trace_span!(parent: Span::current(), "Create metadata segment reader"))
-        .await?;
         let compact_metadata_provider =
-            MetadataProvider::CompactData(&metadata_segement_reader, &record_segment_reader);
+            MetadataProvider::CompactData(&metadata_segment_reader, &record_segment_reader);
 
         // Get offset ids corresponding to user ids
         let (user_allowed_log_offset_ids, user_allowed_compact_offset_ids) =
