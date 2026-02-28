@@ -61,14 +61,14 @@ describe("update records", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    await expect(async () => {
-      await collection.update({
+    await expect(
+      collection.update({
         ids: ["test1"],
         embeddings: [[1, 2, 3, 4, 5, 6, 7, 8, 9, 11]],
         metadatas: [{ test: "meta1" }],
         documents: ["doc1"],
-      });
-    }).rejects.toThrow(ChromaNotFoundError);
+      }),
+    ).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("should support updating records without a document or an embedding", async () => {

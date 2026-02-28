@@ -27,8 +27,6 @@ describe("peek records", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    await expect(async () => {
-      await collection.peek({});
-    }).rejects.toThrow(ChromaNotFoundError);
+    await expect(collection.peek({})).rejects.toThrow(ChromaNotFoundError);
   });
 });
