@@ -790,6 +790,11 @@ impl ChromaCollection {
         })
     }
 
+    /// Returns a JSON object that can be passed to ChromaHttpClient::hydrate_collection().
+    pub async fn dehydrate(&self) -> Result<serde_json::Value, serde_json::Error> {
+        serde_json::to_value(&self.collection)
+    }
+
     /// Internal transport method that constructs collection-specific API paths and delegates to the client.
     async fn send<Body: Serialize, Response: DeserializeOwned>(
         &self,
