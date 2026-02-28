@@ -249,6 +249,7 @@ impl GarbageCollector {
         let orchestrator =
             crate::garbage_collector_orchestrator_v2::GarbageCollectorOrchestrator::new(
                 collection.id,
+                collection.database,
                 collection.version_file_path,
                 collection.lineage_file_path,
                 version_absolute_cutoff_time,

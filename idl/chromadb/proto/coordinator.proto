@@ -517,6 +517,7 @@ message CollectionToGcInfo {
   reserved 4; // used to be "latest_version"
   string tenant_id = 5;
   optional string lineage_file_path = 6;
+  optional string database_name = 7;
 }
 
 message ListCollectionsToGcResponse {
