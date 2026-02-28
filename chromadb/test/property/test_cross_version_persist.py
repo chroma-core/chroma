@@ -1,6 +1,8 @@
 from multiprocessing.connection import Connection
 import os
+import subprocess
 import shutil
+import sys
 import tempfile
 from typing import Generator, List, Tuple, Dict, Any, Callable, Type
 from hypothesis import given, settings
@@ -50,6 +52,45 @@ def versions() -> List[str]:
     versions = [v for v in versions if version_re.match(v)]
     versions.sort(key=packaging_version.Version)
     return BASELINE_VERSIONS + [versions[-1]]
+
+
+def _supports_current_python(version: str) -> bool:
+    """Return whether `chromadb==version` can be imported on this interpreter.
+
+    Python 3.14 is incompatible with pydantic.v1, which older Chroma releases use.
+    Those versions should be skipped for this cross-version property test.
+    """
+    if sys.version_info < (3, 14):
+        return True
+
+    install_version(version, {})
+    path = get_path_to_version_install(version)
+    probe = (
+        "import sys\n"
+        f"sys.path.insert(0, {path!r})\n"
+        "import chromadb\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True
+
+    output = f"{result.stdout}\n{result.stderr}"
+    known_markers = (
+        "Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater",
+        'unable to infer type for attribute "chroma_server_nofile"',
+    )
+    if any(marker in output for marker in known_markers):
+        return False
+
+    # Surface unknown import failures instead of silently skipping them.
+    raise RuntimeError(
+        f"Could not import chromadb=={version} on Python "
+        f"{sys.version_info.major}.{sys.version_info.minor}: {output}"
+    )
 
 
 def _bool_to_int(metadata: Dict[str, Any]) -> Dict[str, Any]:
@@ -140,7 +181,7 @@ def configurations(versions: List[str]) -> List[Tuple[str, Settings]]:
     ]
 
 
-test_old_versions = versions()
+test_old_versions = [v for v in versions() if _supports_current_python(v)]
 base_install_dir = tempfile.mkdtemp()
 
 
