@@ -16,6 +16,17 @@ export interface MorphConfig {
   encoding_format?: 'float' | 'base64';
 }
 
+export interface MorphArgs {
+  apiKey?: string;
+  modelName?: string;
+  apiBase?: string;
+  encodingFormat?: 'float' | 'base64';
+  apiKeyEnvVar?: string;
+}
+
+/**
+ * @deprecated Use MorphArgs instead. This interface will be removed in a future version.
+ */
 export interface MorphEmbeddingFunctionConfig {
   api_key?: string;
   model_name?: string;
@@ -32,29 +43,30 @@ export class MorphEmbeddingFunction implements EmbeddingFunction {
   private readonly apiBase: string;
   private client: OpenAI;
 
-  constructor(config: MorphEmbeddingFunctionConfig = {}) {
-    const {
-      api_key,
-      model_name = 'morph-embedding-v2',
-      api_base = 'https://api.morphllm.com/v1',
-      encoding_format = 'float',
-      api_key_env_var = 'MORPH_API_KEY'
-    } = config;
+    // Support both camelCase (new) and snake_case (deprecated) for backwards compatibility
+    const camelArgs = args as MorphArgs;
+    const snakeArgs = args as MorphEmbeddingFunctionConfig;
+
+    const apiKey = camelArgs.apiKey ?? snakeArgs.api_key;
+    const modelName = camelArgs.modelName ?? snakeArgs.model_name ?? "morph-embedding-v2";
+    const apiBase = camelArgs.apiBase ?? snakeArgs.api_base ?? "https://api.morphllm.com/v1";
+    const encodingFormat = camelArgs.encodingFormat ?? snakeArgs.encoding_format ?? "float";
+    const apiKeyEnvVar = camelArgs.apiKeyEnvVar ?? snakeArgs.api_key_env_var ?? "MORPH_API_KEY";
 
     // Get API key from config or environment
-    const apiKey = api_key || process.env[api_key_env_var];
-    if (!apiKey) {
-      throw new Error(`API key not found. Please set ${api_key_env_var} environment variable or provide api_key in config.`);
+    const resolvedApiKey = apiKey || process.env[apiKeyEnvVar];
+    if (!resolvedApiKey) {
+      throw new Error(`API key not found. Please set ${apiKeyEnvVar} environment variable or provide apiKey in config.`);
     }
 
-    this.modelName = model_name;
-    this.encodingFormat = encoding_format;
-    this.apiKeyEnvVar = api_key_env_var;
-    this.apiBase = api_base;
+    this.modelName = modelName;
+    this.encodingFormat = encodingFormat;
+    this.apiKeyEnvVar = apiKeyEnvVar;
+    this.apiBase = apiBase;
 
     this.client = new OpenAI({
-      apiKey,
-      baseURL: api_base,
+      apiKey: resolvedApiKey,
+      baseURL: apiBase,
     });
   }
 
@@ -78,10 +90,10 @@ export class MorphEmbeddingFunction implements EmbeddingFunction {
 
   public static buildFromConfig(config: MorphConfig): MorphEmbeddingFunction {
     return new MorphEmbeddingFunction({
-      model_name: config.model_name,
-      api_key_env_var: config.api_key_env_var,
-      api_base: config.api_base,
-      encoding_format: config.encoding_format,
+      modelName: config.model_name,
+      apiKeyEnvVar: config.api_key_env_var,
+      apiBase: config.api_base,
+      encodingFormat: config.encoding_format,
     });
   }
 

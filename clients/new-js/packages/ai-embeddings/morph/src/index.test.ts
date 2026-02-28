@@ -24,11 +24,31 @@ describe("MorphEmbeddingFunction", () => {
     });
   }
 
-  const customParametersTest = "should initialize with custom parameters";
+  const customParametersTest = "should initialize with custom parameters (camelCase)";
   if (!process.env.MORPH_API_KEY) {
     it.skip(customParametersTest, () => { });
   } else {
     it(customParametersTest, () => {
+      const embedder = new MorphEmbeddingFunction({
+        modelName: "custom-model",
+        apiBase: "https://custom-api.com/v1",
+        encodingFormat: "base64",
+        apiKeyEnvVar: "MORPH_API_KEY",
+      });
+
+      const config = embedder.getConfig();
+      expect(config.model_name).toBe("custom-model");
+      expect(config.api_base).toBe("https://custom-api.com/v1");
+      expect(config.encoding_format).toBe("base64");
+      expect(config.api_key_env_var).toBe("MORPH_API_KEY");
+    });
+  }
+
+  const backwardsCompatTest = "should support deprecated snake_case parameters for backwards compatibility";
+  if (!process.env.MORPH_API_KEY) {
+    it.skip(backwardsCompatTest, () => { });
+  } else {
+    it(backwardsCompatTest, () => {
       const embedder = new MorphEmbeddingFunction({
         model_name: "custom-model",
         api_base: "https://custom-api.com/v1",
@@ -44,7 +64,7 @@ describe("MorphEmbeddingFunction", () => {
     });
   }
 
-  it("should initialize with custom error for a API key", () => {
+  it("should throw error when API key is not found", () => {
     const originalEnv = process.env.MORPH_API_KEY;
     delete process.env.MORPH_API_KEY;
 
@@ -59,7 +79,23 @@ describe("MorphEmbeddingFunction", () => {
     }
   });
 
-  it("should use custom API key environment variable", () => {
+  it("should use custom API key environment variable (camelCase)", () => {
+    process.env.CUSTOM_MORPH_API_KEY = "test-api-key";
+
+    try {
+      const embedder = new MorphEmbeddingFunction({
+        apiKeyEnvVar: "CUSTOM_MORPH_API_KEY",
+      });
+
+      expect(embedder.getConfig().api_key_env_var).toBe(
+        "CUSTOM_MORPH_API_KEY",
+      );
+    } finally {
+      delete process.env.CUSTOM_MORPH_API_KEY;
+    }
+  });
+
+  it("should use custom API key environment variable (snake_case deprecated)", () => {
     process.env.CUSTOM_MORPH_API_KEY = "test-api-key";
 
     try {
