@@ -82,30 +82,36 @@ impl Operator<IdfInput, IdfOutput> for Idf {
         let mut nts = HashMap::new();
 
         // Create both segment readers in parallel since they are independent
-        let record_segment_reader_fut = Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
-            &input.blockfile_provider,
-        ));
-
-        let metadata_segment_reader_fut = Box::pin(MetadataSegmentReader::from_segment(
-            &input.metadata_segment,
-            &input.blockfile_provider,
-        ));
-
-        let (record_segment_reader_result, metadata_segment_reader_result) =
-            tokio::join!(record_segment_reader_fut, metadata_segment_reader_fut);
-
-        let record_segment_reader = match record_segment_reader_result {
-            Ok(reader) => {
-                n += reader.count().await?;
-                Ok(Some(reader))
+        let record_segment_reader_fut = async {
+            match Box::pin(RecordSegmentReader::from_segment(
+                &input.record_segment,
+                &input.blockfile_provider,
+            ))
+            .await
+            {
+                Ok(reader) => {
+                    let count = reader.count().await?;
+                    Ok((Some(reader), count))
+                }
+                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                    Ok((None, 0))
+                }
+                Err(e) => Err(IdfError::from(*e)),
             }
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
-                Ok(None)
-            }
-            Err(e) => Err(*e),
-        }?;
-        let metadata_segment_reader = metadata_segment_reader_result?;
+        };
+
+        let metadata_segment_reader_fut = async {
+            Box::pin(MetadataSegmentReader::from_segment(
+                &input.metadata_segment,
+                &input.blockfile_provider,
+            ))
+            .await
+            .map_err(IdfError::from)
+        };
+
+        let ((record_segment_reader, count), metadata_segment_reader) =
+            tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
+        n += count;
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
 

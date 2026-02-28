@@ -608,31 +608,38 @@ impl Operator<FilterInput, FilterOutput> for Filter {
         );
 
         // Create both segment readers in parallel since they are independent
-        let record_segment_reader_fut = Box::pin(RecordSegmentReader::from_segment(
-            &input.record_segment,
-            &input.blockfile_provider,
-        ))
-        .instrument(tracing::trace_span!(parent: Span::current(), "Create record segment reader"));
-
-        let metadata_segment_reader_fut = Box::pin(MetadataSegmentReader::from_segment(
-            &input.metadata_segment,
-            &input.blockfile_provider,
-        ))
-        .instrument(
-            tracing::trace_span!(parent: Span::current(), "Create metadata segment reader"),
-        );
-
-        let (record_segment_reader_result, metadata_segment_reader_result) =
-            tokio::join!(record_segment_reader_fut, metadata_segment_reader_fut);
-
-        let record_segment_reader = match record_segment_reader_result {
-            Ok(reader) => Ok(Some(reader)),
-            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
-                Ok(None)
+        let record_segment_reader_fut = async {
+            match Box::pin(RecordSegmentReader::from_segment(
+                &input.record_segment,
+                &input.blockfile_provider,
+            ))
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Create record segment reader"),
+            )
+            .await
+            {
+                Ok(reader) => Ok(Some(reader)),
+                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                    Ok(None)
+                }
+                Err(e) => Err(FilterError::from(*e)),
             }
-            Err(e) => Err(*e),
-        }?;
-        let metadata_segment_reader = metadata_segment_reader_result?;
+        };
+
+        let metadata_segment_reader_fut = async {
+            Box::pin(MetadataSegmentReader::from_segment(
+                &input.metadata_segment,
+                &input.blockfile_provider,
+            ))
+            .instrument(
+                tracing::trace_span!(parent: Span::current(), "Create metadata segment reader"),
+            )
+            .await
+            .map_err(FilterError::from)
+        };
+
+        let (record_segment_reader, metadata_segment_reader) =
+            tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
 
         let cloned_record_segment_reader = record_segment_reader.clone();
         let materialized_logs =
