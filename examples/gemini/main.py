@@ -6,7 +6,7 @@ import google.generativeai as genai
 import chromadb
 from chromadb.utils import embedding_functions
 
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 
 def build_prompt(query: str, context: List[str]) -> str:
@@ -78,8 +78,9 @@ def main(
     client = chromadb.PersistentClient(path=persist_directory)
 
     # create embedding function
-    embedding_function = embedding_functions.GoogleGenerativeAIEmbeddingFunction(
-        api_key=google_api_key, task_type="RETRIEVAL_QUERY"
+    embedding_function = embedding_functions.GoogleGenerativeAiEmbeddingFunction(
+        api_key=google_api_key, 
+        model_name='gemini-embedding-001',
     )
 
     # Get the collection.
