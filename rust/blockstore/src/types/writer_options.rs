@@ -15,6 +15,10 @@ pub struct BlockfileWriterOptions {
     pub(crate) prefix_path: String,
     pub(crate) max_block_size_bytes: Option<usize>,
     pub(crate) cmek: Option<Cmek>,
+    /// When true, track byte offsets of value buffers in the sparse index.
+    /// This enables byte-range reads of individual values without loading entire blocks.
+    /// Currently only supported for unordered blockfile writers.
+    pub(crate) track_value_buffer_offsets: bool,
 }
 
 impl BlockfileWriterOptions {
@@ -25,6 +29,7 @@ impl BlockfileWriterOptions {
             mutation_ordering: BlockfileWriterMutationOrdering::default(),
             max_block_size_bytes: None,
             cmek: None,
+            track_value_buffer_offsets: false,
         }
     }
 
@@ -60,6 +65,14 @@ impl BlockfileWriterOptions {
 
     pub fn with_cmek(mut self, cmek: Cmek) -> Self {
         self.cmek = Some(cmek);
+        self
+    }
+
+    /// Enable tracking of value buffer byte offsets in the sparse index.
+    /// This enables efficient byte-range reads of individual values (e.g., embeddings)
+    /// without loading entire blocks. Only supported for unordered blockfile writers.
+    pub fn track_value_buffer_offsets(mut self) -> Self {
+        self.track_value_buffer_offsets = true;
         self
     }
 }

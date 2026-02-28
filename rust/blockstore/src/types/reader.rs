@@ -169,6 +169,37 @@ impl<
             BlockfileReader::ArrowBlockfileReader(reader) => reader.rank(prefix, key).await,
         }
     }
+
+    /// Fetch raw bytes for a value at a specific key using byte-range reads.
+    ///
+    /// This method is only supported for Arrow blockfiles and returns None for
+    /// memory blockfiles or Arrow blockfiles that don't have value buffer offset tracking.
+    ///
+    /// # Arguments
+    /// * `prefix` - The key prefix
+    /// * `key` - The key to look up
+    /// * `value_size` - Size of each value in bytes
+    ///
+    /// # Returns
+    /// * `Ok(Some(bytes))` - The raw bytes for the value
+    /// * `Ok(None)` - Byte-range reads not supported (memory blockfile or older version)
+    /// * `Err(_)` - Error during lookup or fetch
+    pub async fn get_value_bytes(
+        &self,
+        prefix: &str,
+        key: K,
+        value_size: usize,
+    ) -> Result<Option<std::sync::Arc<Vec<u8>>>, Box<dyn ChromaError>> {
+        match self {
+            BlockfileReader::MemoryBlockfileReader(_) => {
+                // Memory blockfiles don't support byte-range reads
+                Ok(None)
+            }
+            BlockfileReader::ArrowBlockfileReader(reader) => {
+                reader.get_value_bytes(prefix, key, value_size).await
+            }
+        }
+    }
 }
 
 impl<
