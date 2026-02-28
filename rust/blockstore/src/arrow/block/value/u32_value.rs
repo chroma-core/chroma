@@ -79,6 +79,18 @@ impl ArrowWriteableValue for u32 {
             _ => panic!("Invalid builder type: {:?}", &delta.builder),
         }
     }
+
+    fn with_value_from_delta<R>(
+        prefix: &str,
+        key: KeyWrapper,
+        delta: &BlockStorage,
+        f: impl FnOnce(Option<&Self>) -> R,
+    ) -> R {
+        match delta {
+            BlockStorage::UInt32(builder) => builder.with_value(prefix, key, f),
+            _ => panic!("Invalid builder type: {:?}", delta),
+        }
+    }
 }
 
 impl ArrowReadableValue<'_> for u32 {

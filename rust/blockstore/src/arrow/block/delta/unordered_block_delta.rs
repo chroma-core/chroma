@@ -65,6 +65,22 @@ impl UnorderedBlockDelta {
         V::add(prefix, key.into(), value, &self.builder);
     }
 
+    /// Gets a reference to a value without copying it.
+    /// The closure `f` is called with a reference to the stored value if it exists.
+    /// This allows zero-copy access to the stored data while the delta is locked.
+    pub fn with_value<K, V, R>(
+        &self,
+        prefix: &str,
+        key: K,
+        f: impl FnOnce(Option<&V>) -> R,
+    ) -> R
+    where
+        K: ArrowWriteableKey,
+        V: ArrowWriteableValue,
+    {
+        V::with_value_from_delta(prefix, key.into(), &self.builder, f)
+    }
+
     /// Deletes a key from the block delta.
     pub fn delete<K: ArrowWriteableKey, V: ArrowWriteableValue>(&self, prefix: &str, key: K) {
         V::delete(prefix, key.into(), self)
@@ -605,6 +621,49 @@ mod test {
             let key = i as u32;
             let read = forked_block.get::<u32, u32>("prefix", key);
             assert_eq!(read, Some(i as u32));
+        }
+    }
+
+    #[tokio::test]
+    async fn test_batch_add_string_val() {
+        // Test the batch_add functionality for improved performance
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let path = tmp_dir.path().to_str().unwrap();
+        let storage = Storage::Local(LocalStorage::new(path));
+        let cache = new_cache_for_test();
+        let block_manager = BlockManager::new(
+            storage,
+            TEST_MAX_BLOCK_SIZE_BYTES,
+            cache,
+            BlockManagerConfig::default_num_concurrent_block_flushes(),
+        );
+        let delta = block_manager.create::<&str, String, UnorderedBlockDelta>();
+
+        // Use batch_add to add multiple items at once
+        let items: Vec<_> = (0..100)
+            .map(|i| {
+                (
+                    "prefix".to_string(),
+                    crate::key::KeyWrapper::String(format!("key{}", i)),
+                    format!("value{}", i),
+                )
+            })
+            .collect();
+
+        // Access the inner storage directly via the builder
+        if let crate::arrow::block::delta::BlockStorage::String(storage) = &delta.builder {
+            storage.batch_add(items);
+        } else {
+            panic!("Expected String storage");
+        }
+
+        // Verify all items were added
+        let block = block_manager.commit::<&str, String>(delta).await;
+        for i in 0..100 {
+            let key = format!("key{}", i);
+            let expected = format!("value{}", i);
+            let read = block.get::<&str, &str>("prefix", &key).unwrap();
+            assert_eq!(read, expected.as_str());
         }
     }
 }
