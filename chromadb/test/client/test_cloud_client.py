@@ -1,3 +1,4 @@
+import os
 import pytest
 from unittest.mock import patch
 from chromadb import CloudClient
@@ -332,3 +333,47 @@ def test_api_key_with_no_tenant_access() -> None:
             match="Could not determine a tenant from the current authentication method. Please provide a tenant.",
         ):
             CloudClient(api_key="valid_token")
+
+
+def test_api_key_from_env_var() -> None:
+    with patch.dict(os.environ, {"CHROMA_API_KEY": "env_var_token"}), patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="default_tenant", databases=["testdb"]
+        )
+        mock_get_tenant.return_value = Tenant(name="default_tenant")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="testdb", tenant="default_tenant"
+        )
+
+        client = CloudClient(database="testdb")
+
+        settings = client.get_settings()
+        assert settings.chroma_client_auth_credentials == "env_var_token"
+
+
+def test_api_key_param_takes_precedence_over_env_var() -> None:
+    with patch.dict(os.environ, {"CHROMA_API_KEY": "env_var_token"}), patch(
+        "chromadb.api.fastapi.FastAPI.get_user_identity"
+    ) as mock_get_user_identity, patch(
+        "chromadb.api.client.AdminClient.get_tenant"
+    ) as mock_get_tenant, patch(
+        "chromadb.api.client.AdminClient.get_database"
+    ) as mock_get_database:
+        mock_get_user_identity.return_value = UserIdentity(
+            user_id="test_user", tenant="default_tenant", databases=["testdb"]
+        )
+        mock_get_tenant.return_value = Tenant(name="default_tenant")
+        mock_get_database.return_value = Database(
+            id=uuid4(), name="testdb", tenant="default_tenant"
+        )
+
+        client = CloudClient(database="testdb", api_key="explicit_token")
+
+        settings = client.get_settings()
+        assert settings.chroma_client_auth_credentials == "explicit_token"
