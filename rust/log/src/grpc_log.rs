@@ -306,18 +306,21 @@ impl GrpcLog {
             ))
     }
 
-    // ScoutLogs returns the offset of the next record to be inserted into the log.
+    // ScoutLogs returns the offset of the next record to be inserted into the log,
+    // and optionally the storage paths of all fragments needed to read the log.
     pub(super) async fn scout_logs(
         &mut self,
         database_name: DatabaseName,
         collection_id: CollectionUuid,
         _start_from: u64,
-    ) -> Result<u64, Box<dyn ChromaError>> {
+        include_fragment_paths: bool,
+    ) -> Result<crate::ScoutLogsResult, Box<dyn ChromaError>> {
         let mut client = self
             .client_for(collection_id)
             .map_err(|err| Box::new(err) as Box<dyn ChromaError>)?;
         let request = client.scout_logs(chroma_proto::ScoutLogsRequest {
             collection_id: collection_id.0.to_string(),
+            include_fragment_paths,
             database_name: database_name.into_string(),
         });
         let response = request.await;
@@ -329,7 +332,10 @@ impl GrpcLog {
             }
         };
         let scout = response.into_inner();
-        Ok(scout.first_uninserted_record_offset as u64)
+        Ok(crate::ScoutLogsResult {
+            first_uninserted_record_offset: scout.first_uninserted_record_offset as u64,
+            fragment_paths: scout.fragment_paths,
+        })
     }
 
     pub(super) async fn read(

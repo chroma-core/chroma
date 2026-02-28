@@ -86,11 +86,13 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
                 self.database_name.clone(),
                 self.collection_uuid,
                 self.start_log_offset_id,
+                false,
             )
             .await
             .inspect_err(|err| {
                 tracing::error!("could not pull logs: {err:?}");
-            })?;
+            })?
+            .first_uninserted_record_offset;
         let mut fetched = Vec::new();
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos() as i64;
 

@@ -1563,8 +1563,9 @@ impl ServiceBasedFrontend {
         // The same logic is used in get_enum_offset_on_server in log-service/src/lib.rs
         let enumeration_offset = self
             .log_client
-            .scout_logs(&collection.tenant, database_name, collection_id, 0)
+            .scout_logs(&collection.tenant, database_name, collection_id, 0, false)
             .await?
+            .first_uninserted_record_offset
             .saturating_sub(1);
 
         let total_ops = enumeration_offset;
