@@ -2989,7 +2989,7 @@ async fn collection_search(
 
     tracing::info!(
         name: "collection_search",
-        num_queries = payload.searches.len(),
+        searches = ?payload.searches.iter().map(|s| s.masked()).collect::<Vec<_>>(),
     );
 
     // Override limit by quota
