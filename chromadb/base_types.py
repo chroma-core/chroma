@@ -124,7 +124,7 @@ UpdateMetadata = Mapping[
     str, Union[int, float, str, bool, SparseVector, MetadataListValue, None]
 ]
 PyVector = Union[Sequence[float], Sequence[int]]
-Vector = NDArray[Union[np.int32, np.float32]]  # TODO: Specify that the vector is 1D
+Vector = NDArray[np.float32]  #Clarified to represent a 1D float32 vector
 # Metadata Query Grammar
 LiteralValue = Union[str, int, float, bool]
 LogicalOperator = Union[Literal["$and"], Literal["$or"]]
