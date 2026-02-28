@@ -1,6 +1,7 @@
 import posthog
 import logging
 import sys
+import threading
 from typing import Any, Dict, Set
 from chromadb.config import System
 from chromadb.telemetry.product import (
@@ -31,6 +32,7 @@ class Posthog(ProductTelemetryClient):
 
         self.batched_events: Dict[str, ProductTelemetryEvent] = {}
         self.seen_event_types: Set[Any] = set()
+        self._lock = threading.Lock()
 
         super().__init__(system)
 
@@ -41,14 +43,18 @@ class Posthog(ProductTelemetryClient):
             self._direct_capture(event)
             return
         batch_key = event.batch_key
-        if batch_key not in self.batched_events:
-            self.batched_events[batch_key] = event
-            return
-        batched_event = self.batched_events[batch_key].batch(event)
-        self.batched_events[batch_key] = batched_event
-        if batched_event.batch_size >= batched_event.max_batch_size:
-            self._direct_capture(batched_event)
-            del self.batched_events[batch_key]
+        flush_event = None
+        with self._lock:
+            if batch_key not in self.batched_events:
+                self.batched_events[batch_key] = event
+                return
+            batched_event = self.batched_events[batch_key].batch(event)
+            self.batched_events[batch_key] = batched_event
+            if batched_event.batch_size >= batched_event.max_batch_size:
+                del self.batched_events[batch_key]
+                flush_event = batched_event
+        if flush_event is not None:
+            self._direct_capture(flush_event)
 
     def _direct_capture(self, event: ProductTelemetryEvent) -> None:
         try:
