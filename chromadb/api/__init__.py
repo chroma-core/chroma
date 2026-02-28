@@ -148,7 +148,7 @@ class BaseAPI(ABC):
             name: The name of the collection to delete.
 
         Raises:
-            ValueError: If the collection does not exist.
+            NotFoundError: If the collection does not exist.
 
         Examples:
             ```python
@@ -434,8 +434,8 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The newly created collection.
 
         Raises:
-            ValueError: If the collection already exists and get_or_create is False.
-            ValueError: If the collection name is invalid.
+            ChromaError: If the collection already exists and get_or_create is False.
+            InvalidArgumentError: If the collection name is invalid.
 
         Examples:
             ```python
@@ -468,7 +468,7 @@ class ClientAPI(BaseAPI, ABC):
             Collection: The collection
 
         Raises:
-            ValueError: If the collection does not exist
+            NotFoundError: If the collection does not exist
 
         Examples:
             ```python
