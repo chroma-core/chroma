@@ -68,11 +68,12 @@ use crate::types::SysDbError;
 use crate::types::{
     CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
     CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
-    UpdateCollectionRequest, UpdateCollectionResponse,
+    CreateTenantResponse, FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
+    FlushCompactionRequest, FlushCompactionResponse, GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse, GetCollectionsRequest, GetCollectionsResponse,
+    GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest, GetTenantsResponse,
+    ListCollectionsToGcRequest, ListCollectionsToGcResponse, UpdateCollectionRequest,
+    UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -349,6 +350,16 @@ impl Backend {
     ) -> Result<UpdateCollectionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.update_collection(req).await,
+        }
+    }
+
+    /// Finish collection deletion (hard delete).
+    pub async fn finish_collection_deletion(
+        &self,
+        req: FinishCollectionDeletionRequest,
+    ) -> Result<FinishCollectionDeletionResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.finish_collection_deletion(req).await,
         }
     }
 

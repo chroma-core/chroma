@@ -54,11 +54,12 @@ fn to_channel_config(cfg: &SpannerChannelConfig) -> ChannelConfig {
 use crate::types::{
     CollectionFilter, CountCollectionsRequest, CountCollectionsResponse, CreateCollectionRequest,
     CreateCollectionResponse, CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest,
-    CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
-    GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
-    GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse, SpannerRow,
-    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
+    CreateTenantResponse, FinishCollectionDeletionRequest, FinishCollectionDeletionResponse,
+    FlushCompactionRequest, FlushCompactionResponse, GetCollectionWithSegmentsRequest,
+    GetCollectionWithSegmentsResponse, GetCollectionsRequest, GetCollectionsResponse,
+    GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest, GetTenantsResponse,
+    ListCollectionsToGcRequest, ListCollectionsToGcResponse, SpannerRow, SpannerRowRef,
+    SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
     UpdateSegmentRequest, UpdateTenantRequest,
 };
 
@@ -1495,6 +1496,102 @@ impl SpannerBackend {
             Ok((_, ())) => Ok(UpdateCollectionResponse {}),
             Err(e) => Err(e),
         }
+    }
+
+    /// Finish collection deletion (hard delete).
+    ///
+    /// Steps:
+    /// 1. Delete from collection_segments for the local region
+    /// 2. Delete from collection_compaction_cursors for the local region
+    /// 3. Query collection_compaction_cursors for remaining regions
+    /// 4. If no other regions remain, also delete from collection_metadata and collections
+    pub async fn finish_collection_deletion(
+        &self,
+        req: FinishCollectionDeletionRequest,
+    ) -> Result<FinishCollectionDeletionResponse, SysDbError> {
+        let collection_id = req.collection_id.0.to_string();
+        let region = self.local_region().to_string();
+
+        self.client
+            .read_write_transaction::<(), SysDbError, _>(|tx| {
+                let collection_id = collection_id.clone();
+                let region = region.clone();
+                Box::pin(async move {
+                    // Step 1 & 2: Delete from collection_segments and collection_compaction_cursors for this region
+                    let mut delete_segments_stmt = Statement::new(
+                        "DELETE FROM collection_segments WHERE collection_id = @collection_id AND region = @region",
+                    );
+                    delete_segments_stmt.add_param("collection_id", &collection_id);
+                    delete_segments_stmt.add_param("region", &region);
+
+                    let mut delete_cursors_stmt = Statement::new(
+                        "DELETE FROM collection_compaction_cursors WHERE collection_id = @collection_id AND region = @region",
+                    );
+                    delete_cursors_stmt.add_param("collection_id", &collection_id);
+                    delete_cursors_stmt.add_param("region", &region);
+
+                    tx.batch_update(vec![delete_segments_stmt, delete_cursors_stmt]).await?;
+
+                    // Step 3: Check if any other regions still have cursors for this collection
+                    let mut check_stmt = Statement::new(
+                        "SELECT EXISTS(SELECT 1 FROM collection_compaction_cursors WHERE collection_id = @collection_id AND region != @region) as has_other_regions",
+                    );
+                    check_stmt.add_param("collection_id", &collection_id);
+                    check_stmt.add_param("region", &region);
+                    let mut result_set = tx.query(check_stmt).await?;
+
+                    let has_other_regions: bool = result_set
+                        .next()
+                        .await?
+                        .ok_or_else(|| SysDbError::Internal("Expected at least one row".to_string()))?
+                        .column_by_name("has_other_regions")
+                        .map_err(SysDbError::FailedToReadColumn)?;
+
+                    // Step 4: If no other regions remain, delete collection_metadata and collections
+                    if !has_other_regions {
+                        tracing::info!(
+                            collection_id = %collection_id,
+                            region = %region,
+                            "Performing hard delete of collection - no other regions remain"
+                        );
+
+                        // Safety check: verify collection is soft-deleted before hard delete
+                        let mut collection_check = Statement::new(
+                            "SELECT is_deleted FROM collections WHERE collection_id = @collection_id"
+                        );
+                        collection_check.add_param("collection_id", &collection_id);
+                        let mut rows = tx.query(collection_check).await?;
+                        let is_deleted: bool = rows
+                            .next()
+                            .await?
+                            .ok_or_else(|| SysDbError::NotFound(format!("collection '{}' not found", collection_id)))?
+                            .column_by_name("is_deleted")
+                            .map_err(SysDbError::FailedToReadColumn)?;
+                        if !is_deleted {
+                            return Err(SysDbError::InvalidArgument(
+                                "finish_collection_deletion requires collection to be soft-deleted first".into(),
+                            ));
+                        }
+
+                        let mut delete_metadata_stmt = Statement::new(
+                            "DELETE FROM collection_metadata WHERE collection_id = @collection_id",
+                        );
+                        delete_metadata_stmt.add_param("collection_id", &collection_id);
+
+                        let mut delete_collection_stmt = Statement::new(
+                            "DELETE FROM collections WHERE collection_id = @collection_id",
+                        );
+                        delete_collection_stmt.add_param("collection_id", &collection_id);
+
+                        tx.batch_update(vec![delete_metadata_stmt, delete_collection_stmt]).await?;
+                    }
+
+                    Ok(())
+                })
+            })
+            .await?;
+
+        Ok(FinishCollectionDeletionResponse {})
     }
 
     /// List collections that need garbage collection.
@@ -8965,5 +9062,180 @@ pub mod tests {
         assert_eq!(gc_collection.version_file_path, version_file_name);
         assert_eq!(gc_collection.database_name, Some(db_name.into_string()));
         assert_eq!(gc_collection.lineage_file_path, None); // Not set in Spanner schema
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_finish_collection_deletion_single_region() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Step 1: Create a collection
+        let collection_name = format!("test_collection_{}", Uuid::new_v4());
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &collection_name,
+            Some(128),
+            None,
+        )
+        .await;
+
+        // Verify collection exists initially
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.collection_id, collection_id);
+
+        // Step 2: Soft-delete the collection via update
+        let update_req = UpdateCollectionRequest {
+            database_name: db_name.clone(),
+            id: collection_id,
+            name: None,
+            dimension: None,
+            metadata: None,
+            reset_metadata: false,
+            new_configuration: None,
+            cursor_updates: None,
+            is_deleted: Some(true),
+        };
+
+        let result = backend.update_collection(update_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to soft-delete collection: {:?}",
+            result.err()
+        );
+
+        // Verify collection is no longer visible without include_soft_deleted
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone()),
+        };
+        let response = backend.get_collections(get_req).await.unwrap();
+        assert_eq!(
+            response.collections.len(),
+            0,
+            "Soft-deleted collection should not be visible with default filter"
+        );
+
+        // Verify collection is still visible with include_soft_deleted
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone())
+                .include_soft_deleted(true),
+        };
+        let response = backend.get_collections(get_req).await.unwrap();
+        assert_eq!(
+            response.collections.len(),
+            1,
+            "Soft-deleted collection should still exist with include_soft_deleted"
+        );
+
+        // Step 3: Call finish_collection_deletion
+        let finish_req = FinishCollectionDeletionRequest {
+            collection_id,
+            database_name: db_name.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+
+        let result = backend.finish_collection_deletion(finish_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to finish collection deletion: {:?}",
+            result.err()
+        );
+
+        // Step 4: Verify collection is physically removed (single-region case)
+        // Even with include_soft_deleted, collection should be gone
+        let get_req = GetCollectionsRequest {
+            filter: CollectionFilter::default()
+                .ids(vec![collection_id])
+                .tenant_id(tenant_id.clone())
+                .database_name(db_name.clone())
+                .include_soft_deleted(true),
+        };
+        let response = backend.get_collections(get_req).await.unwrap();
+        assert_eq!(
+            response.collections.len(),
+            0,
+            "Hard-deleted collection should be completely removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_finish_collection_deletion_requires_soft_delete() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Step 1: Create a collection but don't soft-delete it
+        let collection_name = format!("test_collection_{}", Uuid::new_v4());
+        let collection_id = create_collection_for_update(
+            &backend,
+            &tenant_id,
+            &db_name,
+            &collection_name,
+            Some(128),
+            None,
+        )
+        .await;
+
+        // Verify collection exists
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.collection_id, collection_id);
+
+        // Step 2: Try to call finish_collection_deletion on non-soft-deleted collection
+        let finish_req = FinishCollectionDeletionRequest {
+            collection_id,
+            database_name: db_name.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+
+        let result = backend.finish_collection_deletion(finish_req).await;
+        assert!(result.is_err());
+        match result {
+            Err(SysDbError::InvalidArgument(msg)) => {
+                assert!(msg.contains("soft-deleted first"));
+            }
+            _ => panic!("Expected InvalidArgument error, got: {:?}", result),
+        }
+
+        // Verify collection still exists
+        let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
+        assert_eq!(collection.collection_id, collection_id);
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_finish_collection_deletion_nonexistent_collection() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Try to call finish_collection_deletion on non-existent collection
+        let fake_collection_id = CollectionUuid(Uuid::new_v4());
+        let finish_req = FinishCollectionDeletionRequest {
+            collection_id: fake_collection_id,
+            database_name: db_name.clone(),
+            tenant_id: tenant_id.clone(),
+        };
+
+        let result = backend.finish_collection_deletion(finish_req).await;
+        assert!(result.is_err());
+        match result {
+            Err(SysDbError::NotFound(msg)) => {
+                assert!(msg.contains("not found"));
+            }
+            _ => panic!("Expected NotFound error, got: {:?}", result),
+        }
     }
 }

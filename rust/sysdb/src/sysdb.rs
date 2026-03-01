@@ -1515,7 +1515,15 @@ impl GrpcSysDb {
         database: String,
         collection_id: CollectionUuid,
     ) -> Result<(), DeleteCollectionError> {
-        self.client
+        let database_name = DatabaseName::new(&database).ok_or_else(|| {
+            DeleteCollectionError::Internal(Box::new(TonicError(tonic::Status::invalid_argument(
+                format!("invalid database name: '{}'", database),
+            ))) as Box<dyn ChromaError>)
+        })?;
+        let mut client = self
+            .client(&database_name)
+            .map_err(|e| DeleteCollectionError::Internal(Box::new(e) as Box<dyn ChromaError>))?;
+        client
             .finish_collection_deletion(chroma_proto::FinishCollectionDeletionRequest {
                 tenant,
                 database,
