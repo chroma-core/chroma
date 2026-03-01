@@ -389,20 +389,23 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
 
         // Collect all IDs from both `id` and `ids_filter`
         let mut all_ids: Vec<CollectionUuid> = Vec::new();
+        let mut has_id_filter = false;
 
         if let Some(id_str) = req.id {
+            has_id_filter = true;
             let id = CollectionUuid(validate_uuid(&id_str)?);
             all_ids.push(id);
         }
 
         if let Some(ids_filter) = req.ids_filter {
+            has_id_filter = true;
             for id_str in ids_filter.ids {
                 let id = CollectionUuid(validate_uuid(&id_str)?);
                 all_ids.push(id);
             }
         }
 
-        if !all_ids.is_empty() {
+        if has_id_filter {
             filter = filter.ids(all_ids);
         }
 
@@ -458,12 +461,6 @@ impl TryFrom<chroma_proto::GetCollectionsRequest> for GetCollectionsRequest {
             filter = filter.limit(limit);
         }
         if let Some(offset) = req.offset {
-            if offset < 0 {
-                return Err(SysDbError::InvalidArgument(format!(
-                    "offset must be non-negative, got {}",
-                    offset
-                )));
-            }
             if offset > 0 {
                 if req.limit.is_none() {
                     return Err(SysDbError::InvalidArgument(
@@ -735,6 +732,7 @@ impl Assignable for GetCollectionsRequest {
         }
         // Fall back to default if no database filter
         // TODO(Sanket): Make database name mandatory in the filter.
+        tracing::warn!("No database filter provided, using default backend");
         Backend::Spanner(factory.one_spanner().clone())
     }
 }
@@ -1425,6 +1423,8 @@ impl TryFrom<CreateCollectionResponse> for chroma_proto::CreateCollectionRespons
 #[derive(Debug, Clone)]
 pub struct GetCollectionsResponse {
     pub collections: Vec<Collection>,
+    /// Collection IDs that are soft-deleted (only populated when include_soft_deleted is true)
+    pub soft_deleted_ids: std::collections::HashSet<CollectionUuid>,
 }
 
 impl TryFrom<GetCollectionsResponse> for chroma_proto::GetCollectionsResponse {
@@ -1607,6 +1607,37 @@ impl TryFrom<FlushCompactionResponse> for chroma_proto::FlushCollectionCompactio
             collection_version: r.collection_version,
             last_compaction_time: r.last_compaction_time,
         })
+    }
+}
+
+impl TryFrom<chroma_proto::BatchGetCollectionSoftDeleteStatusRequest> for GetCollectionsRequest {
+    type Error = SysDbError;
+
+    fn try_from(
+        req: chroma_proto::BatchGetCollectionSoftDeleteStatusRequest,
+    ) -> Result<Self, Self::Error> {
+        let mut ids = Vec::new();
+        for id_str in req.collection_ids {
+            ids.push(CollectionUuid(validate_uuid(&id_str)?));
+        }
+
+        let mut filter = CollectionFilter::default()
+            .ids(ids)
+            .include_soft_deleted(true);
+
+        if let Some(db_str) = req.database_name {
+            if !db_str.is_empty() {
+                let database_name = DatabaseName::new(&db_str).ok_or_else(|| {
+                    SysDbError::InvalidArgument(format!(
+                        "database name must be at least 3 characters, got '{}'",
+                        db_str
+                    ))
+                })?;
+                filter = filter.database_name(database_name);
+            }
+        }
+
+        Ok(GetCollectionsRequest { filter })
     }
 }
 

@@ -383,7 +383,7 @@ impl Backend {
         }
     }
 
-    /// CAS update of version_file_name in collection_compaction_cursors.
+    /// CAS update of version_file_name and related fields in collections table.
     /// Returns true if the update succeeded (rows affected > 0), false if CAS failed.
     pub async fn update_version_related_fields(
         &self,

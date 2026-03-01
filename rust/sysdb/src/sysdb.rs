@@ -584,11 +584,12 @@ impl SysDb {
 
     pub async fn batch_get_collection_soft_delete_status(
         &mut self,
+        database_name: Option<DatabaseName>,
         collection_ids: Vec<CollectionUuid>,
     ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
         match self {
             SysDb::Grpc(grpc) => {
-                grpc.batch_get_collection_soft_delete_status(collection_ids)
+                grpc.batch_get_collection_soft_delete_status(database_name, collection_ids)
                     .await
             }
             SysDb::Sqlite(_) => todo!(),
@@ -1874,26 +1875,42 @@ impl GrpcSysDb {
 
     async fn batch_get_collection_soft_delete_status(
         &mut self,
+        database_name: Option<DatabaseName>,
         collection_ids: Vec<CollectionUuid>,
     ) -> Result<HashMap<CollectionUuid, bool>, BatchGetCollectionSoftDeleteStatusError> {
-        let res = self
-            .client
+        let mut client = match &database_name {
+            Some(db_name) => {
+                tracing::info!("Using mcmr sysdb: {}", db_name.clone().into_string());
+                self.client(db_name)?
+            }
+            None => {
+                tracing::info!("Using default sysdb");
+                self.client.clone()
+            }
+        };
+        let res = client
             .batch_get_collection_soft_delete_status(
                 chroma_proto::BatchGetCollectionSoftDeleteStatusRequest {
                     collection_ids: collection_ids
                         .into_iter()
                         .map(|id| id.0.to_string())
                         .collect(),
+                    database_name: database_name.map(|d| d.into_string()),
                 },
             )
             .await?;
         let collection_id_to_status = res.into_inner().collection_id_to_is_soft_deleted;
+        tracing::info!(
+            "BatchGetCollectionSoftDeleteStatusResponse: {} entries",
+            collection_id_to_status.len()
+        );
         let mut result = HashMap::new();
         for (key, value) in collection_id_to_status {
             let collection_id = CollectionUuid(
                 Uuid::try_parse(&key)
                     .map_err(|err| BatchGetCollectionSoftDeleteStatusError::Uuid(err, key))?,
             );
+            tracing::debug!("Collection {} is soft deleted: {}", collection_id, value);
             result.insert(collection_id, value);
         }
         Ok(result)
@@ -2120,7 +2137,13 @@ impl GrpcSysDb {
             versions,
             database_name: Some(database_name.as_ref().to_string()),
         };
+        tracing::info!(
+            "DELETE_COLLECTION_VERSION request: epoch_id={}, versions={:?}",
+            req.epoch_id,
+            req.versions,
+        );
 
+<<<<<<< HEAD
         let res = self
             .client(&database_name)
             .map_err(|e| {
@@ -2130,6 +2153,25 @@ impl GrpcSysDb {
             })?
             .delete_collection_version(req)
             .await?;
+=======
+        let res = match database_name {
+            Some(ref db_name) => {
+                tracing::info!(
+                    "USING db {} FOR DELETE_COLLECTION_VERSION",
+                    db_name.clone().into_string()
+                );
+                self.client(db_name)
+                    .map_err(|e| {
+                        DeleteCollectionVersionError::FailedToDeleteVersion(
+                            tonic::Status::internal(e.to_string()),
+                        )
+                    })?
+                    .delete_collection_version(req)
+                    .await?
+            }
+            None => self.client.delete_collection_version(req).await?,
+        };
+>>>>>>> 20248a444 ([ENH]: MCMR batch_get_collection_soft_delete_status)
         Ok(res.into_inner().collection_id_to_success)
     }
 

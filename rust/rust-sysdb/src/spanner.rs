@@ -867,11 +867,12 @@ impl SpannerBackend {
             (Some(limit), Some(offset)) => format!("LIMIT {} OFFSET {}", limit, offset),
             (Some(limit), None) => format!("LIMIT {}", limit),
             (None, None) => String::new(),
-            (None, Some(_)) => {
+            (None, Some(offset)) if offset > 0 => {
                 return Err(SysDbError::InvalidArgument(
                     "offset requires limit to be specified".to_string(),
                 ));
             }
+            (None, Some(_)) => String::new(),
         };
 
         let query = format!(
@@ -904,7 +905,8 @@ impl SpannerBackend {
                 ccc.last_compaction_time_secs,
                 ccc.version_file_name,
                 ccc.compaction_failure_count,
-                ccc.index_schema
+                ccc.index_schema,
+                c.is_deleted
             FROM filtered_collections fc
             JOIN collections c ON c.collection_id = fc.collection_id
             LEFT JOIN collection_metadata cm ON cm.collection_id = c.collection_id
@@ -933,6 +935,8 @@ impl SpannerBackend {
             stmt.add_param("database_name", &database_name.as_ref());
         }
 
+        tracing::debug!("Get collection query is: {}", query);
+
         let mut tx = self.client.single().await?;
         let mut result_set = tx
             .query(stmt)
@@ -960,14 +964,35 @@ impl SpannerBackend {
 
         // Convert each group of rows to a Collection, preserving the query order
         let mut collections = Vec::new();
+        let mut soft_deleted_ids = std::collections::HashSet::new();
         for collection_id in collection_order {
             if let Some(rows) = rows_by_collection.remove(&collection_id) {
+                let is_deleted: bool = rows[0]
+                    .column_by_name("is_deleted")
+                    .map_err(SysDbError::FailedToReadColumn)?;
+                tracing::debug!(
+                    "Collection {} has is_deleted: {}",
+                    collection_id,
+                    is_deleted
+                );
                 let collection = Collection::try_from(SpannerRows { rows })?;
+                if is_deleted {
+                    tracing::debug!(
+                        "Adding collection {} to soft_deleted_ids",
+                        collection.collection_id
+                    );
+                    soft_deleted_ids.insert(collection.collection_id);
+                }
                 collections.push(collection);
             }
         }
 
-        Ok(GetCollectionsResponse { collections })
+        tracing::debug!("Final soft_deleted_ids: {:?}", soft_deleted_ids);
+
+        Ok(GetCollectionsResponse {
+            collections,
+            soft_deleted_ids,
+        })
     }
 
     /// Count collections for a tenant, optionally filtered by database.
@@ -1658,6 +1683,9 @@ impl SpannerBackend {
             "#,
         );
 
+        tracing::info!("list_collections_to_gc query: {}", query);
+        tracing::info!("list_collections_to_gc params: {:?}", req);
+
         let mut stmt = Statement::new(&query);
         stmt.add_param("region", &region.to_string());
 
@@ -1710,6 +1738,7 @@ impl SpannerBackend {
                 database_name,
             });
         }
+        tracing::info!("GOT {} collections", collections.len());
 
         Ok(ListCollectionsToGcResponse { collections })
     }
