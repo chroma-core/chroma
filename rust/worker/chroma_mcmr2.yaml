@@ -269,6 +269,7 @@ log_service:
             project: "local-project"
             instance: "test-instance"
             database: "local-logdb-database"
+
 garbage_collector:
   service_name: "garbage-collector"
   otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"
@@ -276,12 +277,19 @@ garbage_collector:
     - crate_name: "garbage_collector"
       filter_level: "debug"
   relative_cutoff_time_seconds: 60 # GC all versions created at time < now() - relative_cutoff_time_seconds (1 minute)
+  collection_soft_delete_grace_period_seconds: 0
+  attached_function_soft_delete_grace_period_seconds: 0
   max_collections_to_gc: 1000
   gc_interval_mins: 1
   disallow_collections: []
   default_mode: "deletev2"
   sysdb_config:
     host: "sysdb.chroma2"
+    port: 50051
+    connect_timeout_ms: 60000
+    request_timeout_ms: 60000
+  mcmr_sysdb_config:
+    host: "rust-sysdb-service.chroma2"
     port: 50051
     connect_timeout_ms: 60000
     request_timeout_ms: 60000

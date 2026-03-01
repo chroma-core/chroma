@@ -93,7 +93,7 @@ impl GarbageCollectorConfig {
     }
 
     fn default_filter_min_versions_if_alive() -> Option<u64> {
-        None
+        Some(3)
     }
 
     pub(super) fn load() -> Self {
@@ -150,7 +150,7 @@ impl GarbageCollectorConfig {
     }
 
     fn enable_log_gc_for_tenant_threshold() -> String {
-        "00000000-0000-0000-0000-000000000000".to_string()
+        "00000000-0000-0000-0000-000000000001".to_string()
     }
 }
 

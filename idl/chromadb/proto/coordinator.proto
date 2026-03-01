@@ -555,6 +555,7 @@ message BatchGetCollectionVersionFilePathsResponse {
 
 message BatchGetCollectionSoftDeleteStatusRequest {
   repeated string collection_ids = 1;
+  optional string database_name = 2;
 }
 
 message BatchGetCollectionSoftDeleteStatusResponse {
