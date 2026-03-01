@@ -47,6 +47,7 @@ use chroma_types::chroma_proto::{
     UpdateSegmentRequest, UpdateSegmentResponse,
 };
 use chroma_types::{Collection, CollectionUuid, DatabaseName};
+use std::collections::HashMap;
 use thiserror::Error;
 use tokio::{
     select,
@@ -618,11 +619,39 @@ impl SysDb for SysdbService {
 
     async fn batch_get_collection_version_file_paths(
         &self,
-        _request: Request<BatchGetCollectionVersionFilePathsRequest>,
+        request: Request<BatchGetCollectionVersionFilePathsRequest>,
     ) -> Result<Response<BatchGetCollectionVersionFilePathsResponse>, Status> {
-        Err(Status::unimplemented(
-            "batch_get_collection_version_file_paths is not supported",
-        ))
+        // TODO(tanujnay112): This is inefficient. Augment the GetCollections spanner API
+        // to specify SELECT columns.
+        let proto_req = request.into_inner();
+        let internal_req: internal::GetCollectionsRequest = proto_req
+            .try_into()
+            .map_err(|e: internal::SysDbError| Status::from(e))?;
+
+        let backend = internal_req.assign(&self.backends);
+        let collections_resp = internal_req.run(backend).await?;
+        let mut collection_id_to_version_file_path = HashMap::new();
+        let mut missing_paths = Vec::new();
+
+        for collection in collections_resp.collections {
+            let collection_id_str = collection.collection_id.to_string();
+            if let Some(version_file_path) = collection.version_file_path {
+                collection_id_to_version_file_path.insert(collection_id_str, version_file_path);
+            } else {
+                missing_paths.push(collection_id_str);
+            }
+        }
+
+        if !missing_paths.is_empty() {
+            return Err(Status::not_found(format!(
+                "Version file paths not found for collections: {}",
+                missing_paths.join(", ")
+            )));
+        }
+
+        Ok(Response::new(BatchGetCollectionVersionFilePathsResponse {
+            collection_id_to_version_file_path,
+        }))
     }
 
     async fn batch_get_collection_soft_delete_status(
