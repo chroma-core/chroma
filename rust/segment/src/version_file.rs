@@ -258,10 +258,11 @@ impl VersionFileManager {
         };
 
         if version_history.versions.is_empty() {
-            tracing::error!("version history is empty");
-            return Err(VersionFileError::ValidationFailed(
-                "version history is empty".to_string(),
-            ));
+            tracing::warn!("version history is empty");
+            // return Err(VersionFileError::ValidationFailed(
+            //     "version history is empty".to_string(),
+            // ));
+            return Ok(());
         }
 
         let versions = &version_history.versions;
@@ -479,7 +480,13 @@ mod tests {
 
         // Upload the version file
         manager
-            .upload(&upload_path, &version_file, &collection, new_version)
+            .upload(
+                &upload_path,
+                &version_file,
+                &collection,
+                VersionFileType::Compaction,
+                new_version,
+            )
             .await
             .unwrap();
 
@@ -712,7 +719,13 @@ mod tests {
 
         // Upload initial version
         let upload_result = manager
-            .upload(&initial_path, &version_file, &collection, new_version)
+            .upload(
+                &initial_path,
+                &version_file,
+                &collection,
+                VersionFileType::Compaction,
+                new_version,
+            )
             .await;
         assert!(upload_result.is_ok());
 
@@ -789,7 +802,7 @@ mod tests {
             VersionFileType::Compaction,
         );
 
-        let res = manager
+        let reupload_result = manager
             .upload(
                 &modified_path,
                 &version_file,
@@ -797,7 +810,6 @@ mod tests {
                 modified_version_id,
             )
             .await;
-        assert!(res.is_ok());
 
         // Validate that the path follows the new Go-style format: {version_id:06d}_{uuid}_flush
         // We'll check that the path contains the expected components

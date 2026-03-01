@@ -598,14 +598,44 @@ impl SysDb for SysdbService {
 
         Ok(Response::new(proto_resp))
     }
-
     async fn mark_version_for_deletion(
         &self,
-        _request: Request<MarkVersionForDeletionRequest>,
+        request: Request<MarkVersionForDeletionRequest>,
     ) -> Result<Response<MarkVersionForDeletionResponse>, Status> {
-        Err(Status::unimplemented(
-            "mark_version_for_deletion is not supported",
-        ))
+        let proto_req = request.into_inner();
+        let database_name = proto_req
+            .database_name
+            .as_ref()
+            .and_then(DatabaseName::new)
+            .ok_or_else(|| Status::invalid_argument("valid database_name is required"))?;
+
+        let mut collection_id_to_success = HashMap::new();
+        for version_list in &proto_req.versions {
+            let collection_id_str = version_list.collection_id.clone();
+            let success = match self
+                .update_version_file_single_collection(
+                    version_list,
+                    &database_name,
+                    VersionFileOperation::MarkForDeletion,
+                )
+                .await
+            {
+                Ok(_) => true,
+                Err(e) => {
+                    tracing::error!(
+                        collection_id = %collection_id_str,
+                        error = ?e,
+                        "Failed to mark versions for deletion after retries"
+                    );
+                    false
+                }
+            };
+            collection_id_to_success.insert(collection_id_str, success);
+        }
+
+        Ok(Response::new(MarkVersionForDeletionResponse {
+            collection_id_to_success,
+        }))
     }
 
     async fn delete_collection_version(
@@ -974,7 +1004,203 @@ impl SysdbService {
                 tracing::error!("Failed to upload version file: {}", e);
                 e
             })?;
+
         Ok((version_file_pb, new_version_file_path))
+    }
+
+    /// Update a single collection's version file using a CAS retry loop.
+    /// Shared by both mark_version_for_deletion and delete_collection_version.
+    async fn update_version_file_single_collection(
+        &self,
+        version_list: &chroma_types::chroma_proto::VersionListForCollection,
+        database_name: &DatabaseName,
+        operation: VersionFileOperation,
+    ) -> Result<(), SysDbError> {
+        let collection_id =
+            CollectionUuid(crate::types::validate_uuid(&version_list.collection_id)?);
+        let target_versions: std::collections::HashSet<i64> =
+            version_list.versions.iter().copied().collect();
+
+        let backoff = ConstantBuilder::default()
+            .with_delay(std::time::Duration::ZERO)
+            .with_max_times(10);
+
+        (|| async {
+            // 1. Get collection to obtain current version_file_path
+            let get_req = internal::GetCollectionsRequest::for_collection(
+                collection_id,
+                database_name.clone(),
+                true,
+            );
+            let backend = get_req.assign(&self.backends);
+            let collection_response = get_req.run(backend.clone()).await?;
+            let collection = collection_response
+                .collections
+                .first()
+                .ok_or_else(|| {
+                    SysDbError::NotFound(format!("Collection {} not found", collection_id))
+                })?
+                .clone();
+
+            let old_version_file_path = collection.version_file_path.clone().unwrap_or_default();
+
+            // 2. Fetch the existing version file from storage
+            let version_file_manager =
+                VersionFileManager::new(self.local_region_object_storage.clone());
+            let mut version_file = version_file_manager.fetch(&collection).await.map_err(|e| {
+                tracing::error!(
+                    collection_id = %collection_id,
+                    error = ?e,
+                    "Failed to fetch version file for {}",
+                    operation.name()
+                );
+                SysDbError::Internal(format!("Failed to fetch version file: {}", e))
+            })?;
+
+            // 3. Apply the operation to the version file
+            let version_history = version_file
+                .version_history
+                .as_mut()
+                .ok_or_else(|| SysDbError::Internal("Version history not found".to_string()))?;
+
+            match operation {
+                VersionFileOperation::MarkForDeletion => {
+                    let mut versions_found = 0;
+                    for version_info in version_history.versions.iter_mut() {
+                        if target_versions.contains(&version_info.version) {
+                            version_info.marked_for_deletion = true;
+                            versions_found += 1;
+                        }
+                    }
+                    if versions_found != target_versions.len() {
+                        return Err(SysDbError::Internal(format!(
+                            "Requested versions not found in version file: found {}, expected {}",
+                            versions_found,
+                            target_versions.len()
+                        )));
+                    }
+                }
+            }
+
+            // Calculate oldest version timestamp and active version count
+            let oldest_version_ts = version_history.versions.first().map(|v| v.created_at_secs);
+            let num_active_versions = version_history
+                .versions
+                .iter()
+                .filter(|v| !v.marked_for_deletion)
+                .count() as i32;
+
+            tracing::debug!(
+                collection_id = %collection_id,
+                oldest_version_ts = ?oldest_version_ts,
+                num_active_versions = num_active_versions,
+                total_versions = version_history.versions.len(),
+                "Calculated version metadata for update"
+            );
+
+            let new_version_file_path = version_file_manager.generate_file_path(
+                &collection,
+                collection.version as i64,
+                operation.version_file_type(),
+            );
+
+            // 4. Upload the new version file
+            version_file_manager
+                .upload(
+                    &new_version_file_path,
+                    &version_file,
+                    &collection,
+                    collection.version as i64,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        collection_id = %collection_id,
+                        error = ?e,
+                        "Failed to upload {} version file",
+                        operation.name()
+                    );
+                    SysDbError::Internal(format!(
+                        "Failed to upload {} version file: {}",
+                        operation.name(),
+                        e
+                    ))
+                })?;
+
+            // 5. CAS update version_file_name and related fields in the DB
+            tracing::debug!(
+                collection_id = %collection_id,
+                old_version_file_path = %old_version_file_path,
+                new_version_file_path = %new_version_file_path,
+                "Calling update_version_related_fields"
+            );
+
+            let updated = backend
+                .update_version_related_fields(
+                    &collection_id.0.to_string(),
+                    &old_version_file_path,
+                    &new_version_file_path,
+                    oldest_version_ts,
+                    num_active_versions,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(
+                        collection_id = %collection_id,
+                        error = ?e,
+                        "Failed to update version related fields"
+                    );
+                    e
+                })?;
+
+            tracing::debug!(
+                collection_id = %collection_id,
+                updated = updated,
+                "Database update completed"
+            );
+
+            if !updated {
+                tracing::info!(
+                    collection_id = %collection_id,
+                    "CAS failed for {}, retrying",
+                    operation.name()
+                );
+                // TODO: delete the orphaned version file from storage
+                return Err(SysDbError::CollectionEntryIsStale);
+            }
+
+            tracing::info!(
+                collection_id = %collection_id,
+                versions = ?version_list.versions,
+                new_version_file_path = %new_version_file_path,
+                "Successfully completed {}",
+                operation.name()
+            );
+
+            Ok(())
+        })
+        .retry(backoff)
+        .when(|e: &SysDbError| matches!(e, SysDbError::CollectionEntryIsStale))
+        .await
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum VersionFileOperation {
+    MarkForDeletion,
+}
+
+impl VersionFileOperation {
+    fn name(&self) -> &'static str {
+        match self {
+            VersionFileOperation::MarkForDeletion => "mark_version_for_deletion",
+        }
+    }
+
+    fn version_file_type(&self) -> VersionFileType {
+        match self {
+            VersionFileOperation::MarkForDeletion => VersionFileType::GarbageCollectionMark,
+        }
     }
 }
 

@@ -684,9 +684,13 @@ impl SysDb {
         &mut self,
         epoch_id: i64,
         versions: Vec<VersionListForCollection>,
+        database_name: DatabaseName,
     ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
         match self {
-            SysDb::Grpc(grpc) => grpc.mark_version_for_deletion(epoch_id, versions).await,
+            SysDb::Grpc(grpc) => {
+                grpc.mark_version_for_deletion(epoch_id, versions, database_name)
+                    .await
+            }
             SysDb::Test(test) => {
                 let versions_clone = versions.clone();
                 test.mark_version_for_deletion(epoch_id, versions_clone)
@@ -2071,10 +2075,27 @@ impl GrpcSysDb {
         &mut self,
         epoch_id: i64,
         versions: Vec<chroma_proto::VersionListForCollection>,
+        database_name: DatabaseName,
     ) -> Result<HashMap<String, bool>, MarkVersionForDeletionError> {
-        let req = chroma_proto::MarkVersionForDeletionRequest { epoch_id, versions };
+        // Stamp database_name onto each VersionListForCollection so the server
+        // can route to the correct backend.
+        let database_name_str = Some(database_name.as_ref().to_string());
 
-        let res = self.client.mark_version_for_deletion(req).await?;
+        let req = chroma_proto::MarkVersionForDeletionRequest {
+            epoch_id,
+            versions,
+            database_name: database_name_str,
+        };
+
+        let res = self
+            .client(&database_name)
+            .map_err(|e| {
+                MarkVersionForDeletionError::FailedToMarkVersion(tonic::Status::internal(
+                    e.to_string(),
+                ))
+            })?
+            .mark_version_for_deletion(req)
+            .await?;
         Ok(res.into_inner().collection_id_to_success)
     }
 

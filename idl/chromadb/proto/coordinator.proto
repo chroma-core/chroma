@@ -527,6 +527,7 @@ message ListCollectionsToGcResponse {
 message MarkVersionForDeletionRequest {
   int64 epoch_id = 1;
   repeated VersionListForCollection versions = 2;
+  optional string database_name = 3;
 }
 
 message MarkVersionForDeletionResponse {
