@@ -25,6 +25,7 @@ import (
 	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/mistral"
 	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/morph"
 	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/nomic"
+	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/perplexity"
 	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/ollama"
 	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
 	_ "github.com/chroma-core/chroma/clients/go/pkg/embeddings/together"
@@ -102,6 +103,17 @@ func TestBuildDenseFromJSON(t *testing.T) {
 			}`,
 			requiresAPIKey: true,
 			envVar:         "MORPH_API_KEY",
+		},
+		{
+			name:   "Perplexity",
+			efName: "perplexity",
+			jsonConfig: `{
+				"api_key_env_var": "PERPLEXITY_API_KEY",
+				"model_name": "pplx-embed-v1-0.6b",
+				"dimensions": 256
+			}`,
+			requiresAPIKey: true,
+			envVar:         "PERPLEXITY_API_KEY",
 		},
 		{
 			name:   "Nomic",
@@ -351,6 +363,7 @@ func TestAllRegisteredProvidersHaveFactories(t *testing.T) {
 		"voyageai",
 		"mistral",
 		"morph",
+		"perplexity",
 		"nomic",
 		"together_ai",
 		"huggingface",

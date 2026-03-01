@@ -22,6 +22,7 @@ import (
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/mistral"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/morph"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/nomic"
+	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/perplexity"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/ollama"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
 	"github.com/chroma-core/chroma/clients/go/pkg/embeddings/together"
@@ -349,6 +350,41 @@ func TestEFPersistence_Morph_Integration(t *testing.T) {
 	require.NoError(t, err)
 
 	collectionName := "test_morph_persistence"
+	_, err = client.CreateCollection(ctx, collectionName, v2.WithEmbeddingFunctionCreate(ef))
+	require.NoError(t, err)
+
+	retrievedCol, err := client.GetCollection(ctx, collectionName)
+	require.NoError(t, err)
+
+	err = retrievedCol.Add(ctx, v2.WithIDs("doc1"), v2.WithTexts("hello world"))
+	require.NoError(t, err)
+
+	results, err := retrievedCol.Query(ctx, v2.WithQueryTexts("hello"), v2.WithNResults(1))
+	require.NoError(t, err)
+	require.NotEmpty(t, results.GetDocumentsGroups())
+}
+
+// TestEFPersistence_Perplexity_Integration tests Perplexity EF persistence
+func TestEFPersistence_Perplexity_Integration(t *testing.T) {
+	if os.Getenv("PERPLEXITY_API_KEY") == "" {
+		t.Skip("PERPLEXITY_API_KEY not set, skipping Perplexity integration test")
+	}
+
+	baseURL, cleanup := setupChromaContainer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	client, err := v2.NewHTTPClient(
+		v2.WithBaseURL(baseURL),
+		v2.WithDatabaseAndTenant(v2.DefaultDatabase, v2.DefaultTenant),
+	)
+	require.NoError(t, err)
+	defer client.Close()
+
+	ef, err := perplexity.NewPerplexityEmbeddingFunction(perplexity.WithEnvAPIKey())
+	require.NoError(t, err)
+
+	collectionName := "test_perplexity_persistence"
 	_, err = client.CreateCollection(ctx, collectionName, v2.WithEmbeddingFunctionCreate(ef))
 	require.NoError(t, err)
 
