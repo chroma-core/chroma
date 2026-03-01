@@ -258,10 +258,8 @@ impl VersionFileManager {
         };
 
         if version_history.versions.is_empty() {
-            tracing::error!("version history is empty");
-            return Err(VersionFileError::ValidationFailed(
-                "version history is empty".to_string(),
-            ));
+            tracing::warn!("version history is empty");
+            return Ok(());
         }
 
         let versions = &version_history.versions;
@@ -789,7 +787,7 @@ mod tests {
             VersionFileType::Compaction,
         );
 
-        let res = manager
+        let reupload_result = manager
             .upload(
                 &modified_path,
                 &version_file,
@@ -797,7 +795,7 @@ mod tests {
                 modified_version_id,
             )
             .await;
-        assert!(res.is_ok());
+        assert!(reupload_result.is_ok(), "Reupload should succeed");
 
         // Validate that the path follows the new Go-style format: {version_id:06d}_{uuid}_flush
         // We'll check that the path contains the expected components
