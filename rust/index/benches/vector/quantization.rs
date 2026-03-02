@@ -106,8 +106,8 @@ macro_rules! desc {
 const DIMS: &[usize] = &[1024];
 // const DIMS: &[usize] = &[128, 1024, 4096];
 const BATCH: usize = 512;
-// const THREAD_COUNTS: &[usize] = &[1, 8];
-const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8, 16, 32];
+const THREAD_COUNTS: &[usize] = &[1, 8];
+// const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8, 16, 32];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -190,7 +190,8 @@ fn bench_quantize(c: &mut Criterion) {
         let padded_bytes = Code::<1>::packed_len(dim);
         let cn = c_norm(&centroid);
 
-        group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
+        // Code::quantize reads both embedding and centroid: 2 * dim * 4 bytes per call.
+        group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
 
         desc!(
             format!("quant-4bit/{dim}"),
@@ -216,12 +217,14 @@ fn bench_quantize(c: &mut Criterion) {
             });
         });
 
-        // QuantizedQuery::new — builds 4 bit-planes from a quantized query residual.
-        // This is the per-query setup cost for the bitwise distance path (§3.3.1).
-        // Throughput accounts for the f32 query vector read (same denominator as Code::quantize).
+        // QuantizedQuery::new reads only the pre-computed residual: dim * 4 bytes.
+        group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
         desc!(
             format!("quant-query/{dim}"),
-            format!("{BATCH} queries → QuantizedQuery (4-bit planes, §3.3.1)")
+            format!("{BATCH} queries: residual alloc + c_dot_q + q_norm + QuantizedQuery::new. \
+                     Higher per-query latency than primitives/quant-query/full (which calls \
+                     QuantizedQuery::new alone with hot caches) due to the extra work and \
+                     cache pressure from cycling {BATCH} distinct queries.")
         );
         group.bench_with_input(BenchmarkId::new("quant-query", dim), &dim, |b, _| {
             b.iter(|| {
@@ -691,11 +694,16 @@ fn bench_primitives(c: &mut Criterion) {
             .collect();
 
         // ── Code::<1>::quantize primitives ────────────────────────────────────
+        //
+        // These measure each logical operation in isolation.  The production
+        // quantize() fuses all of them into a single pass with dual
+        // accumulators over chunks_exact(16).  Compare the sum of these
+        // against quant-1bit/full to see the fusion benefit.
 
         group.throughput(Throughput::Bytes(2 * dim as u64 * 4));
         desc!(
             format!("quant-1bit/vec_sub/{dim}"),
-            "r = emb − centroid  [quantize step 1]"
+            "r = emb − centroid  [reference: 8 KB read baseline, not used in fused path]"
         );
         group.bench_with_input(BenchmarkId::new("quant-1bit/vec_sub", dim), &dim, |b, _| {
             b.iter(|| {
@@ -707,7 +715,7 @@ fn bench_primitives(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(2 * dim as u64 * 4));
         desc!(
             format!("quant-1bit/simsimd_dot/{dim}"),
-            "⟨a, b⟩ via simsimd  [quantize: norm², radial]"
+            "⟨a, b⟩ via simsimd  [reference: SIMD ceiling for a single dot product]"
         );
         group.bench_with_input(
             BenchmarkId::new("quant-1bit/simsimd_dot", dim),
@@ -722,7 +730,7 @@ fn bench_primitives(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(dim as u64 * 4));
         desc!(
             format!("quant-1bit/abs_sum/{dim}"),
-            "Σ|r[i]|, auto-vectorizes to VABSPS+VADDPS  [quantize: correction]"
+            "Σ|r[i]| single accumulator (sequential dep chain, does NOT auto-vectorize)"
         );
         group.bench_with_input(BenchmarkId::new("quant-1bit/abs_sum", dim), &dim, |b, _| {
             b.iter(|| {
@@ -731,10 +739,60 @@ fn bench_primitives(c: &mut Criterion) {
             });
         });
 
+        group.throughput(Throughput::Bytes(2 * dim as u64 * 4));
+        desc!(
+            format!("quant-1bit/fused_reductions/{dim}"),
+            "sub + abs_sum + norm² + radial, dual accumulators over chunks_exact(16)"
+        );
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/fused_reductions", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let mut abs_a = 0.0f32;
+                    let mut nsq_a = 0.0f32;
+                    let mut rad_a = 0.0f32;
+                    let mut abs_b = 0.0f32;
+                    let mut nsq_b = 0.0f32;
+                    let mut rad_b = 0.0f32;
+                    for (emb16, cen16) in values
+                        .chunks_exact(16)
+                        .zip(values2.chunks_exact(16))
+                    {
+                        for j in 0..4 {
+                            let v = emb16[j] - cen16[j];
+                            abs_a += v.abs();
+                            nsq_a += v * v;
+                            rad_a += v * cen16[j];
+                        }
+                        for j in 4..8 {
+                            let v = emb16[j] - cen16[j];
+                            abs_b += v.abs();
+                            nsq_b += v * v;
+                            rad_b += v * cen16[j];
+                        }
+                        for j in 8..12 {
+                            let v = emb16[j] - cen16[j];
+                            abs_a += v.abs();
+                            nsq_a += v * v;
+                            rad_a += v * cen16[j];
+                        }
+                        for j in 12..16 {
+                            let v = emb16[j] - cen16[j];
+                            abs_b += v.abs();
+                            nsq_b += v * v;
+                            rad_b += v * cen16[j];
+                        }
+                    }
+                    black_box((abs_a + abs_b, nsq_a + nsq_b, rad_a + rad_b));
+                });
+            },
+        );
+
         group.throughput(Throughput::Bytes(dim as u64 * 4));
         desc!(
             format!("quant-1bit/sign_pack/{dim}"),
-            "IEEE sign-bit extract + byte pack, 8 f32 → 1 byte  [quantize: packed codes]"
+            "sign-bit extract + byte pack via chunks_exact(16), 16 f32 → 2 bytes"
         );
         group.bench_with_input(
             BenchmarkId::new("quant-1bit/sign_pack", dim),
@@ -742,13 +800,20 @@ fn bench_primitives(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let mut packed = vec![0u8; bytes];
-                    for (byte_ref, chunk) in packed.iter_mut().zip(values.chunks(8)) {
-                        let mut byte = 0u8;
-                        for (j, &val) in chunk.iter().enumerate() {
-                            let sign = (val.to_bits() >> 31) as u8;
-                            byte |= (sign ^ 1) << j;
+                    for (out, chunk) in packed
+                        .chunks_exact_mut(2)
+                        .zip(values.chunks_exact(16))
+                    {
+                        let mut b0 = 0u8;
+                        let mut b1 = 0u8;
+                        for j in 0..8 {
+                            b0 |= ((chunk[j].to_bits() >> 31) as u8 ^ 1) << j;
                         }
-                        *byte_ref = byte;
+                        for j in 0..8 {
+                            b1 |= ((chunk[j + 8].to_bits() >> 31) as u8 ^ 1) << j;
+                        }
+                        out[0] = b0;
+                        out[1] = b1;
                     }
                     black_box(packed);
                 });
@@ -1173,14 +1238,13 @@ fn bench_primitives(c: &mut Criterion) {
 
         desc!(
             format!("quant-query/full/two_pass_fused/{dim}"),
-            "[P2+P4] two-pass min/max + fused quantize+sum+scatter  [expected production]"
+            "[P2+P4] two-pass min/max + fused quantize+sum+scatter via chunks_exact(8)"
         );
         group.bench_with_input(
             BenchmarkId::new("quant-query/full/two_pass_fused", dim),
             &dim,
             |b, _| {
                 b.iter(|| {
-                    // Two-pass min/max — vectorizes independently
                     let v_l = values.iter().copied().fold(f32::INFINITY, f32::min);
                     let v_r = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                     let range = v_r - v_l;
@@ -1191,10 +1255,9 @@ fn bench_primitives(c: &mut Criterion) {
                     };
                     let inv_delta = 1.0 / delta;
 
-                    // P2+P4: flat planes, fuse quantize + sum + byte_chunks scatter
                     let mut flat_planes = vec![0u8; 4 * bytes];
                     let mut sum_q_u = 0u32;
-                    for (byte_idx, chunk) in values.chunks(8).enumerate() {
+                    for (byte_idx, chunk) in values.chunks_exact(8).enumerate() {
                         let (mut b0, mut b1, mut b2, mut b3) = (0u8, 0u8, 0u8, 0u8);
                         for (bit, &v) in chunk.iter().enumerate() {
                             let qu = (((v - v_l) * inv_delta).round() as u32).min(15);
@@ -1252,7 +1315,9 @@ fn bench_primitives(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(dim as u64 * 4));
         desc!(
             format!("quant-query/full/{dim}"),
-            "QuantizedQuery::new end-to-end  [compare vs sum of primitives]"
+            "QuantizedQuery::new alone, single vector, hot cache. \
+             Lower latency than quantize/quant-query (which includes residual alloc + \
+             c_dot_q + q_norm + cache-cold batch effects)."
         );
         group.bench_with_input(BenchmarkId::new("quant-query/full", dim), &dim, |b, _| {
             b.iter(|| {

@@ -186,26 +186,50 @@ standard deviation of ≈ 2 %, making it negligible for ranking purposes.
 
 # Optimizations
 
-## `Code::<1>::quantize`: single fused pass
+## `Code::<1>::quantize`: fused pass with dual accumulators
 
-Replaced the four-pass approach with a single fused pass over the input data
-and the centroid. This eliminates the 4 KB intermediate `r` allocation and three
-re-reads of it. The four scalar accumulators (abs_sum, norm_sq, radial, popcount)
-are independent across iterations and auto-vectorize to VABSPS/VFMADD on AVX2/AVX-512.
+Replaced the original five-pass approach with a single fused pass over
+`(embedding, centroid)`.  No intermediate `r` vector is allocated (saves 4 KB
+for dim=1024).  The output buffer is allocated once and the header + packed
+bytes are written directly into it.
+
+Three optimizations on top of the naive fused loop:
+
+1. **`chunks_exact(16)`** — processes 16 elements (2 output bytes) per outer
+   iteration.  Guarantees the chunk length to LLVM, enabling bounds-check
+   elimination and wider code generation.  `sign_pack` alone went from 334 ns
+   to 152 ns (2.2×) from this change.
+
+2. **Dual accumulators** — each FP reduction (`abs_sum`, `norm_sq`, `radial`)
+   is split into two independent chains (elements 0..3 into `_a`, 4..7 into
+   `_b`).  This breaks the sequential dependency chain that prevents the OoO
+   core from pipelining the additions.  The single-accumulator `abs_sum`
+   primitive runs at 4.4 GiB/s; the dual-accumulator `fused_reductions`
+   primitive (which also computes `norm_sq` and `radial`) runs at 10.4 GiB/s.
+
+3. **Single allocation** — the packed bytes are written directly into the
+   final `Vec<u8>` (header region filled last via `copy_from_slice`),
+   eliminating one 128-byte `Vec` allocation and memcpy per code.
 
 Current cost breakdown (dim=1024):
   1. fused pass: emb−centroid, sign_pack, abs_sum, norm², radial, popcount
                  (read 8 KB, write 128 B — no intermediate r allocation)
-  2. alloc:      Vec::with_capacity for the output code buffer (144 B)
+  2. alloc:      single `vec![0u8; 144]` for header + packed bytes
 
-Prior cost (before Q1): vec_sub alloc (4 KB), simsimd dot ×2 (8 KB reads),
-sign_pack (4 KB read), abs_sum (4 KB read), popcount (128 B read) — ~5 passes.
+Approaches tried and rejected:
+
+- **Split loop** (separate SIMD reductions from bit-packing): +26% regression.
+  The extra 8 KB L1 re-read costs more than the SIMD vectorization gains.
+- **`abs_sum` via `signed_dot` after packing**: +33% regression.  Two
+  `signed_dot` calls (~390 ns) cost more than the inline accumulation.
+- **4 accumulators** instead of 2: +3% regression.  Extra register pressure
+  outweighs deeper pipelining on tested hardware.
 
 Measurements on Apple M-series (`-C target-cpu=native`):
 
-| Benchmark | Before | After | Delta |
+| Benchmark | Original (5-pass) | Fused (v1) | Fused + dual accum (v2) |
 |---|---|---|---|
-| `primitives/quant-1bit/full/1024` | ~1,934 ns, ~3.95 GiB/s | 988 ns, 7.72 GiB/s | **−49% / +96%** |
+| `primitives/quant-1bit/full/1024` | ~1,934 ns, 3.95 GiB/s | 988 ns, 7.72 GiB/s | **712 ns, 10.7 GiB/s** |
 
 ---
 
@@ -292,7 +316,24 @@ Measurements on Apple M-series:
 | `bit_plane_decompose/flat_alloc` (P4 alone) | 2 351 ns | no change |
 | `bit_plane_decompose/byte_chunks` | 707 ns | **3.3×** |
 | `quant-query/full/1024` (before) | 5 537 ns | — |
-| `quant-query/full/1024` (after) | 1 034 ns | **5.35× / −81%** |
+| `quant-query/full/1024` (after flat+fused) | 1 034 ns | **5.35× / −81%** |
+| `quant-query/full/1024` (after +chunks_exact) | 567 ns | **9.77× / −90%** |
+
+### `chunks_exact(8)` upgrade
+
+Switching the scatter loop from `chunks(8)` to `chunks_exact(8)` gave a further
+44% speedup (1020 → 567 ns).  `chunks_exact` guarantees the chunk length to
+LLVM, enabling bounds-check elimination and tighter code generation for the
+inner 8-element loop.  This is the same pattern that improved `Code::<1>::quantize`.
+
+Approaches tried and rejected:
+
+- **Replace `.round()` with `(x + 0.5) as u32`**: no improvement.  ARM NEON
+  compiles `round()` to a single `VCVTNS` instruction; adding 0.5 + truncation
+  is two instructions.
+- **Process 16 elements (2 bytes per plane)**: 2.35× regression.  The
+  `step_by(2)` index pattern generates poor code compared to the natural
+  `chunks_exact(8).enumerate()` iterator.
 
 ---
 
