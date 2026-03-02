@@ -1,0 +1,55 @@
+{
+  "name": "@chroma-core/perplexity",
+  "version": "0.1.0",
+  "private": false,
+  "description": "Perplexity AI embedding provider for Chroma",
+  "main": "dist/cjs/perplexity.cjs",
+  "types": "dist/perplexity.d.ts",
+  "module": "dist/perplexity.legacy-esm.js",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/perplexity.d.ts",
+        "default": "./dist/perplexity.mjs"
+      },
+      "require": {
+        "types": "./dist/cjs/perplexity.d.cts",
+        "default": "./dist/cjs/perplexity.cjs"
+      }
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "clean": "rimraf dist",
+    "prebuild": "rimraf dist",
+    "build": "tsup",
+    "watch": "tsup --watch",
+    "test": "jest"
+  },
+  "devDependencies": {
+    "@jest/globals": "^29.7.0",
+    "dotenv": "^16.3.1",
+    "jest": "^29.7.0",
+    "rimraf": "^5.0.0",
+    "ts-jest": "^29.1.2",
+    "ts-node": "^10.9.2",
+    "tsup": "^8.3.5"
+  },
+  "peerDependencies": {
+    "chromadb": "workspace:^"
+  },
+  "dependencies": {
+    "@chroma-core/ai-embeddings-common": "workspace:^",
+    "@perplexity-ai/perplexity_ai": "^0.26.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

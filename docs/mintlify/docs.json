@@ -187,6 +187,7 @@
               "integrations/embedding-models/nomic",
               "integrations/embedding-models/ollama",
               "integrations/embedding-models/open-clip",
+              "integrations/embedding-models/perplexity",
               "integrations/embedding-models/roboflow",
               "integrations/embedding-models/sentence-transformer",
               "integrations/embedding-models/text2vec",

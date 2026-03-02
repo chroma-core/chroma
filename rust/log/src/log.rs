@@ -6,7 +6,7 @@ use chroma_error::ChromaError;
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkCollectionError, ForkLogsResponse, LogRecord,
-    OperationRecord, ResetError, ResetResponse,
+    OperationRecord, ResetError, ResetResponse, TopologyName,
 };
 use std::fmt::Debug;
 
@@ -216,7 +216,7 @@ impl Log {
     #[tracing::instrument(skip(self), err(Display))]
     pub async fn purge_dirty_for_collection(
         &mut self,
-        collection_ids: Vec<CollectionUuid>,
+        collection_ids: Vec<(CollectionUuid, Option<TopologyName>)>,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),

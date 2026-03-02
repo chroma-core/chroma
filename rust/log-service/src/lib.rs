@@ -1437,6 +1437,7 @@ impl LogServer {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for (collection_id, rollup) in need_to_compact_s3.iter() {
                 if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
                     backpressure.push(*collection_id);
                 }
             }
@@ -1445,6 +1446,7 @@ impl LogServer {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for ((_, collection_id), rollup) in need_to_compact_repl.iter() {
                 if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
                     backpressure.push(*collection_id);
                 }
             }
@@ -2154,10 +2156,8 @@ impl LogServer {
             "Pulling logs",
         );
 
-        let read_fragments_span = tracing::info_span!("read_fragments");
         let fragments = match self
             .read_fragments(topology_name.as_ref(), collection_id, &pull_logs)
-            .instrument(read_fragments_span)
             .await
         {
             Ok(fragments) => fragments,
@@ -2200,10 +2200,8 @@ impl LogServer {
                 }
             })
             .collect::<Vec<_>>();
-        let try_join_all_span = tracing::info_span!("join all");
         let record_batches = if !fragment_futures.is_empty() {
             futures::future::try_join_all(fragment_futures)
-                .instrument(try_join_all_span)
                 .await
                 .map_err(|err: Error| Status::new(err.code().into(), err.to_string()))?
         } else {
@@ -2211,8 +2209,6 @@ impl LogServer {
             vec![]
         };
         let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
-        let record_batch_iter = tracing::info_span!("record_batch_iter");
-        let _guard = record_batch_iter.enter();
         for record_batch in record_batches.into_iter() {
             for (log_offset, record_bytes) in record_batch.into_iter() {
                 if log_offset.offset() < pull_logs.start_from_offset as u64
@@ -2437,23 +2433,46 @@ impl LogServer {
             .map_err(|err| {
                 Status::invalid_argument(format!("Failed to parse collection id: {err}"))
             })?;
-        tracing::info!("Purging collections in dirty log: [{collection_ids:?}]");
-        let dirty_marker_json_blobs = collection_ids
-            .into_iter()
-            .map(|collection_id| {
-                serde_json::to_string(&DirtyMarker::Purge { collection_id }).map(String::into_bytes)
-            })
-            .collect::<Result<_, _>>()
-            .map_err(|err| Status::internal(format!("Failed to serialize dirty marker: {err}")))?;
-        if let Some(dirty_log) = self.dirty_log.as_ref() {
-            dirty_log
-                .append_many(dirty_marker_json_blobs)
+        let topology_name = request
+            .topology_name
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|err| Status::invalid_argument(format!("Invalid topology name: {err}")))?;
+        tracing::info!(
+            "Purging collections in dirty log: [{collection_ids:?}] topology={topology_name:?}"
+        );
+        if let Some(topology_name) = topology_name {
+            let Some((_regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+                return Err(Status::not_found(format!(
+                    "topology not found: {topology_name}"
+                )));
+            };
+            let uuids: Vec<_> = collection_ids.iter().map(|id| id.0).collect();
+            ReplManifestManager::purge_dirty_for_collections(&topology.config.spanner, &uuids)
                 .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
-            tracing::error!("dirty log not set and purge dirty received");
-            Err(Status::failed_precondition("dirty log not configured"))
+            let dirty_marker_json_blobs = collection_ids
+                .into_iter()
+                .map(|collection_id| {
+                    serde_json::to_string(&DirtyMarker::Purge { collection_id })
+                        .map(String::into_bytes)
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    Status::internal(format!("Failed to serialize dirty marker: {err}"))
+                })?;
+            if let Some(dirty_log) = self.dirty_log.as_ref() {
+                dirty_log
+                    .append_many(dirty_marker_json_blobs)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+            } else {
+                tracing::error!("dirty log not set and purge dirty received");
+                Err(Status::failed_precondition("dirty log not configured"))
+            }
         }
     }
 
