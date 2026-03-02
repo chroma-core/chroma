@@ -89,3 +89,8 @@ harness = false
 name = "quantization_error"
 path = "benches/vector/error.rs"
 harness = false
+
+[[bench]]
+name = "recall_ivf"
+path = "benches/vector/recall_ivf.rs"
+harness = false

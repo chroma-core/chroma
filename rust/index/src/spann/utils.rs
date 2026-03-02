@@ -13,6 +13,7 @@ use crate::{
     SearchResult,
 };
 
+
 /// A point with its ID, version, and embedding.
 pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
 
@@ -807,7 +808,6 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
 /// Query a quantized cluster, returning deduplicated, sorted results.
 ///
 /// Uses RaBitQ distance estimation between the query and each quantized point.
-/// `data_bits` selects the code format: 1 for `Code<1>`, 4 for `Code<4>`.
 /// The `predicate` receives `(id, version)` for each entry and should return
 /// `true` to include the entry in the results. Duplicate IDs are skipped
 /// (first valid occurrence wins).
@@ -815,7 +815,6 @@ pub fn query_quantized_cluster(
     cluster: &QuantizedCluster<'_>,
     query: &[f32],
     distance_function: &DistanceFunction,
-    data_bits: u8,
     predicate: impl Fn(u32, u32) -> bool,
 ) -> SearchResult {
     if cluster.ids.is_empty() {
@@ -831,10 +830,7 @@ pub fn query_quantized_cluster(
         .map(|(q, c)| q - c)
         .collect::<Vec<_>>();
 
-    let code_size = match data_bits {
-        1 => Code::<1>::size(cluster.center.len()),
-        _ => Code::<4>::size(cluster.center.len()),
-    };
+    let code_size = Code::<4>::size(cluster.center.len());
     let mut seen = HashSet::new();
     let mut keys = Vec::new();
     let mut distances = Vec::new();
@@ -848,17 +844,8 @@ pub fn query_quantized_cluster(
         if !predicate(*id, *version) || !seen.insert(*id) {
             continue;
         }
-        let code: Box<dyn RabitqCode> = match data_bits {
-            1 => Box::new(Code::<1, _>::new(code_bytes)),
-            _ => Box::new(Code::<4, _>::new(code_bytes)),
-        };
-        let distance = code.distance_query(
-            distance_function,
-            &r_q,
-            c_norm,
-            c_dot_q,
-            q_norm,
-        );
+        let code = Code::<4, _>::new(code_bytes);
+        let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
         keys.push(*id);
         distances.push(distance);
     }
