@@ -10,10 +10,7 @@ use bitpacking::{BitPacker, BitPacker8x};
 use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
 
-use super::utils::{
-    padded_dim_4bit, rabitq_distance_code, rabitq_distance_query, CodeHeader,
-    RabitqCode,
-};
+use super::utils::{rabitq_distance_code, rabitq_distance_query, CodeHeader, RabitqCode};
 use super::Code;
 
 // ── Code<4, T> ────────────────────────────────────────────────────────────────
@@ -207,7 +204,6 @@ impl Code<4, Vec<u8>> {
     }
 }
 
-
 /// Unpacks 4-bit packed codes to grid values (for distance_code trait impl).
 pub fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
     const BITS: u8 = 4;
@@ -221,6 +217,11 @@ pub fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
     }
     let offset = f32::from(CEIL) - GRID_OFFSET;
     codes[..dim].iter().map(|&c| c as f32 - offset).collect()
+}
+
+/// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
+pub fn padded_dim_4bit(dim: usize) -> usize {
+    dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
 }
 
 #[cfg(test)]

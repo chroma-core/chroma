@@ -74,6 +74,8 @@ pub enum USearchError {
     DimensionMismatch { expected: usize, got: usize },
     #[error("Index error: {0}")]
     Index(String),
+    #[error("Unsupported quantization bit width: {0} (supported: 1, 4)")]
+    InvalidQuantizationBits(u8),
     #[error("Cannot retrieve embeddings from quantized index")]
     QuantizedEmbedding,
     #[error("Storage error: {0}")]
@@ -86,6 +88,7 @@ impl ChromaError for USearchError {
             USearchError::Cache(err) => err.code(),
             USearchError::DimensionMismatch { .. } => ErrorCodes::InvalidArgument,
             USearchError::Index(_) => ErrorCodes::Internal,
+            USearchError::InvalidQuantizationBits(_) => ErrorCodes::InvalidArgument,
             USearchError::QuantizedEmbedding => ErrorCodes::InvalidArgument,
             USearchError::Storage(err) => err.code(),
         }
@@ -118,23 +121,9 @@ impl USearchIndex {
         distance_function: DistanceFunction,
         bits: u8,
     ) {
-        match bits {
-            1 => Self::apply_quantization_metric_impl::<1>(index, center, distance_function),
-            _ => Self::apply_quantization_metric_impl::<4>(index, center, distance_function),
-        }
-    }
-
-    fn apply_quantization_metric_impl<const BITS: u8>(
-        index: &mut usearch::Index,
-        center: &[f32],
-        distance_function: DistanceFunction,
-    ) {
         let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
         let dim = center.len();
-        let code_len = match BITS {
-            1 => Code::<1>::size(dim),
-            _ => Code::<4>::size(dim),
-        };
+        let code_len = Self::code_size(dim, bits);
 
         index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
             // SAFETY: usearch passes valid pointers of `code_len` i8 elements
@@ -142,9 +131,10 @@ impl USearchIndex {
             let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
-            match BITS {
+            match bits {
                 1 => Code::<1>::new(a).distance_code(&Code::<1>::new(b), &distance_function, c_norm, dim),
-                _ => Code::<4>::new(a).distance_code(&Code::<4>::new(b), &distance_function, c_norm, dim),
+                4 => Code::<4>::new(a).distance_code(&Code::<4>::new(b), &distance_function, c_norm, dim),
+                _ => unreachable!("quantization_bits validated in USearchIndex::new"),
             }
         }));
     }
@@ -198,20 +188,28 @@ impl USearchIndex {
     fn code_size(dimensions: usize, bits: u8) -> usize {
         match bits {
             1 => Code::<1>::size(dimensions),
-            _ => Code::<4>::size(dimensions),
+            4 => Code::<4>::size(dimensions),
+            _ => unreachable!("quantization_bits validated in USearchIndex::new"),
         }
     }
 
     /// Quantizes a vector using the configured bit width.
     fn quantize_vector(vector: &[f32], center: &[f32], bits: u8) -> Vec<u8> {
         match bits {
-            1 => Code::<1>::quantize(vector, center).as_ref().to_vec(),
-            _ => Code::<4>::quantize(vector, center).as_ref().to_vec(),
+            1 => Code::<1>::quantize(vector, center).into_inner(),
+            4 => Code::<4>::quantize(vector, center).into_inner(),
+            _ => unreachable!("quantization_bits validated in USearchIndex::new"),
         }
     }
 
     /// Create a new empty index.
     fn new(config: USearchIndexConfig, id: IndexUuid) -> Result<Self, USearchError> {
+        if config.quantization_center.is_some() && !matches!(config.quantization_bits, 1 | 4) {
+            return Err(USearchError::InvalidQuantizationBits(
+                config.quantization_bits,
+            ));
+        }
+
         let (scalar, index_dimensions) = match &config.quantization_center {
             Some(center) => {
                 if center.len() != config.dimensions {
@@ -219,6 +217,9 @@ impl USearchIndex {
                         expected: config.dimensions,
                         got: center.len(),
                     });
+                }
+                if ![1, 4].contains(&config.quantization_bits) {
+                    return Err(USearchError::InvalidQuantizationBits(config.quantization_bits));
                 }
                 (
                     ScalarKind::I8,
@@ -292,7 +293,7 @@ impl VectorIndex for USearchIndex {
         }
 
         if let Some(code) = code {
-            let i8_slice = bytemuck::cast_slice::<_, i8>(&code);
+            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             index.add(key as u64, i8_slice)
         } else {
             index.add(key as u64, vector)
@@ -349,7 +350,7 @@ impl VectorIndex for USearchIndex {
 
         let matches = if let Some(center) = &self.config.quantization_center {
             let code = Self::quantize_vector(query, center, self.config.quantization_bits);
-            let i8_slice = bytemuck::cast_slice::<_, i8>(&code);
+            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             self.index.read().search(i8_slice, count)
         } else {
             self.index.read().search(query, count)

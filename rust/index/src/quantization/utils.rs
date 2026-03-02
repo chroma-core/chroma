@@ -147,13 +147,3 @@ pub fn rabitq_distance_code(
         DistanceFunction::InnerProduct => 1.0 - d_a_dot_d_b,
     }
 }
-
-// ── Sizing helper ─────────────────────────────────────────────────────────────
-//
-// Module-level function rather than a method to avoid Rust's "can't infer T"
-// error when calling Code::<4>::size(dim) without a concrete T annotation.
-
-/// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
-pub fn padded_dim_4bit(dim: usize) -> usize {
-    dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
-}

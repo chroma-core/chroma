@@ -90,5 +90,11 @@ mod utils;
 
 pub struct Code<const BITS: u8, T = Vec<u8>>(T);
 
+impl<const BITS: u8, T> Code<BITS, T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 pub use quantization1bit::{BatchQueryLuts, QuantizedQuery};
 pub use utils::RabitqCode;
