@@ -132,8 +132,8 @@ impl USearchIndex {
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
             match bits {
-                1 => Code::<1>::new(a).distance_code(&Code::<1>::new(b), &distance_function, c_norm, dim),
-                4 => Code::<4>::new(a).distance_code(&Code::<4>::new(b), &distance_function, c_norm, dim),
+                1 => Code::<1, _>::new(a).distance_code(&Code::<1, _>::new(b), &distance_function, c_norm, dim),
+                4 => Code::<4, _>::new(a).distance_code(&Code::<4, _>::new(b), &distance_function, c_norm, dim),
                 _ => unreachable!("quantization_bits validated in USearchIndex::new"),
             }
         }));
@@ -755,5 +755,134 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_metric_1bit() {
+        let (_temp_dir, storage) = test_storage();
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        const DIM: usize = 128;
+
+        let center: Arc<[f32]> = Arc::from(vec![0.1f32; DIM]);
+        let config = USearchIndexConfig {
+            collection_id,
+            cmek: None,
+            prefix_path: String::new(),
+            dimensions: DIM,
+            distance_function: DistanceFunction::Euclidean,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            quantization_center: Some(center),
+            quantization_bits: 1,
+        };
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let vectors: Vec<Vec<f32>> = (0..16).map(|_| random_vector(&mut rng, DIM)).collect();
+
+        let (index_id, results_before) = {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+            let index = provider.open(&config, OpenMode::Create).await.unwrap();
+            for (i, v) in vectors.iter().enumerate() {
+                index.add(i as u32, v).unwrap();
+            }
+            let results = index.search(&vectors[0], 8).unwrap();
+            let id = provider.flush(&index).await.unwrap();
+            (id, results)
+        };
+
+        let results_after = {
+            let provider =
+                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+            let index = provider
+                .open(&config, OpenMode::Open(index_id))
+                .await
+                .unwrap();
+            index.search(&vectors[0], 8).unwrap()
+        };
+
+        assert_eq!(results_before.keys, results_after.keys);
+        for (before, after) in results_before
+            .distances
+            .iter()
+            .zip(results_after.distances.iter())
+        {
+            assert!(
+                (before - after).abs() <= f32::EPSILON,
+                "Distance mismatch: before={}, after={}",
+                before,
+                after
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_quantize_1bit() {
+        let (_temp_dir, storage) = test_storage();
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let provider =
+            USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
+        const DIM: usize = 1024;
+
+        let config = USearchIndexConfig {
+            collection_id,
+            cmek: None,
+            prefix_path: String::new(),
+            dimensions: DIM,
+            distance_function: DistanceFunction::Euclidean,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            quantization_center: None,
+            quantization_bits: 1,
+        };
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let vectors = (0..128)
+            .map(|_| random_vector(&mut rng, DIM))
+            .collect::<Vec<_>>();
+
+        let raw_index = provider.open(&config, OpenMode::Create).await.unwrap();
+        for (i, v) in vectors.iter().enumerate() {
+            raw_index.add(i as u32, v).unwrap();
+        }
+
+        for (i, v) in vectors.iter().enumerate() {
+            let result = raw_index.search(v, 1).unwrap();
+            assert_eq!(
+                result.keys[0], i as u32,
+                "Full precision: top-1 mismatch at {}",
+                i
+            );
+        }
+
+        let center = Arc::from(vec![0.0f32; DIM]);
+        let quantized_config = USearchIndexConfig {
+            quantization_center: Some(center),
+            ..config
+        };
+        let quantized_index = provider
+            .open(&quantized_config, OpenMode::Create)
+            .await
+            .unwrap();
+        for (i, v) in vectors.iter().enumerate() {
+            quantized_index.add(i as u32, v).unwrap();
+        }
+
+        let mut top1_hits = 0usize;
+        for (i, v) in vectors.iter().enumerate() {
+            let result = quantized_index.search(v, 8).unwrap();
+            if result.keys[0] == i as u32 {
+                top1_hits += 1;
+            }
+        }
+
+        let recall = top1_hits as f64 / vectors.len() as f64;
+        assert!(
+            recall >= 0.95,
+            "1-bit quantized top-1 recall {:.1}% is below 95% threshold",
+            recall * 100.0
+        );
     }
 }

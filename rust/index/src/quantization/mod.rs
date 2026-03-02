@@ -98,3 +98,19 @@ impl<const BITS: u8, T> Code<BITS, T> {
 
 pub use quantization1bit::{BatchQueryLuts, QuantizedQuery};
 pub use utils::RabitqCode;
+
+use std::sync::Arc;
+
+pub fn code_size(bits: u8, dim: usize) -> usize {
+    match bits {
+        1 => Code::<1>::size(dim),
+        _ => Code::<4>::size(dim),
+    }
+}
+
+pub fn quantize(bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
+    match bits {
+        1 => Code::<1>::quantize(embedding, centroid).into_inner().into(),
+        _ => Code::<4>::quantize(embedding, centroid).into_inner().into(),
+    }
+}

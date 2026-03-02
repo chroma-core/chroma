@@ -4,7 +4,6 @@
 //! and the distance math helpers used by both [`super::quantization1bit`]
 //! and [`super::quantization4bit`].
 
-use bitpacking::{BitPacker, BitPacker8x};
 use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
 

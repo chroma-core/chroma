@@ -106,8 +106,8 @@ macro_rules! desc {
 const DIMS: &[usize] = &[1024];
 // const DIMS: &[usize] = &[128, 1024, 4096];
 const BATCH: usize = 512;
-const THREAD_COUNTS: &[usize] = &[1, 8];
-// const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8];
+// const THREAD_COUNTS: &[usize] = &[1, 8];
+const THREAD_COUNTS: &[usize] = &[1, 2, 4, 8, 16, 32];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
