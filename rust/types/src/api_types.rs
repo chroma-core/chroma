@@ -1293,6 +1293,65 @@ impl AddCollectionRecordsRequest {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<Metadata>>>,
     ) -> Result<Self, ChromaValidationError> {
+        let expected_len = ids.len();
+        if embeddings.len() != expected_len {
+            return Err(ChromaValidationError::from((
+                "embeddings",
+                ValidationError::new("array_length_mismatch").with_message(
+                    format!(
+                        "Expected embeddings to have {} elements matching ids, got {}",
+                        expected_len,
+                        embeddings.len()
+                    )
+                    .into(),
+                ),
+            )));
+        }
+        if let Some(ref docs) = documents {
+            if docs.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "documents",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected documents to have {} elements matching ids, got {}",
+                            expected_len,
+                            docs.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref u) = uris {
+            if u.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "uris",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected uris to have {} elements matching ids, got {}",
+                            expected_len,
+                            u.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref meta) = metadatas {
+            if meta.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "metadatas",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected metadatas to have {} elements matching ids, got {}",
+                            expected_len,
+                            meta.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
         let request = Self {
             tenant_id,
             database_name,
@@ -1398,6 +1457,67 @@ impl UpdateCollectionRecordsRequest {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
     ) -> Result<Self, ChromaValidationError> {
+        let expected_len = ids.len();
+        if let Some(ref emb) = embeddings {
+            if emb.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "embeddings",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected embeddings to have {} elements matching ids, got {}",
+                            expected_len,
+                            emb.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref docs) = documents {
+            if docs.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "documents",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected documents to have {} elements matching ids, got {}",
+                            expected_len,
+                            docs.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref u) = uris {
+            if u.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "uris",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected uris to have {} elements matching ids, got {}",
+                            expected_len,
+                            u.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref meta) = metadatas {
+            if meta.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "metadatas",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected metadatas to have {} elements matching ids, got {}",
+                            expected_len,
+                            meta.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
         let request = Self {
             tenant_id,
             database_name,
@@ -1494,6 +1614,65 @@ impl UpsertCollectionRecordsRequest {
         uris: Option<Vec<Option<String>>>,
         metadatas: Option<Vec<Option<UpdateMetadata>>>,
     ) -> Result<Self, ChromaValidationError> {
+        let expected_len = ids.len();
+        if embeddings.len() != expected_len {
+            return Err(ChromaValidationError::from((
+                "embeddings",
+                ValidationError::new("array_length_mismatch").with_message(
+                    format!(
+                        "Expected embeddings to have {} elements matching ids, got {}",
+                        expected_len,
+                        embeddings.len()
+                    )
+                    .into(),
+                ),
+            )));
+        }
+        if let Some(ref docs) = documents {
+            if docs.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "documents",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected documents to have {} elements matching ids, got {}",
+                            expected_len,
+                            docs.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref u) = uris {
+            if u.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "uris",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected uris to have {} elements matching ids, got {}",
+                            expected_len,
+                            u.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
+        if let Some(ref meta) = metadatas {
+            if meta.len() != expected_len {
+                return Err(ChromaValidationError::from((
+                    "metadatas",
+                    ValidationError::new("array_length_mismatch").with_message(
+                        format!(
+                            "Expected metadatas to have {} elements matching ids, got {}",
+                            expected_len,
+                            meta.len()
+                        )
+                        .into(),
+                    ),
+                )));
+            }
+        }
         let request = Self {
             tenant_id,
             database_name,
