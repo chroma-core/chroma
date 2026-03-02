@@ -1,0 +1,317 @@
+
+# RaBitQ Implementation Specifics
+
+Findings from reviewing the Chroma RaBitQ implementation against the original
+paper.
+
+Reference implementations examined:
+
+- **gaoj0017/RaBitQ** — original author's C++/Python code
+  (`data/rabitq.py`, `src/space.h`, `src/ivf_rabitq.h`)
+---
+
+## Distance-Estimation Formula
+
+All three implementations compute the same formula.  Starting from Euclidean
+distance in the original space:
+
+```
+‖d − q‖² = ‖c‖² + ‖r_d‖² + ‖r_q‖² + 2⟨r_d, c⟩ + 2⟨r_q, c⟩ − 2⟨d, q⟩
+```
+
+where `r_d = d − c` and `r_q = q − c` are the data and query residuals relative
+to the cluster centroid `c`.  The inner product `⟨r_d, r_q⟩` is estimated via
+the 1-bit approximation (Theorem 3.2 of the paper):
+
+```
+⟨r_d, r_q⟩ ≈ ‖r_d‖ · ⟨g_d, r_q⟩ / ⟨g_d, n_d⟩
+```
+
+- `g_d[i] = +0.5` when bit `i` is 1, `−0.5` when bit `i` is 0 (our scaling)
+- `n_d = r_d / ‖r_d‖` is the unit-norm data residual
+- `⟨g_d, n_d⟩` is the **correction factor**, stored in `CodeHeader::correction`
+
+---
+
+## Correction Factor Algebra
+
+The implementations use different scaling conventions but are algebraically
+equivalent.
+
+**Our implementation** (`Code::quantize`, BITS=1):
+
+```
+correction = 0.5 · Σ|r[i]| / ‖r‖     (= GRID_OFFSET · abs_sum / norm)
+```
+
+**gaoj0017** uses normalised vectors and defines:
+
+```
+x0 = ‖XP‖₁ / (√D · ‖XP‖)
+```
+
+For unit-norm `XP` this simplifies to `‖XP‖₁ / √D`.  With `g[i] = ±1/√D`
+(their scaling), their correction equals `Σ|r̂[i]| / √D = Σ|r[i]| / (√D · ‖r‖)`.
+Our `GRID_OFFSET = 0.5 = 1/(2·1) ≠ 1/√D`, but the `0.5` factors in `⟨g, r_q⟩`
+and `⟨g, n_d⟩` cancel in the ratio, so the estimated distance is identical.
+
+---
+
+## Random Orthogonal Rotation (P)
+
+The paper applies a random orthogonal rotation `P` before quantization to obtain
+its theoretical error guarantees (the `O(1/√D)` bound holds in expectation over
+random `P`).
+
+| Implementation | Rotation applied? |
+|---|---|
+| gaoj0017 | Yes — `XP` computed once at index time |
+| **Our production code** (`quantized_spann.rs::rotate`) | **Yes** — `self.rotation` matrix applied before `Code::quantize` |
+| **Our benchmarks** (`benches/quantization.rs`) | **No** — `random_vec` produces unrotated inputs |
+
+The rotation is not absent — it is correctly applied in production.  The
+benchmarks intentionally omit it for simplicity; this does not affect the
+performance measurements (timing is dominated by the inner-product arithmetic)
+but does mean the benchmark error-distribution results carry a slight
+test-setup bias (see Error Analysis section below).
+
+---
+
+## Storage of ⟨r, c⟩ (Radial Component)
+
+The term `⟨r, c⟩` is required at query time for every code.
+
+| Implementation | How ⟨r, c⟩ is stored |
+|---|---|
+| gaoj0017 | Exact f32, precomputed at index time |
+| **Ours** (`CodeHeader::radial`) | **Exact** f32, precomputed at index time |
+
+Storing the exact value is a strict accuracy advantage over the NTU library,
+which introduces additional quantization error in this term.
+
+---
+
+## Precomputed Signed Sum (`factor_ppc` / `signed_sum`)
+
+The signed sum `Σ sign[i] = 2·popcount(x_b) − D` appears in the bitwise
+distance estimator for any query that uses `QuantizedQuery` or `BatchQueryLuts`.
+It depends only on the data code and is constant across all queries.
+
+**gaoj0017** precomputes this as `factor_ppc` at index time.
+
+**Our previous implementation** recomputed `popcount(x_b)` on every call to
+`distance_query_bitwise` (16 `popcnt` instructions for 1024-d) and on every
+nibble iteration in `BatchQueryLuts::distance_query`.
+
+**After this change**, `CodeHeader` stores the value as `signed_sum: i32`,
+computed once in `Code::quantize`:
+
+```rust
+let popcount: i32 = packed.iter().map(|b| b.count_ones() as i32).sum();
+let signed_sum = 2 * popcount - dim as i32;
+```
+
+`distance_query_bitwise` and `BatchQueryLuts::distance_query` now read
+`code.signed_sum()` instead of running a popcount loop.  For 1024-d codes this
+eliminates 16 `popcnt` + 16 additions per distance estimate in the bitwise path.
+
+As a side-effect, `distance_query_bitwise` no longer needs the `dim: usize`
+argument, which has been removed from the public API.
+
+**Header size change:** `CodeHeader` grew from 12 bytes to 16 bytes
+(`signed_sum: i32` added at offset 12).  Persisted codes (blockfiles) written
+before this change are **not** compatible with the updated reader.
+
+---
+
+## Query Quantization: Deterministic vs. Stochastic Dithering
+
+`QuantizedQuery::new` uses deterministic rounding:
+
+```rust
+((v - v_l) / delta).round()
+```
+
+The original paper (gaoj0017) uses stochastic dithering (random rounding) for
+query quantization.  At `B_q = 4` bits the accuracy difference is negligible;
+deterministic rounding is simpler and removes a source of non-determinism.
+
+---
+
+## 4-Bit Codebook Structure
+
+Our 4-bit implementation uses a ray-walk algorithm to find the optimal grid
+point along `r` that maximises cosine similarity.
+
+---
+
+## Error Analysis
+
+The `print_error_analysis` benchmark (`benches/quantization.rs`) measures
+relative and absolute error of the distance estimator for 4-bit float,
+1-bit float, and 1-bit bitwise (QuantizedQuery) methods.
+
+### Why relative error has a non-zero mean
+
+Relative error `ε_rel = (d̂ − d) / d` has a strictly positive mean even for an
+unbiased estimator, due to **Jensen's inequality**: `E[1/X] > 1/E[X]` when `X`
+is a positive random variable.  The distribution of `d̂` is approximately
+symmetric around `d`, but `1/d` is convex, so dividing by `d` distorts the
+symmetry upward.  This is a property of the metric, not a flaw in the
+implementation.
+
+### Why absolute error has a non-zero mean in the benchmarks
+
+The paper's unbiasedness guarantee is: for a fixed query `q`, the estimator is
+unbiased in expectation over random orthogonal rotations `P`.  In the benchmarks
+the rotation is omitted and queries are drawn from `Uniform(−1, 1)^D` centred at
+the origin, not at the centroid.  This means query residuals `r_q = q − c` have
+a non-zero expected value (`−c`), introducing a small systematic bias in the
+test.  The absolute error mean is approximately 0.3 % of `d_true` with a
+standard deviation of ≈ 2 %, making it negligible for ranking purposes.
+
+---
+
+## Summary of Differences
+
+| Aspect | gaoj0017 (original paper) |  Ours |
+|---|---|---|
+| Random rotation | Yes | Yes (production); No (benchmarks) |
+| `⟨r, c⟩` storage | Exact | Exact |
+| `signed_sum` precomputed | Yes (`factor_ppc`) | Yes |
+| Query dithering | Stochastic | Deterministic |
+| 4-bit codebook | N/A | Ray-walk |
+| Multi-bit query scoring | Bit-plane (same) | Bit-plane (same) |
+
+
+# Optimizations
+
+## `Code::<1>::quantize`: single fused pass
+
+Replaced the four-pass approach with a single fused pass over the input data
+and the centroid. This eliminates the 4 KB intermediate `r` allocation and three
+re-reads of it. The four scalar accumulators (abs_sum, norm_sq, radial, popcount)
+are independent across iterations and auto-vectorize to VABSPS/VFMADD on AVX2/AVX-512.
+
+Current cost breakdown (dim=1024):
+  1. fused pass: emb−centroid, sign_pack, abs_sum, norm², radial, popcount
+                 (read 8 KB, write 128 B — no intermediate r allocation)
+  2. alloc:      Vec::with_capacity for the output code buffer (144 B)
+
+Prior cost (before Q1): vec_sub alloc (4 KB), simsimd dot ×2 (8 KB reads),
+sign_pack (4 KB read), abs_sum (4 KB read), popcount (128 B read) — ~5 passes.
+
+Measurements on Apple M-series (`-C target-cpu=native`):
+
+| Benchmark | Before | After | Delta |
+|---|---|---|---|
+| `primitives/quant-1bit/full/1024` | ~1,934 ns, ~3.95 GiB/s | 988 ns, 7.72 GiB/s | **−49% / +96%** |
+
+---
+
+## `Code::<1>::distance_code`: simsimd hamming distance
+
+Replaced the scalar `u64` XOR + POPCNT loop in `hamming_distance` with
+`simsimd::BinarySimilarity::hamming`, which dispatches at runtime to:
+
+- **x86_64 (r6id production):** AVX-512 VPOPCNTDQ — 512 bits/cycle
+- **ARM (Graviton / Apple Silicon):** NEON CNT — 128 bits/cycle
+
+Measurements on Apple M-series (`-C target-cpu=native`):
+
+| Benchmark | Before | After | Delta |
+|---|---|---|---|
+| `primitives/dc-1bit/hamming/1024` (single pair) | 10.60 ns | 6.69 ns | **−37% / +58%** |
+| `distance_code/dc-1bit/1024` (256 pairs) | 3.66 µs | 2.58 µs | **−30% / +42%** |
+
+On x86 production the gain will be larger: VPOPCNTDQ packs 8 u64 pops into
+one instruction vs our prior scalar loop (16 iterations of 3 instructions each).
+
+A scalar fallback is retained for `None` returns (unsupported targets / tests).
+
+---
+
+## `Code::<1>::distance_query`: interleaved + `chunks_exact` for AND+popcount
+
+1. Read each x_b word once and AND with all 4 bit planes simultaneously,
+accumulating into separate per-plane counters. Avoids 3 redundant re-reads of
+x_b (128 B × 3 = 384 B at dim=1024; grows linearly with dim).
+
+2. Replaced `step_by(8)+slice[i..i+8]` with `chunks_exact(8)`. Exposes
+the iteration stride to LLVM cleanly, enabling auto-vectorization of the inner
+loop. The speedup (2.4× from 1. alone) was far larger than expected from just
+eliminating a bounds check — LLVM was not vectorizing the step_by version at all.
+
+The production code unrolls the 4-plane loop entirely
+
+Measurements on Apple M-series (`-C target-cpu=native`):
+
+| Benchmark | Baseline | B2 only | B1+B2 |
+|---|---|---|---|
+| `primitives/dq-bw/and_popcount/1024` | 44.4 ns | 18.8 ns (**2.4×**) | 16.7 ns (**2.7×**) |
+| `distance_query/dq-bw/scan` (2048 codes) | 98.0 µs | 43.9 µs (**+126%**) | 41.0 µs (**+139%**) |
+
+Cold query throughput (`dq-bw/1024`, 512 queries) was unchanged — dominated by
+`QuantizedQuery::new` build cost and cache-miss latency on fresh queries.
+
+## `QuantizedQuery::new`: flat allocation + fused scatter
+
+### Background
+
+`QuantizedQuery::new` had five passes over the input data and four separate
+heap allocations, making it the dominant cost in cold-query workloads.
+
+```
+Prior breakdown (dim=1024):
+  min_max scan ×2:    163 ns each (8 KB total reads)
+  quantize_elements:  165 ns + Vec<u32> alloc (4 KB)
+  sum_q_u:            separate fold pass
+  bit_plane_decompose: 2 339 ns + 4 × Vec<u8> alloc (4 × 128 B)
+  Total: ~5 500 ns
+```
+
+### Flat allocation + fused scatter (IMPLEMENTED)
+
+Replaced the branchy element-by-element scatter into 4 separate `Vec<u8>`
+allocations with a byte_chunks approach:
+
+- One flat `Vec<u8>` of `b_q × padded_bytes` (1 alloc instead of b_q)
+- Quantize, accumulate sum, and scatter bits in a **single pass** over r_q
+- Process 8 elements → 1 byte per plane per iteration (branchless)
+- b_q=4 fast path: hardcoded plane accumulators enable LLVM to fully unroll
+
+`QuantizedQuery::bit_planes` changed from `Vec<Vec<u8>>` to flat `Vec<u8>`,
+with a new `padded_bytes: usize` field for indexing. `distance_query` updated
+to slice the flat buffer: plane j at `&bit_planes[j*pb..(j+1)*pb]`.
+
+Measurements on Apple M-series:
+
+| Benchmark | Time | vs. Baseline |
+|---|---|---|
+| `bit_plane_decompose/baseline` | 2 339 ns | — |
+| `bit_plane_decompose/flat_alloc` (P4 alone) | 2 351 ns | no change |
+| `bit_plane_decompose/byte_chunks` | 707 ns | **3.3×** |
+| `quant-query/full/1024` (before) | 5 537 ns | — |
+| `quant-query/full/1024` (after) | 1 034 ns | **5.35× / −81%** |
+
+---
+
+## `Code::<1>::distance_query_full_precision`: lookup table
+
+The hot kernel for the float query path computes `Σ sign[i]·values[i]` where
+sign[i] ∈ {−1, +1} from packed bits. Prior approach: expand bits to ±1.0 f32s
+via 8 `f32::from_bits` calls per byte (IEEE bit trick), then simsimd dot.
+
+**Implemented:** Precomputed lookup table `SIGN_TABLE[256][8]` mapping each byte
+to its 8 f32 signs. One table lookup + `copy_from_slice` replaces the 8
+`f32::from_bits` calls per byte. The 8 KB table stays in L1.
+
+Measurements on Apple M-series:
+
+| Benchmark | Before | After | Delta |
+|---|---|---|---|
+| `primitives/dq-float/signed_dot/1024` | ~316 ns | ~194 ns | **−39% / +63%** |
+
+**Future options** (see benches/vector/quantization.rs § Code::<1>::distance_query_full_precision):
+- [D1] Masked sum: `2·Σ(values where bit=1) − total_sum`; needs VMASKMOV/BSL.
+- [D2] XOR sign-flip: XOR values with 0x80000000 where bit=0, then sum; no expansion.
