@@ -78,8 +78,8 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
-            GrpcPushLogsError::BackoffCompaction => ErrorCodes::AlreadyExists,
+            GrpcPushLogsError::Backoff => ErrorCodes::ResourceExhausted,
+            GrpcPushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,

@@ -927,7 +927,9 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .when(|e| {
+                e.code() == ErrorCodes::ResourceExhausted && !e.to_string().contains("compaction")
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1034,7 +1036,9 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .when(|e| {
+                e.code() == ErrorCodes::ResourceExhausted && !e.to_string().contains("compaction")
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1143,7 +1147,9 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
+            .when(|e| {
+                e.code() == ErrorCodes::ResourceExhausted && !e.to_string().contains("compaction")
+            })
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1405,8 +1411,10 @@ impl ServiceBasedFrontend {
         let res = Box::pin(
             delete_to_retry
                 .retry(self.collections_with_segments_provider.get_retry_backoff())
-                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
-                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
+                .when(|e| {
+                    e.code() == ErrorCodes::ResourceExhausted
+                        && !e.to_string().contains("compaction")
+                })
                 .notify(|_, _| {
                     let retried = retries.fetch_add(1, Ordering::Relaxed);
                     if retried > 0 {
