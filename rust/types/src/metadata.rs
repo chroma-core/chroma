@@ -1196,13 +1196,13 @@ impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
     type Error = UpdateMetadataValueConversionError;
 
     fn try_from(proto_metadata: chroma_proto::UpdateMetadata) -> Result<Self, Self::Error> {
-        let mut metadata = UpdateMetadata::new();
-        for (key, value) in proto_metadata.metadata.iter() {
-            let value = match value.try_into() {
+        let mut metadata = UpdateMetadata::with_capacity(proto_metadata.metadata.len());
+        for (key, value) in proto_metadata.metadata.into_iter() {
+            let value = match (&value).try_into() {
                 Ok(value) => value,
                 Err(_) => return Err(UpdateMetadataValueConversionError::InvalidValue),
             };
-            metadata.insert(key.clone(), value);
+            metadata.insert(key, value);
         }
         Ok(metadata)
     }
@@ -1210,13 +1210,12 @@ impl TryFrom<chroma_proto::UpdateMetadata> for UpdateMetadata {
 
 impl From<UpdateMetadata> for chroma_proto::UpdateMetadata {
     fn from(metadata: UpdateMetadata) -> Self {
-        let mut metadata = metadata;
         let mut proto_metadata = chroma_proto::UpdateMetadata {
-            metadata: HashMap::new(),
+            metadata: HashMap::with_capacity(metadata.len()),
         };
-        for (key, value) in metadata.drain() {
+        for (key, value) in metadata.into_iter() {
             let proto_value = value.into();
-            proto_metadata.metadata.insert(key.clone(), proto_value);
+            proto_metadata.metadata.insert(key, proto_value);
         }
         proto_metadata
     }
