@@ -23,18 +23,38 @@ is the cost of the preparation pipeline and cache pressure, not the quantization
 
 # Thread Scaling
 
-Benchmark data from `cargo bench -p chroma-index --bench quantization -- thread_scaling` (N=1024, dim=1024).
+Benchmark data from `cargo bench -p chroma-index --bench quantization -- thread_scaling`
+(N=1024, dim=1024) on r6i.8xlarge (16 physical cores / 32 vCPUs, Intel Ice Lake).
+Full raw output in `saved_benchmarks/thread_scaling_r6i.8xlarge.txt`.
 
-| Operation | What it does | 1 thread | 8 threads | Speedup |
-|-----------|--------------|----------|-----------|---------|
-| quant-4bit | 4-bit data encode (ray-walk) | 54 ms, 74 MiB/s | 8.0 ms, 500 MiB/s | ~6.7x |
-| quant-1bit | 1-bit data encode (sign-bit, dual accum) | 760 µs, 5.1 GiB/s | 173 µs, 22 GiB/s | ~4.4x |
-| dq-4f (cold) | 4-bit code vs f32 query (grid unpack + dot) | 2.3 ms, 1.9 GiB/s | 0.37 ms, 12 GiB/s | ~6.3x |
-| dq-float (cold) | 1-bit code vs f32 query (signed_dot) | 2.1 ms, 2.0 GiB/s | 0.32 ms, 13 GiB/s | ~6.5x |
-| dq-bw (cold) | 1-bit code vs QuantizedQuery (AND+popcount) | 2.9 ms, 1.4 GiB/s | 0.49 ms, 8.3 GiB/s | ~6.0x |
-| d-lut (cold) | 1-bit code vs BatchQueryLuts (nibble LUT) | 10.2 ms, 405 MiB/s | 1.6 ms, 2.5 GiB/s | ~6.2x |
+| Operation | What it does | 1 thread | 16 threads | 32 threads | 1->16 | 16->32 (HT) |
+|-----------|--------------|----------|------------|------------|-------|-------------|
+| quant-4bit | 4-bit data encode (ray-walk) | 86.9 ms, 46 MiB/s | 6.09 ms, 656 MiB/s | 4.54 ms, 880 MiB/s | 14.3x | 1.34x |
+| quant-1bit | 1-bit data encode (dual accum) | 1.17 ms, 3.35 GiB/s | 108 us, 36.1 GiB/s | 114 us, 34.2 GiB/s | 10.8x | **0.95x** |
+| dq-4f | 4-bit code vs f32 query | 3.48 ms, 1.27 GiB/s | 261 us, 16.9 GiB/s | 168 us, 26.2 GiB/s | 13.3x | 1.55x |
+| dq-float | 1-bit code vs f32 query (signed_dot) | 2.94 ms, 1.38 GiB/s | 224 us, 18.1 GiB/s | 143 us, 28.3 GiB/s | 13.1x | 1.57x |
+| dq-bw | 1-bit code vs QuantizedQuery (AND+popcount) | 4.84 ms, 855 MiB/s | 345 us, 11.7 GiB/s | 250 us, 16.1 GiB/s | 14.0x | 1.38x |
+| d-lut | 1-bit code vs BatchQueryLuts (nibble LUT) | 7.02 ms, 589 MiB/s | 490 us, 8.24 GiB/s | 401 us, 10.1 GiB/s | 14.3x | 1.22x |
 
-4-bit quantization scales near-linearly (~6.7x with 8 threads). 1-bit quantize scales ~4.4x; the fused loop is compute-bound (dual-accumulator FP reductions dominate) rather than memory-bound at this thread count. Distance-query methods scale ~6x; dq-bw and d-lut benefit from parallel QuantizedQuery/LUT build amortized across threads. Full raw output in `benchmark_results.txt`.
+**Scaling shape:** All operations scale near-linearly from 1 to 16 threads (physical cores).
+Beyond 16 threads, hyperthreading (HT) behaviour diverges by workload type:
+
+- **quant-1bit is the outlier**: HT gives *no benefit* (0.95x). The dual-accumulator
+  fused FP reduction loop saturates the physical core's FP units; a second HT thread
+  on the same core competes for the same execution ports rather than hiding latency.
+- **dq-4f / dq-float** benefit most from HT (1.55--1.57x). These are memory-bound
+  (loading 1024-byte codes from DRAM); while one HT thread stalls on a cache miss the
+  other can execute, effectively hiding memory latency.
+- **quant-4bit / dq-bw / d-lut** see moderate HT benefit (1.22--1.38x), reflecting a
+  mix of compute and memory work.
+
+**Why dq-bw appears slower than dq-4f / dq-float:** These are cold-query benchmarks
+(1 query per code). dq-bw and d-lut include per-query QuantizedQuery / BatchQueryLuts
+build cost (~568 ns / ~8 us respectively) that dq-4f and dq-float do not pay. In
+production scans (1 query, many codes), this build cost amortizes away and dq-bw is
+~23x faster than dq-4f per code (18 ns vs ~1 us hot-scan). Compare dq-float
+(1-bit code, same f32 query as dq-4f, no query quantization) to dq-4f to isolate
+the code-size advantage of 1-bit vs 4-bit without the query build overhead.
 
 ---
 
