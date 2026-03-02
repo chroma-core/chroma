@@ -353,7 +353,7 @@ impl GrpcLog {
         match response {
             Ok(response) => {
                 let logs = response.into_inner().records;
-                let mut result = Vec::new();
+                let mut result = Vec::with_capacity(logs.len());
                 for log_record_proto in logs {
                     let log_record = log_record_proto.try_into();
                     match log_record {
