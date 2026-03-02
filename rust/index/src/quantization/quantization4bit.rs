@@ -10,21 +10,15 @@ use bitpacking::{BitPacker, BitPacker8x};
 use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
 
-use super::utils::{rabitq_distance_code, rabitq_distance_query, CodeHeader, RabitqCode};
-use super::utils::padded_dim_4bit;
+use super::utils::{
+    padded_dim_4bit, rabitq_distance_code, rabitq_distance_query, CodeHeader,
+    RabitqCode,
+};
+use super::Code;
 
-// ── Code4Bit ──────────────────────────────────────────────────────────────────
+// ── Code<4, T> ────────────────────────────────────────────────────────────────
 
-/// 4-bit RaBitQ quantized code.
-///
-/// Byte layout: `[CodeHeader (12 bytes)][packed 4-bit codes]`
-///
-/// Uses a ray-walk algorithm to find the optimal grid point in
-/// {±0.5, ±1.5, ±2.5, ±3.5, ±4.5, ±5.5, ±6.5, ±7.5}^dim that maximises
-/// cosine similarity with the data residual.
-pub struct Code4Bit<T = Vec<u8>>(T);
-
-impl<T: AsRef<[u8]>> RabitqCode for Code4Bit<T> {
+impl<T: AsRef<[u8]>> RabitqCode for Code<4, T> {
     fn correction(&self) -> f32 {
         bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
     }
@@ -37,38 +31,12 @@ impl<T: AsRef<[u8]>> RabitqCode for Code4Bit<T> {
     fn packed(&self) -> &[u8] {
         &self.0.as_ref()[size_of::<CodeHeader>()..]
     }
-}
-
-impl<T> Code4Bit<T> {
-    /// Wraps existing bytes as a 4-bit code.
-    pub fn new(bytes: T) -> Self {
-        Self(bytes)
-    }
-}
-
-impl<T: AsRef<[u8]>> Code4Bit<T> {
-    /// Estimates distance between two original data vectors `d_a` and `d_b`.
-    ///
-    /// For 4-bit codes, `⟨g_a, g_b⟩` is computed by unpacking the grid vectors
-    /// and taking their dot product.
-    pub fn distance_code<U: AsRef<[u8]>>(
-        &self,
-        distance_fn: &DistanceFunction,
-        other: &Code4Bit<U>,
-        c_norm: f32,
-        dim: usize,
-    ) -> f32 {
-        let g_a = self.unpack_grid(dim);
-        let g_b = other.unpack_grid(dim);
-        let g_a_dot_g_b = f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32;
-        rabitq_distance_code(g_a_dot_g_b, self, other, c_norm, distance_fn)
-    }
 
     /// Estimates distance from data vector `d` to query `q`.
     ///
     /// For 4-bit codes, `⟨g, r_q⟩` is computed by unpacking the grid vector
     /// and taking its dot product with the query residual.
-    pub fn distance_query(
+    fn distance_query(
         &self,
         distance_fn: &DistanceFunction,
         r_q: &[f32],
@@ -81,6 +49,28 @@ impl<T: AsRef<[u8]>> Code4Bit<T> {
         rabitq_distance_query(g_dot_r_q, self, c_norm, c_dot_q, q_norm, distance_fn)
     }
 
+    fn distance_code(
+        &self,
+        other: &dyn RabitqCode,
+        distance_fn: &DistanceFunction,
+        c_norm: f32,
+        dim: usize,
+    ) -> f32 {
+        let g_a = unpack_grid_4bit(self.packed(), dim);
+        let g_b = unpack_grid_4bit(other.packed(), dim);
+        let g_a_dot_g_b = f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32;
+        rabitq_distance_code(g_a_dot_g_b, self, other, c_norm, distance_fn)
+    }
+}
+
+impl<T> Code<4, T> {
+    /// Wraps existing bytes as a 4-bit code.
+    pub fn new(bytes: T) -> Self {
+        Self(bytes)
+    }
+}
+
+impl<T: AsRef<[u8]>> Code<4, T> {
     /// Unpacks the grid point from the packed 4-bit codes.
     fn unpack_grid(&self, dim: usize) -> Vec<f32> {
         const BITS: u8 = 4;
@@ -100,13 +90,13 @@ impl<T: AsRef<[u8]>> Code4Bit<T> {
     }
 }
 
-impl<T: AsRef<[u8]>> AsRef<[u8]> for Code4Bit<T> {
+impl<T: AsRef<[u8]>> AsRef<[u8]> for Code<4, T> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
     }
 }
 
-impl Code4Bit {
+impl Code<4, Vec<u8>> {
     const BITS: u8 = 4;
     const CEIL: u8 = 8; // 1 << (BITS - 1)
     const GRID_OFFSET: f32 = 0.5;
@@ -217,8 +207,21 @@ impl Code4Bit {
     }
 }
 
-/// 4-bit code, for backward compatibility.
-pub type Code<T> = Code4Bit<T>;
+
+/// Unpacks 4-bit packed codes to grid values (for distance_code trait impl).
+pub fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
+    const BITS: u8 = 4;
+    const CEIL: u8 = 8;
+    const GRID_OFFSET: f32 = 0.5;
+    let bitpacker = BitPacker8x::new();
+    let mut codes = vec![0u32; padded_dim_4bit(dim)];
+    for (i, chunk) in codes.chunks_mut(BitPacker8x::BLOCK_LEN).enumerate() {
+        let offset = i * BitPacker8x::compressed_block_size(BITS);
+        bitpacker.decompress(&packed[offset..], chunk, BITS);
+    }
+    let offset = f32::from(CEIL) - GRID_OFFSET;
+    codes[..dim].iter().map(|&c| c as f32 - offset).collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -227,14 +230,14 @@ mod tests {
     use simsimd::SpatialSimilarity;
 
     use super::*;
-    use crate::quantization::RabitqCode;
+    use crate::quantization::{Code, RabitqCode};
 
     #[test]
     fn test_attributes() {
         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
         let centroid = (0..300).map(|i| i as f32 * 0.5).collect::<Vec<_>>();
 
-        let code = Code4Bit::quantize(&embedding, &centroid);
+        let code = Code::<4>::quantize(&embedding, &centroid);
 
         // Verify accessors return finite values
         assert!(code.correction().is_finite());
@@ -255,22 +258,22 @@ mod tests {
         assert!((code.radial() - expected_radial).abs() < f32::EPSILON);
 
         // Verify buffer size
-        assert_eq!(code.as_ref().len(), Code4Bit::size(embedding.len()));
+        assert_eq!(code.as_ref().len(), Code::<4>::size(embedding.len()));
     }
 
     #[test]
     fn test_size() {
         // Exactly one block (256)
-        assert_eq!(Code4Bit::packed_len(256), 256 * 4 / 8); // 128 bytes
-        assert_eq!(Code4Bit::size(256), 12 + 128); // 3 floats + packed
+        assert_eq!(Code::<4>::packed_len(256), 256 * 4 / 8); // 128 bytes
+        assert_eq!(Code::<4>::size(256), 12 + 128); // 3 floats + packed
 
         // Non-aligned (300) - should pad to 512
-        assert_eq!(Code4Bit::packed_len(300), 512 * 4 / 8); // 256 bytes
-        assert_eq!(Code4Bit::size(300), 12 + 256);
+        assert_eq!(Code::<4>::packed_len(300), 512 * 4 / 8); // 256 bytes
+        assert_eq!(Code::<4>::size(300), 12 + 256);
 
         // Two blocks (512)
-        assert_eq!(Code4Bit::packed_len(512), 512 * 4 / 8); // 256 bytes
-        assert_eq!(Code4Bit::size(512), 12 + 256);
+        assert_eq!(Code::<4>::packed_len(512), 512 * 4 / 8); // 256 bytes
+        assert_eq!(Code::<4>::size(512), 12 + 256);
     }
 
     #[test]
@@ -278,13 +281,13 @@ mod tests {
         let embedding = (0..300).map(|i| i as f32).collect::<Vec<_>>();
 
         // Exactly zero residual
-        let code = Code4Bit::quantize(&embedding, &embedding);
+        let code = Code::<4>::quantize(&embedding, &embedding);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
 
         // Near-zero residual
         let centroid = embedding.iter().map(|x| x + 1e-10).collect::<Vec<_>>();
-        let code = Code4Bit::quantize(&embedding, &centroid);
+        let code = Code::<4>::quantize(&embedding, &centroid);
         assert_eq!(code.correction(), 1.0);
         assert!(code.norm() < f32::EPSILON);
     }
@@ -313,7 +316,7 @@ mod tests {
                             continue;
                         }
 
-                        let code = Code4Bit::quantize(&embedding, &centroid);
+                        let code = Code::<4>::quantize(&embedding, &centroid);
                         let dist = code.distance_query(
                             &DistanceFunction::Cosine,
                             &embedding,
@@ -355,7 +358,7 @@ mod tests {
             .collect::<Vec<_>>();
         let codes = vectors
             .iter()
-            .map(|v| Code4Bit::quantize(v, &centroid))
+            .map(|v| Code::<4>::quantize(v, &centroid))
             .collect::<Vec<_>>();
 
         let max_p95_rel_error = 0.16 / 16.0;
@@ -385,7 +388,7 @@ mod tests {
                     };
 
                     let estimated_code =
-                        codes[i].distance_code(&distance_fn, &codes[j], c_norm, dim);
+                        codes[i].distance_code(&codes[j], &distance_fn, c_norm, dim);
                     rel_errors_code
                         .push((exact - estimated_code).abs() / exact.abs().max(f32::EPSILON));
 

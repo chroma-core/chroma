@@ -43,7 +43,7 @@ impl Operator<QuantizedSpannCenterSearchInput, QuantizedSpannCenterSearchOutput>
         input: &QuantizedSpannCenterSearchInput,
     ) -> Result<QuantizedSpannCenterSearchOutput, QuantizedSpannCenterSearchError> {
         let rotated_query = input.reader.rotate(&self.embedding)?;
-        let cluster_ids = input.reader.navigate_with_rerank(
+        let cluster_ids = input.reader.navigate(
             &rotated_query,
             input.count,
             input.centroid_rerank_factor,

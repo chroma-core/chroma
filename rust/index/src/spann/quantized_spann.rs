@@ -31,7 +31,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    quantization::{Code4Bit, Code},
+    quantization::{Code, RabitqCode},
     spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
@@ -273,7 +273,11 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let code_size = Code4Bit::size(self.dimension);
+        let code_bits = self.config.quantize.data_bits().unwrap_or(4);
+        let code_size = match code_bits {
+            1 => Code::<1>::size(self.dimension),
+            _ => Code::<4>::size(self.dimension),
+        };
         if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
             if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted
@@ -358,10 +362,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let dist_to_target = self.distance(&embedding, &target_center);
             let dist_to_source = self.distance(&embedding, &source_center);
 
+            let code_bits = self.config.quantize.data_bits().unwrap_or(4);
             if dist_to_target <= dist_to_source {
-                let code = Code::<Vec<u8>>::quantize(&embedding, &target_center)
-                    .as_ref()
-                    .into();
+                let code = match code_bits {
+                    1 => Code::<1>::quantize(&embedding, &target_center),
+                    _ => Code::<4>::quantize(&embedding, &target_center),
+                };
                 if self
                     .append(nearest_cluster_id, *id, *version, code)
                     .is_none()
@@ -426,6 +432,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         target_cluster_ids: &[u32],
     ) -> Result<Vec<u32>, QuantizedSpannError> {
         let version = self.upgrade_version(id);
+        let code_bits = self.config.quantize.data_bits().unwrap_or(4);
 
         let mut registered = false;
         let mut staging = Vec::new();
@@ -435,9 +442,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                 continue;
             };
 
-            let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
-                .as_ref()
-                .into();
+            let code = match code_bits {
+                1 => Code::<1>::quantize(&embedding, &centroid),
+                _ => Code::<4>::quantize(&embedding, &centroid),
+            };
 
             let Some(len) = self.append(*cluster_id, id, version, code) else {
                 continue;
@@ -455,9 +463,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         }
 
         if !registered {
-            let code = Code::<Vec<u8>>::quantize(&embedding, &embedding)
-                .as_ref()
-                .into();
+            let code = match code_bits {
+                1 => Code::<1>::quantize(&embedding, &embedding),
+                _ => Code::<4>::quantize(&embedding, &embedding),
+            };
             let delta = QuantizedDelta {
                 center: embedding,
                 codes: vec![code],
@@ -579,6 +588,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
         let old_center = delta.center.clone();
+        let code_bits = self.config.quantize.data_bits().unwrap_or(4);
 
         let embeddings = delta
             .ids
@@ -611,7 +621,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: left_center.clone(),
             codes: left_group
                 .iter()
-                .map(|(_, _, emb)| Code::<Vec<u8>>::quantize(emb, &left_center).as_ref().into())
+                .map(|(_, _, emb)| match code_bits {
+                    1 => Code::<1>::quantize(emb, &left_center),
+                    _ => Code::<4>::quantize(emb, &left_center),
+                })
                 .collect(),
             ids: left_group.iter().map(|(id, _, _)| *id).collect(),
             length: left_group.len(),
@@ -623,10 +636,9 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: right_center.clone(),
             codes: right_group
                 .iter()
-                .map(|(_, _, emb)| {
-                    Code::<Vec<u8>>::quantize(emb, &right_center)
-                        .as_ref()
-                        .into()
+                .map(|(_, _, emb)| match code_bits {
+                    1 => Code::<1>::quantize(emb, &right_center),
+                    _ => Code::<4>::quantize(emb, &right_center),
                 })
                 .collect(),
             ids: right_group.iter().map(|(id, _, _)| *id).collect(),
@@ -752,7 +764,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     continue;
                 }
 
-                let code = Code::<&[u8]>::new(code.as_ref());
+                let code: Box<dyn RabitqCode> = match code_bits {
+                    1 => Box::new(Code::<1, _>::new(code.as_ref())),
+                    _ => Box::new(Code::<4, _>::new(code.as_ref())),
+                };
 
                 let left_dist = code.distance_query(
                     &self.distance_function,

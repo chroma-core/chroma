@@ -1,6 +1,6 @@
 This document contains notes on the 1-bit RaBitQ implementation and performance.
 
-# RaBitQ Implementation Notes
+# RaBitQ Implementation Specifics
 
 Findings from reviewing the Chroma RaBitQ implementation against the original
 paper.
@@ -234,7 +234,7 @@ Query
 
 ## Rerank Step 1: Centroids
 
-**Where:** `QuantizedSpannSegmentReader::navigate_with_rerank` in
+**Where:** `QuantizedSpannSegmentReader::navigate` in
 `rust/segment/src/quantized_spann.rs`.
 
 **What:** After the quantized centroid index returns `nprobe * centroid_rerank_factor`
@@ -315,27 +315,46 @@ Benchmark data from `cargo bench -p chroma-index --bench quantization -- thread_
 
 # Recall at 1M Vectors
 
-Benchmark data from `cargo bench -p chroma-index --bench recall -- --dataset <dataset> --size 1000000` (K=10) and `--k 100` (K=100).
+Benchmark data from `cargo bench -p chroma-index --bench quantization_recall -- --dataset <dataset> --size 1000000` (K=10) and `--k 100` (K=100).
 Full output in `recall_1M_results.txt` and `recall_1M_results_k100.txt`.
 
-**4-bit**
+**4-bit** (4bit-code-full-query: 4-bit data, f32 query)
 
 | rerank | cohere_wiki@10 | msmarco@10 | beir@10 | cohere_wiki@100 | msmarco@100 | beir@100 |
 |--------|----------------|------------|---------|----------------|-------------|----------|
-| 1x | 0.896 | 0.935 | 0.930 | 0.928 | 0.947 | 0.944 |
-| 2x | 1.000 | 0.997 | 0.999 | 1.000 | 1.000 | 1.000 |
+| 1x | 0.923 | 0.944 | 0.937 | 0.940 | 0.956 | 0.955 |
+| 2x | 1.000 | 0.998 | 1.000 | 1.000 | 1.000 | 1.000 |
 | 4x | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
 | 8x | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
 | 16x | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
 
-**1-bit**
+**1-bit** (1bit-code-4bit-query: 1-bit data, 4-bit quantized query, QuantizedQuery)
 
 | rerank | cohere_wiki@10 | msmarco@10 | beir@10 | cohere_wiki@100 | msmarco@100 | beir@100 |
 |--------|----------------|------------|---------|----------------|-------------|----------|
-| 1x | 0.581 | 0.682 | 0.711 | 0.646 | 0.730 | 0.741 |
-| 2x | 0.769 | 0.865 | 0.900 | 0.838 | 0.912 | 0.921 |
-| 4x | 0.899 | 0.951 | 0.973 | 0.943 | 0.980 | 0.981 |
-| 8x | 0.968 | 0.988 | 0.991 | 0.986 | 0.997 | 0.996 |
-| 16x | 0.994 | 0.994 | 0.999 | 0.998 | 1.000 | 1.000 |
+| 1x | 0.643 | 0.675 | 0.745 | 0.679 | 0.756 | 0.772 |
+| 2x | 0.830 | 0.889 | 0.928 | 0.874 | 0.935 | 0.942 |
+| 4x | 0.945 | 0.969 | 0.982 | 0.966 | 0.989 | 0.991 |
+| 8x | 0.987 | 0.996 | 0.998 | 0.993 | 0.999 | 0.999 |
+| 16x | 0.997 | 0.999 | 1.000 | 0.999 | 1.000 | 1.000 |
 
-4-bit reaches recall_mean 1.0 at rerank 2x–4x on all datasets. 1-bit needs rerank 8x–16x for recall_mean > 0.99; at rerank 4x, 1-bit recall_mean is 0.90–0.98.
+4-bit reaches recall_mean 1.0 at rerank 2x–4x on all datasets. 1-bit (1bit-code-4bit-query) needs rerank 8x–16x for recall_mean > 0.99; at rerank 4x, 1-bit recall_mean is 0.95–0.99.
+
+# Configuration for Deploying 1-Bit RaBitQ Indices
+## Data Quantization
+
+Set the collection's quantization variant to OneBitRabitQWithUSearch (previously FourBitRabitQWithUSearch). The index will store 1 bit per dimension per vector rather than 4 bits. Data quantization and distance scoring are handled automatically.
+
+## Query Quantization
+
+Query quantization is not yet exposed in configuration. When querying 1-bit indices, the query residual is internally quantized to 4 bits using QuantizedQuery. This is not user-controllable.
+
+## Reranking
+
+Two independent rerank multipliers in InternalSpannConfiguration (both default to 1 = disabled):
+- centroid_rerank_factor — over-fetches cluster candidates, then re-scores with exact centroid distances before scanning clusters.
+  - Network cost: none (raw centroids are in-memory).
+  - Memory cost: num_clusters × dim × 4 bytes (~600 MB for 100K clusters at dim=1536). Only loaded when factor > 1.
+- vector_rerank_factor — over-fetches vector candidates from clusters, then re-scores with exact embeddings from the record segment.
+  - Network cost: 1–4 S3 GETs per query (block-cache dependent).
+  - Memory cost: shared blockfile cache.

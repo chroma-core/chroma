@@ -76,20 +76,19 @@
 //!
 //! | Type | Header | Quantization |
 //! |------|--------|-------------|
-//! | [`Code1Bit`] | 16 bytes (includes `signed_sum`) | Sign of residual |
-//! | [`Code4Bit`] | 12 bytes | Ray-walk |
+//! | [`Code<1>`] | 16 bytes (includes `signed_sum`) | Sign of residual |
+//! | [`Code<4>`] | 12 bytes | Ray-walk |
 //!
 //! Both implement [`RabitqCode`] for shared accessor access. The shared distance
 //! math lives in `utils::rabitq_distance_query` and `utils::rabitq_distance_code`,
 //! which take any `impl RabitqCode` — each concrete type supplies only the
 //! type-specific inner product kernel before calling the helper.
-//!
-//! [`Code<T>`] is a type alias for [`Code4Bit<T>`] for backward compatibility.
 
-mod utils;
-mod quantization4bit;
 mod quantization1bit;
+mod quantization4bit;
+mod utils;
 
+pub struct Code<const BITS: u8, T = Vec<u8>>(T);
+
+pub use quantization1bit::{BatchQueryLuts, QuantizedQuery};
 pub use utils::RabitqCode;
-pub use quantization4bit::{Code, Code4Bit};
-pub use quantization1bit::{BatchQueryLuts, Code1Bit, QuantizedQuery};

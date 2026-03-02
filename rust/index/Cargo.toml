@@ -76,16 +76,16 @@ name = "fts_regex"
 harness = false
 
 [[bench]]
-name = "quantization"
+name = "quantization_performance"
 path = "benches/vector/quantization.rs"
 harness = false
 
 [[bench]]
-name = "recall"
+name = "quantization_recall"
 path = "benches/vector/recall.rs"
 harness = false
 
 [[bench]]
-name = "error"
+name = "quantization_error"
 path = "benches/vector/error.rs"
 harness = false

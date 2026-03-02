@@ -28,24 +28,24 @@
 //!
 //!   Tag        Function                                 Prefix
 //!   ─────────  ────────────────────────────────────     ──────
-//!   quant-1bit     Code1Bit::quantize                       q-
-//!   quant-4bit     Code4Bit::quantize                       q-
+//!   quant-1bit     Code::<1>::quantize                       q-
+//!   quant-4bit     Code::<4>::quantize                       q-
 //!   quant-query    QuantizedQuery::new                      q-
 //!   quant-lut      BatchQueryLuts::new                      q-
-//!   dq-float       Code1Bit::distance_query_full_precision  dq-
-//!   dq-bw          Code1Bit::distance_query                 dq-
+//!   dq-float       Code::<1>::distance_query_full_precision  dq-
+//!   dq-bw          Code::<1>::distance_query                 dq-
 //!   d-lut          BatchQueryLuts::distance_query           dq-
-//!   dq-4f          Code4Bit::distance_query                 dq-
-//!   dc-1bit        Code1Bit::distance_code                  dc-
-//!   dc-4bit        Code4Bit::distance_code                  dc-
+//!   dq-4f          Code::<4>::distance_query                 dq-
+//!   dc-1bit        Code::<1>::distance_code                  dc-
+//!   dc-4bit        Code::<4>::distance_code                  dc-
 //!
 //! Run with:
-//!   cargo bench -p chroma-index --bench quantization
-//!   cargo bench -p chroma-index --bench quantization -- dq-
-//!   cargo bench -p chroma-index --bench quantization -- dq-bw
+//!   cargo bench -p chroma-index --bench quantization_performance
+//!   cargo bench -p chroma-index --bench quantization_performance -- dq-
+//!   cargo bench -p chroma-index --bench quantization_performance -- dq-bw
 //!
 //! For native CPU (POPCNT, AVX2, etc.):
-//!   RUSTFLAGS="-C target-cpu=native" cargo bench -p chroma-index --bench quantization
+//!   RUSTFLAGS="-C target-cpu=native" cargo bench -p chroma-index --bench quantization_performance
 
 use std::hint::black_box;
 
@@ -77,7 +77,7 @@ static SIGN_LUT: [[f32; 8]; 256] = {
     t
 };
 
-use chroma_index::quantization::{BatchQueryLuts, Code1Bit, Code4Bit, QuantizedQuery};
+use chroma_index::quantization::{BatchQueryLuts, Code, QuantizedQuery, RabitqCode};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use itertools::izip;
 use rand::{rngs::StdRng, Rng, SeedableRng};
@@ -90,9 +90,7 @@ use simsimd::{BinarySimilarity, SpatialSimilarity};
 fn bench_filter() -> Option<String> {
     // argv: <binary> [criterion-opts...] [filter]
     // The filter is the last positional arg (no leading `-`).
-    std::env::args()
-        .skip(1)
-        .find(|a| !a.starts_with('-'))
+    std::env::args().skip(1).find(|a| !a.starts_with('-'))
 }
 
 /// Print a one-line description of the benchmark that follows, but only when
@@ -126,7 +124,7 @@ fn make_codes_1bit(dim: usize, n: usize) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32
     let centroid = random_vec(&mut rng, dim);
     let codes: Vec<Vec<u8>> = (0..n)
         .map(|_| {
-            Code1Bit::quantize(&random_vec(&mut rng, dim), &centroid)
+            Code::<1>::quantize(&random_vec(&mut rng, dim), &centroid)
                 .as_ref()
                 .to_vec()
         })
@@ -145,7 +143,7 @@ fn make_codes_4bit(dim: usize, n: usize) -> (Vec<f32>, Vec<Vec<u8>>, Vec<Vec<f32
     let centroid = random_vec(&mut rng, dim);
     let codes: Vec<Vec<u8>> = (0..n)
         .map(|_| {
-            Code4Bit::quantize(&random_vec(&mut rng, dim), &centroid)
+            Code::<4>::quantize(&random_vec(&mut rng, dim), &centroid)
                 .as_ref()
                 .to_vec()
         })
@@ -189,7 +187,7 @@ fn bench_quantize(c: &mut Criterion) {
         let mut rng = make_rng();
         let centroid = random_vec(&mut rng, dim);
         let embeddings: Vec<Vec<f32>> = (0..BATCH).map(|_| random_vec(&mut rng, dim)).collect();
-        let padded_bytes = Code1Bit::packed_len(dim);
+        let padded_bytes = Code::<1>::packed_len(dim);
         let cn = c_norm(&centroid);
 
         group.throughput(Throughput::Bytes((BATCH * dim * 4) as u64));
@@ -201,7 +199,7 @@ fn bench_quantize(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("quant-4bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for emb in &embeddings {
-                    black_box(Code4Bit::quantize(emb, &centroid));
+                    black_box(Code::<4>::quantize(emb, &centroid));
                 }
             });
         });
@@ -213,7 +211,7 @@ fn bench_quantize(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("quant-1bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for emb in &embeddings {
-                    black_box(Code1Bit::quantize(emb, &centroid));
+                    black_box(Code::<1>::quantize(emb, &centroid));
                 }
             });
         });
@@ -268,8 +266,8 @@ fn bench_distance_code(c: &mut Criterion) {
         let (centroid, codes_1, _) = make_codes_1bit(dim, BATCH);
         let (_, codes_4, _) = make_codes_4bit(dim, BATCH);
         let cn = c_norm(&centroid);
-        let code_bytes_1 = Code1Bit::size(dim);
-        let code_bytes_4 = Code4Bit::size(dim);
+        let code_bytes_1 = Code::<1>::size(dim);
+        let code_bytes_4 = Code::<4>::size(dim);
 
         group.throughput(Throughput::Bytes(pairs * 2 * code_bytes_1 as u64));
         desc!(
@@ -279,9 +277,9 @@ fn bench_distance_code(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("dc-1bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in (0..BATCH).step_by(2) {
-                    let a = Code1Bit::new(codes_1[i].as_slice());
-                    let bb = Code1Bit::new(codes_1[i + 1].as_slice());
-                    black_box(a.distance_code(&df, &bb, cn, dim));
+                    let a = Code::<1, _>::new(codes_1[i].as_slice());
+                    let bb = Code::<1, _>::new(codes_1[i + 1].as_slice());
+                    black_box(a.distance_code(&bb, &df, cn, dim));
                 }
             });
         });
@@ -294,9 +292,9 @@ fn bench_distance_code(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("dc-4bit", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in (0..BATCH).step_by(2) {
-                    let a = Code4Bit::new(codes_4[i].as_slice());
-                    let bb = Code4Bit::new(codes_4[i + 1].as_slice());
-                    black_box(a.distance_code(&df, &bb, cn, dim));
+                    let a = Code::<4, _>::new(codes_4[i].as_slice());
+                    let bb = Code::<4, _>::new(codes_4[i + 1].as_slice());
+                    black_box(a.distance_code(&bb, &df, cn, dim));
                 }
             });
         });
@@ -334,10 +332,10 @@ fn bench_distance_query(c: &mut Criterion) {
         let (centroid, codes_1, queries_1) = make_codes_1bit(dim, BATCH);
         let (_, codes_4, queries_4) = make_codes_4bit(dim, BATCH);
         let cn = c_norm(&centroid);
-        let code_bytes_1 = Code1Bit::size(dim);
-        let code_bytes_4 = Code4Bit::size(dim);
+        let code_bytes_1 = Code::<1>::size(dim);
+        let code_bytes_4 = Code::<4>::size(dim);
         let query_bytes = dim * 4;
-        let padded_bytes = Code1Bit::packed_len(dim);
+        let padded_bytes = Code::<1>::packed_len(dim);
 
         // All 1-bit variants use the same throughput so GiB/s is comparable.
         let throughput_1bit = BATCH as u64 * (code_bytes_1 + query_bytes) as u64;
@@ -351,7 +349,7 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("dq-4f", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code4Bit::new(codes_4[i].as_slice());
+                    let code = Code::<4, _>::new(codes_4[i].as_slice());
                     let r_q = &queries_4[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
@@ -367,11 +365,11 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("dq-float", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code1Bit::new(codes_1[i].as_slice());
+                    let code = Code::<1, _>::new(codes_1[i].as_slice());
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
-                    black_box(code.distance_query_full_precision(&df, r_q, cn, cdq, qn));
+                    black_box(code.distance_query(&df, r_q, cn, cdq, qn));
                 }
             });
         });
@@ -384,12 +382,12 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("dq-bw", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code1Bit::new(codes_1[i].as_slice());
+                    let code = Code::<1, _>::new(codes_1[i].as_slice());
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
                     let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                    black_box(code.distance_query(&df, &qq));
+                    black_box(code.distance_4bit_query(&df, &qq));
                 }
             });
         });
@@ -402,7 +400,7 @@ fn bench_distance_query(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("d-lut", dim), &dim, |b, _| {
             b.iter(|| {
                 for i in 0..BATCH {
-                    let code = Code1Bit::new(codes_1[i].as_slice());
+                    let code = Code::<1, _>::new(codes_1[i].as_slice());
                     let r_q = &queries_1[i];
                     let cdq = c_dot_q(&centroid, r_q);
                     let qn = q_norm(&centroid, r_q);
@@ -432,11 +430,11 @@ fn bench_distance_query(c: &mut Criterion) {
 
         let (_, codes_1, _) = make_codes_1bit(SCAN_DIM, SCAN_N);
         let (_, codes_4, _) = make_codes_4bit(SCAN_DIM, SCAN_N);
-        let padded_bytes = Code1Bit::packed_len(SCAN_DIM);
+        let padded_bytes = Code::<1>::packed_len(SCAN_DIM);
 
         // Throughput counts code bytes only; the query is amortized and stays in L1.
-        let tput_1bit = SCAN_N as u64 * Code1Bit::size(SCAN_DIM) as u64;
-        let tput_4bit = SCAN_N as u64 * Code4Bit::size(SCAN_DIM) as u64;
+        let tput_1bit = SCAN_N as u64 * Code::<1>::size(SCAN_DIM) as u64;
+        let tput_4bit = SCAN_N as u64 * Code::<4>::size(SCAN_DIM) as u64;
 
         group.throughput(Throughput::Bytes(tput_4bit));
         desc!(
@@ -448,7 +446,7 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_4
                     .iter()
                     .map(|cb| {
-                        let code = Code4Bit::new(cb.as_slice());
+                        let code = Code::<4, _>::new(cb.as_slice());
                         black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
                     })
                     .sum();
@@ -465,8 +463,8 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code1Bit::new(cb.as_slice());
-                        black_box(code.distance_query_full_precision(&df, &r_q, cn, cdq, qn))
+                        let code = Code::<1, _>::new(cb.as_slice());
+                        black_box(code.distance_query(&df, &r_q, cn, cdq, qn))
                     })
                     .sum();
             });
@@ -483,8 +481,8 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code1Bit::new(cb.as_slice());
-                        black_box(code.distance_query(&df, &qq))
+                        let code = Code::<1, _>::new(cb.as_slice());
+                        black_box(code.distance_4bit_query(&df, &qq))
                     })
                     .sum();
             });
@@ -501,7 +499,7 @@ fn bench_distance_query(c: &mut Criterion) {
                 let _: f32 = codes_1
                     .iter()
                     .map(|cb| {
-                        let code = Code1Bit::new(cb.as_slice());
+                        let code = Code::<1, _>::new(cb.as_slice());
                         black_box(luts.distance_query(&code, &df))
                     })
                     .sum();
@@ -529,7 +527,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
     let (_, codes_4, queries_4) = make_codes_4bit(DIM, N);
     let cn = c_norm(&centroid);
     let df = DistanceFunction::Euclidean;
-    let padded_bytes = Code1Bit::packed_len(DIM);
+    let padded_bytes = Code::<1>::packed_len(DIM);
 
     let mut group = c.benchmark_group("thread_scaling");
 
@@ -549,7 +547,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
             b.iter(|| {
                 pool.install(|| {
                     embeddings.par_iter().for_each(|emb| {
-                        black_box(Code4Bit::quantize(emb, &centroid));
+                        black_box(Code::<4>::quantize(emb, &centroid));
                     });
                 });
             });
@@ -563,14 +561,14 @@ fn bench_thread_scaling(c: &mut Criterion) {
             b.iter(|| {
                 pool.install(|| {
                     embeddings.par_iter().for_each(|emb| {
-                        black_box(Code1Bit::quantize(emb, &centroid));
+                        black_box(Code::<1>::quantize(emb, &centroid));
                     });
                 });
             });
         });
 
         group.throughput(Throughput::Bytes(
-            (N * (Code4Bit::size(DIM) + DIM * 4)) as u64,
+            (N * (Code::<4>::size(DIM) + DIM * 4)) as u64,
         ));
         desc!(
             format!("dq-4f/{threads}t"),
@@ -583,7 +581,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                         .par_iter()
                         .zip(queries_4.par_iter())
                         .for_each(|(code_bytes, r_q)| {
-                            let code = Code4Bit::new(code_bytes.as_slice());
+                            let code = Code::<4, _>::new(code_bytes.as_slice());
                             let cdq = c_dot_q(&centroid, r_q);
                             let qn = q_norm(&centroid, r_q);
                             black_box(code.distance_query(&df, r_q, cn, cdq, qn));
@@ -592,7 +590,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
             });
         });
         group.throughput(Throughput::Bytes(
-            (N * (Code1Bit::size(DIM) + DIM * 4)) as u64,
+            (N * (Code::<1>::size(DIM) + DIM * 4)) as u64,
         ));
         desc!(
             format!("dq-float/{threads}t"),
@@ -605,10 +603,10 @@ fn bench_thread_scaling(c: &mut Criterion) {
                         .par_iter()
                         .zip(queries_1.par_iter())
                         .for_each(|(code_bytes, r_q)| {
-                            let code = Code1Bit::new(code_bytes.as_slice());
+                            let code = Code::<1, _>::new(code_bytes.as_slice());
                             let cdq = c_dot_q(&centroid, r_q);
                             let qn = q_norm(&centroid, r_q);
-                            black_box(code.distance_query_full_precision(&df, r_q, cn, cdq, qn));
+                            black_box(code.distance_query(&df, r_q, cn, cdq, qn));
                         });
                 });
             });
@@ -625,11 +623,11 @@ fn bench_thread_scaling(c: &mut Criterion) {
                         .par_iter()
                         .zip(queries_1.par_iter())
                         .for_each(|(code_bytes, r_q)| {
-                            let code = Code1Bit::new(code_bytes.as_slice());
+                            let code = Code::<1, _>::new(code_bytes.as_slice());
                             let cdq = c_dot_q(&centroid, r_q);
                             let qn = q_norm(&centroid, r_q);
                             let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                            black_box(code.distance_query(&df, &qq));
+                            black_box(code.distance_4bit_query(&df, &qq));
                         });
                 });
             });
@@ -646,7 +644,7 @@ fn bench_thread_scaling(c: &mut Criterion) {
                         .par_iter()
                         .zip(queries_1.par_iter())
                         .for_each(|(code_bytes, r_q)| {
-                            let code = Code1Bit::new(code_bytes.as_slice());
+                            let code = Code::<1, _>::new(code_bytes.as_slice());
                             let cdq = c_dot_q(&centroid, r_q);
                             let qn = q_norm(&centroid, r_q);
                             let luts = BatchQueryLuts::new(r_q, cn, cdq, qn);
@@ -668,9 +666,9 @@ fn bench_thread_scaling(c: &mut Criterion) {
 //   cargo bench ... -- quant-query          # full quant-query + min_max, quantize_elements, ...
 //   cargo bench ... -- primitives           # ALL primitives only (no full-function groups)
 //
-// Isolate every major computational primitive used by Code1Bit::quantize,
-// Code1Bit::distance_query, Code1Bit::distance_query_bitwise,
-// Code1Bit::distance_code, and QuantizedQuery::new.
+// Isolate every major computational primitive used by Code::<1>::quantize,
+// Code::<1>::distance_query, Code::<1>::distance_query_bitwise,
+// Code::<1>::distance_code, and QuantizedQuery::new.
 //
 // Comparing a function's wall-clock time against the sum of its primitives
 // reveals overhead (allocation, scalar math, cache effects) that the
@@ -692,7 +690,7 @@ fn bench_primitives(c: &mut Criterion) {
             .map(|_| (0..bytes).map(|_| rng.gen()).collect())
             .collect();
 
-        // ── Code1Bit::quantize primitives ────────────────────────────────────
+        // ── Code::<1>::quantize primitives ────────────────────────────────────
 
         group.throughput(Throughput::Bytes(2 * dim as u64 * 4));
         desc!(
@@ -711,11 +709,15 @@ fn bench_primitives(c: &mut Criterion) {
             format!("quant-1bit/simsimd_dot/{dim}"),
             "⟨a, b⟩ via simsimd  [quantize: norm², radial]"
         );
-        group.bench_with_input(BenchmarkId::new("quant-1bit/simsimd_dot", dim), &dim, |b, _| {
-            b.iter(|| {
-                black_box(f32::dot(&values, &values2).unwrap_or(0.0) as f32);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/simsimd_dot", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    black_box(f32::dot(&values, &values2).unwrap_or(0.0) as f32);
+                });
+            },
+        );
 
         group.throughput(Throughput::Bytes(dim as u64 * 4));
         desc!(
@@ -734,37 +736,45 @@ fn bench_primitives(c: &mut Criterion) {
             format!("quant-1bit/sign_pack/{dim}"),
             "IEEE sign-bit extract + byte pack, 8 f32 → 1 byte  [quantize: packed codes]"
         );
-        group.bench_with_input(BenchmarkId::new("quant-1bit/sign_pack", dim), &dim, |b, _| {
-            b.iter(|| {
-                let mut packed = vec![0u8; bytes];
-                for (byte_ref, chunk) in packed.iter_mut().zip(values.chunks(8)) {
-                    let mut byte = 0u8;
-                    for (j, &val) in chunk.iter().enumerate() {
-                        let sign = (val.to_bits() >> 31) as u8;
-                        byte |= (sign ^ 1) << j;
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/sign_pack", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let mut packed = vec![0u8; bytes];
+                    for (byte_ref, chunk) in packed.iter_mut().zip(values.chunks(8)) {
+                        let mut byte = 0u8;
+                        for (j, &val) in chunk.iter().enumerate() {
+                            let sign = (val.to_bits() >> 31) as u8;
+                            byte |= (sign ^ 1) << j;
+                        }
+                        *byte_ref = byte;
                     }
-                    *byte_ref = byte;
-                }
-                black_box(packed);
-            });
-        });
+                    black_box(packed);
+                });
+            },
+        );
 
         group.throughput(Throughput::Bytes(bytes as u64));
         desc!(
             format!("quant-1bit/popcount/{dim}"),
             "u64 popcount over packed bytes  [quantize: signed_sum]"
         );
-        group.bench_with_input(BenchmarkId::new("quant-1bit/popcount", dim), &dim, |b, _| {
-            b.iter(|| {
-                let count: u32 = packed_a
-                    .chunks_exact(8)
-                    .map(|c| u64::from_le_bytes(c.try_into().unwrap()).count_ones())
-                    .sum();
-                black_box(count);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("quant-1bit/popcount", dim),
+            &dim,
+            |b, _| {
+                b.iter(|| {
+                    let count: u32 = packed_a
+                        .chunks_exact(8)
+                        .map(|c| u64::from_le_bytes(c.try_into().unwrap()).count_ones())
+                        .sum();
+                    black_box(count);
+                });
+            },
+        );
 
-        // ── Code1Bit::distance_query primitives ──────────────────────────────
+        // ── Code::<1>::distance_query primitives ──────────────────────────────
 
         group.throughput(Throughput::Bytes((bytes + dim * 4) as u64));
         desc!(
@@ -829,7 +839,7 @@ fn bench_primitives(c: &mut Criterion) {
             },
         );
 
-        // ── Code1Bit::distance_code primitives ───────────────────────────────
+        // ── Code::<1>::distance_code primitives ───────────────────────────────
 
         group.throughput(Throughput::Bytes(2 * bytes as u64));
         desc!(
@@ -843,10 +853,8 @@ fn bench_primitives(c: &mut Criterion) {
                 b.iter(|| {
                     let mut count = 0u32;
                     for i in (0..packed_a.len()).step_by(8) {
-                        let a_word =
-                            u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
-                        let b_word =
-                            u64::from_le_bytes(packed_b[i..i + 8].try_into().unwrap());
+                        let a_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                        let b_word = u64::from_le_bytes(packed_b[i..i + 8].try_into().unwrap());
                         count += (a_word ^ b_word).count_ones();
                     }
                     black_box(count);
@@ -863,14 +871,13 @@ fn bench_primitives(c: &mut Criterion) {
             &dim,
             |b, _| {
                 b.iter(|| {
-                    let d =
-                        <u8 as BinarySimilarity>::hamming(&packed_a, &packed_b).unwrap_or(0.0);
+                    let d = <u8 as BinarySimilarity>::hamming(&packed_a, &packed_b).unwrap_or(0.0);
                     black_box(d);
                 });
             },
         );
 
-        // ── Code1Bit::distance_query_bitwise primitives ──────────────────────
+        // ── Code::<1>::distance_query_bitwise primitives ──────────────────────
 
         group.throughput(Throughput::Bytes((bytes + 4 * bytes) as u64));
         desc!(
@@ -886,10 +893,8 @@ fn bench_primitives(c: &mut Criterion) {
                     for (j, plane) in bit_planes.iter().enumerate() {
                         let mut plane_pop = 0u32;
                         for i in (0..packed_a.len()).step_by(8) {
-                            let x_word =
-                                u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
-                            let q_word =
-                                u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
+                            let x_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                            let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
                             plane_pop += (x_word & q_word).count_ones();
                         }
                         xb_dot_qu += plane_pop << j;
@@ -910,16 +915,13 @@ fn bench_primitives(c: &mut Criterion) {
                 b.iter(|| {
                     let mut pops = [0u32; 4];
                     for i in (0..packed_a.len()).step_by(8) {
-                        let x_word =
-                            u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
+                        let x_word = u64::from_le_bytes(packed_a[i..i + 8].try_into().unwrap());
                         for (j, plane) in bit_planes.iter().enumerate() {
-                            let q_word =
-                                u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
+                            let q_word = u64::from_le_bytes(plane[i..i + 8].try_into().unwrap());
                             pops[j] += (x_word & q_word).count_ones();
                         }
                     }
-                    let xb_dot_qu =
-                        pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
+                    let xb_dot_qu = pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
                     black_box(xb_dot_qu);
                 });
             },
@@ -961,25 +963,21 @@ fn bench_primitives(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let mut pops = [0u32; 4];
-                    let plane_chunks: [_; 4] = std::array::from_fn(|j| {
-                        bit_planes[j].chunks_exact(8)
-                    });
-                    for (x_chunk, (p0, p1, p2, p3)) in
-                        packed_a.chunks_exact(8).zip(izip!(
-                            plane_chunks[0].clone(),
-                            plane_chunks[1].clone(),
-                            plane_chunks[2].clone(),
-                            plane_chunks[3].clone(),
-                        ))
-                    {
+                    let plane_chunks: [_; 4] =
+                        std::array::from_fn(|j| bit_planes[j].chunks_exact(8));
+                    for (x_chunk, (p0, p1, p2, p3)) in packed_a.chunks_exact(8).zip(izip!(
+                        plane_chunks[0].clone(),
+                        plane_chunks[1].clone(),
+                        plane_chunks[2].clone(),
+                        plane_chunks[3].clone(),
+                    )) {
                         let x = u64::from_le_bytes(x_chunk.try_into().unwrap());
                         pops[0] += (x & u64::from_le_bytes(p0.try_into().unwrap())).count_ones();
                         pops[1] += (x & u64::from_le_bytes(p1.try_into().unwrap())).count_ones();
                         pops[2] += (x & u64::from_le_bytes(p2.try_into().unwrap())).count_ones();
                         pops[3] += (x & u64::from_le_bytes(p3.try_into().unwrap())).count_ones();
                     }
-                    let xb_dot_qu =
-                        pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
+                    let xb_dot_qu = pops[0] + (pops[1] << 1) + (pops[2] << 2) + (pops[3] << 3);
                     black_box(xb_dot_qu);
                 });
             },
@@ -1013,10 +1011,12 @@ fn bench_primitives(c: &mut Criterion) {
             &dim,
             |b, _| {
                 b.iter(|| {
-                    let (v_l, v_r) = values.iter().copied().fold(
-                        (f32::INFINITY, f32::NEG_INFINITY),
-                        |(lo, hi), v| (lo.min(v), hi.max(v)),
-                    );
+                    let (v_l, v_r) = values
+                        .iter()
+                        .copied()
+                        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+                            (lo.min(v), hi.max(v))
+                        });
                     black_box((v_l, v_r));
                 });
             },
@@ -1134,12 +1134,18 @@ fn bench_primitives(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     // P1: fused min+max in one pass
-                    let (v_l, v_r) = values.iter().copied().fold(
-                        (f32::INFINITY, f32::NEG_INFINITY),
-                        |(lo, hi), v| (lo.min(v), hi.max(v)),
-                    );
+                    let (v_l, v_r) = values
+                        .iter()
+                        .copied()
+                        .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), v| {
+                            (lo.min(v), hi.max(v))
+                        });
                     let range = v_r - v_l;
-                    let delta = if range > f32::EPSILON { range / 15.0 } else { 1.0 };
+                    let delta = if range > f32::EPSILON {
+                        range / 15.0
+                    } else {
+                        1.0
+                    };
                     let inv_delta = 1.0 / delta;
 
                     // P2+P4: flat planes, fuse quantize + sum + scatter
@@ -1178,7 +1184,11 @@ fn bench_primitives(c: &mut Criterion) {
                     let v_l = values.iter().copied().fold(f32::INFINITY, f32::min);
                     let v_r = values.iter().copied().fold(f32::NEG_INFINITY, f32::max);
                     let range = v_r - v_l;
-                    let delta = if range > f32::EPSILON { range / 15.0 } else { 1.0 };
+                    let delta = if range > f32::EPSILON {
+                        range / 15.0
+                    } else {
+                        1.0
+                    };
                     let inv_delta = 1.0 / delta;
 
                     // P2+P4: flat planes, fuse quantize + sum + byte_chunks scatter
@@ -1211,39 +1221,33 @@ fn bench_primitives(c: &mut Criterion) {
         group.throughput(Throughput::Bytes(2 * dim as u64 * 4));
         desc!(
             format!("quant-1bit/full/{dim}"),
-            "Code1Bit::quantize end-to-end  [compare vs sum of primitives]"
+            "Code::<1>::quantize end-to-end  [compare vs sum of primitives]"
         );
         group.bench_with_input(BenchmarkId::new("quant-1bit/full", dim), &dim, |b, _| {
             b.iter(|| {
-                black_box(Code1Bit::quantize(&values, &centroid));
+                black_box(Code::<1>::quantize(&values, &centroid));
             });
         });
 
-        let code_owned = Code1Bit::quantize(&values, &centroid);
-        let code = Code1Bit::new(code_owned.as_ref());
+        let code_owned = Code::<1>::quantize(&values, &centroid);
+        let code = Code::<1, _>::new(code_owned.as_ref());
         let r_q = &values2;
         let cn = c_norm(&centroid);
         let cdq = c_dot_q(&centroid, r_q);
         let qn = q_norm(&centroid, r_q);
 
-        group.throughput(Throughput::Bytes((Code1Bit::size(dim) + dim * 4) as u64));
+        group.throughput(Throughput::Bytes((Code::<1>::size(dim) + dim * 4) as u64));
         desc!(
             format!("dq-float/full/{dim}"),
-            "Code1Bit::distance_query end-to-end  [compare vs signed_dot]"
+            "Code::<1>::distance_query end-to-end  [compare vs signed_dot]"
         );
         group.bench_with_input(BenchmarkId::new("dq-float/full", dim), &dim, |b, _| {
             b.iter(|| {
-                black_box(code.distance_query_full_precision(
-                    &DistanceFunction::Euclidean,
-                    r_q,
-                    cn,
-                    cdq,
-                    qn,
-                ));
+                black_box(code.distance_query(&DistanceFunction::Euclidean, r_q, cn, cdq, qn));
             });
         });
 
-        let padded_bytes = Code1Bit::packed_len(dim);
+        let padded_bytes = Code::<1>::packed_len(dim);
 
         group.throughput(Throughput::Bytes(dim as u64 * 4));
         desc!(

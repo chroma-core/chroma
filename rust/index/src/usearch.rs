@@ -19,7 +19,7 @@ use usearch::{IndexOptions, MetricKind, ScalarKind};
 use uuid::Uuid;
 
 use crate::{
-    quantization::{Code1Bit, Code4Bit}, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    quantization::{Code, RabitqCode}, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 /// Buffer for index resizing
@@ -132,8 +132,8 @@ impl USearchIndex {
         let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
         let dim = center.len();
         let code_len = match BITS {
-            1 => Code1Bit::size(dim),
-            _ => Code4Bit::size(dim),
+            1 => Code::<1>::size(dim),
+            _ => Code::<4>::size(dim),
         };
 
         index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
@@ -143,8 +143,8 @@ impl USearchIndex {
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
             match BITS {
-                1 => Code1Bit::new(a).distance_code(&distance_function, &Code1Bit::new(b), c_norm, dim),
-                _ => Code4Bit::new(a).distance_code(&distance_function, &Code4Bit::new(b), c_norm, dim),
+                1 => Code::<1>::new(a).distance_code(&Code::<1>::new(b), &distance_function, c_norm, dim),
+                _ => Code::<4>::new(a).distance_code(&Code::<4>::new(b), &distance_function, c_norm, dim),
             }
         }));
     }
@@ -197,16 +197,16 @@ impl USearchIndex {
     /// Returns the code size in bytes for the configured quantization.
     fn code_size(dimensions: usize, bits: u8) -> usize {
         match bits {
-            1 => Code1Bit::size(dimensions),
-            _ => Code4Bit::size(dimensions),
+            1 => Code::<1>::size(dimensions),
+            _ => Code::<4>::size(dimensions),
         }
     }
 
     /// Quantizes a vector using the configured bit width.
     fn quantize_vector(vector: &[f32], center: &[f32], bits: u8) -> Vec<u8> {
         match bits {
-            1 => Code1Bit::quantize(vector, center).as_ref().to_vec(),
-            _ => Code4Bit::quantize(vector, center).as_ref().to_vec(),
+            1 => Code::<1>::quantize(vector, center).as_ref().to_vec(),
+            _ => Code::<4>::quantize(vector, center).as_ref().to_vec(),
         }
     }
 

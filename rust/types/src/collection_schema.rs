@@ -1071,6 +1071,22 @@ impl Schema {
                     quantize: variant,
                     ..*spann_config
                 },
+                Quantization::OneBitRabitQWithUSearch => SpannIndexConfig {
+                    search_nprobe: Some(64),
+                    nreplica_count: Some(2),
+                    write_rng_factor: Some(4.0),
+                    write_rng_epsilon: Some(8.0),
+                    split_threshold: Some(512),
+                    reassign_neighbor_count: Some(32),
+                    merge_threshold: Some(128),
+                    write_nprobe: Some(64),
+                    ef_construction: Some(256),
+                    ef_search: Some(128),
+                    max_neighbors: Some(24),
+                    center_drift_threshold: Some(0.125),
+                    quantize: variant,
+                    ..*spann_config
+                },
             };
         }
     }
@@ -2829,6 +2845,19 @@ pub enum Quantization {
     #[default]
     None,
     FourBitRabitQWithUSearch,
+    OneBitRabitQWithUSearch,
+}
+
+impl Quantization {
+    /// Number of bits per data-vector element for this quantization variant.
+    /// Returns `None` when quantization is disabled.
+    pub fn data_bits(&self) -> Option<u8> {
+        match self {
+            Self::None => None,
+            Self::FourBitRabitQWithUSearch => Some(4),
+            Self::OneBitRabitQWithUSearch => Some(1),
+        }
+    }
 }
 
 fn is_default_quantization(v: &Quantization) -> bool {
@@ -4564,6 +4593,7 @@ mod tests {
                 ef_search: 60,
                 max_neighbors: 24,
                 space: Space::Cosine,
+                ..Default::default()
             }),
             embedding_function: None,
         };
@@ -4677,6 +4707,7 @@ mod tests {
                 ef_search: 60,
                 max_neighbors: 24,
                 space: Space::Cosine,
+                ..Default::default()
             }),
             embedding_function: None,
         };
@@ -4896,6 +4927,7 @@ mod tests {
                 ef_search: 60,
                 max_neighbors: 24,
                 space: Space::Cosine,
+                ..Default::default()
             }),
             embedding_function: None,
         };

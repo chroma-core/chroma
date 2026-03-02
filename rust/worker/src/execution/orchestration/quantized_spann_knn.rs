@@ -56,6 +56,9 @@ pub struct QuantizedSpannKnnOrchestrator {
     centroid_rerank_factor: usize,
     vector_rerank_factor: usize,
 
+    /// Data quantization bits (1 or 4), derived from the Quantization variant.
+    data_bits: u8,
+
     // State tracking.
     // num_bruteforces is set when either there is no reader (0) or center search completes.
     num_bruteforces: Option<usize>,
@@ -74,14 +77,22 @@ impl QuantizedSpannKnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
     ) -> Self {
-        // Derive rerank factors from the collection's SPANN configuration.
-        let spann_config: InternalSpannConfiguration = collection_and_segments
+        // Derive configuration from the collection's SPANN schema.
+        let spann_index_config = collection_and_segments
             .collection
             .schema
             .as_ref()
-            .and_then(|s| s.get_spann_config())
-            .map(|(config, space)| InternalSpannConfiguration::from((Some(&space), &config)))
+            .and_then(|s| s.get_spann_config());
+
+        let spann_config: InternalSpannConfiguration = spann_index_config
+            .as_ref()
+            .map(|(config, space)| InternalSpannConfiguration::from((Some(space), config)))
             .unwrap_or_default();
+
+        let data_bits = spann_index_config
+            .as_ref()
+            .and_then(|(config, _)| config.quantize.data_bits())
+            .unwrap_or(4);
 
         Self {
             collection_and_segments,
@@ -94,6 +105,7 @@ impl QuantizedSpannKnnOrchestrator {
             spann_provider,
             centroid_rerank_factor: spann_config.centroid_rerank_factor as usize,
             vector_rerank_factor: spann_config.vector_rerank_factor as usize,
+            data_bits,
             num_bruteforces: None,
             log_and_bruteforce_results: Vec::new(),
             result_channel: None,
@@ -332,6 +344,7 @@ impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClust
 
         let bf_operator = QuantizedSpannBruteforceOperator {
             count: bf_count,
+            data_bits: self.data_bits,
             distance_function,
             filter: self
                 .knn_filter_output

@@ -39,6 +39,8 @@ impl ChromaError for QuantizedSpannBruteforceError {
 #[derive(Debug, Clone)]
 pub struct QuantizedSpannBruteforceOperator {
     pub count: usize,
+    /// Data quantization bits (1 or 4).
+    pub data_bits: u8,
     pub distance_function: DistanceFunction,
     pub filter: SignedRoaringBitmap,
     pub rotated_query: Arc<[f32]>,
@@ -60,6 +62,7 @@ impl Operator<QuantizedSpannBruteforceInput, QuantizedSpannBruteforceOutput>
             &cluster,
             &self.rotated_query,
             &self.distance_function,
+            self.data_bits,
             |id, version| {
                 if input.global_versions.get(&id) != Some(&version) {
                     return false;

@@ -296,14 +296,14 @@ primitives/quant-query/full/two_pass_fused/1024
                         time:   [991.37 ns 994.95 ns 1.0012 µs]
                         thrpt:  [3.8102 GiB/s 3.8341 GiB/s 3.8479 GiB/s]
 
-  [quant-1bit/full/1024] Code1Bit::quantize end-to-end  [compare vs sum of primitives]
+  [quant-1bit/full/1024] Code::<1>::quantize end-to-end  [compare vs sum of primitives]
 Benchmarking primitives/quant-1bit/full/1024: Collecting 100 samples in estimated 5.0040 s (5.0M iteration
 primitives/quant-1bit/full/1024
                         time:   [989.09 ns 992.42 ns 997.68 ns]
                         thrpt:  [7.6472 GiB/s 7.6877 GiB/s 7.7135 GiB/s]
 
 
-  [dq-float/full/1024] Code1Bit::distance_query end-to-end  [compare vs signed_dot]
+  [dq-float/full/1024] Code::<1>::distance_query end-to-end  [compare vs signed_dot]
 primitives/dq-float/full/1024
                         time:   [212.38 ns 213.17 ns 214.36 ns]
                         thrpt:  [18.421 GiB/s 18.525 GiB/s 18.593 GiB/s]

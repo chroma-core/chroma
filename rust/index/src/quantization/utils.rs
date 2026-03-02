@@ -26,8 +26,8 @@ pub struct CodeHeader {
 
 /// Shared accessors for RaBitQ code types.
 ///
-/// Implemented by both [`super::quantization1bit::Code1Bit`] and
-/// [`super::quantization4bit::Code4Bit`], allowing the shared distance helpers
+/// Implemented by both [`super::quantization1bit::Code::<1>`] and
+/// [`super::quantization4bit::Code::<4>`], allowing the shared distance helpers
 /// ([`rabitq_distance_query`], [`rabitq_distance_code`]) to read header fields
 /// without knowing the concrete code type.
 pub trait RabitqCode {
@@ -39,11 +39,30 @@ pub trait RabitqCode {
     fn radial(&self) -> f32;
     /// Packed quantization codes (excluding the header).
     fn packed(&self) -> &[u8];
+
+    /// Estimates distance from data vector `d` to query `q`.
+    fn distance_query(
+        &self,
+        distance_fn: &DistanceFunction,
+        r_q: &[f32],
+        c_norm: f32,
+        c_dot_q: f32,
+        q_norm: f32,
+    ) -> f32;
+
+    /// Estimates distance between two data vectors (both must be same code format).
+    fn distance_code(
+        &self,
+        other: &dyn RabitqCode,
+        distance_fn: &DistanceFunction,
+        c_norm: f32,
+        dim: usize,
+    ) -> f32;
 }
 
 // ── Shared math helpers ───────────────────────────────────────────────────────
 //
-// Called by both Code1Bit and Code4Bit after computing their type-specific
+// Called by both Code::<1> and Code::<4> after computing their type-specific
 // inner product kernel. Factoring out the shared formulas keeps the
 // DistanceFunction match arms in one place.
 
@@ -87,8 +106,8 @@ pub fn rabitq_distance_query(
 /// See module-level documentation for the derivation.
 pub fn rabitq_distance_code(
     g_a_dot_g_b: f32,
-    code_a: &impl RabitqCode,
-    code_b: &impl RabitqCode,
+    code_a: &dyn RabitqCode,
+    code_b: &dyn RabitqCode,
     c_norm: f32,
     distance_fn: &DistanceFunction,
 ) -> f32 {
@@ -132,7 +151,7 @@ pub fn rabitq_distance_code(
 // ── Sizing helper ─────────────────────────────────────────────────────────────
 //
 // Module-level function rather than a method to avoid Rust's "can't infer T"
-// error when calling Code4Bit::size(dim) without a concrete T annotation.
+// error when calling Code::<4>::size(dim) without a concrete T annotation.
 
 /// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
 pub fn padded_dim_4bit(dim: usize) -> usize {

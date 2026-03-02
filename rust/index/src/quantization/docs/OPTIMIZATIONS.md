@@ -1,7 +1,7 @@
 
 # Implemented Optimizations
 
-## `Code1Bit::quantize`: single fused pass
+## `Code::<1>::quantize`: single fused pass
 
 Replaced the four-pass approach with a single fused pass over the input data
 and the centroid. This eliminates the 4 KB intermediate `r` allocation and three
@@ -24,7 +24,7 @@ Measurements on Apple M-series (`-C target-cpu=native`):
 
 ---
 
-## `Code1Bit::distance_code`: simsimd hamming distance
+## `Code::<1>::distance_code`: simsimd hamming distance
 
 Replaced the scalar `u64` XOR + POPCNT loop in `hamming_distance` with
 `simsimd::BinarySimilarity::hamming`, which dispatches at runtime to:
@@ -46,7 +46,7 @@ A scalar fallback is retained for `None` returns (unsupported targets / tests).
 
 ---
 
-## `Code1Bit::distance_query`: interleaved + `chunks_exact` for AND+popcount
+## `Code::<1>::distance_query`: interleaved + `chunks_exact` for AND+popcount
 
 1. Read each x_b word once and AND with all 4 bit planes simultaneously,
 accumulating into separate per-plane counters. Avoids 3 redundant re-reads of
@@ -111,7 +111,7 @@ Measurements on Apple M-series:
 
 ---
 
-## `Code1Bit::distance_query_full_precision`: lookup table
+## `Code::<1>::distance_query_full_precision`: lookup table
 
 The hot kernel for the float query path computes `Σ sign[i]·values[i]` where
 sign[i] ∈ {−1, +1} from packed bits. Prior approach: expand bits to ±1.0 f32s
@@ -127,6 +127,6 @@ Measurements on Apple M-series:
 |---|---|---|---|
 | `primitives/dq-float/signed_dot/1024` | ~316 ns | ~194 ns | **−39% / +63%** |
 
-**Future options** (see benches/vector/quantization.rs § Code1Bit::distance_query_full_precision):
+**Future options** (see benches/vector/quantization.rs § Code::<1>::distance_query_full_precision):
 - [D1] Masked sum: `2·Σ(values where bit=1) − total_sum`; needs VMASKMOV/BSL.
 - [D2] XOR sign-flip: XOR values with 0x80000000 where bit=0, then sum; no expansion.

@@ -9,7 +9,7 @@ Target hardware:
 
 **File:** `rust/index/src/spann/quantized_spann.rs`
 
-**Context:** Currently planned as part of the Code4Bit → Code1Bit migration.
+**Context:** Currently planned as part of the Code::<4> → Code::<1> migration.
 
 ### Problem
 
@@ -25,7 +25,7 @@ struct QuantizedDelta {
 }
 ```
 
-For a cluster of N=2048 points at dim=1024, a Code1Bit code is 144 bytes
+For a cluster of N=2048 points at dim=1024, a Code::<1> code is 144 bytes
 (16-byte header + 128-byte packed bits): **2048 separate 144-byte allocations per cluster**.
 
 The data lives contiguously in the blockfile, gets shredded into N individual
@@ -71,7 +71,7 @@ pattern the blockfile reader already uses.
 
 ### Prerequisite
 
-A `Code1Bit::quantize_into(embedding, centroid, output: &mut [u8])` API that
+A `Code::<1>::quantize_into(embedding, centroid, output: &mut [u8])` API that
 writes the header and packed bits directly into a caller-provided slice, avoiding
 the intermediate `Vec<u8>` allocation inside `quantize()`. Without the slab
 change, `quantize_into` alone just moves allocations to the caller and provides
@@ -95,13 +95,13 @@ allocations at commit.
 
 **Memory overhead.** Each `Arc<[u8]>` carries two reference-count words (16
 bytes on 64-bit) plus a heap allocation header (~16–32 bytes depending on
-allocator). For a Code1Bit code of 144 bytes that is ~22–33% overhead per code.
+allocator). For a Code::<1> code of 144 bytes that is ~22–33% overhead per code.
 The slab eliminates this entirely.
 
 **Cache locality during NPA scan.** The NPA scan (L728) iterates all codes in a
 neighbor cluster sequentially to compute distance estimates. With `Vec<Arc<[u8]>>`
 each code pointer-chases to a separate heap object; with a slab successive codes
-are adjacent in memory. At 144 bytes per Code1Bit code and a 64-byte cache line,
+are adjacent in memory. At 144 bytes per Code::<1> code and a 64-byte cache line,
 a 50-point cluster's codes occupy ~112 cache lines in the slab vs. 50 scattered
 allocations that may not share any cache lines.
 
@@ -117,11 +117,11 @@ indexing) where many clusters are loaded, mutated, and committed per cycle. The
 cache locality benefit is secondary but may be measurable in the NPA scan for
 large clusters.
 
-### Why now (Code1Bit migration)
+### Why now (Code::<1> migration)
 
-Code4Bit codes are 524 bytes at dim=1024 (12-byte header + 512-byte packed).
-Code1Bit codes are 144 bytes. The cluster capacity in points stays the same,
-so clusters with Code1Bit will have ~3.6× more codes that fit in cache — making
+Code::<4> codes are 524 bytes at dim=1024 (12-byte header + 512-byte packed).
+Code::<1> codes are 144 bytes. The cluster capacity in points stays the same,
+so clusters with Code::<1> will have ~3.6× more codes that fit in cache — making
 cache locality a more significant factor and the slab change proportionally
 more valuable.
 
