@@ -89,7 +89,7 @@ class ONNXMiniLM_L6_V2(EmbeddingFunction[Documents]):
 
     # Borrowed from https://gist.github.com/yanqd0/c13ed29e29432e3cf3e7c38467f42f51
     # Download with tqdm to preserve the sentence-transformers experience
-    @retry(  # type: ignore
+    @retry(
         reraise=True,
         stop=stop_after_attempt(3),
         wait=wait_random(min=1, max=3),
