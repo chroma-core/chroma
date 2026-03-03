@@ -836,7 +836,7 @@ impl AdmissionControlledS3Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + Clone + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -857,7 +857,8 @@ impl AdmissionControlledS3Storage {
         batch_fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
     where
-        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFn:
+            FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + Clone + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -935,7 +936,8 @@ impl AdmissionControlledS3Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
     where
-        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
+        FetchFn:
+            FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + Clone + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -965,205 +967,216 @@ impl AdmissionControlledS3Storage {
         // Create a dedup key.
         let composite_key = keys.join("|");
 
-        // Phase 1: Acquire lock, check/create inflight request.
-        // The std::sync::MutexGuard is scoped to this block so it provably
-        // drops before any .await point, keeping the future Send.
-        let (output_rx, new_request_data, cleanup_guard) = {
-            let _lock_held_duration = Stopwatch::new(
-                &self.metrics.nac_lock_wait_duration_us,
-                &self.metrics.hostname_attribute,
-                chroma_tracing::util::StopWatchUnit::Micros,
-            );
-            let mut requests = match self.outstanding_read_requests.lock() {
-                Ok(requests) => requests,
-                Err(poisoned) => {
-                    tracing::warn!(
-                        "Someone panicked while holding the nac_dedup lock: {}",
-                        poisoned
-                    );
-                    self.outstanding_read_requests.clear_poison();
-                    poisoned.into_inner()
-                }
-            };
-            match requests.get_mut(&composite_key) {
-                Some(inflight_req) => {
-                    self.metrics
-                        .nac_dedup_count
-                        .add(1, &self.metrics.hostname_attribute);
-                    // Update the priority if the new request has higher priority.
-                    let cleanup_guard = inflight_req.context.maybe_update_priority(
-                        options.priority,
-                        self.metrics.nac_priority_increase_sent.clone(),
-                        &self.metrics.hostname_attribute,
-                    );
-                    let (output_tx, output_rx) = tokio::sync::oneshot::channel();
-                    // Add the new sender to the existing request, then release the lock so the driving task
-                    // can make progress.
-                    inflight_req.senders.push(output_tx);
-                    (output_rx, None, cleanup_guard)
-                }
-                None => {
-                    let priority_holder = Arc::new(PriorityHolder::new(options.priority));
-                    let (priority_tx, priority_rx) = tokio::sync::broadcast::channel(100);
-                    let (output_tx, output_rx) = tokio::sync::oneshot::channel();
-
-                    let request = InflightRequest::new(
-                        priority_holder.clone(),
-                        Some(priority_tx),
-                        vec![output_tx],
-                    );
-                    let mut guard = InflightRequestCleanupGuard::for_priority(
-                        request.context.clone(),
-                        options.priority,
-                    );
-                    requests.insert(composite_key.clone(), request);
-
-                    // Add map cleanup to the guard after insertion
-                    guard = guard.with_map_cleanup(
-                        self.outstanding_read_requests.clone(),
-                        self.metrics.outstanding_read_requests.clone(),
-                        keys.len(),
-                        composite_key.clone(),
-                    );
-
-                    (output_rx, Some((priority_holder, priority_rx)), guard)
-                }
-            }
-        };
-
-        // If we're the initiator (new request), set up and run the fetch.
-        if let Some((priority_holder, priority_rx)) = new_request_data {
-            // Clones for the spawned task.
-            let read_requests_waiting_for_token =
-                self.metrics.read_requests_waiting_for_token.clone();
-            let nac_read_requests_waiting_for_token =
-                self.metrics.nac_read_requests_waiting_for_token.clone();
-            let hostname_attr = self.metrics.hostname_attribute.clone();
-            let storage_clone = self.storage.clone();
-            let rate_limiter_clone = self.rate_limiter.clone();
-            let outstanding_read_requests = self.outstanding_read_requests.clone();
-            let composite_key_clone = composite_key.clone();
-            let keys_clone: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
-
-            // NOTE(hammadb): If the upstream request gets cancelled, we still
-            // finish the request once it has been spawned, if its cancelled
-            // before it has been spawned, then the task will never run. (Applies if spawn_fetches is true)
-            // NOTE(sicheng): The following block used to be executed with tokio::spawn.
-            // It could lead to unbounded growth in tokio task queue, and could cause
-            // performance degration in tokio runtime. As a temporary solution, since
-            // we do not cancel tasks right now, this block of logic is moved out
-            // of tokio::spawn. If we introduce the cancellation logic in the future
-            // we need to address the issue in the comment above. (Applies if spawn_fetches is false)
-            let fetching_future = async move {
-                let mut cleanup_guard = cleanup_guard;
-
-                // Fetch all keys in parallel
-                let fetch_futures: Vec<_> = keys_clone
-                    .iter()
-                    .map(|key| {
-                        let storage_clone = storage_clone.clone();
-                        let rate_limiter_clone = rate_limiter_clone.clone();
-                        let key_clone = key.clone();
-                        let priority_holder = priority_holder.clone();
-                        let read_requests_waiting_for_token =
-                            read_requests_waiting_for_token.clone();
-                        let nac_read_requests_waiting_for_token =
-                            nac_read_requests_waiting_for_token.clone();
-                        let hostname_attr = hostname_attr.clone();
-
-                        async {
-                            if is_parallel {
-                                AdmissionControlledS3Storage::parallel_read(
-                                    storage_clone,
-                                    rate_limiter_clone,
-                                    key_clone,
-                                    priority_holder,
-                                    read_requests_waiting_for_token,
-                                    nac_read_requests_waiting_for_token,
-                                    hostname_attr,
-                                )
-                                .await
-                            } else {
-                                AdmissionControlledS3Storage::read(
-                                    storage_clone,
-                                    rate_limiter_clone,
-                                    key_clone,
-                                    priority_holder,
-                                    Some(priority_rx.resubscribe()),
-                                    read_requests_waiting_for_token,
-                                    nac_read_requests_waiting_for_token,
-                                    hostname_attr,
-                                )
-                                .await
-                            }
-                        }
-                    })
-                    .collect();
-
-                let fetch_results = futures::future::join_all(fetch_futures).await;
-
-                // Call fetch_fn once with all the results
-                let fetched =
-                    AdmissionControlledS3Storage::execute_batch_fetch(fetch_fn, fetch_results)
-                        .await
-                        .map(|(r, e_tags)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tags));
-
-                // Clean up the requests map entry.
-                let mut inflight = {
-                    let mut requests = match outstanding_read_requests.lock() {
-                        Ok(requests) => requests,
-                        Err(poisoned) => {
-                            tracing::warn!(
-                                "Someone panicked while holding the nac_dedup lock: {}",
-                                poisoned
-                            );
-                            outstanding_read_requests.clear_poison();
-                            poisoned.into_inner()
-                        }
-                    };
-                    // SAFETY(hammadb): We just created this entry above, and only this task remove it,
-                    // so it must exist.
-                    let result = requests
-                        .remove(&composite_key_clone)
-                        .expect("Key must exist");
-                    // It is very important that we call complete here while holding the lock.
-                    result.context.complete();
-                    cleanup_guard.complete();
-                    result
+        // For loop?  More like: Try Twice.
+        for _i in 0..2 {
+            let fetch_fn = fetch_fn.clone();
+            // Phase 1: Acquire lock, check/create inflight request.
+            // The std::sync::MutexGuard is scoped to this block so it provably
+            // drops before any .await point, keeping the future Send.
+            let (output_rx, new_request_data, cleanup_guard) = {
+                let _lock_held_duration = Stopwatch::new(
+                    &self.metrics.nac_lock_wait_duration_us,
+                    &self.metrics.hostname_attribute,
+                    chroma_tracing::util::StopWatchUnit::Micros,
+                );
+                let mut requests = match self.outstanding_read_requests.lock() {
+                    Ok(requests) => requests,
+                    Err(poisoned) => {
+                        tracing::warn!(
+                            "Someone panicked while holding the nac_dedup lock: {}",
+                            poisoned
+                        );
+                        self.outstanding_read_requests.clear_poison();
+                        poisoned.into_inner()
+                    }
                 };
-                for output_tx in inflight.senders.drain(..) {
-                    match output_tx.send(fetched.clone()) {
-                        Ok(_) => {}
-                        Err(_) => {
-                            tracing::error!("Unexpected channel closure, the calling task must have been dropped");
-                        }
+                match requests.get_mut(&composite_key) {
+                    Some(inflight_req) => {
+                        self.metrics
+                            .nac_dedup_count
+                            .add(1, &self.metrics.hostname_attribute);
+                        // Update the priority if the new request has higher priority.
+                        let cleanup_guard = inflight_req.context.maybe_update_priority(
+                            options.priority,
+                            self.metrics.nac_priority_increase_sent.clone(),
+                            &self.metrics.hostname_attribute,
+                        );
+                        let (output_tx, output_rx) = tokio::sync::oneshot::channel();
+                        // Add the new sender to the existing request, then release the lock so the driving task
+                        // can make progress.
+                        inflight_req.senders.push(output_tx);
+                        (output_rx, None, cleanup_guard)
+                    }
+                    None => {
+                        let priority_holder = Arc::new(PriorityHolder::new(options.priority));
+                        let (priority_tx, priority_rx) = tokio::sync::broadcast::channel(100);
+                        let (output_tx, output_rx) = tokio::sync::oneshot::channel();
+
+                        let request = InflightRequest::new(
+                            priority_holder.clone(),
+                            Some(priority_tx),
+                            vec![output_tx],
+                        );
+                        let mut guard = InflightRequestCleanupGuard::for_priority(
+                            request.context.clone(),
+                            options.priority,
+                        );
+                        requests.insert(composite_key.clone(), request);
+
+                        // Add map cleanup to the guard after insertion
+                        guard = guard.with_map_cleanup(
+                            self.outstanding_read_requests.clone(),
+                            self.metrics.outstanding_read_requests.clone(),
+                            keys.len(),
+                            composite_key.clone(),
+                        );
+
+                        (output_rx, Some((priority_holder, priority_rx)), guard)
                     }
                 }
             };
-            if self.spawn_fetches {
-                tokio::task::spawn(fetching_future);
-            } else {
-                fetching_future.await;
+
+            // If we're the initiator (new request), set up and run the fetch.
+            if let Some((priority_holder, priority_rx)) = new_request_data {
+                // Clones for the spawned task.
+                let read_requests_waiting_for_token =
+                    self.metrics.read_requests_waiting_for_token.clone();
+                let nac_read_requests_waiting_for_token =
+                    self.metrics.nac_read_requests_waiting_for_token.clone();
+                let hostname_attr = self.metrics.hostname_attribute.clone();
+                let storage_clone = self.storage.clone();
+                let rate_limiter_clone = self.rate_limiter.clone();
+                let outstanding_read_requests = self.outstanding_read_requests.clone();
+                let composite_key_clone = composite_key.clone();
+                let keys_clone: Vec<String> = keys.iter().map(|s| s.to_string()).collect();
+
+                // NOTE(hammadb): If the upstream request gets cancelled, we still
+                // finish the request once it has been spawned, if its cancelled
+                // before it has been spawned, then the task will never run. (Applies if spawn_fetches is true)
+                // NOTE(sicheng): The following block used to be executed with tokio::spawn.
+                // It could lead to unbounded growth in tokio task queue, and could cause
+                // performance degration in tokio runtime. As a temporary solution, since
+                // we do not cancel tasks right now, this block of logic is moved out
+                // of tokio::spawn. If we introduce the cancellation logic in the future
+                // we need to address the issue in the comment above. (Applies if spawn_fetches is false)
+                let fetching_future = async move {
+                    let mut cleanup_guard = cleanup_guard;
+
+                    // Fetch all keys in parallel
+                    let fetch_futures: Vec<_> = keys_clone
+                        .iter()
+                        .map(|key| {
+                            let storage_clone = storage_clone.clone();
+                            let rate_limiter_clone = rate_limiter_clone.clone();
+                            let key_clone = key.clone();
+                            let priority_holder = priority_holder.clone();
+                            let read_requests_waiting_for_token =
+                                read_requests_waiting_for_token.clone();
+                            let nac_read_requests_waiting_for_token =
+                                nac_read_requests_waiting_for_token.clone();
+                            let hostname_attr = hostname_attr.clone();
+
+                            async {
+                                if is_parallel {
+                                    AdmissionControlledS3Storage::parallel_read(
+                                        storage_clone,
+                                        rate_limiter_clone,
+                                        key_clone,
+                                        priority_holder,
+                                        read_requests_waiting_for_token,
+                                        nac_read_requests_waiting_for_token,
+                                        hostname_attr,
+                                    )
+                                    .await
+                                } else {
+                                    AdmissionControlledS3Storage::read(
+                                        storage_clone,
+                                        rate_limiter_clone,
+                                        key_clone,
+                                        priority_holder,
+                                        Some(priority_rx.resubscribe()),
+                                        read_requests_waiting_for_token,
+                                        nac_read_requests_waiting_for_token,
+                                        hostname_attr,
+                                    )
+                                    .await
+                                }
+                            }
+                        })
+                        .collect();
+
+                    let fetch_results = futures::future::join_all(fetch_futures).await;
+
+                    // Call fetch_fn once with all the results
+                    let fetched =
+                        AdmissionControlledS3Storage::execute_batch_fetch(fetch_fn, fetch_results)
+                            .await
+                            .map(|(r, e_tags)| (Arc::new(r) as Arc<dyn Any + Send + Sync>, e_tags));
+
+                    // Clean up the requests map entry.
+                    let mut inflight = {
+                        let mut requests = match outstanding_read_requests.lock() {
+                            Ok(requests) => requests,
+                            Err(poisoned) => {
+                                tracing::warn!(
+                                    "Someone panicked while holding the nac_dedup lock: {}",
+                                    poisoned
+                                );
+                                outstanding_read_requests.clear_poison();
+                                poisoned.into_inner()
+                            }
+                        };
+                        // SAFETY(hammadb): We just created this entry above, and only this task remove it,
+                        // so it must exist.
+                        let result = requests
+                            .remove(&composite_key_clone)
+                            .expect("Key must exist");
+                        // It is very important that we call complete here while holding the lock.
+                        result.context.complete();
+                        cleanup_guard.complete();
+                        result
+                    };
+                    for output_tx in inflight.senders.drain(..) {
+                        match output_tx.send(fetched.clone()) {
+                            Ok(_) => {}
+                            Err(_) => {
+                                tracing::error!("Unexpected channel closure, the calling task must have been dropped");
+                            }
+                        }
+                    }
+                };
+                if self.spawn_fetches {
+                    tokio::task::spawn(fetching_future);
+                } else {
+                    fetching_future.await;
+                }
             }
+
+            // Outer error is for the channel.
+            let Ok(any_res) = output_rx.await else {
+                continue;
+            };
+            // Inner error is for the op.
+            let any_res = any_res?;
+
+            return Ok((
+                any_res
+                    .0
+                    .downcast::<FetchReturn>()
+                    .expect("Impossible state: downcast failed")
+                    .as_ref()
+                    .clone(),
+                any_res.1,
+            ));
         }
-
-        // Await result (common for both dedup'd waiters and initiator).
-        let any_res = output_rx.await.map_err(|e| {
-            tracing::error!("Unexpected channel closure: {}", e);
-            StorageError::Generic {
-                source: Arc::new(e),
-            }
-        })??;
-
-        Ok((
-            any_res
-                .0
-                .downcast::<FetchReturn>()
-                .expect("Impossible state: downcast failed")
-                .as_ref()
-                .clone(),
-            any_res.1,
-        ))
+        Err(StorageError::Generic {
+            source: Arc::new(std::io::Error::other(format!(
+                "get_with_e_tag_internal for keys [{}] failed after 2 attempts: \
+                 every attempt ended with a closed oneshot channel \
+                 (the fetching task was dropped before sending a result)",
+                composite_key
+            ))),
+        })
     }
 
     async fn strongly_consistent_get_with_e_tag(
