@@ -19,7 +19,8 @@ use usearch::{IndexOptions, MetricKind, ScalarKind};
 use uuid::Uuid;
 
 use crate::{
-    quantization::{Code, RabitqCode}, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    quantization::{Code, RabitqCode},
+    IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 /// Buffer for index resizing
@@ -46,15 +47,13 @@ pub struct USearchIndexConfig {
     pub expansion_search: usize,
     /// If provided, use RaBitQ quantization with this center point.
     pub quantization_center: Option<Arc<[f32]>>,
-    /// Quantization bits per dimension (1 or 4). Only used when `quantization_center` is `Some`.
-    pub quantization_bits: u8,
 }
 
 impl USearchIndexConfig {
     /// Derive cache key for the config
     fn cache_key(&self) -> CacheKey {
         match self.quantization_center {
-            Some(_) => CacheKey::Quantized(self.collection_id, self.quantization_bits),
+            Some(_) => CacheKey::Quantized(self.collection_id),
             None => CacheKey::Raw(self.collection_id),
         }
     }
@@ -63,7 +62,7 @@ impl USearchIndexConfig {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CacheKey {
     Raw(CollectionUuid),
-    Quantized(CollectionUuid, u8),
+    Quantized(CollectionUuid),
 }
 
 #[derive(Error, Debug)]
@@ -74,8 +73,6 @@ pub enum USearchError {
     DimensionMismatch { expected: usize, got: usize },
     #[error("Index error: {0}")]
     Index(String),
-    #[error("Unsupported quantization bit width: {0} (supported: 1, 4)")]
-    InvalidQuantizationBits(u8),
     #[error("Cannot retrieve embeddings from quantized index")]
     QuantizedEmbedding,
     #[error("Storage error: {0}")]
@@ -88,7 +85,6 @@ impl ChromaError for USearchError {
             USearchError::Cache(err) => err.code(),
             USearchError::DimensionMismatch { .. } => ErrorCodes::InvalidArgument,
             USearchError::Index(_) => ErrorCodes::Internal,
-            USearchError::InvalidQuantizationBits(_) => ErrorCodes::InvalidArgument,
             USearchError::QuantizedEmbedding => ErrorCodes::InvalidArgument,
             USearchError::Storage(err) => err.code(),
         }
@@ -119,11 +115,10 @@ impl USearchIndex {
         index: &mut usearch::Index,
         center: &[f32],
         distance_function: DistanceFunction,
-        bits: u8,
     ) {
         let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
         let dim = center.len();
-        let code_len = Self::code_size(dim, bits);
+        let code_len = Code::<4>::size(dim);
 
         index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
             // SAFETY: usearch passes valid pointers of `code_len` i8 elements
@@ -131,11 +126,7 @@ impl USearchIndex {
             let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
-            match bits {
-                1 => Code::<1, _>::new(a).distance_code(&Code::<1, _>::new(b), &distance_function, c_norm, dim),
-                4 => Code::<4, _>::new(a).distance_code(&Code::<4, _>::new(b), &distance_function, c_norm, dim),
-                _ => unreachable!("quantization_bits validated in USearchIndex::new"),
-            }
+            Code::<4, _>::new(a).distance_code(&Code::<4, _>::new(b), &distance_function, c_norm, dim)
         }));
     }
 
@@ -144,7 +135,6 @@ impl USearchIndex {
         let distance_function = self.config.distance_function.clone();
         let index = self.index.clone();
         let quantization_center = self.config.quantization_center.clone();
-        let quantization_bits = self.config.quantization_bits;
         let tombstones = self.tombstones.clone();
         spawn_blocking(move || {
             let mut guard = index.write();
@@ -155,12 +145,7 @@ impl USearchIndex {
 
             // Re-apply custom metric after loading (load_from_buffer resets it)
             if let Some(center) = quantization_center {
-                Self::apply_quantization_metric(
-                    &mut guard,
-                    &center,
-                    distance_function,
-                    quantization_bits,
-                );
+                Self::apply_quantization_metric(&mut guard, &center, distance_function);
             }
 
             Ok(())
@@ -184,32 +169,8 @@ impl USearchIndex {
         .map_err(|e| USearchError::Index(e.to_string()))?
     }
 
-    /// Returns the code size in bytes for the configured quantization.
-    fn code_size(dimensions: usize, bits: u8) -> usize {
-        match bits {
-            1 => Code::<1>::size(dimensions),
-            4 => Code::<4>::size(dimensions),
-            _ => unreachable!("quantization_bits validated in USearchIndex::new"),
-        }
-    }
-
-    /// Quantizes a vector using the configured bit width.
-    fn quantize_vector(vector: &[f32], center: &[f32], bits: u8) -> Vec<u8> {
-        match bits {
-            1 => Code::<1>::quantize(vector, center).into_inner(),
-            4 => Code::<4>::quantize(vector, center).into_inner(),
-            _ => unreachable!("quantization_bits validated in USearchIndex::new"),
-        }
-    }
-
     /// Create a new empty index.
     fn new(config: USearchIndexConfig, id: IndexUuid) -> Result<Self, USearchError> {
-        if config.quantization_center.is_some() && !matches!(config.quantization_bits, 1 | 4) {
-            return Err(USearchError::InvalidQuantizationBits(
-                config.quantization_bits,
-            ));
-        }
-
         let (scalar, index_dimensions) = match &config.quantization_center {
             Some(center) => {
                 if center.len() != config.dimensions {
@@ -218,13 +179,7 @@ impl USearchIndex {
                         got: center.len(),
                     });
                 }
-                if ![1, 4].contains(&config.quantization_bits) {
-                    return Err(USearchError::InvalidQuantizationBits(config.quantization_bits));
-                }
-                (
-                    ScalarKind::I8,
-                    Self::code_size(config.dimensions, config.quantization_bits),
-                )
+                (ScalarKind::I8, Code::<4>::size(config.dimensions))
             }
             None => (ScalarKind::F32, config.dimensions),
         };
@@ -253,7 +208,6 @@ impl USearchIndex {
                 &mut index,
                 center,
                 config.distance_function.clone(),
-                config.quantization_bits,
             );
         }
 
@@ -281,7 +235,7 @@ impl VectorIndex for USearchIndex {
             .config
             .quantization_center
             .as_ref()
-            .map(|center| Self::quantize_vector(vector, center, self.config.quantization_bits));
+            .map(|center| Code::<4>::quantize(vector, center));
 
         let index = self.index.write();
         if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
@@ -292,7 +246,7 @@ impl VectorIndex for USearchIndex {
                 .map_err(|e| USearchError::Index(e.to_string()))?
         }
 
-        if let Some(code) = code {
+        if let Some(ref code) = code {
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             index.add(key as u64, i8_slice)
         } else {
@@ -349,7 +303,7 @@ impl VectorIndex for USearchIndex {
         }
 
         let matches = if let Some(center) = &self.config.quantization_center {
-            let code = Self::quantize_vector(query, center, self.config.quantization_bits);
+            let code = Code::<4>::quantize(query, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             self.index.read().search(i8_slice, count)
         } else {
@@ -533,7 +487,6 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: Some(center),
-            quantization_bits: 4,
         };
 
         // Generate test vectors
@@ -596,7 +549,6 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: None,
-            quantization_bits: 4,
         };
 
         // Generate all test vectors upfront
@@ -689,7 +641,6 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: None,
-            quantization_bits: 4,
         };
 
         // Generate 128 random vectors
@@ -757,132 +708,4 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_metric_1bit() {
-        let (_temp_dir, storage) = test_storage();
-        let collection_id = CollectionUuid(Uuid::new_v4());
-        const DIM: usize = 128;
-
-        let center: Arc<[f32]> = Arc::from(vec![0.1f32; DIM]);
-        let config = USearchIndexConfig {
-            collection_id,
-            cmek: None,
-            prefix_path: String::new(),
-            dimensions: DIM,
-            distance_function: DistanceFunction::Euclidean,
-            connectivity: 16,
-            expansion_add: 128,
-            expansion_search: 64,
-            quantization_center: Some(center),
-            quantization_bits: 1,
-        };
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let vectors: Vec<Vec<f32>> = (0..16).map(|_| random_vector(&mut rng, DIM)).collect();
-
-        let (index_id, results_before) = {
-            let provider =
-                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
-            let index = provider.open(&config, OpenMode::Create).await.unwrap();
-            for (i, v) in vectors.iter().enumerate() {
-                index.add(i as u32, v).unwrap();
-            }
-            let results = index.search(&vectors[0], 8).unwrap();
-            let id = provider.flush(&index).await.unwrap();
-            (id, results)
-        };
-
-        let results_after = {
-            let provider =
-                USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
-            let index = provider
-                .open(&config, OpenMode::Open(index_id))
-                .await
-                .unwrap();
-            index.search(&vectors[0], 8).unwrap()
-        };
-
-        assert_eq!(results_before.keys, results_after.keys);
-        for (before, after) in results_before
-            .distances
-            .iter()
-            .zip(results_after.distances.iter())
-        {
-            assert!(
-                (before - after).abs() <= f32::EPSILON,
-                "Distance mismatch: before={}, after={}",
-                before,
-                after
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn test_quantize_1bit() {
-        let (_temp_dir, storage) = test_storage();
-        let collection_id = CollectionUuid(Uuid::new_v4());
-        let provider =
-            USearchIndexProvider::new(storage.clone(), new_non_persistent_cache_for_test());
-        const DIM: usize = 1024;
-
-        let config = USearchIndexConfig {
-            collection_id,
-            cmek: None,
-            prefix_path: String::new(),
-            dimensions: DIM,
-            distance_function: DistanceFunction::Euclidean,
-            connectivity: 16,
-            expansion_add: 128,
-            expansion_search: 64,
-            quantization_center: None,
-            quantization_bits: 1,
-        };
-
-        let mut rng = StdRng::seed_from_u64(42);
-        let vectors = (0..128)
-            .map(|_| random_vector(&mut rng, DIM))
-            .collect::<Vec<_>>();
-
-        let raw_index = provider.open(&config, OpenMode::Create).await.unwrap();
-        for (i, v) in vectors.iter().enumerate() {
-            raw_index.add(i as u32, v).unwrap();
-        }
-
-        for (i, v) in vectors.iter().enumerate() {
-            let result = raw_index.search(v, 1).unwrap();
-            assert_eq!(
-                result.keys[0], i as u32,
-                "Full precision: top-1 mismatch at {}",
-                i
-            );
-        }
-
-        let center = Arc::from(vec![0.0f32; DIM]);
-        let quantized_config = USearchIndexConfig {
-            quantization_center: Some(center),
-            ..config
-        };
-        let quantized_index = provider
-            .open(&quantized_config, OpenMode::Create)
-            .await
-            .unwrap();
-        for (i, v) in vectors.iter().enumerate() {
-            quantized_index.add(i as u32, v).unwrap();
-        }
-
-        let mut top1_hits = 0usize;
-        for (i, v) in vectors.iter().enumerate() {
-            let result = quantized_index.search(v, 8).unwrap();
-            if result.keys[0] == i as u32 {
-                top1_hits += 1;
-            }
-        }
-
-        let recall = top1_hits as f64 / vectors.len() as f64;
-        assert!(
-            recall >= 0.95,
-            "1-bit quantized top-1 recall {:.1}% is below 95% threshold",
-            recall * 100.0
-        );
-    }
 }
