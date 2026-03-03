@@ -80,7 +80,10 @@ fn status_with_backoff_reason(
     reason: &str,
 ) -> Status {
     let mut metadata = tonic::metadata::MetadataMap::new();
-    metadata.insert(BACKOFF_REASON_MD_KEY, reason.parse().expect("valid ascii metadata value"));
+    metadata.insert(
+        BACKOFF_REASON_MD_KEY,
+        reason.parse().expect("valid ascii metadata value"),
+    );
     Status::with_metadata(code, message, metadata)
 }
 

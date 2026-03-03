@@ -963,7 +963,10 @@ impl ServiceBasedFrontend {
                 }
                 Ok(AddCollectionRecordsResponse {})
             }
-            Err(e) => Err(AddCollectionRecordsError::Other(Box::new(e) as _)),
+            Err(e) => match e {
+                PushLogsError::Backoff => Err(AddCollectionRecordsError::Backoff),
+                other => Err(AddCollectionRecordsError::Other(Box::new(other) as _)),
+            },
         }
     }
 
@@ -1064,7 +1067,10 @@ impl ServiceBasedFrontend {
                 }
                 Ok(UpdateCollectionRecordsResponse {})
             }
-            Err(e) => Err(UpdateCollectionRecordsError::Other(Box::new(e) as _)),
+            Err(e) => match e {
+                PushLogsError::Backoff => Err(UpdateCollectionRecordsError::Backoff),
+                other => Err(UpdateCollectionRecordsError::Other(Box::new(other) as _)),
+            },
         }
     }
 
@@ -1167,7 +1173,10 @@ impl ServiceBasedFrontend {
                 }
                 Ok(UpsertCollectionRecordsResponse {})
             }
-            Err(e) => Err(UpsertCollectionRecordsError::Other(Box::new(e) as _)),
+            Err(e) => match e {
+                PushLogsError::Backoff => Err(UpsertCollectionRecordsError::Backoff),
+                other => Err(UpsertCollectionRecordsError::Other(Box::new(other) as _)),
+            },
         }
     }
 

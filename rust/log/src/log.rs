@@ -44,7 +44,9 @@ pub enum PushLogsError {
     #[error("log is under write batching pressure; please backoff exponentially and retry")]
     Backoff,
     /// Backoff because the log needs compaction.
-    #[error("log needs compaction before accepting more writes; please backoff exponentially and retry")]
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
     BackoffCompaction,
     /// Any other push failure.
     #[error(transparent)]

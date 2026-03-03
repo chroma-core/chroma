@@ -36,11 +36,7 @@ const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
 
 /// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
 fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
-    status
-        .metadata()
-        .get(BACKOFF_REASON_MD_KEY)?
-        .to_str()
-        .ok()
+    status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
 }
 
 //////////////// Errors ////////////////
