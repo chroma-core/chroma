@@ -121,7 +121,7 @@ A source of the GitHub repository type is an individual GitHub repository config
 ```
 
 - `repository` defines the GitHub repository whose code should be synced. This must be the forward slash-separated combination of the repository owner's GitHub username and the repository name (e.g., `chroma-core/chroma`). Note that changing a repository name after creating a Chroma Sync source for it will result in invocations on that source failing, so a new source with the updated repository name must be created.
-- `app_id` defines the GitHub App ID of the GitHub App that has access to the provided `repository`. This parameter should only be supplied if the provided repository is private. If you are unsure of the GitHub App ID you should use, [see more](https://www.notion.so/Chroma-Sync-Docs-28b58a6d81918062b6ebf00deedde0ab?pvs=21) about the two tiers Chroma offers for the GitHub repository source type.
+- `app_id` defines the GitHub App ID of the GitHub App that has access to the provided `repository`. This parameter should only be supplied if the provided repository is private.
 - `include_globs` defines a set of glob patterns for which matching files should be synced. If this parameter is not provided, files matching `"*"` will be synced. Note that Chroma will not sync binary data, images, and other large or non-UTF-8 files.
 
 ## Web
