@@ -1671,7 +1671,7 @@
       },
       "AutoSync": {
         "type": "string",
-        "description": "Auto-sync mode for S3 sources\n- `none`: Manual invocations only (default, only supported mode initially)\n- `direct`: Triggered by S3 events (future)\n- `metadata`: Triggered by S3 events with custom metadata support (future)",
+        "description": "Auto-sync mode for S3 sources\n- `none`: Manual invocations only (default)\n- `direct`: Triggered by S3 events\n- `metadata`: Triggered by S3 events with custom metadata support",
         "enum": [
           "none",
           "direct",
