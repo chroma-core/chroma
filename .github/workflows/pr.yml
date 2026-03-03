@@ -32,28 +32,32 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          predicate-quantifier: 'every'
+          predicate-quantifier: 'some'
           filters: |
-            # documentation changes
             docs:
               - 'docs/**'
               - '**/*.md'
+              - '**/*.mdx'
               - 'sample_apps/**'
               - 'examples/**'
-            # Outside docs
+            helm-changes:
+              - 'k8s/distributed-chroma/**'
+            js-client:
+              - 'clients/js/**'
+
+      - name: Filter exclusions
+        id: exclusion-filter
+        uses: dorny/paths-filter@v3
+        with:
+          predicate-quantifier: 'every'
+          filters: |
             outside-docs:
               - '**'
               - '!docs/**'
               - '!**/*.md'
+              - '!**/*.mdx'
               - '!sample_apps/**'
               - '!examples/**'
-            # Helm chart changes
-            helm-changes:
-              - 'k8s/distributed-chroma/**'
-            # JavaScript client changes
-            js-client:
-              - 'clients/js/**'
-            # Outside JS client
             outside-js-client:
               - '!clients/js/**'
 
@@ -64,7 +68,7 @@ jobs:
           TESTS_TO_RUN="[]"
 
           # If changes are docs-only (changes in docs but not outside docs)
-          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.outside-docs }}" == "false" ]]; then
+          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.exclusion-filter.outputs.outside-docs }}" == "false" ]]; then
             echo "Only documentation changes detected, skipping all tests"
             echo "docs-only=true" >> $GITHUB_OUTPUT
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
@@ -74,7 +78,7 @@ jobs:
           fi
 
           # Check for JS-only changes (changes in JS but not outside JS)
-          if [[ "${{ steps.filter.outputs.js-client }}" == "true" && "${{ steps.filter.outputs.outside-js-client }}" == "false" ]]; then
+          if [[ "${{ steps.filter.outputs.js-client }}" == "true" && "${{ steps.exclusion-filter.outputs.outside-js-client }}" == "false" ]]; then
             echo "JavaScript-only changes detected"
             TESTS_TO_RUN='["js-client"]'
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
