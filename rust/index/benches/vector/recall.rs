@@ -1,8 +1,9 @@
 //! Recall benchmark for RaBitQ quantization on real embedding datasets.
 //!
-//! Measures recall@K for three scoring methods:
+//! Measures recall@K for four scoring methods:
 //!
 //!   4bit-code-full-query  — 4-bit data quantization, f32 query (quality ceiling)
+//!   1bit-code-full-query  — 1-bit data quantization, f32 query (distance_query)
 //!   1bit-code-4bit-query  — 1-bit data quantization, 4-bit quantized query (AND+popcount, §3.3.1)
 //!   1bit-code-1bit-query  — 1-bit data quantization, 1-bit quantized query (distance_code)
 //!
@@ -44,6 +45,7 @@ use std::time::Instant;
 
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_index::quantization::{Code, QuantizedQuery, RabitqCode};
+use rayon::prelude::*;
 use faer::{
     stats::{
         prelude::{Distribution, StandardNormal, ThreadRng},
@@ -173,7 +175,7 @@ fn compute_ground_truth(
     df: &DistanceFunction,
 ) -> Vec<Vec<u32>> {
     queries
-        .iter()
+        .par_iter()
         .map(|q| {
             let mut dists: Vec<(usize, f32)> = db
                 .iter()
@@ -274,8 +276,8 @@ fn run_recall(
     // This mirrors the production SPANN pipeline which normalizes before rotating.
     print!("  Pre-processing {n} vectors + {n_queries} queries ...");
     let t0 = Instant::now();
-    let vectors: Vec<Vec<f32>> = vectors_raw.iter().map(|v| preprocess(v, df)).collect();
-    let queries: Vec<Vec<f32>> = queries_raw.iter().map(|q| preprocess(q, df)).collect();
+    let vectors: Vec<Vec<f32>> = vectors_raw.par_iter().map(|v| preprocess(v, df)).collect();
+    let queries: Vec<Vec<f32>> = queries_raw.par_iter().map(|q| preprocess(q, df)).collect();
     println!(" {:.2}s", t0.elapsed().as_secs_f64());
 
     // Step 2: centroid of pre-processed vectors (before rotation).
@@ -313,13 +315,13 @@ fn run_recall(
     println!("  Quantizing {n} rotated vectors ...");
     let t0 = Instant::now();
     let codes_4: Vec<Vec<u8>> = rotated_vectors
-        .iter()
+        .par_iter()
         .map(|v| Code::<4>::quantize(v, &centroid).as_ref().to_vec())
         .collect();
     let t_q4 = t0.elapsed();
     let t0 = Instant::now();
     let codes_1: Vec<Vec<u8>> = rotated_vectors
-        .iter()
+        .par_iter()
         .map(|v| Code::<1>::quantize(v, &centroid).as_ref().to_vec())
         .collect();
     let t_q1 = t0.elapsed();
@@ -329,63 +331,66 @@ fn run_recall(
         t_q1.as_secs_f64()
     );
 
-    // Step 7: score.  Each closure takes the rotated query residual
-    // r_q = rotated_q - rotated_centroid and returns per-code estimated distances.
-    // DistanceFunction is Clone-only, so clone once per closure.
-    let df4f = df.clone();
-    let df1b = df.clone();
-    let df1c = df.clone();
+    // Step 7: score all queries with each method.
+    // Each method scores every rotated query against all codes, then we compute
+    // recall@K at various rerank factors.
 
-    let methods: Vec<(&'static str, Box<dyn Fn(&[f32]) -> Vec<f32>>)> = vec![
-        (
-            "4bit-code-full-query",
-            Box::new(|r_q: &[f32]| -> Vec<f32> {
-                let cdq = c_dot_q(&centroid, r_q);
-                let qn = q_norm(&centroid, r_q);
-                codes_4
-                    .iter()
-                    .map(|cb| Code::<4, _>::new(cb.as_slice()).distance_query(&df4f, r_q, cn, cdq, qn))
-                    .collect()
-            }),
-        ),
-        (
-            "1bit-code-4bit-query",
-            Box::new(|r_q: &[f32]| -> Vec<f32> {
-                let cdq = c_dot_q(&centroid, r_q);
-                let qn = q_norm(&centroid, r_q);
-                let qq = QuantizedQuery::new(r_q, 4, padded_bytes, cn, cdq, qn);
-                codes_1
-                    .iter()
-                    .map(|cb| Code::<1, _>::new(cb.as_slice()).distance_4bit_query(&df1b, &qq))
-                    .collect()
-            }),
-        ),
-        (
-            "1bit-code-1bit-query",
-            Box::new(|r_q: &[f32]| -> Vec<f32> {
-                let full_q: Vec<f32> = r_q.iter().zip(&centroid).map(|(r, c)| r + c).collect();
-                let cq = Code::<1>::quantize(&full_q, &centroid);
-                codes_1
-                    .iter()
-                    .map(|cb| Code::<1, _>::new(cb.as_slice()).distance_code(&cq, &df1c, cn, dim))
-                    .collect()
-            }),
-        ),
+    let methods: &[&str] = &[
+        "4bit-code-full-query",
+        "1bit-code-full-query",
+        "1bit-code-4bit-query",
+        "1bit-code-1bit-query",
     ];
 
     let mut results = Vec::new();
 
-    for (method_name, score_fn) in &methods {
+    for &method_name in methods {
         println!("  Scoring {n_queries} queries with {method_name} ...");
         let t0 = Instant::now();
 
-        // For each query: use the pre-rotated query vector, compute residual to
-        // the rotated centroid, then score all codes.
         let all_scores: Vec<Vec<f32>> = rotated_queries
-            .iter()
+            .par_iter()
             .map(|rq| {
                 let r_q: Vec<f32> = rq.iter().zip(&centroid).map(|(q, c)| q - c).collect();
-                score_fn(&r_q)
+                let cdq = c_dot_q(&centroid, &r_q);
+                let qn = q_norm(&centroid, &r_q);
+                match method_name {
+                    "4bit-code-full-query" => codes_4
+                        .iter()
+                        .map(|cb| {
+                            Code::<4, _>::new(cb.as_slice())
+                                .distance_query(df, &r_q, cn, cdq, qn)
+                        })
+                        .collect(),
+                    "1bit-code-full-query" => codes_1
+                        .iter()
+                        .map(|cb| {
+                            Code::<1, _>::new(cb.as_slice())
+                                .distance_query(df, &r_q, cn, cdq, qn)
+                        })
+                        .collect(),
+                    "1bit-code-4bit-query" => {
+                        let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
+                        codes_1
+                            .iter()
+                            .map(|cb| {
+                                Code::<1, _>::new(cb.as_slice()).distance_4bit_query(df, &qq)
+                            })
+                            .collect()
+                    }
+                    "1bit-code-1bit-query" => {
+                        let full_q: Vec<f32> =
+                            r_q.iter().zip(&centroid).map(|(r, c)| r + c).collect();
+                        let cq = Code::<1>::quantize(&full_q, &centroid);
+                        codes_1
+                            .iter()
+                            .map(|cb| {
+                                Code::<1, _>::new(cb.as_slice()).distance_code(&cq, df, cn, dim)
+                            })
+                            .collect()
+                    }
+                    _ => unreachable!(),
+                }
             })
             .collect();
 
@@ -396,11 +401,14 @@ fn run_recall(
             if r > n {
                 continue;
             }
-            let mut recalls = Vec::with_capacity(n_queries);
-            for (qi, scores) in all_scores.iter().enumerate() {
-                let top = top_r_by_estimated_distance(scores, r);
-                recalls.push(recall_at_k(&top, &ground_truth[qi], k));
-            }
+            let recalls: Vec<f32> = all_scores
+                .par_iter()
+                .enumerate()
+                .map(|(qi, scores)| {
+                    let top = top_r_by_estimated_distance(scores, r);
+                    recall_at_k(&top, &ground_truth[qi], k)
+                })
+                .collect();
             let recall_mean = recalls.iter().sum::<f32>() / recalls.len() as f32;
             let recall_min = recalls.iter().copied().fold(f32::INFINITY, f32::min);
             let recall_max = recalls.iter().copied().fold(f32::NEG_INFINITY, f32::max);

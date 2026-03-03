@@ -62,28 +62,64 @@ the code-size advantage of 1-bit vs 4-bit without the query build overhead.
 
 Benchmark data from `cargo bench -p chroma-index --bench quantization_recall -- --dataset <dataset> --size 1000000` (K=10) and `--k 100` (K=100).
 Full output in `recall_1M_results.txt` and `recall_1M_results_k100.txt`.
+Run on r6i.8xlarge (16 physical cores, Intel Ice Lake).
 
-**4-bit** (4bit-code-full-query: 4-bit data, f32 query)
+Four scoring methods, ordered from highest to lowest quality:
+
+- **4bit-code-full-query** -- 4-bit data codes, f32 query (quality ceiling)
+- **1bit-code-full-query** -- 1-bit data codes, f32 query (Code<1>::distance_query)
+- **1bit-code-4bit-query** -- 1-bit data codes, 4-bit quantized query (AND+popcount)
+- **1bit-code-1bit-query** -- 1-bit data codes, 1-bit quantized query (distance_code)
+
+## 4-bit (4bit-code-full-query)
 
 | rerank | cohere_wiki@10 | msmarco@10 | beir@10 | cohere_wiki@100 | msmarco@100 | beir@100 |
-|--------|----------------|------------|---------|----------------|-------------|----------|
-| 1x | 0.923 | 0.944 | 0.937 | 0.940 | 0.956 | 0.955 |
-| 2x | 1.000 | 0.998 | 1.000 | 1.000 | 1.000 | 1.000 |
+|--------|----------------|------------|---------|-----------------|-------------|----------|
+| 1x | 0.913 | 0.933 | 0.938 | 0.942 | 0.954 | 0.954 |
+| 2x | 1.000 | 0.999 | 1.000 | 1.000 | 1.000 | 1.000 |
 | 4x | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
-| 8x | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
-| 16x | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
 
-**1-bit** (1bit-code-4bit-query: 1-bit data, 4-bit quantized query, QuantizedQuery)
+## 1-bit, f32 query (1bit-code-full-query)
 
 | rerank | cohere_wiki@10 | msmarco@10 | beir@10 | cohere_wiki@100 | msmarco@100 | beir@100 |
-|--------|----------------|------------|---------|----------------|-------------|----------|
-| 1x | 0.643 | 0.675 | 0.745 | 0.679 | 0.756 | 0.772 |
-| 2x | 0.830 | 0.889 | 0.928 | 0.874 | 0.935 | 0.942 |
-| 4x | 0.945 | 0.969 | 0.982 | 0.966 | 0.989 | 0.991 |
-| 8x | 0.987 | 0.996 | 0.998 | 0.993 | 0.999 | 0.999 |
+|--------|----------------|------------|---------|-----------------|-------------|----------|
+| 1x | 0.648 | 0.712 | 0.750 | 0.689 | 0.763 | 0.776 |
+| 2x | 0.861 | 0.899 | 0.930 | 0.884 | 0.944 | 0.949 |
+| 4x | 0.964 | 0.972 | 0.986 | 0.971 | 0.991 | 0.993 |
+| 8x | 0.991 | 0.988 | 0.997 | 0.996 | 0.999 | 0.999 |
+| 16x | 0.998 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 |
+
+## 1-bit, 4-bit query (1bit-code-4bit-query)
+
+| rerank | cohere_wiki@10 | msmarco@10 | beir@10 | cohere_wiki@100 | msmarco@100 | beir@100 |
+|--------|----------------|------------|---------|-----------------|-------------|----------|
+| 1x | 0.640 | 0.701 | 0.750 | 0.686 | 0.758 | 0.772 |
+| 2x | 0.845 | 0.900 | 0.933 | 0.876 | 0.938 | 0.945 |
+| 4x | 0.962 | 0.967 | 0.986 | 0.967 | 0.990 | 0.991 |
+| 8x | 0.988 | 0.992 | 0.996 | 0.995 | 0.999 | 0.999 |
 | 16x | 0.997 | 0.999 | 1.000 | 0.999 | 1.000 | 1.000 |
 
-4-bit reaches recall_mean 1.0 at rerank 2x–4x on all datasets. 1-bit (1bit-code-4bit-query) needs rerank 8x–16x for recall_mean > 0.99; at rerank 4x, 1-bit recall_mean is 0.95–0.99.
+## 1-bit, 1-bit query (1bit-code-1bit-query)
+
+| rerank | cohere_wiki@10 | msmarco@10 | beir@10 | cohere_wiki@100 | msmarco@100 | beir@100 |
+|--------|----------------|------------|---------|-----------------|-------------|----------|
+| 1x | 0.497 | 0.577 | 0.661 | 0.550 | 0.654 | 0.667 |
+| 2x | 0.693 | 0.776 | 0.837 | 0.725 | 0.840 | 0.854 |
+| 4x | 0.814 | 0.883 | 0.922 | 0.856 | 0.941 | 0.947 |
+| 8x | 0.910 | 0.939 | 0.973 | 0.939 | 0.981 | 0.982 |
+| 16x | 0.964 | 0.974 | 0.988 | 0.980 | 0.996 | 0.995 |
+
+4-bit reaches recall_mean 1.0 at rerank 2x on all datasets. The three 1-bit methods
+show a clear quality/speed tradeoff:
+
+- **1bit-full-query** is nearly as accurate as **1bit-4bit-query** (within 0.01 recall
+  at every rerank level) but ~5x slower since it uses f32 dot products instead of
+  AND+popcount. In practice, query quantization loses almost nothing.
+- **1bit-4bit-query** is the production sweet spot: rerank 8x gives recall > 0.99
+  on all datasets at K=10, and the scoring is ~7x faster than 4-bit.
+- **1bit-1bit-query** (code-vs-code) is the fastest but loses 0.10-0.15 recall at
+  1x vs the 4-bit-query variants. Useful for code-vs-code distance (e.g. HNSW
+  edge weights) where no f32 query is available.
 
 These results measure within-cluster recall (single centroid, flat scan). The next section
 addresses centroid-level recall in a multi-cluster IVF setting.

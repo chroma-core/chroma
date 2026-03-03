@@ -40,7 +40,7 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 
@@ -91,9 +91,14 @@ def download_single_split(
     config: Optional[str],
     emb_column: str,
     n_needed: int,
+    dim: int,
     streaming: bool,
 ) -> np.ndarray[Any, np.dtype[np.float32]]:
-    """Stream or load the first n_needed embeddings from a single-split dataset."""
+    """Stream or load the first n_needed embeddings from a single-split dataset.
+
+    Pre-allocates a numpy array and fills it row-by-row to avoid the ~7x memory
+    overhead of accumulating Python float lists (28 bytes/float vs 4 bytes in f32).
+    """
     try:
         from datasets import load_dataset
     except ImportError:
@@ -113,28 +118,26 @@ def download_single_split(
     print(f"Loading {n_needed:,} embeddings from {dataset_name} ...")
     ds = load_dataset(dataset_name, **load_kw)
 
-    vecs: List[List[float]] = []
-    expected_dim: Optional[int] = None
+    arr = np.empty((n_needed, dim), dtype=np.float32)
+    count = 0
     for i, row in enumerate(
         tqdm(ds, total=n_needed if streaming else None, desc="downloading")
     ):
-        if i >= n_needed:
+        if count >= n_needed:
             break
         emb = row[emb_column]
-        emb_list = list(emb)
-        if expected_dim is None:
-            expected_dim = len(emb_list)
-        elif len(emb_list) != expected_dim:
+        emb_arr = np.asarray(emb, dtype=np.float32)
+        if emb_arr.shape[0] != dim:
             print(
-                f"WARNING: row {i} has dim={len(emb_list)}, expected {expected_dim}; skipping"
+                f"WARNING: row {i} has dim={emb_arr.shape[0]}, expected {dim}; skipping"
             )
             continue
-        vecs.append(emb_list)
+        arr[count] = emb_arr
+        count += 1
 
-    if not vecs:
+    if count == 0:
         raise RuntimeError("No embeddings loaded from dataset")
-    arr = np.array(vecs, dtype=np.float32)
-    return arr
+    return arr[:count]
 
 
 def download_beir(
@@ -144,6 +147,7 @@ def download_beir(
     emb_column: str,
     n_vectors: int,
     n_queries: int,
+    dim: int,
 ) -> Tuple[
     np.ndarray[Any, np.dtype[np.float32]], np.ndarray[Any, np.dtype[np.float32]]
 ]:
@@ -166,23 +170,27 @@ def download_beir(
     corpus_ds = load_dataset(dataset_name, corpus_config, split="train", streaming=True)
     queries_ds = load_dataset(dataset_name, queries_config, split="dev", streaming=True)
 
-    vecs: List[List[float]] = []
+    vectors = np.empty((n_vectors, dim), dtype=np.float32)
+    count = 0
     for i, row in enumerate(tqdm(corpus_ds, total=n_vectors, desc="corpus")):
-        if i >= n_vectors:
+        if count >= n_vectors:
             break
-        vecs.append(list(row[emb_column]))
-    if not vecs:
+        vectors[count] = np.asarray(row[emb_column], dtype=np.float32)
+        count += 1
+    if count == 0:
         raise RuntimeError("No corpus embeddings loaded")
-    vectors = np.array(vecs, dtype=np.float32)
+    vectors = vectors[:count]
 
-    qvecs: List[List[float]] = []
+    queries = np.empty((n_queries, dim), dtype=np.float32)
+    qcount = 0
     for i, row in enumerate(tqdm(queries_ds, total=n_queries, desc="queries")):
-        if i >= n_queries:
+        if qcount >= n_queries:
             break
-        qvecs.append(list(row[emb_column]))
-    if not qvecs:
+        queries[qcount] = np.asarray(row[emb_column], dtype=np.float32)
+        qcount += 1
+    if qcount == 0:
         raise RuntimeError("No query embeddings loaded")
-    queries = np.array(qvecs, dtype=np.float32)
+    queries = queries[:qcount]
 
     return vectors, queries
 
@@ -303,12 +311,12 @@ def main() -> None:
 
     if max_size >= 10_000_000:
         vec_gb = max_size * dim * 4 / 1e9
-        total_gb = vec_gb * 2.5  # vectors + KNN working memory
+        total_gb = vec_gb * 1.1  # vectors dominate; KNN batches add ~10%
         print(
             f"WARNING: Preparing {max_size:,} vectors at dim={dim} requires ~{vec_gb:.0f} GB"
         )
         print(
-            f"         for vectors alone, ~{total_gb:.0f} GB total with ground truth computation."
+            f"         for vectors, ~{total_gb:.0f} GB peak during ground truth computation."
         )
         resp = input("Continue? [y/N] ").strip().lower()
         if resp != "y":
@@ -328,6 +336,7 @@ def main() -> None:
             emb_column,
             n_vectors,
             n_queries,
+            dim,
         )
         config_info = {
             "corpus": cfg["corpus_config"],
@@ -341,6 +350,7 @@ def main() -> None:
             cfg.get("config"),
             emb_column,
             max_needed,
+            dim,
             cfg.get("streaming", False),
         )
         vectors = all_vecs[: max(args.sizes)]
