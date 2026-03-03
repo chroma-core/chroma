@@ -963,6 +963,7 @@
               "string",
               "null"
             ],
+            "maxLength": 120,
             "description": "Custom ID for Chroma object IDs (optional, S3 sources only).\nIf provided, chunk IDs become \"custom_id-{chunk}\" instead of \"sha256(object_key)-{chunk}\".\nAlso stored as \"custom_id\" metadata on each chunk."
           },
           "metadata": {
