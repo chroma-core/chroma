@@ -1,0 +1,78 @@
+ubuntu@ip-172-31-75-166:~/chroma$ cargo bench -p chroma-index --bench quantization_recall_ivf -- --size 1000000
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 9.73s
+     Running benches/vector/recall_ivf.rs (target/release/deps/quantization_recall_ivf-6a4bd60a09c82cff)
+
+=== IVF RaBitQ Recall Benchmark ===
+  dataset=cohere_wiki, distance=euclidean, K=10, data_bits=1, centroid_bits=1
+  nprobes=[16, 32, 64, 128], centroid_rerank=[1, 2, 4], vector_rerank=[1, 2, 4]
+  sizes=[1000000]
+
+  Pre-processing 1000000 vectors + 100 queries ... 1.55s
+  Computing ground truth (100 queries x 1000000 vectors) ...
+  Ground truth in 5.22s
+  KMeans clustering into 1000 clusters ...
+  Clustered in 1929.02s: 1000 non-empty clusters, avg=1000, min=88, max=3079
+  Generating 1024x1024 random rotation P ...
+  Generated in 0.06s
+  Quantizing 1000 centroids (1-bit) ...
+  Centroid quantization in 0.0017s
+  Building 1000 quantized clusters (1-bit data) ...
+  Built quantized clusters in 6.45s
+  Scoring 100 queries ...
+  Scored in 12.31s
+
+====================================================================================================================
+  IVF Recall@10 on cohere_wiki  (N=1000000, clusters=1000, distance=euclidean, data=1bit, centroid=1bit)
+--------------------------------------------------------------------------------------------------------------------
+  Legend:
+    nprobe                    clusters probed per query
+    centroid_rerank           centroid rerank factor (retrieve nprobe*c_rerank by quantized distance, rerank to nprobe with exact)
+    vector_rerank             vector rerank factor (shortlist k*v_rerank candidates, rerank to k with exact)
+    centroid_recall           centroid recall after quantized search + rerank pipeline
+    centroid_recall_cieling   what an exact centroid search would achieve at nprobe
+    vector_recall             end-to-end recall using quantized within-cluster scoring (no vector rerank)
+    vector_recall_reranked    end-to-end recall after exact vector reranking of top k*v_rerank candidates
+--------------------------------------------------------------------------------------------------------------------
+    nprobe centroid_rerank vector_rerank centroid_recall centroid_recall_cieling vector_recall vector_recall_reranked
+--------------------------------------------------------------------------------------------------------------------
+        16              1x            1x          0.7430                 0.7540        0.5910                 0.5910
+        16              1x            2x          0.7430                 0.7540        0.6930                 0.6930
+        16              1x            4x          0.7430                 0.7540        0.7360                 0.7360
+        16              2x            1x          0.7550                 0.7540        0.5970                 0.5970
+        16              2x            2x          0.7550                 0.7540        0.7040                 0.7040
+        16              2x            4x          0.7550                 0.7540        0.7500                 0.7500
+        16              4x            1x          0.7540                 0.7540        0.5950                 0.5950
+        16              4x            2x          0.7540                 0.7540        0.7020                 0.7020
+        16              4x            4x          0.7540                 0.7540        0.7490                 0.7490
+--------------------------------------------------------------------------------------------------------------------
+        32              1x            1x          0.8260                 0.8300        0.6290                 0.6290
+        32              1x            2x          0.8260                 0.8300        0.7540                 0.7540
+        32              1x            4x          0.8260                 0.8300        0.8150                 0.8150
+        32              2x            1x          0.8330                 0.8300        0.6300                 0.6300
+        32              2x            2x          0.8330                 0.8300        0.7580                 0.7580
+        32              2x            4x          0.8330                 0.8300        0.8210                 0.8210
+        32              4x            1x          0.8300                 0.8300        0.6290                 0.6290
+        32              4x            2x          0.8300                 0.8300        0.7560                 0.7560
+        32              4x            4x          0.8300                 0.8300        0.8180                 0.8180
+--------------------------------------------------------------------------------------------------------------------
+        64              1x            1x          0.8950                 0.9090        0.6550                 0.6550
+        64              1x            2x          0.8950                 0.9090        0.7970                 0.7970
+        64              1x            4x          0.8950                 0.9090        0.8760                 0.8760
+        64              2x            1x          0.9040                 0.9090        0.6560                 0.6560
+        64              2x            2x          0.9040                 0.9090        0.8030                 0.8030
+        64              2x            4x          0.9040                 0.9090        0.8880                 0.8880
+        64              4x            1x          0.9090                 0.9090        0.6610                 0.6610
+        64              4x            2x          0.9090                 0.9090        0.8060                 0.8060
+        64              4x            4x          0.9090                 0.9090        0.8930                 0.8930
+--------------------------------------------------------------------------------------------------------------------
+       128              1x            1x          0.9440                 0.9530        0.6630                 0.6630
+       128              1x            2x          0.9440                 0.9530        0.8190                 0.8190
+       128              1x            4x          0.9440                 0.9530        0.9200                 0.9200
+       128              2x            1x          0.9500                 0.9530        0.6680                 0.6680
+       128              2x            2x          0.9500                 0.9530        0.8270                 0.8270
+       128              2x            4x          0.9500                 0.9530        0.9270                 0.9270
+       128              4x            1x          0.9530                 0.9530        0.6700                 0.6700
+       128              4x            2x          0.9530                 0.9530        0.8300                 0.8300
+       128              4x            4x          0.9530                 0.9530        0.9290                 0.9290
+====================================================================================================================

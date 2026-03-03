@@ -92,10 +92,9 @@ addresses centroid-level recall in a multi-cluster IVF setting.
 
 # Centroid Recall (IVF)
 
-tl;dr: Recall is primarily determined by the number of probes used. Centroid reranking plays in tiny role: 2x seems to always get us to full recall.
-
-Benchmark data from `cargo bench -p chroma-index --bench recall_ivf -- --size 100000`
-(cohere_wiki, N=100K, 316 clusters via KMeans, K=10, 1-bit data, 1-bit centroids).
+Benchmark data from `cargo bench -p chroma-index --bench quantization_recall_ivf -- --size 1000000`
+(cohere_wiki, N=1M, 1000 clusters via KMeans, K=10, 1-bit data, 1-bit centroids,
+r6i.8xlarge). Full raw output in `saved_benchmarks/recall_ivf_r6i.8xlarge.txt`.
 
 This measures centroid selection recall: what fraction of the true top-K neighbors
 reside in the probed clusters. Centroids are quantized with 1-bit RaBitQ relative to a
@@ -106,32 +105,35 @@ HNSW graph approximation).
 **centroid_recall** = fraction of true top-K in the nprobe clusters selected by the
 quantized centroid pipeline (quantized search for `nprobe * centroid_rerank` candidates,
 then exact-distance rerank to nprobe). **centroid_recall_ceiling** = same metric using
-exact centroid distance (no quantization). Namely, this is the maximum recall that can be achieved with the given nprobe.
+exact centroid distance (no quantization) -- the maximum recall achievable at this nprobe.
 
 | nprobe | centroid_rerank | centroid_recall | centroid_recall_ceiling |
 |--------|-----------------|-----------------|------------------------|
-| 16 | 1x | 0.916 | 0.926 |
-| 16 | 2x | 0.926 | 0.926 |
-| 16 | 4x | 0.926 | 0.926 |
-| 32 | 1x | 0.960 | 0.963 |
-| 32 | 2x | 0.963 | 0.963 |
-| 32 | 4x | 0.963 | 0.963 |
-| 64 | 1x | 0.983 | 0.983 |
-| 64 | 2x | 0.983 | 0.983 |
-| 64 | 4x | 0.983 | 0.983 |
-| 128 | 1x | 0.997 | 0.998 |
-| 128 | 2x | 0.998 | 0.998 |
-| 128 | 4x | 0.998 | 0.998 |
+| 16 | 1x | 0.743 | 0.754 |
+| 16 | 2x | 0.755 | 0.754 |
+| 16 | 4x | 0.754 | 0.754 |
+| 32 | 1x | 0.826 | 0.830 |
+| 32 | 2x | 0.833 | 0.830 |
+| 32 | 4x | 0.830 | 0.830 |
+| 64 | 1x | 0.895 | 0.909 |
+| 64 | 2x | 0.904 | 0.909 |
+| 64 | 4x | 0.909 | 0.909 |
+| 128 | 1x | 0.944 | 0.953 |
+| 128 | 2x | 0.950 | 0.953 |
+| 128 | 4x | 0.953 | 0.953 |
 
 **Findings:** Centroid quantization error is small. At every nprobe, `centroid_rerank=2x`
-is sufficient to close the gap between quantized and exact centroid recall completely.
-The gap without reranking (`centroid_rerank=1x`) is at most 1% (0.916 vs 0.926 at
-nprobe=16) and shrinks with larger nprobe. At nprobe >= 64 (the production default),
-quantized centroid recall matches the exact ceiling even without reranking.
+is sufficient to close the gap between quantized and exact centroid recall completely
+(and sometimes slightly exceeds the ceiling due to randomness in the quantized ranking).
+The gap without reranking (`centroid_rerank=1x`) is at most 1.4% (0.895 vs 0.909 at
+nprobe=64) and is consistently closed by 2x reranking.
 
-This means `centroid_rerank_factor=2` is a safe default that eliminates centroid
-quantization loss at negligible cost (one extra exact-distance pass over nprobe
-centroids). For nprobe >= 64, `centroid_rerank_factor=1` (no reranking) also works --
-the bottleneck is within-cluster vector recall, not centroid selection.
+At 1M vectors the centroid recall ceiling itself is the limiting factor: even with
+perfect centroid selection, nprobe=64 only achieves 0.909 centroid recall and nprobe=128
+reaches 0.953. End-to-end recall is further reduced by within-cluster quantization error
+(see the "Recall at 1M Vectors" section above for vector reranking factors needed).
 
-Or we could not rerank, saving us the space of the raw centroids, and increase the nprobe count a bit instead.
+`centroid_rerank_factor=2` is a safe default that eliminates centroid quantization loss
+at negligible cost (one extra exact-distance pass over nprobe centroids). Alternatively,
+skipping centroid reranking entirely and increasing nprobe by ~10% achieves the same
+centroid recall while saving the memory cost of storing raw centroids.
