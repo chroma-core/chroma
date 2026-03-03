@@ -31,6 +31,18 @@ use uuid::Uuid;
 
 use crate::GarbageCollectError;
 
+/// The gRPC metadata key carrying the backoff reason.
+const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+
+/// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
+fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
+    status
+        .metadata()
+        .get(BACKOFF_REASON_MD_KEY)?
+        .to_str()
+        .ok()
+}
+
 //////////////// Errors ////////////////
 
 #[derive(Error, Debug)]
@@ -409,18 +421,16 @@ impl GrpcLog {
             .client_for(collection_id)?
             .push_logs(request)
             .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable.into()
-                    || err.code() == ErrorCodes::AlreadyExists.into()
-                {
-                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
-                    GrpcPushLogsError::Backoff
-                } else if err.code() == ErrorCodes::ResourceExhausted.into() {
-                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
+            .map_err(|err| match backoff_reason_from_status(&err) {
+                Some("compaction") => {
+                    tracing::event!(Level::INFO, name = "backoff", reason = "compaction", error =? err);
                     GrpcPushLogsError::BackoffCompaction
-                } else {
-                    err.into()
                 }
+                Some(reason) => {
+                    tracing::event!(Level::INFO, name = "backoff", reason, error =? err);
+                    GrpcPushLogsError::Backoff
+                }
+                None => err.into(),
             })?;
         let resp = resp.into_inner();
         if resp.log_is_sealed {
