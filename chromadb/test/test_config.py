@@ -1,7 +1,9 @@
+import os
+import random
+from threading import local
+
 from chromadb.config import Component, System, Settings
 from overrides import overrides
-from threading import local
-import random
 
 data = local()  # use thread local just in case tests ever run in parallel
 
@@ -196,6 +198,24 @@ def test_http_client_setting_defaults() -> None:
     assert settings.chroma_http_keepalive_secs == 40.0
     assert settings.chroma_http_max_connections is None
     assert settings.chroma_http_max_keepalive_connections is None
+
+
+def test_settings_ignores_extra_env_vars(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Settings should not crash when the .env file contains non-chromadb keys.
+
+    Regression test: pydantic-settings v2 defaults to extra="forbid", so a
+    .env file with unrelated keys (e.g. OPENAI_API_KEY) would raise a
+    ValidationError without extra="ignore" in model_config.
+    """
+    dotenv = tmp_path / ".env"
+    dotenv.write_text("OPENAI_API_KEY=sk-test\nGEMINI_API_KEY=test\n")
+    orig_dir = os.getcwd()
+    try:
+        os.chdir(tmp_path)
+        settings = Settings()
+    finally:
+        os.chdir(orig_dir)
+    assert settings.environment == ""
 
 
 def test_http_client_setting_overrides() -> None:
