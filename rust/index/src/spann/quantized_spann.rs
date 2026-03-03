@@ -427,7 +427,8 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Register a vector in target clusters.
-    /// Returns the clusters whose lengths exceed split threshold
+    /// Returns the clusters whose lengths exceed split threshold.
+    /// Caller is responsible for version management.
     fn register(
         &self,
         id: u32,
@@ -2944,5 +2945,79 @@ mod tests {
                 cluster_id
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_stale_register() {
+        // === Setup ===
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let usearch_provider = test_usearch_provider(storage);
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
+            CollectionUuid::new(),
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        // --- Spawn a target cluster with a filler point ---
+        let center: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
+        let emb_20 = [1.0f32, 0.0, 0.0, 0.0];
+        let code_20: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_20, &center).as_ref().into();
+        let v20 = writer.remove(20);
+
+        let delta = QuantizedDelta {
+            center: center.clone(),
+            codes: vec![code_20],
+            ids: vec![20],
+            length: 1,
+            versions: vec![v20],
+        };
+        let cluster_id = writer.spawn(delta).expect("spawn failed");
+
+        // --- Point 10: assign initial version ---
+        let v10 = writer.remove(10);
+        let emb_10 = writer.rotate(&[0.0, 1.0, 0.0, 0.0]);
+        writer.embeddings.insert(10, emb_10.clone());
+
+        // --- Simulate concurrent delete: bump version past v10 ---
+        writer.remove(10);
+        assert_eq!(*writer.versions.get(&10).unwrap(), v10 + 1);
+
+        // --- Call register with stale version ---
+        // This simulates what reassign would do if is_valid passed before the
+        // concurrent remove happened.
+        writer
+            .register(10, emb_10, &[cluster_id], v10)
+            .expect("register failed");
+
+        // --- Global version should NOT have been bumped ---
+        assert_eq!(
+            *writer.versions.get(&10).unwrap(),
+            v10 + 1,
+            "Global version should not change from stale register"
+        );
+
+        // --- Point 10 should NOT be alive ---
+        // Cluster entry has v10, but global is v10+1, so is_valid returns false.
+        let current_version = *writer.versions.get(&10).unwrap();
+        let has_live_copy = writer.cluster_deltas.iter().any(|entry| {
+            entry
+                .ids
+                .iter()
+                .zip(entry.versions.iter())
+                .any(|(id, ver)| *id == 10 && *ver == current_version)
+        });
+        assert!(
+            !has_live_copy,
+            "Stale register should not resurrect a deleted point"
+        );
     }
 }
