@@ -2831,17 +2831,6 @@ pub enum Quantization {
     FourBitRabitQWithUSearch,
 }
 
-impl Quantization {
-    /// Number of bits per data-vector element for this quantization variant.
-    /// Returns `None` when quantization is disabled.
-    pub fn data_bits(&self) -> Option<u8> {
-        match self {
-            Self::None => None,
-            Self::FourBitRabitQWithUSearch => Some(4),
-        }
-    }
-}
-
 fn is_default_quantization(v: &Quantization) -> bool {
     matches!(v, Quantization::None)
 }

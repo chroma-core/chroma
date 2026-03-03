@@ -686,7 +686,6 @@ pub fn internal_spann_configuration_strategy() -> impl Strategy<Value = Internal
                 ef_construction,
                 ef_search,
                 max_neighbors,
-                ..Default::default()
             },
         )
 }
