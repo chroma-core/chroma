@@ -19,6 +19,19 @@ is the cost of the preparation pipeline and cache pressure, not the quantization
 
 **Summary:** 1-bit RaBitQ is 25--71x faster than 4-bit across data quantization, code-vs-code distance, and batched query distance. The 1-bit path uses sign-bit packing with dual-accumulator fused reductions, simsimd hamming/AND+popcount, and QuantizedQuery bit-planes (fused quantize+scatter via `chunks_exact(8)`); the 4-bit path uses ray-walk codes, nibble unpack, and f32 dot products.
 
+## vs Exact f32 Distance
+
+Hot-scan benchmark: 1 query vs 2048 vectors, dim=1024, query in L1.
+Benchmark data from `cargo bench -p chroma-index --bench quantization_performance -- dq-`
+on r6i.8xlarge.
+
+| Method | Time | Per vector | vs exact |
+|--------|------|------------|----------|
+| dq-exact (f32 x f32, no quantization) | 290 us | 141 ns | 1.0x |
+| dq-4f (4-bit code, unpack + f32 dot) | 762 us | 372 ns | 2.6x slower |
+| dq-float (1-bit code, sign expand + f32 dot) | 933 us | 456 ns | 3.2x slower |
+| dq-bw (1-bit code, AND+popcount) | 40 us | 19.5 ns | **7.2x faster** |
+
 ---
 
 # Thread Scaling

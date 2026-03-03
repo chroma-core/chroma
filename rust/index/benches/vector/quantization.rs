@@ -32,6 +32,7 @@
 //!   quant-4bit     Code::<4>::quantize                       q-
 //!   quant-query    QuantizedQuery::new                      q-
 //!   quant-lut      BatchQueryLuts::new                      q-
+//!   dq-exact       DistanceFunction::distance (f32×f32)      dq-
 //!   dq-float       Code::<1>::distance_query_full_precision  dq-
 //!   dq-bw          Code::<1>::distance_query                 dq-
 //!   d-lut          BatchQueryLuts::distance_query           dq-
@@ -340,6 +341,25 @@ fn bench_distance_query(c: &mut Criterion) {
         let query_bytes = dim * 4;
         let padded_bytes = Code::<1>::packed_len(dim);
 
+        // Ground truth: exact f32 distance (no quantization at all)
+        let mut rng_exact = StdRng::seed_from_u64(0xcafe);
+        let raw_vecs: Vec<Vec<f32>> = (0..BATCH).map(|_| random_vec(&mut rng_exact, dim)).collect();
+        let raw_queries: Vec<Vec<f32>> =
+            (0..BATCH).map(|_| random_vec(&mut rng_exact, dim)).collect();
+
+        group.throughput(Throughput::Bytes((BATCH * 2 * dim * 4) as u64));
+        desc!(
+            format!("dq-exact/{dim}"),
+            format!("cold {BATCH} queries; DistanceFunction::distance f32*f32 (ground truth)")
+        );
+        group.bench_with_input(BenchmarkId::new("dq-exact", dim), &dim, |b, _| {
+            b.iter(|| {
+                for i in 0..BATCH {
+                    black_box(df.distance(&raw_vecs[i], &raw_queries[i]));
+                }
+            });
+        });
+
         // All 1-bit variants use the same throughput so GiB/s is comparable.
         let throughput_1bit = BATCH as u64 * (code_bytes_1 + query_bytes) as u64;
         let throughput_4bit = BATCH as u64 * (code_bytes_4 + query_bytes) as u64;
@@ -435,9 +455,29 @@ fn bench_distance_query(c: &mut Criterion) {
         let (_, codes_4, _) = make_codes_4bit(SCAN_DIM, SCAN_N);
         let padded_bytes = Code::<1>::packed_len(SCAN_DIM);
 
+        // Ground truth: exact f32 distance scan (no quantization)
+        let mut rng_exact = StdRng::seed_from_u64(0xcafe);
+        let scan_raw_vecs: Vec<Vec<f32>> =
+            (0..SCAN_N).map(|_| random_vec(&mut rng_exact, SCAN_DIM)).collect();
+        let scan_raw_query = random_vec(&mut rng_exact, SCAN_DIM);
+
         // Throughput counts code bytes only; the query is amortized and stays in L1.
         let tput_1bit = SCAN_N as u64 * Code::<1>::size(SCAN_DIM) as u64;
         let tput_4bit = SCAN_N as u64 * Code::<4>::size(SCAN_DIM) as u64;
+
+        group.throughput(Throughput::Bytes((SCAN_N * SCAN_DIM * 4) as u64));
+        desc!(
+            "dq-exact/scan",
+            format!("hot {SCAN_N} vectors @ dim={SCAN_DIM}; DistanceFunction::distance f32*f32 (ground truth)")
+        );
+        group.bench_function("dq-exact/scan", |b| {
+            b.iter(|| {
+                let _: f32 = scan_raw_vecs
+                    .iter()
+                    .map(|v| black_box(df.distance(v, &scan_raw_query)))
+                    .sum();
+            });
+        });
 
         group.throughput(Throughput::Bytes(tput_4bit));
         desc!(

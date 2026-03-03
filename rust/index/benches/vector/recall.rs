@@ -45,7 +45,6 @@ use std::time::Instant;
 
 use chroma_distance::{normalize, DistanceFunction};
 use chroma_index::quantization::{Code, QuantizedQuery, RabitqCode};
-use rayon::prelude::*;
 use faer::{
     stats::{
         prelude::{Distribution, StandardNormal, ThreadRng},
@@ -53,6 +52,7 @@ use faer::{
     },
     Mat,
 };
+use rayon::prelude::*;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -358,24 +358,20 @@ fn run_recall(
                     "4bit-code-full-query" => codes_4
                         .iter()
                         .map(|cb| {
-                            Code::<4, _>::new(cb.as_slice())
-                                .distance_query(df, &r_q, cn, cdq, qn)
+                            Code::<4, _>::new(cb.as_slice()).distance_query(df, &r_q, cn, cdq, qn)
                         })
                         .collect(),
                     "1bit-code-full-query" => codes_1
                         .iter()
                         .map(|cb| {
-                            Code::<1, _>::new(cb.as_slice())
-                                .distance_query(df, &r_q, cn, cdq, qn)
+                            Code::<1, _>::new(cb.as_slice()).distance_query(df, &r_q, cn, cdq, qn)
                         })
                         .collect(),
                     "1bit-code-4bit-query" => {
                         let qq = QuantizedQuery::new(&r_q, 4, padded_bytes, cn, cdq, qn);
                         codes_1
                             .iter()
-                            .map(|cb| {
-                                Code::<1, _>::new(cb.as_slice()).distance_4bit_query(df, &qq)
-                            })
+                            .map(|cb| Code::<1, _>::new(cb.as_slice()).distance_4bit_query(df, &qq))
                             .collect()
                     }
                     "1bit-code-1bit-query" => {
