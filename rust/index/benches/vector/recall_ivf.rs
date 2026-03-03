@@ -41,6 +41,7 @@
 //!   --centroid-rerank r,...   centroid rerank factors (default: 1,2,4,8,16)
 //!   --centroid-bits B         quantization bits for centroids: 1 (default) or 4
 //!   --data-bits B             quantization bits for data vectors: 1 (default) or 4
+//!   --cluster-bits B          quantization bits for KMeans assignment: 1 or 4 (default: exact)
 //!   --distance D              euclidean (default), cosine, ip
 
 use std::collections::HashSet;
@@ -250,6 +251,106 @@ fn simple_kmeans(vectors: &[Vec<f32>], n_clusters: usize, df: &DistanceFunction)
     }
 }
 
+fn quantized_kmeans(
+    vectors: &[Vec<f32>],
+    n_clusters: usize,
+    df: &DistanceFunction,
+    global_centroid: &[f32],
+    cluster_bits: u8,
+) -> KMeansResult {
+    let n = vectors.len();
+    let dim = vectors[0].len();
+    let gc_norm = c_norm(global_centroid);
+    let mut rng = StdRng::seed_from_u64(42);
+
+    let mut indices: Vec<usize> = (0..n).collect();
+    for i in 0..n_clusters.min(n) {
+        let j = rng.gen_range(i..n);
+        indices.swap(i, j);
+    }
+    let mut centroids: Vec<Vec<f32>> = indices[..n_clusters.min(n)]
+        .iter()
+        .map(|&i| vectors[i].clone())
+        .collect();
+
+    println!("    Quantizing {n} vectors for KMeans ({cluster_bits}-bit) ...");
+    let t0 = Instant::now();
+    let vector_codes: Vec<Vec<u8>> = vectors
+        .par_iter()
+        .map(|v| match cluster_bits {
+            4 => Code::<4>::quantize(v, global_centroid).as_ref().to_vec(),
+            _ => Code::<1>::quantize(v, global_centroid).as_ref().to_vec(),
+        })
+        .collect();
+    println!("    Quantized vectors in {:.2}s", t0.elapsed().as_secs_f64());
+
+    let mut assignments = vec![0usize; n];
+
+    for iter in 0..50 {
+        let centroid_codes: Vec<Vec<u8>> = centroids
+            .iter()
+            .map(|c| match cluster_bits {
+                4 => Code::<4>::quantize(c, global_centroid).as_ref().to_vec(),
+                _ => Code::<1>::quantize(c, global_centroid).as_ref().to_vec(),
+            })
+            .collect();
+
+        let new_assignments: Vec<usize> = vector_codes
+            .par_iter()
+            .map(|vc| {
+                centroid_codes
+                    .iter()
+                    .enumerate()
+                    .map(|(c, cc)| {
+                        let d = match cluster_bits {
+                            4 => Code::<4, _>::new(vc.as_slice())
+                                .distance_code(&Code::<4, _>::new(cc.as_slice()), df, gc_norm, dim),
+                            _ => Code::<1, _>::new(vc.as_slice())
+                                .distance_code(&Code::<1, _>::new(cc.as_slice()), df, gc_norm, dim),
+                        };
+                        (c, d)
+                    })
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .unwrap()
+                    .0
+            })
+            .collect();
+
+        let changed = assignments
+            .iter()
+            .zip(&new_assignments)
+            .any(|(old, new)| old != new);
+        assignments = new_assignments;
+
+        if !changed {
+            println!("    KMeans converged at iteration {iter}");
+            break;
+        }
+
+        let mut sums = vec![vec![0.0f32; dim]; n_clusters];
+        let mut counts = vec![0usize; n_clusters];
+        for (i, v) in vectors.iter().enumerate() {
+            let c = assignments[i];
+            counts[c] += 1;
+            for (j, &x) in v.iter().enumerate() {
+                sums[c][j] += x;
+            }
+        }
+        for c in 0..n_clusters {
+            if counts[c] > 0 {
+                for j in 0..dim {
+                    centroids[c][j] = sums[c][j] / counts[c] as f32;
+                }
+            }
+        }
+    }
+
+    KMeansResult {
+        centroids,
+        assignments,
+    }
+}
+
 // ── Per-cluster quantized data ───────────────────────────────────────────────
 
 struct QuantizedCluster {
@@ -362,6 +463,7 @@ fn run_ivf_recall(
     df: &DistanceFunction,
     data_bits: u8,
     centroid_bits: u8,
+    cluster_bits: Option<u8>,
 ) -> Vec<IvfRecallResult> {
     let dir = data_dir(dataset);
     let meta = load_meta(&dir.join(format!("meta_{n}.json")));
@@ -384,10 +486,41 @@ fn run_ivf_recall(
     let ground_truth = compute_ground_truth(&vectors, &queries, k, df);
     println!("  Ground truth in {:.2}s", t0.elapsed().as_secs_f64());
 
-    // Step 3: KMeans clustering on pre-processed (unrotated) vectors
-    println!("  KMeans clustering into {n_clusters} clusters ...");
+    // Step 3: random orthogonal rotation (before KMeans so quantized KMeans can use it)
+    println!("  Generating {dim}x{dim} random rotation P ...");
     let t0 = Instant::now();
-    let km = simple_kmeans(&vectors, n_clusters, df);
+    let p = {
+        let dist = UnitaryMat {
+            dim,
+            standard_normal: StandardNormal,
+        };
+        dist.sample(&mut ThreadRng::default())
+    };
+    println!("  Generated in {:.2}s", t0.elapsed().as_secs_f64());
+
+    // Step 3b: rotate all vectors (needed for both quantized KMeans and cluster building)
+    println!("  Rotating {n} vectors ...");
+    let t0 = Instant::now();
+    let rotated_vectors: Vec<Vec<f32>> = vectors
+        .par_iter()
+        .map(|v| rotate_vec(&p, v))
+        .collect();
+    println!("  Rotated in {:.2}s", t0.elapsed().as_secs_f64());
+
+    // Global centroid of rotated vectors (used for quantized KMeans and centroid quantization)
+    let global_centroid = compute_mean(&rotated_vectors);
+
+    // Step 4: KMeans clustering on rotated vectors
+    let cluster_mode = match cluster_bits {
+        Some(b) => format!("{b}-bit quantized"),
+        None => "exact".to_string(),
+    };
+    println!("  KMeans clustering into {n_clusters} clusters ({cluster_mode} distances) ...");
+    let t0 = Instant::now();
+    let km = match cluster_bits {
+        Some(bits) => quantized_kmeans(&rotated_vectors, n_clusters, df, &global_centroid, bits),
+        None => simple_kmeans(&rotated_vectors, n_clusters, df),
+    };
     let mut cluster_sizes: Vec<usize> = vec![0; n_clusters];
     for &a in &km.assignments {
         cluster_sizes[a] += 1;
@@ -406,25 +539,12 @@ fn run_ivf_recall(
         cluster_members[c].push(i);
     }
 
-    // Step 4: random orthogonal rotation
-    println!("  Generating {dim}x{dim} random rotation P ...");
-    let t0 = Instant::now();
-    let p = {
-        let dist = UnitaryMat {
-            dim,
-            standard_normal: StandardNormal,
-        };
-        dist.sample(&mut ThreadRng::default())
-    };
-    println!("  Generated in {:.2}s", t0.elapsed().as_secs_f64());
-
-    // Rotate centroids
-    let rotated_centroids: Vec<Vec<f32>> = km.centroids.iter().map(|c| rotate_vec(&p, c)).collect();
+    // Centroids from KMeans are already in rotated space (no separate rotation needed)
+    let rotated_centroids = km.centroids;
 
     // Step 5: quantize centroids relative to global centroid
     println!("  Quantizing {n_clusters} centroids ({centroid_bits}-bit) ...");
     let t0 = Instant::now();
-    let global_centroid = compute_mean(&rotated_centroids);
     let gc_norm = c_norm(&global_centroid);
     let centroid_codes: Vec<Vec<u8>> = rotated_centroids
         .iter()
@@ -438,7 +558,7 @@ fn run_ivf_recall(
         t0.elapsed().as_secs_f64()
     );
 
-    // Step 6: build per-cluster quantized data codes
+    // Step 6: build per-cluster quantized data codes (vectors already rotated)
     println!("  Building {n_clusters} quantized clusters ({data_bits}-bit data) ...");
     let t0 = Instant::now();
     let code_size = match data_bits {
@@ -452,12 +572,11 @@ fn run_ivf_recall(
             let members = &cluster_members[c];
             let mut codes = Vec::with_capacity(members.len() * code_size);
             for &idx in members {
-                let rotated_vec = rotate_vec(&p, &vectors[idx]);
                 let code_bytes = match data_bits {
-                    1 => Code::<1>::quantize(&rotated_vec, centroid)
+                    1 => Code::<1>::quantize(&rotated_vectors[idx], centroid)
                         .as_ref()
                         .to_vec(),
-                    _ => Code::<4>::quantize(&rotated_vec, centroid)
+                    _ => Code::<4>::quantize(&rotated_vectors[idx], centroid)
                         .as_ref()
                         .to_vec(),
                 };
@@ -696,6 +815,7 @@ struct CliArgs {
     df: DistanceFunction,
     data_bits: u8,
     centroid_bits: u8,
+    cluster_bits: Option<u8>,
 }
 
 fn parse_args() -> CliArgs {
@@ -711,6 +831,7 @@ fn parse_args() -> CliArgs {
     let mut distance_str = "euclidean".to_string();
     let mut data_bits = DEFAULT_DATA_BITS;
     let mut centroid_bits = DEFAULT_CENTROID_BITS;
+    let mut cluster_bits: Option<u8> = None;
 
     let mut i = 1;
     while i < args.len() {
@@ -784,6 +905,12 @@ fn parse_args() -> CliArgs {
                     centroid_bits = args[i].parse().unwrap();
                 }
             }
+            "--cluster-bits" => {
+                i += 1;
+                if i < args.len() {
+                    cluster_bits = Some(args[i].parse().unwrap());
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -820,6 +947,7 @@ fn parse_args() -> CliArgs {
         df,
         data_bits,
         centroid_bits,
+        cluster_bits,
     }
 }
 
@@ -888,12 +1016,13 @@ fn main() {
 
     println!("\n=== IVF RaBitQ Recall Benchmark ===");
     println!(
-        "  dataset={}, distance={}, K={}, data_bits={}, centroid_bits={}",
+        "  dataset={}, distance={}, K={}, data_bits={}, centroid_bits={}, cluster_bits={}",
         args.dataset,
         df_name(&args.df),
         args.k,
         args.data_bits,
         args.centroid_bits,
+        args.cluster_bits.map_or("exact".to_string(), |b| format!("{b}")),
     );
     println!(
         "  nprobes={:?}, centroid_rerank={:?}, vector_rerank={:?}",
@@ -916,6 +1045,7 @@ fn main() {
             &args.df,
             args.data_bits,
             args.centroid_bits,
+            args.cluster_bits,
         );
         print_results(
             &args.dataset,
