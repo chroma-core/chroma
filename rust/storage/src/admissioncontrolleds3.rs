@@ -1169,7 +1169,12 @@ impl AdmissionControlledS3Storage {
             ));
         }
         Err(StorageError::Generic {
-            source: Arc::new(std::io::Error::other("too many retries")),
+            source: Arc::new(std::io::Error::other(format!(
+                "get_with_e_tag_internal for keys [{}] failed after 2 attempts: \
+                 every attempt ended with a closed oneshot channel \
+                 (the fetching task was dropped before sending a result)",
+                composite_key
+            ))),
         })
     }
 
