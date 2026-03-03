@@ -34,6 +34,77 @@ on r6i.8xlarge.
 
 ---
 
+# Cross-Machine Comparison
+
+Full raw output in `saved_benchmarks/performance_r6i.8xlarge.txt` (Intel) and
+`saved_benchmarks/performance_mb_pro_m1.txt` (Apple Silicon).
+
+- **r6i.8xlarge**: Intel Ice Lake, 16 physical cores / 32 vCPUs, AVX-512
+- **MacBook Pro M1**: Apple Silicon, 8 performance cores, NEON
+
+**Batch benchmarks** (512 embeddings/queries, dim=1024):
+
+| Benchmark | M1 | r6i.8xlarge | Ratio (r6i/M1) |
+|-----------|-----|-------------|----------------|
+| quant-4bit (data encode) | 27.6 ms, 145 MiB/s | 43.2 ms, 93 MiB/s | 1.6x slower |
+| quant-1bit (data encode) | 361 us, 10.8 GiB/s | 576 us, 6.8 GiB/s | 1.6x slower |
+| dc-1bit (256 pairs) | 2.69 us, 25.5 GiB/s | 3.99 us, 17.2 GiB/s | 1.5x slower |
+| dc-4bit (256 pairs) | 182 us, 1.37 GiB/s | 166 us, 1.50 GiB/s | 1.1x faster |
+| dq-exact (f32 ground truth) | 53.6 us, 72.9 GiB/s | 120 us, 32.7 GiB/s | 2.2x slower |
+| dq-4f (4-bit, cold query) | 1.17 ms, 1.88 GiB/s | 1.71 ms, 1.29 GiB/s | 1.5x slower |
+| dq-float (1-bit, cold query) | 1.06 ms, 1.91 GiB/s | 1.46 ms, 1.39 GiB/s | 1.4x slower |
+| dq-bw (AND+popcount, cold) | 1.26 ms, 1.60 GiB/s | 2.38 ms, 870 MiB/s | 1.9x slower |
+| d-lut (nibble LUT, cold) | 5.28 ms, 393 MiB/s | 3.48 ms, 594 MiB/s | 1.5x faster |
+
+**Hot-scan benchmarks** (1 query, 2048 codes, dim=1024):
+
+| Benchmark | M1 | r6i.8xlarge | Ratio (r6i/M1) |
+|-----------|-----|-------------|----------------|
+| dq-exact/scan | 172 us, 45.3 GiB/s | 290 us, 27.0 GiB/s | 1.7x slower |
+| dq-4f/scan | 1.03 ms, 995 MiB/s | 762 us, 1.31 GiB/s | 1.4x faster |
+| dq-float/scan | 456 us, 616 MiB/s | 933 us, 301 MiB/s | 2.0x slower |
+| dq-bw/scan | 40.8 us, 6.74 GiB/s | 40.0 us, 6.86 GiB/s | ~same |
+| d-lut/scan | 371 us, 759 MiB/s | 265 us, 1.03 GiB/s | 1.4x faster |
+
+**Key primitive differences** (single-vector, hot cache):
+
+| Primitive | M1 | r6i.8xlarge | Ratio (r6i/M1) |
+|-----------|-----|-------------|----------------|
+| simsimd_dot | 260 ns, 29.3 GiB/s | 63 ns, 121 GiB/s | **4.1x faster** |
+| signed_dot | 198 ns, 19.9 GiB/s | 443 ns, 8.9 GiB/s | 2.2x slower |
+| sign_pack | 143 ns, 26.7 GiB/s | 320 ns, 11.9 GiB/s | 2.2x slower |
+| fused_reductions | 547 ns, 14.0 GiB/s | 695 ns, 11.0 GiB/s | 1.3x slower |
+| hamming/simsimd | 6.54 ns, 36.2 GiB/s | 4.77 ns, 50.0 GiB/s | 1.4x faster |
+| QuantizedQuery::new | 566 ns, 6.74 GiB/s | 2.21 us, 1.73 GiB/s | **3.9x slower** |
+
+**Observations:**
+
+- **M1 wins on scalar/FP-intensive work.** Data quantization (both 1-bit and 4-bit),
+  fused reductions, sign packing, and signed_dot are all 1.3-2.2x faster on M1.
+  Apple Silicon's wide FP pipeline and memory bandwidth advantage over Ice Lake show
+  clearly in these single-threaded benchmarks.
+
+- **r6i wins on simsimd operations.** AVX-512 gives a 4.1x advantage on raw f32 dot
+  products (simsimd_dot) and 1.4x on hamming distance. This matters for dq-4f/scan
+  and d-lut/scan which are both ~1.4x slower on M1.
+
+- **AND+popcount (dq-bw/scan) is identical** on both (~40 us). NEON CNT and AVX-512
+  VPOPCNTDQ are equally effective for this workload. This is the production-path kernel.
+
+- **QuantizedQuery::new is 3.9x faster on M1** (566 ns vs 2.21 us). The fused
+  min/max + quantize + bit-plane scatter path benefits from M1's stronger single-core
+  throughput. This is a per-query cost that amortizes across codes.
+
+- **d-lut is consistently slower on M1** (1.4-1.5x). The nibble LUT approach likely
+  benefits from AVX-512 gather/scatter instructions not available on NEON.
+
+- **Thread scaling data is only meaningful on r6i** (16 physical cores + HT). The M1
+  has 8 performance cores with no hyperthreading; the 16t/32t results on M1 are just
+  contention noise. See the Thread Scaling section for r6i scaling analysis.
+
+
+---
+
 # Thread Scaling
 
 Benchmark data from `cargo bench -p chroma-index --bench quantization -- thread_scaling`
