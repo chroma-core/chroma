@@ -58,6 +58,7 @@ use faer::{
     Mat,
 };
 use rand::{rngs::StdRng, Rng, SeedableRng};
+use rayon::prelude::*;
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -66,7 +67,7 @@ const DEFAULT_K: usize = 10;
 const DEFAULT_NPROBE: &[usize] = &[16, 32, 64, 128];
 const DEFAULT_VECTOR_RERANK_FACTORS: &[usize] = &[1, 2, 4];
 const DEFAULT_CENTROID_RERANK_FACTORS: &[usize] = &[1, 2, 4];
-const AVAILABLE_SIZES: &[usize] = &[10_000, 100_000, 1_000_000];
+const AVAILABLE_SIZES: &[usize] = &[10_000, 100_000, 1_000_000, 10_000_000];
 const DEFAULT_DATASET: &str = "cohere_wiki";
 const DEFAULT_DATA_BITS: u8 = 1;
 const DEFAULT_CENTROID_BITS: u8 = 1;
@@ -128,7 +129,7 @@ fn compute_ground_truth(
     df: &DistanceFunction,
 ) -> Vec<Vec<u32>> {
     queries
-        .iter()
+        .par_iter()
         .map(|q| {
             let mut dists: Vec<(usize, f32)> = db
                 .iter()
@@ -202,19 +203,25 @@ fn simple_kmeans(vectors: &[Vec<f32>], n_clusters: usize, df: &DistanceFunction)
     let mut assignments = vec![0usize; n];
 
     for _ in 0..50 {
-        let mut changed = false;
-        for (i, v) in vectors.iter().enumerate() {
-            let (best, _) = centroids
-                .iter()
-                .enumerate()
-                .map(|(c, cent)| (c, exact_distance(v, cent, df)))
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .unwrap();
-            if assignments[i] != best {
-                assignments[i] = best;
-                changed = true;
-            }
-        }
+        let new_assignments: Vec<usize> = vectors
+            .par_iter()
+            .map(|v| {
+                centroids
+                    .iter()
+                    .enumerate()
+                    .map(|(c, cent)| (c, exact_distance(v, cent, df)))
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                    .unwrap()
+                    .0
+            })
+            .collect();
+
+        let changed = assignments
+            .iter()
+            .zip(&new_assignments)
+            .any(|(old, new)| old != new);
+        assignments = new_assignments;
+
         if !changed {
             break;
         }
@@ -439,6 +446,7 @@ fn run_ivf_recall(
         _ => Code::<4>::size(dim),
     };
     let quantized_clusters: Vec<QuantizedCluster> = (0..n_clusters)
+        .into_par_iter()
         .map(|c| {
             let centroid = &rotated_centroids[c];
             let members = &cluster_members[c];

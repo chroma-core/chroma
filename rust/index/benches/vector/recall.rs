@@ -57,7 +57,7 @@ use faer::{
 const DEFAULT_DIM: usize = 1024;
 const DEFAULT_K: usize = 10;
 const DEFAULT_RERANK_FACTORS: &[usize] = &[1, 2, 4, 8, 16];
-const AVAILABLE_SIZES: &[usize] = &[10_000, 100_000, 1_000_000];
+const AVAILABLE_SIZES: &[usize] = &[10_000, 100_000, 1_000_000, 10_000_000];
 const DEFAULT_DATASET: &str = "cohere_wiki";
 
 // Vectors are rotated in chunks of this many to keep peak extra memory bounded.

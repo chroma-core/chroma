@@ -46,7 +46,7 @@ import numpy as np
 
 DATA_ROOT = Path(__file__).resolve().parent / "data__nogit"
 
-DEFAULT_SIZES = [10_000, 100_000, 1_000_000]
+DEFAULT_SIZES = [10_000, 100_000, 1_000_000, 10_000_000]
 DEFAULT_N_QUERIES = 100
 DEFAULT_K = 100
 
@@ -298,6 +298,23 @@ def main() -> None:
 
     cfg: Dict[str, Any] = DATASETS[args.dataset]
     emb_column = cfg["emb_column"]
+    dim = cfg.get("dim", 1024)
+    max_size = max(args.sizes)
+
+    if max_size >= 10_000_000:
+        vec_gb = max_size * dim * 4 / 1e9
+        total_gb = vec_gb * 2.5  # vectors + KNN working memory
+        print(
+            f"WARNING: Preparing {max_size:,} vectors at dim={dim} requires ~{vec_gb:.0f} GB"
+        )
+        print(
+            f"         for vectors alone, ~{total_gb:.0f} GB total with ground truth computation."
+        )
+        resp = input("Continue? [y/N] ").strip().lower()
+        if resp != "y":
+            print("Aborted.")
+            sys.exit(0)
+
     t0 = time.time()
     config_info: Any
 
