@@ -20,11 +20,6 @@ spec:
       containers:
         - name: minio
           image: minio/minio:latest
-          resources:
-            requests:
-              cpu: "100m"
-            limits:
-              cpu: "100m"
           args:
             - server
             - /storage

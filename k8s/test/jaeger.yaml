@@ -38,10 +38,8 @@ spec:
               name: http-port
           resources:
             requests:
-              cpu: "50m"
               memory: "512Mi"
             limits:
-              cpu: "50m"
               memory: "2Gi"
 
           volumeMounts:

@@ -16,11 +16,6 @@ spec:
       containers:
         - name: postgres
           image: chroma-postgres
-          resources:
-            requests:
-              cpu: "100m"
-            limits:
-              cpu: "100m"
           env:
             - name: POSTGRES_MULTIPLE_DATABASES
               value: "sysdb,log"
