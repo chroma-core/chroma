@@ -11002,6 +11002,7 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "uuid",
+ "wal3",
 ]
 
 [[package]]

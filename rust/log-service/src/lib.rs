@@ -2088,6 +2088,87 @@ impl LogServer {
         }))
     }
 
+    async fn scout_log_fragments(
+        &self,
+        request: Request<chroma_types::chroma_proto::ScoutLogFragmentsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ScoutLogFragmentsResponse>, Status> {
+        let req = request.into_inner();
+        let collection_id = Uuid::parse_str(&req.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&req.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let manifest_and_witness = match log_reader.manifest_and_witness().await {
+            Ok(Some(mw)) => mw,
+            Ok(None) => {
+                return Ok(Response::new(
+                    chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                        first_uninserted_record_offset: req.start_from_offset,
+                        fragments: vec![],
+                    },
+                ));
+            }
+            Err(wal3::Error::UninitializedLog) => {
+                return Ok(Response::new(
+                    chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                        first_uninserted_record_offset: req.start_from_offset,
+                        fragments: vec![],
+                    },
+                ));
+            }
+            Err(err) => {
+                return Err(Status::new(
+                    err.code().into(),
+                    format!("could not scout log fragments: {err:?}"),
+                ));
+            }
+        };
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: None,
+        };
+        let from = LogPosition::from_offset(req.start_from_offset);
+        let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
+            Some(fragments) => fragments,
+            None => log_reader.scan(from, limits).await.map_err(|err| {
+                Status::new(
+                    err.code().into(),
+                    format!("could not scout log fragments: {err:?}"),
+                )
+            })?,
+        };
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let proto_fragments = fragments
+            .into_iter()
+            .map(|f| chroma_types::chroma_proto::LogFragmentPointer {
+                path: f.path,
+                start_offset: f.start.offset(),
+                limit_offset: f.limit.offset(),
+                num_bytes: f.num_bytes,
+                storage_prefix: storage_prefix.clone(),
+            })
+            .collect();
+        Ok(Response::new(
+            chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                first_uninserted_record_offset: manifest_and_witness
+                    .manifest
+                    .next_write_timestamp()
+                    .offset(),
+                fragments: proto_fragments,
+            },
+        ))
+    }
+
     async fn read_fragments(
         &self,
         database_name: Option<&TopologyName>,
@@ -2876,6 +2957,13 @@ impl LogService for LogServerWrapper {
         request: Request<PurgeFromCacheRequest>,
     ) -> Result<Response<PurgeFromCacheResponse>, Status> {
         self.log_server.purge_from_cache(request).await
+    }
+
+    async fn scout_log_fragments(
+        &self,
+        request: Request<chroma_types::chroma_proto::ScoutLogFragmentsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ScoutLogFragmentsResponse>, Status> {
+        self.log_server.scout_log_fragments(request).await
     }
 }
 

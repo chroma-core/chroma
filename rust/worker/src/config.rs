@@ -172,6 +172,11 @@ pub struct QueryServiceConfig {
         default = "QueryServiceConfig::default_grpc_shutdown_grace_period"
     )]
     pub grpc_shutdown_grace_period: Duration,
+
+    /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
+    /// instead of gRPC PullLogs for log fetching.
+    #[serde(default = "QueryServiceConfig::default_use_pointer_fetch")]
+    pub use_pointer_fetch: bool,
 }
 
 impl QueryServiceConfig {
@@ -204,6 +209,10 @@ impl QueryServiceConfig {
 
     fn default_grpc_shutdown_grace_period() -> Duration {
         Duration::from_secs(1)
+    }
+
+    fn default_use_pointer_fetch() -> bool {
+        false
     }
 }
 

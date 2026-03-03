@@ -322,6 +322,7 @@ impl LogFetchOrchestrator {
             spann_provider,
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
+            false, // LogFetchOrchestrator doesn't need use_pointer_fetch
         );
         LogFetchOrchestrator {
             collection_id,
@@ -491,6 +492,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     tenant: collection.tenant.clone(),
                     database_name,
                     fetch_log_concurrency: self.context.fetch_log_concurrency,
+                    use_pointer_fetch: self.context.use_pointer_fetch,
+                    fragment_fetcher: self.context.fragment_fetcher.clone(),
                 }),
                 (),
                 ctx.receiver(),

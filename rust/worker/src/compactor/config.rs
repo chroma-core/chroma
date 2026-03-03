@@ -114,6 +114,10 @@ pub struct CompactorConfig {
     pub repair_log_offsets_timeout_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_failure_count")]
     pub max_failure_count: i32,
+    /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
+    /// instead of gRPC PullLogs for log fetching.
+    #[serde(default = "CompactorConfig::default_use_pointer_fetch")]
+    pub use_pointer_fetch: bool,
 }
 
 impl CompactorConfig {
@@ -172,6 +176,10 @@ impl CompactorConfig {
     fn default_max_failure_count() -> i32 {
         5
     }
+
+    fn default_use_pointer_fetch() -> bool {
+        false
+    }
 }
 
 impl Default for CompactorConfig {
@@ -193,6 +201,7 @@ impl Default for CompactorConfig {
             repair_log_offsets_timeout_seconds:
                 CompactorConfig::default_repair_log_offsets_timeout_seconds(),
             max_failure_count: CompactorConfig::default_max_failure_count(),
+            use_pointer_fetch: CompactorConfig::default_use_pointer_fetch(),
         }
     }
 }

@@ -60,6 +60,7 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
+    use_pointer_fetch: bool,
     shutdown_grace_period: Duration,
 }
 
@@ -111,6 +112,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
+            use_pointer_fetch: config.use_pointer_fetch,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
@@ -218,6 +220,8 @@ impl WorkerServer {
             tenant: collection_and_segments.collection.tenant.clone(),
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
+            use_pointer_fetch: self.use_pointer_fetch,
+            fragment_fetcher: None,
         })
     }
 
@@ -784,6 +788,7 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
+            use_pointer_fetch: false,
             shutdown_grace_period: Duration::from_secs(1),
         };
 
