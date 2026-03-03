@@ -84,3 +84,54 @@ Full output in `recall_1M_results.txt` and `recall_1M_results_k100.txt`.
 | 16x | 0.997 | 0.999 | 1.000 | 0.999 | 1.000 | 1.000 |
 
 4-bit reaches recall_mean 1.0 at rerank 2x–4x on all datasets. 1-bit (1bit-code-4bit-query) needs rerank 8x–16x for recall_mean > 0.99; at rerank 4x, 1-bit recall_mean is 0.95–0.99.
+
+These results measure within-cluster recall (single centroid, flat scan). The next section
+addresses centroid-level recall in a multi-cluster IVF setting.
+
+---
+
+# Centroid Recall (IVF)
+
+tl;dr: Recall is primarily determined by the number of probes used. Centroid reranking plays in tiny role: 2x seems to always get us to full recall.
+
+Benchmark data from `cargo bench -p chroma-index --bench recall_ivf -- --size 100000`
+(cohere_wiki, N=100K, 316 clusters via KMeans, K=10, 1-bit data, 1-bit centroids).
+
+This measures centroid selection recall: what fraction of the true top-K neighbors
+reside in the probed clusters. Centroids are quantized with 1-bit RaBitQ relative to a
+global centroid (centroid-of-centroids), matching the production quantized HNSW pipeline.
+Centroid search is brute-force over quantized codes (isolating quantization error from
+HNSW graph approximation).
+
+**centroid_recall** = fraction of true top-K in the nprobe clusters selected by the
+quantized centroid pipeline (quantized search for `nprobe * centroid_rerank` candidates,
+then exact-distance rerank to nprobe). **centroid_recall_ceiling** = same metric using
+exact centroid distance (no quantization). Namely, this is the maximum recall that can be achieved with the given nprobe.
+
+| nprobe | centroid_rerank | centroid_recall | centroid_recall_ceiling |
+|--------|-----------------|-----------------|------------------------|
+| 16 | 1x | 0.916 | 0.926 |
+| 16 | 2x | 0.926 | 0.926 |
+| 16 | 4x | 0.926 | 0.926 |
+| 32 | 1x | 0.960 | 0.963 |
+| 32 | 2x | 0.963 | 0.963 |
+| 32 | 4x | 0.963 | 0.963 |
+| 64 | 1x | 0.983 | 0.983 |
+| 64 | 2x | 0.983 | 0.983 |
+| 64 | 4x | 0.983 | 0.983 |
+| 128 | 1x | 0.997 | 0.998 |
+| 128 | 2x | 0.998 | 0.998 |
+| 128 | 4x | 0.998 | 0.998 |
+
+**Findings:** Centroid quantization error is small. At every nprobe, `centroid_rerank=2x`
+is sufficient to close the gap between quantized and exact centroid recall completely.
+The gap without reranking (`centroid_rerank=1x`) is at most 1% (0.916 vs 0.926 at
+nprobe=16) and shrinks with larger nprobe. At nprobe >= 64 (the production default),
+quantized centroid recall matches the exact ceiling even without reranking.
+
+This means `centroid_rerank_factor=2` is a safe default that eliminates centroid
+quantization loss at negligible cost (one extra exact-distance pass over nprobe
+centroids). For nprobe >= 64, `centroid_rerank_factor=1` (no reranking) also works --
+the bottleneck is within-cluster vector recall, not centroid selection.
+
+Or we could not rerank, saving us the space of the raw centroids, and increase the nprobe count a bit instead.
