@@ -97,7 +97,9 @@ pub(crate) struct CompactionManagerContext {
     purge_dirty_log_timeout_seconds: u64,
     repair_log_offsets_timeout_seconds: u64,
     disabled_function_collections: HashSet<CollectionUuid>,
+    use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
+    collections_for_fragment_fetch: HashSet<CollectionUuid>,
 }
 
 pub(crate) struct CompactionManager {
@@ -148,7 +150,9 @@ impl CompactionManager {
         repair_log_offsets_timeout_seconds: u64,
         heap_service: Option<GrpcHeapService>,
         disabled_function_collections: HashSet<CollectionUuid>,
+        use_fragment_fetch: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
+        collections_for_fragment_fetch: HashSet<CollectionUuid>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -183,7 +187,9 @@ impl CompactionManager {
                 repair_log_offsets_timeout_seconds,
                 disabled_function_collections,
                 heap_service,
+                use_fragment_fetch,
                 fragment_fetcher,
+                collections_for_fragment_fetch,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -384,6 +390,25 @@ impl Drop for CompactionManager {
 }
 
 impl CompactionManagerContext {
+    /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
+    /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
+    /// true or the collection appears in `collections_for_fragment_fetch`.
+    fn fragment_fetcher_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<Arc<FragmentFetcher>> {
+        let fetcher = self.fragment_fetcher.as_ref()?;
+        if self.use_fragment_fetch
+            || self
+                .collections_for_fragment_fetch
+                .contains(&collection_id)
+        {
+            Some(Arc::clone(fetcher))
+        } else {
+            None
+        }
+    }
+
     #[instrument(name = "CompactionManager::compact", skip(self))]
     async fn compact(
         self,
@@ -404,6 +429,7 @@ impl CompactionManagerContext {
         // fetch data to compact -> execute_task/compact -> register
         // Use the compact function to handle the entire orchestration process
         let is_function_disabled = self.disabled_function_collections.contains(&collection_id);
+        let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
 
         let compact_result = Box::pin(compact(
             self.system.clone(),
@@ -422,7 +448,7 @@ impl CompactionManagerContext {
             self.spann_provider.clone(),
             dispatcher.clone(),
             is_function_disabled,
-            self.fragment_fetcher.clone(),
+            fragment_fetcher,
             #[cfg(test)]
             None,
         ))
@@ -575,9 +601,21 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             }
         };
 
-        let fragment_fetcher = if config.compactor.use_fragment_fetch {
+        let mut collections_for_fragment_fetch =
+            HashSet::with_capacity(config.compactor.collections_for_fragment_fetch.len());
+        for id_str in &config.compactor.collections_for_fragment_fetch {
+            let uuid = Uuid::from_str(id_str).map_err(|_| {
+                Box::new(CompactionError::InvalidCollectionUuid(id_str.clone()))
+                    as Box<dyn ChromaError>
+            })?;
+            collections_for_fragment_fetch.insert(CollectionUuid(uuid));
+        }
+        let needs_fragment_fetcher =
+            config.compactor.use_fragment_fetch || !collections_for_fragment_fetch.is_empty();
+        let fragment_fetcher = if needs_fragment_fetcher {
             Some(Arc::new(
-                FragmentFetcher::new(storage.clone(), &config.fragment_fetcher_cache).await?,
+                FragmentFetcher::new(storage.clone(), &config.compactor.fragment_fetcher_cache)
+                    .await?,
             ))
         } else {
             None
@@ -603,7 +641,9 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             repair_log_offsets_timeout_seconds,
             heap_service,
             disabled_function_collections,
+            config.compactor.use_fragment_fetch,
             fragment_fetcher,
+            collections_for_fragment_fetch,
         )
     }
 }
@@ -1110,7 +1150,9 @@ mod tests {
             repair_log_offsets_timeout_seconds,
             None,           // heap_service not needed in tests
             HashSet::new(), // disabled_function_collections
+            false,          // use_fragment_fetch
             None,           // fragment_fetcher
+            HashSet::new(), // collections_for_fragment_fetch
         )
         .expect("Failed to create compaction manager in test");
 

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,7 +21,7 @@ use chroma_types::{
     },
     operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
     plan::{ReadLevel, SearchPayload},
-    CollectionAndSegments, SegmentType,
+    CollectionAndSegments, CollectionUuid, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -44,6 +45,16 @@ use crate::{
     },
 };
 
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid collection UUID in config: {0}")]
+struct InvalidCollectionUuidError(String);
+
+impl ChromaError for InvalidCollectionUuidError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
+
 #[derive(Clone)]
 pub struct WorkerServer {
     // System
@@ -61,7 +72,9 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
+    use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
+    collections_for_fragment_fetch: HashSet<CollectionUuid>,
     shutdown_grace_period: Duration,
 }
 
@@ -101,7 +114,16 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
-        let fragment_fetcher = if config.use_fragment_fetch {
+        let mut collections_for_fragment_fetch = HashSet::new();
+        for id_str in &config.collections_for_fragment_fetch {
+            let uuid = uuid::Uuid::parse_str(id_str).map_err(|_| {
+                Box::new(InvalidCollectionUuidError(id_str.clone())) as Box<dyn ChromaError>
+            })?;
+            collections_for_fragment_fetch.insert(CollectionUuid(uuid));
+        }
+        let needs_fragment_fetcher =
+            config.use_fragment_fetch || !collections_for_fragment_fetch.is_empty();
+        let fragment_fetcher = if needs_fragment_fetcher {
             Some(Arc::new(
                 FragmentFetcher::new(storage.clone(), &config.fragment_fetcher_cache).await?,
             ))
@@ -120,7 +142,9 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
+            use_fragment_fetch: config.use_fragment_fetch,
             fragment_fetcher,
+            collections_for_fragment_fetch,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
@@ -216,6 +240,8 @@ impl WorkerServer {
         let database_name =
             chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
                 .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
+        let collection_id = collection_and_segments.collection.collection_id;
+        let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
         Ok(FetchLogOperator {
             log_client: self.log.clone(),
             batch_size,
@@ -224,12 +250,31 @@ impl WorkerServer {
             start_log_offset_id: u64::try_from(collection_and_segments.collection.log_position + 1)
                 .unwrap_or_default(),
             maximum_fetch_count: None,
-            collection_uuid: collection_and_segments.collection.collection_id,
+            collection_uuid: collection_id,
             tenant: collection_and_segments.collection.tenant.clone(),
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
-            fragment_fetcher: self.fragment_fetcher.clone(),
+            fragment_fetcher,
         })
+    }
+
+    /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
+    /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
+    /// true or the collection appears in `collections_for_fragment_fetch`.
+    fn fragment_fetcher_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<Arc<FragmentFetcher>> {
+        let fetcher = self.fragment_fetcher.as_ref()?;
+        if self.use_fragment_fetch
+            || self
+                .collections_for_fragment_fetch
+                .contains(&collection_id)
+        {
+            Some(Arc::clone(fetcher))
+        } else {
+            None
+        }
     }
 
     async fn orchestrate_count(
@@ -795,7 +840,9 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
+            use_fragment_fetch: false,
             fragment_fetcher: None,
+            collections_for_fragment_fetch: HashSet::new(),
             shutdown_grace_period: Duration::from_secs(1),
         };
 

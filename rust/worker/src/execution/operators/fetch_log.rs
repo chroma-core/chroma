@@ -80,6 +80,7 @@ impl ChromaError for FetchLogError {
 
 impl FetchLogOperator {
     /// Fetch logs via the existing ScoutLogs + PullLogs gRPC path.
+    #[tracing::instrument(skip(self))]
     async fn run_grpc_pull(&self) -> Result<FetchLogOutput, FetchLogError> {
         let mut log_client = self.log_client.clone();
         let mut limit_offset = log_client
@@ -147,6 +148,7 @@ impl FetchLogOperator {
     }
 
     /// Fetch logs via ScoutLogFragments + direct object storage reads.
+    #[tracing::instrument(skip(self))]
     async fn run_pointer_fetch(&self) -> Result<FetchLogOutput, FetchLogError> {
         let fragment_fetcher =
             self.fragment_fetcher
@@ -179,7 +181,12 @@ impl FetchLogOperator {
             .collect();
 
         let fetched = fragment_fetcher
-            .fetch_records(&pointers, self.start_log_offset_id, limit_offset)
+            .fetch_records(
+                &pointers,
+                self.start_log_offset_id,
+                limit_offset,
+                self.fetch_log_concurrency,
+            )
             .await?;
 
         Ok(Chunk::new(fetched.into()))

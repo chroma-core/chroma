@@ -1148,7 +1148,16 @@ impl LogServer {
         let mut cached = None;
         if let Some(cache) = self.cache.as_ref() {
             if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
-                cached = serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes).ok();
+                match serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes) {
+                    Ok(mw) => cached = Some(mw),
+                    Err(err) => {
+                        tracing::warn!(
+                            %collection_id,
+                            %err,
+                            "failed to deserialize cached manifest; falling back to full fetch",
+                        );
+                    }
+                }
             }
         }
         if let Some(ref c) = cached {
