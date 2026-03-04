@@ -4,6 +4,7 @@ use chroma_blockstore::{BlockfileFlusher, BlockfileWriter};
 use chroma_error::{ChromaError, ErrorCodes};
 use dashmap::DashMap;
 use thiserror::Error;
+use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::sparse::{
@@ -106,96 +107,127 @@ impl<'me> SparseWriter<'me> {
             .collect::<Vec<_>>();
         encoded_dimensions.push((DIMENSION_PREFIX.to_string(), u32::MAX));
         encoded_dimensions.sort_unstable();
+        tracing::trace!(
+            num_dimensions = encoded_dimensions.len(),
+            "Collected and sorted delta dimensions"
+        );
 
         let mut block_maxes = HashMap::with_capacity(encoded_dimensions.len());
-        let mut dimension_maxes = match self.old_reader.as_ref() {
-            Some(reader) => reader.get_dimension_max().await?,
-            None => HashMap::new(),
-        };
-
-        for (encoded_dimension, dimension_id) in &encoded_dimensions {
-            if encoded_dimension == DIMENSION_PREFIX {
-                continue;
-            }
-
-            let Some((_, offset_updates)) = self.delta.remove(dimension_id) else {
-                continue;
-            };
-            let mut offset_update_vec = offset_updates.into_iter().collect::<Vec<_>>();
-            offset_update_vec.sort_unstable_by_key(|(offset, _)| *offset);
-
-            let mut offset_values = match self.old_reader.as_ref() {
-                Some(reader) => reader.get_offset_values(encoded_dimension).await?.collect(),
-                None => HashMap::new(),
-            };
-
-            for (offset, update) in offset_update_vec {
-                match update {
-                    Some(value) => {
-                        self.offset_value_writer
-                            .set(encoded_dimension, offset, value)
-                            .await?;
-                        offset_values.insert(offset, value);
-                    }
-                    None => {
-                        self.offset_value_writer
-                            .delete::<_, f32>(encoded_dimension, offset)
-                            .await?;
-                        offset_values.remove(&offset);
-                    }
-                }
-            }
-
-            if offset_values.is_empty() {
-                dimension_maxes.remove(dimension_id);
-            } else {
-                let mut block_max =
-                    Vec::with_capacity(offset_values.len() / self.block_size as usize);
-                let mut dimension_max = f32::MIN;
-                let mut offset_value_vec = offset_values.into_iter().collect::<Vec<_>>();
-                offset_value_vec.sort_unstable_by_key(|(offset, _)| *offset);
-
-                for block in offset_value_vec.chunks(self.block_size as usize) {
-                    let (max_offset, max_value) = block.iter().fold(
-                        (u32::MIN, f32::MIN),
-                        |(max_offset, max_value), (offset, value)| {
-                            (max_offset.max(*offset), max_value.max(*value))
-                        },
-                    );
-                    block_max.push((max_offset + 1, max_value));
-                    dimension_max = dimension_max.max(max_value);
-                }
-
-                block_maxes.insert(*dimension_id, block_max);
-                dimension_maxes.insert(*dimension_id, dimension_max);
+        let mut dimension_maxes = async {
+            match self.old_reader.as_ref() {
+                Some(reader) => reader.get_dimension_max().await,
+                None => Ok(HashMap::new()),
             }
         }
+        .instrument(tracing::trace_span!("Load old dimension maxes"))
+        .await?;
 
-        for (encoded_dimension, dimension_id) in encoded_dimensions {
-            if encoded_dimension == DIMENSION_PREFIX {
-                let mut dimension_max_vec = dimension_maxes.drain().collect::<Vec<_>>();
-                dimension_max_vec.sort_unstable_by_key(|(dimension_id, _)| *dimension_id);
-                for (dimension_max_id, value) in dimension_max_vec {
+        async {
+            for (encoded_dimension, dimension_id) in &encoded_dimensions {
+                if encoded_dimension == DIMENSION_PREFIX {
+                    continue;
+                }
+
+                let Some((_, offset_updates)) = self.delta.remove(dimension_id) else {
+                    continue;
+                };
+                let mut offset_update_vec = offset_updates.into_iter().collect::<Vec<_>>();
+                offset_update_vec.sort_unstable_by_key(|(offset, _)| *offset);
+
+                let mut offset_values = match self.old_reader.as_ref() {
+                    Some(reader) => reader.get_offset_values(encoded_dimension).await?.collect(),
+                    None => HashMap::new(),
+                };
+
+                for (offset, update) in offset_update_vec {
+                    match update {
+                        Some(value) => {
+                            self.offset_value_writer
+                                .set(encoded_dimension, offset, value)
+                                .await?;
+                            offset_values.insert(offset, value);
+                        }
+                        None => {
+                            self.offset_value_writer
+                                .delete::<_, f32>(encoded_dimension, offset)
+                                .await?;
+                            offset_values.remove(&offset);
+                        }
+                    }
+                }
+
+                if offset_values.is_empty() {
+                    dimension_maxes.remove(dimension_id);
+                } else {
+                    let mut block_max =
+                        Vec::with_capacity(offset_values.len() / self.block_size as usize);
+                    let mut dimension_max = f32::MIN;
+                    let mut offset_value_vec = offset_values.into_iter().collect::<Vec<_>>();
+                    offset_value_vec.sort_unstable_by_key(|(offset, _)| *offset);
+
+                    for block in offset_value_vec.chunks(self.block_size as usize) {
+                        let (max_offset, max_value) = block.iter().fold(
+                            (u32::MIN, f32::MIN),
+                            |(max_offset, max_value), (offset, value)| {
+                                (max_offset.max(*offset), max_value.max(*value))
+                            },
+                        );
+                        block_max.push((max_offset + 1, max_value));
+                        dimension_max = dimension_max.max(max_value);
+                    }
+
+                    block_maxes.insert(*dimension_id, block_max);
+                    dimension_maxes.insert(*dimension_id, dimension_max);
+                }
+            }
+            Ok::<_, SparseWriterError>(())
+        }
+        .instrument(tracing::trace_span!(
+            "Write offset values and compute block maxes"
+        ))
+        .await?;
+
+        async {
+            for (encoded_dimension, dimension_id) in encoded_dimensions {
+                if encoded_dimension == DIMENSION_PREFIX {
+                    let mut dimension_max_vec = dimension_maxes.drain().collect::<Vec<_>>();
+                    dimension_max_vec.sort_unstable_by_key(|(dimension_id, _)| *dimension_id);
+                    for (dimension_max_id, value) in dimension_max_vec {
+                        self.max_writer
+                            .set(DIMENSION_PREFIX, dimension_max_id, value)
+                            .await?;
+                    }
+                    continue;
+                }
+
+                let Some(block_max) = block_maxes.remove(&dimension_id) else {
+                    continue;
+                };
+                for (offset, value) in block_max {
                     self.max_writer
-                        .set(DIMENSION_PREFIX, dimension_max_id, value)
+                        .set(&encoded_dimension, offset, value)
                         .await?;
                 }
-                continue;
             }
-
-            let Some(block_max) = block_maxes.remove(&dimension_id) else {
-                continue;
-            };
-            for (offset, value) in block_max {
-                self.max_writer
-                    .set(&encoded_dimension, offset, value)
-                    .await?;
-            }
+            Ok::<_, SparseWriterError>(())
         }
+        .instrument(tracing::trace_span!("Write max blockfile"))
+        .await?;
+
+        let max_flusher = self
+            .max_writer
+            .commit::<u32, f32>()
+            .instrument(tracing::trace_span!("Commit max blockfile"))
+            .await?;
+        let offset_value_flusher = self
+            .offset_value_writer
+            .commit::<u32, f32>()
+            .instrument(tracing::trace_span!("Commit offset-value blockfile"))
+            .await?;
 
         Ok(SparseFlusher {
-            max_flusher: self.max_writer.commit::<u32, f32>().await?,
-            offset_value_flusher: self.offset_value_writer.commit::<u32, f32>().await?,
+            max_flusher,
+            offset_value_flusher,
         })
     }
 }
