@@ -756,9 +756,7 @@ export class CollectionImpl implements Collection {
     if (whereDocument) validateWhereDocument(whereDocument);
   }
 
-  public async count(options?: {
-    readLevel?: ReadLevel;
-  }): Promise<number> {
+  public async count(options?: { readLevel?: ReadLevel }): Promise<number> {
     const { data } = await RecordService.collectionCount({
       client: this.apiClient,
       path: await this.path(),
@@ -966,12 +964,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-        collectionName: this.name,
-        currentConfiguration: this.configuration,
-        newConfiguration: configuration,
-        currentEmbeddingFunction: this.embeddingFunction,
-        client: this.chromaClient,
-      })
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+          client: this.chromaClient,
+        })
       : {};
 
     if (updateEmbeddingFunction) {
