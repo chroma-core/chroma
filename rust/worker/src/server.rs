@@ -266,11 +266,7 @@ impl WorkerServer {
         collection_id: CollectionUuid,
     ) -> Option<Arc<FragmentFetcher>> {
         let fetcher = self.fragment_fetcher.as_ref()?;
-        if self.use_fragment_fetch
-            || self
-                .collections_for_fragment_fetch
-                .contains(&collection_id)
-        {
+        if self.use_fragment_fetch || self.collections_for_fragment_fetch.contains(&collection_id) {
             Some(Arc::clone(fetcher))
         } else {
             None

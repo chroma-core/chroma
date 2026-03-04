@@ -239,7 +239,11 @@ impl FragmentFetcher {
         let (parsed_records, _num_bytes, _now_us) =
             wal3::interfaces::s3::parse_parquet_fast(&bytes, starting_position).await?;
 
-        let mut records = Vec::with_capacity(limit_offset.saturating_sub(start_offset).try_into()?);
+        let fragment_capacity = pointer
+            .limit_offset
+            .saturating_sub(pointer.start_offset)
+            .min(limit_offset.saturating_sub(start_offset));
+        let mut records = Vec::with_capacity(fragment_capacity.try_into()?);
         for (log_position, record_bytes) in parsed_records {
             let offset = log_position.offset();
             if offset < start_offset || offset >= limit_offset {
