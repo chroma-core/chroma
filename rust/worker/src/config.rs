@@ -175,8 +175,8 @@ pub struct QueryServiceConfig {
 
     /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
     /// instead of gRPC PullLogs for log fetching.
-    #[serde(default = "QueryServiceConfig::default_use_pointer_fetch")]
-    pub use_pointer_fetch: bool,
+    #[serde(default = "QueryServiceConfig::default_use_fragment_fetch")]
+    pub use_fragment_fetch: bool,
 
     /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
     #[serde(default)]
@@ -215,7 +215,7 @@ impl QueryServiceConfig {
         Duration::from_secs(1)
     }
 
-    fn default_use_pointer_fetch() -> bool {
+    fn default_use_fragment_fetch() -> bool {
         false
     }
 }

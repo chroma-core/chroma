@@ -95,7 +95,7 @@ pub(crate) struct CompactionManagerContext {
     purge_dirty_log_timeout_seconds: u64,
     repair_log_offsets_timeout_seconds: u64,
     disabled_function_collections: HashSet<CollectionUuid>,
-    use_pointer_fetch: bool,
+    use_fragment_fetch: bool,
 }
 
 pub(crate) struct CompactionManager {
@@ -146,7 +146,7 @@ impl CompactionManager {
         repair_log_offsets_timeout_seconds: u64,
         heap_service: Option<GrpcHeapService>,
         disabled_function_collections: HashSet<CollectionUuid>,
-        use_pointer_fetch: bool,
+        use_fragment_fetch: bool,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -181,7 +181,7 @@ impl CompactionManager {
                 repair_log_offsets_timeout_seconds,
                 disabled_function_collections,
                 heap_service,
-                use_pointer_fetch,
+                use_fragment_fetch,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -420,7 +420,7 @@ impl CompactionManagerContext {
             self.spann_provider.clone(),
             dispatcher.clone(),
             is_function_disabled,
-            self.use_pointer_fetch,
+            self.use_fragment_fetch,
             #[cfg(test)]
             None,
         ))
@@ -478,7 +478,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
         let fetch_log_concurrency = config.compactor.fetch_log_concurrency;
-        let use_pointer_fetch = config.compactor.use_pointer_fetch;
+        let use_fragment_fetch = config.compactor.use_fragment_fetch;
         let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let repair_log_offsets_timeout_seconds =
             config.compactor.repair_log_offsets_timeout_seconds;
@@ -594,7 +594,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             repair_log_offsets_timeout_seconds,
             heap_service,
             disabled_function_collections,
-            use_pointer_fetch,
+            use_fragment_fetch,
         )
     }
 }
@@ -1101,7 +1101,7 @@ mod tests {
             repair_log_offsets_timeout_seconds,
             None,           // heap_service not needed in tests
             HashSet::new(), // disabled_function_collections
-            false,          // use_pointer_fetch
+            false,          // use_fragment_fetch
         )
         .expect("Failed to create compaction manager in test");
 

@@ -61,7 +61,7 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
-    use_pointer_fetch: bool,
+    use_fragment_fetch: bool,
     fragment_fetcher: Option<Arc<FragmentFetcher>>,
     shutdown_grace_period: Duration,
 }
@@ -102,7 +102,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
-        let fragment_fetcher = if config.use_pointer_fetch {
+        let fragment_fetcher = if config.use_fragment_fetch {
             Some(Arc::new(
                 FragmentFetcher::new(storage.clone(), &config.fragment_fetcher_cache).await?,
             ))
@@ -121,7 +121,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
-            use_pointer_fetch: config.use_pointer_fetch,
+            use_fragment_fetch: config.use_fragment_fetch,
             fragment_fetcher,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
@@ -230,7 +230,7 @@ impl WorkerServer {
             tenant: collection_and_segments.collection.tenant.clone(),
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
-            use_pointer_fetch: self.use_pointer_fetch,
+            use_fragment_fetch: self.use_fragment_fetch,
             fragment_fetcher: self.fragment_fetcher.clone(),
         })
     }
@@ -798,7 +798,7 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
-            use_pointer_fetch: false,
+            use_fragment_fetch: false,
             fragment_fetcher: None,
             shutdown_grace_period: Duration::from_secs(1),
         };

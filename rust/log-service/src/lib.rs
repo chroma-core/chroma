@@ -1130,6 +1130,49 @@ impl LogServer {
             .await
     }
 
+    /// Load a manifest for `collection_id`, using a cached manifest validated by a HEAD request
+    /// when possible.
+    ///
+    /// 1. Check the in-memory cache for a `ManifestAndWitness`.
+    /// 2. If found, issue an S3 HEAD (via `log_reader.verify`) to confirm the ETag still matches.
+    ///    A matching ETag means the cached manifest is identical to what is on storage, so it can
+    ///    be reused without a full GET.
+    /// 3. If the cache misses or the HEAD verification fails, perform a full GET via
+    ///    `log_reader.manifest_and_witness()` and populate the cache with the result.
+    async fn manifest_with_head_check(
+        &self,
+        log_reader: &dyn LogReaderTrait,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<ManifestAndWitness>, wal3::Error> {
+        let cache_key = cache_key_for_manifest_and_etag(collection_id);
+        let mut cached = None;
+        if let Some(cache) = self.cache.as_ref() {
+            if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
+                cached = serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes).ok();
+            }
+        }
+        if let Some(ref c) = cached {
+            if !log_reader.verify(c).await.unwrap_or_default() {
+                cached.take();
+            }
+        }
+        if let Some(mw) = cached {
+            return Ok(Some(mw));
+        }
+        match log_reader.manifest_and_witness().await {
+            Ok(Some(mw)) => {
+                if let Some(cache) = self.cache.as_ref() {
+                    if let Ok(json) = serde_json::to_string(&mw) {
+                        cache.insert(cache_key, CachedBytes::new(json.into())).await;
+                    }
+                }
+                Ok(Some(mw))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
         let mut new_backpressure = Arc::new(HashSet::from_iter(to_pressure.iter().cloned()));
         let mut backpressure = self.backpressure.lock();
@@ -2021,63 +2064,26 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
-        let cache_key = cache_key_for_manifest_and_etag(collection_id);
-        let mut cached_manifest_and_e_tag = None;
-        if let Some(cache) = self.cache.as_ref() {
-            if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
-                let met = serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes).ok();
-                cached_manifest_and_e_tag = met;
-            }
-        }
-        // NOTE(rescrv):  We verify and if verification fails, we take the cached manifest to fall
-        // back to the uncached path.
-        if let Some(cached) = cached_manifest_and_e_tag.as_ref() {
-            // Here's the linearization point.  We have a cached manifest and e_tag.
-            //
-            // If we verify (perform a head), then statistically speaking, the manifest and e_tag
-            // we have in hand is identical (barring md5 collision) to the manifest and e_tag on
-            // storage.  We can use the cached manifest and e_tag in this case because it is the
-            // identical flow whether we read the whole manifest from storage or whether we pretend
-            // to read it/verify it with a HEAD and then read out of cache.
-            if !log_reader.verify(cached).await.unwrap_or_default() {
-                cached_manifest_and_e_tag.take();
-            }
-        }
-        let (start_position, limit_position) = if let Some(manifest_and_e_tag) =
-            cached_manifest_and_e_tag
+        let (start_position, limit_position) = match self
+            .manifest_with_head_check(&*log_reader, collection_id)
+            .await
         {
-            (
-                manifest_and_e_tag.manifest.oldest_timestamp(),
-                manifest_and_e_tag.manifest.next_write_timestamp(),
-            )
-        } else {
-            let (start_position, limit_position) = match log_reader.manifest_and_witness().await {
-                Ok(Some(manifest_and_e_tag)) => {
-                    if let Some(cache) = self.cache.as_ref() {
-                        let json = serde_json::to_string(&manifest_and_e_tag)
-                            .map_err(|err| Status::unknown(err.to_string()))?;
-                        let cached_bytes = CachedBytes::new(json.into());
-                        cache.insert(cache_key, cached_bytes).await;
-                    }
-                    (
-                        manifest_and_e_tag.manifest.oldest_timestamp(),
-                        manifest_and_e_tag.manifest.next_write_timestamp(),
-                    )
-                }
-                Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
-                Err(wal3::Error::UninitializedLog) => {
-                    return Err(Status::not_found(format!(
-                        "collection {collection_id} not found"
-                    )));
-                }
-                Err(err) => {
-                    return Err(Status::new(
-                        err.code().into(),
-                        format!("could not scout logs: {err:?}"),
-                    ));
-                }
-            };
-            (start_position, limit_position)
+            Ok(Some(mw)) => (
+                mw.manifest.oldest_timestamp(),
+                mw.manifest.next_write_timestamp(),
+            ),
+            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+            Err(wal3::Error::UninitializedLog) => {
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
+            }
+            Err(err) => {
+                return Err(Status::new(
+                    err.code().into(),
+                    format!("could not scout logs: {err:?}"),
+                ));
+            }
         };
         let start_offset = start_position.offset() as i64;
         let limit_offset = limit_position.offset() as i64;
@@ -2107,7 +2113,10 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
-        let manifest_and_witness = match log_reader.manifest_and_witness().await {
+        let manifest_and_witness = match self
+            .manifest_with_head_check(&*log_reader, collection_id)
+            .await
+        {
             Ok(Some(mw)) => mw,
             Ok(None) => {
                 return Ok(Response::new(
