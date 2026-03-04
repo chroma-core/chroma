@@ -274,7 +274,7 @@ class CollectionCommon(Generic[ClientT]):
         validate_include(include=include, dissalowed=["distances"])
 
         if "data" in include and self._data_loader is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "You must set a data loader on the collection if loading from URIs."
             )
 
@@ -469,7 +469,7 @@ class CollectionCommon(Generic[ClientT]):
         where_document: Optional[WhereDocument],
     ) -> DeleteRequest:
         if ids is None and where is None and where_document is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "At least one of ids, where, or where_document must be provided"
             )
 
@@ -539,7 +539,7 @@ class CollectionCommon(Generic[ClientT]):
         if metadata is not None:
             validate_metadata(metadata)
             if "hnsw:space" in metadata:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Changing the distance function of a collection once it is created is not supported currently."
                 )
 
@@ -654,7 +654,7 @@ class CollectionCommon(Generic[ClientT]):
                 )
 
                 if len(sparse_embeddings) != len(positions):
-                    raise ValueError(
+                    raise InvalidArgumentError(
                         "Sparse embedding function returned unexpected number of embeddings."
                     )
 
@@ -684,7 +684,7 @@ class CollectionCommon(Generic[ClientT]):
             )
 
             if len(sparse_embeddings) != len(positions):
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Sparse embedding function returned unexpected number of embeddings."
                 )
 
@@ -713,7 +713,7 @@ class CollectionCommon(Generic[ClientT]):
                 # uris require special handling
                 if field == "uris":
                     if self._data_loader is None:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             "You must set a data loader on the collection if loading from URIs."
                         )
                     return self._embed(
@@ -725,7 +725,7 @@ class CollectionCommon(Generic[ClientT]):
                         input=record_set[field],  # type: ignore[literal-required]
                         is_query=is_query,
                     )
-        raise ValueError(
+        raise InvalidArgumentError(
             "Record does not contain any non-None fields that can be embedded."
             f"Embeddable Fields: {embeddable_fields}"
             f"Record Fields: {record_set}"
@@ -777,7 +777,7 @@ class CollectionCommon(Generic[ClientT]):
                 return schema_embedding_function.embed_query(input=input)
             return schema_embedding_function(input=input)
         if self._embedding_function is None:
-            raise ValueError(
+            raise InvalidArgumentError(
                 "You must provide an embedding function to compute embeddings."
                 "https://docs.trychroma.com/guides/embeddings"
             )
@@ -825,7 +825,7 @@ class CollectionCommon(Generic[ClientT]):
             # Use the collection's main embedding function
             embedding = self._embed(input=[query_text], is_query=True)
             if not embedding or len(embedding) != 1:
-                raise ValueError(
+                raise InvalidArgumentError(
                     "Embedding function returned unexpected number of embeddings"
                 )
             # Return a new Knn with the embedded query
@@ -840,7 +840,7 @@ class CollectionCommon(Generic[ClientT]):
         # Handle metadata field with potential sparse embedding
         schema = self.schema
         if schema is None or key not in schema.keys:
-            raise ValueError(
+            raise InvalidArgumentError(
                 f"Cannot embed string query for key '{key}': "
                 f"key not found in schema. Please provide an embedded vector or "
                 f"configure an embedding function for this key in the schema."
@@ -869,7 +869,7 @@ class CollectionCommon(Generic[ClientT]):
                     )
 
                     if not sparse_embedding or len(sparse_embedding) != 1:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             "Sparse embedding function returned unexpected number of embeddings"
                         )
 
@@ -899,7 +899,7 @@ class CollectionCommon(Generic[ClientT]):
                         embeddings = embedding_func([query_text])
 
                     if not embeddings or len(embeddings) != 1:
-                        raise ValueError(
+                        raise InvalidArgumentError(
                             "Embedding function returned unexpected number of embeddings"
                         )
 
@@ -912,7 +912,7 @@ class CollectionCommon(Generic[ClientT]):
                         return_rank=knn.return_rank,
                     )
 
-        raise ValueError(
+        raise InvalidArgumentError(
             f"Cannot embed string query for key '{key}': "
             f"no embedding function configured for this key in the schema. "
             f"Please provide an embedded vector or configure an embedding function."
