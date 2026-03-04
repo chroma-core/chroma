@@ -309,6 +309,10 @@ pub struct CompactionServiceConfig {
     /// If set, a pprof server will be started on this port.
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
 }
 
 impl CompactionServiceConfig {

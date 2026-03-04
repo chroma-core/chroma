@@ -1,3 +1,4 @@
+use std::num::TryFromIntError;
 use std::sync::Arc;
 
 use chroma_cache::{Cache, CacheConfig, CacheError, Weighted};
@@ -94,6 +95,8 @@ pub enum FragmentFetchError {
         /// The offset that was actually found.
         found: i64,
     },
+    #[error("Integer conversion error: {0}")]
+    IntegerConversion(#[from] TryFromIntError),
     #[error("Fragment fetcher not configured")]
     NotConfigured,
 }
@@ -107,6 +110,7 @@ impl ChromaError for FragmentFetchError {
             FragmentFetchError::RecordConversion(_) => ErrorCodes::Internal,
             FragmentFetchError::CacheError(_) => ErrorCodes::Internal,
             FragmentFetchError::HoleInLog { .. } => ErrorCodes::DataLoss,
+            FragmentFetchError::IntegerConversion(_) => ErrorCodes::Internal,
             FragmentFetchError::NotConfigured => ErrorCodes::Internal,
         }
     }
@@ -225,7 +229,7 @@ impl FragmentFetcher {
         let (parsed_records, _num_bytes, _now_us) =
             wal3::interfaces::s3::parse_parquet_fast(&bytes, starting_position).await?;
 
-        let mut records = Vec::new();
+        let mut records = Vec::with_capacity(limit_offset.saturating_sub(start_offset).try_into()?);
         for (log_position, record_bytes) in parsed_records {
             let offset = log_position.offset();
             if offset < start_offset || offset >= limit_offset {

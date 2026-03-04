@@ -14,12 +14,13 @@ use crate::execution::operators::fragment_fetch::{
 
 /// The `FetchLogOperator` fetches logs from the log service.
 ///
-/// Two strategies are supported, selected by `use_fragment_fetch`:
+/// Two strategies are supported, selected by `fragment_fetcher`:
 ///
-/// 1. **gRPC pull** (default): `ScoutLogs` + chunked concurrent `PullLogs` calls.
-/// 2. **Pointer fetch**: `ScoutLogFragments` returns fragment pointers, then
-///    the embedded `FragmentFetcher` reads parquet data directly from object
-///    storage.
+/// 1. **gRPC pull** (default, when `fragment_fetcher` is `None`): `ScoutLogs` +
+///    chunked concurrent `PullLogs` calls.
+/// 2. **Pointer fetch** (when `fragment_fetcher` is `Some`):
+///    `ScoutLogFragments` returns fragment pointers, then the embedded
+///    `FragmentFetcher` reads parquet data directly from object storage.
 ///
 /// # Parameters
 /// - `log_client`: The log service reader
@@ -28,8 +29,7 @@ use crate::execution::operators::fragment_fetch::{
 /// - `maximum_fetch_count`: The maximum number of logs to fetch in total
 /// - `collection_uuid`: The uuid of the collection where the fetched logs should belong
 /// - `fetch_log_concurrency`: The maximum number of concurrent log fetch requests
-/// - `use_fragment_fetch`: When true, use ScoutLogFragments + direct storage reads
-/// - `fragment_fetcher`: The fragment fetcher for pointer-based reads (required when use_fragment_fetch is true)
+/// - `fragment_fetcher`: When `Some`, use ScoutLogFragments + direct storage reads
 ///
 /// # Inputs
 /// - No input is required
@@ -51,7 +51,6 @@ pub struct FetchLogOperator {
     pub tenant: String,
     pub database_name: DatabaseName,
     pub fetch_log_concurrency: usize,
-    pub use_fragment_fetch: bool,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
 }
 
@@ -201,12 +200,12 @@ impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
             start_log_offset_id = self.start_log_offset_id,
             maximum_fetch_count = self.maximum_fetch_count,
             collection_uuid = ?self.collection_uuid.0,
-            use_fragment_fetch = self.use_fragment_fetch,
+            use_fragment_fetch = self.fragment_fetcher.is_some(),
             "[{}]",
             self.get_name(),
         );
 
-        if self.use_fragment_fetch {
+        if self.fragment_fetcher.is_some() {
             self.run_pointer_fetch().await
         } else {
             self.run_grpc_pull().await
@@ -260,7 +259,6 @@ mod tests {
             tenant: "test-tenant".to_string(),
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
-            use_fragment_fetch: false,
             fragment_fetcher: None,
         };
 
@@ -289,7 +287,6 @@ mod tests {
             tenant: "test-tenant".to_string(),
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
-            use_fragment_fetch: false,
             fragment_fetcher: None,
         };
 

@@ -307,6 +307,7 @@ impl LogFetchOrchestrator {
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
+        fragment_fetcher: Option<Arc<crate::execution::operators::fragment_fetch::FragmentFetcher>>,
     ) -> Self {
         let context = CompactionContext::new(
             is_rebuild,
@@ -322,7 +323,7 @@ impl LogFetchOrchestrator {
             spann_provider,
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
-            false, // LogFetchOrchestrator doesn't need use_fragment_fetch
+            fragment_fetcher,
         );
         LogFetchOrchestrator {
             collection_id,
@@ -492,7 +493,6 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     tenant: collection.tenant.clone(),
                     database_name,
                     fetch_log_concurrency: self.context.fetch_log_concurrency,
-                    use_fragment_fetch: self.context.use_fragment_fetch,
                     fragment_fetcher: self.context.fragment_fetcher.clone(),
                 }),
                 (),

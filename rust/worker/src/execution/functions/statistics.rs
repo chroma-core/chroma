@@ -1371,7 +1371,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await

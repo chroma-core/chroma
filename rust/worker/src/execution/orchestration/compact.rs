@@ -141,7 +141,6 @@ pub struct CompactionContext {
     pub max_partition_size: usize,
     pub hnsw_index_uuids: HashSet<IndexUuid>, // TODO(tanujnay112): Remove after direct hnsw is solidified
     pub is_function_disabled: bool,
-    pub use_fragment_fetch: bool,
     pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
     #[cfg(test)]
     pub poison_offset: Option<u32>,
@@ -167,7 +166,6 @@ impl Clone for CompactionContext {
             max_partition_size: self.max_partition_size,
             hnsw_index_uuids: self.hnsw_index_uuids.clone(),
             is_function_disabled: self.is_function_disabled,
-            use_fragment_fetch: self.use_fragment_fetch,
             fragment_fetcher: self.fragment_fetcher.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
@@ -203,7 +201,6 @@ impl CompactionContext {
             max_partition_size: self.max_partition_size,
             hnsw_index_uuids: self.hnsw_index_uuids.clone(),
             is_function_disabled: self.is_function_disabled,
-            use_fragment_fetch: self.use_fragment_fetch,
             fragment_fetcher: self.fragment_fetcher.clone(),
             #[cfg(test)]
             poison_offset: self.poison_offset,
@@ -308,7 +305,7 @@ impl CompactionContext {
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
         is_function_disabled: bool,
-        use_fragment_fetch: bool,
+        fragment_fetcher: Option<Arc<FragmentFetcher>>,
     ) -> Self {
         let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
         CompactionContext {
@@ -328,8 +325,7 @@ impl CompactionContext {
             orchestrator_context,
             hnsw_index_uuids: HashSet::new(),
             is_function_disabled,
-            use_fragment_fetch,
-            fragment_fetcher: None,
+            fragment_fetcher,
             #[cfg(test)]
             poison_offset: None,
         }
@@ -413,6 +409,7 @@ impl CompactionContext {
             self.hnsw_provider.clone(),
             self.spann_provider.clone(),
             self.dispatcher.clone(),
+            self.fragment_fetcher.clone(),
         );
 
         let log_fetch_response = match log_fetch_orchestrator.run(system.clone()).await {
@@ -947,7 +944,7 @@ pub async fn compact(
     spann_provider: SpannProvider,
     dispatcher: ComponentHandle<Dispatcher>,
     is_function_disabled: bool,
-    use_fragment_fetch: bool,
+    fragment_fetcher: Option<Arc<FragmentFetcher>>,
     #[cfg(test)] poison_offset: Option<u32>,
 ) -> Result<CompactionResponse, CompactionError> {
     let mut compaction_context = CompactionContext::new(
@@ -964,7 +961,7 @@ pub async fn compact(
         spann_provider.clone(),
         dispatcher.clone(),
         is_function_disabled,
-        use_fragment_fetch,
+        fragment_fetcher,
     );
 
     #[cfg(test)]
@@ -1036,7 +1033,6 @@ mod tests {
             tenant: cas.collection.tenant.clone(),
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
-            use_fragment_fetch: false,
             fragment_fetcher: None,
         };
 
@@ -1148,7 +1144,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -1169,7 +1165,6 @@ mod tests {
             tenant: old_cas.collection.tenant.clone(),
             database_name: chroma_types::DatabaseName::new("test_db").unwrap(),
             fetch_log_concurrency: 10,
-            use_fragment_fetch: false,
             fragment_fetcher: None,
         };
         let filter = Filter {
@@ -1232,7 +1227,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -1358,7 +1353,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -1399,7 +1394,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -1520,7 +1515,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -1706,7 +1701,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -1906,7 +1901,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             Some(2), // The apply operator processing this offset will fail.
         ))
         .await;
@@ -2107,7 +2102,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -2145,7 +2140,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -2381,7 +2376,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -2600,7 +2595,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -2688,7 +2683,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await;
@@ -2942,7 +2937,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
         );
 
         // Start compaction 1's log_fetch_orchestrator
@@ -2995,7 +2990,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
         );
 
         // Now start compaction 2 and let it run completely using the compact() function
@@ -3019,7 +3014,7 @@ mod tests {
             spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ));
 
@@ -3276,7 +3271,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
-            false,
+            None,
             None,
         ))
         .await
@@ -3364,7 +3359,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             true, // is_function_disabled = true
-            false,
+            None,
             None,
         ))
         .await
@@ -3426,7 +3421,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false, // is_function_disabled = false for rebuild
-            false,
+            None,
             None,
         ))
         .await

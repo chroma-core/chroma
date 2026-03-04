@@ -4,6 +4,7 @@ use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
 use crate::config::CompactionServiceConfig;
+use crate::execution::operators::fragment_fetch::FragmentFetcher;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogInput;
@@ -43,6 +44,7 @@ use std::future::Future;
 use std::panic::AssertUnwindSafe;
 use std::pin::Pin;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tokio::select;
@@ -95,7 +97,7 @@ pub(crate) struct CompactionManagerContext {
     purge_dirty_log_timeout_seconds: u64,
     repair_log_offsets_timeout_seconds: u64,
     disabled_function_collections: HashSet<CollectionUuid>,
-    use_fragment_fetch: bool,
+    fragment_fetcher: Option<Arc<FragmentFetcher>>,
 }
 
 pub(crate) struct CompactionManager {
@@ -146,7 +148,7 @@ impl CompactionManager {
         repair_log_offsets_timeout_seconds: u64,
         heap_service: Option<GrpcHeapService>,
         disabled_function_collections: HashSet<CollectionUuid>,
-        use_fragment_fetch: bool,
+        fragment_fetcher: Option<Arc<FragmentFetcher>>,
     ) -> Result<Self, Box<dyn ChromaError>> {
         let (compact_awaiter_tx, compact_awaiter_rx) =
             mpsc::channel::<CompactionTask>(compaction_manager_queue_size);
@@ -181,7 +183,7 @@ impl CompactionManager {
                 repair_log_offsets_timeout_seconds,
                 disabled_function_collections,
                 heap_service,
-                use_fragment_fetch,
+                fragment_fetcher,
             },
             on_next_memberlist_signal: None,
             compact_awaiter_channel: compact_awaiter_tx,
@@ -420,7 +422,7 @@ impl CompactionManagerContext {
             self.spann_provider.clone(),
             dispatcher.clone(),
             is_function_disabled,
-            self.use_fragment_fetch,
+            self.fragment_fetcher.clone(),
             #[cfg(test)]
             None,
         ))
@@ -478,7 +480,6 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         let max_partition_size = config.compactor.max_partition_size;
         let fetch_log_batch_size = config.compactor.fetch_log_batch_size;
         let fetch_log_concurrency = config.compactor.fetch_log_concurrency;
-        let use_fragment_fetch = config.compactor.use_fragment_fetch;
         let purge_dirty_log_timeout_seconds = config.compactor.purge_dirty_log_timeout_seconds;
         let repair_log_offsets_timeout_seconds =
             config.compactor.repair_log_offsets_timeout_seconds;
@@ -574,6 +575,14 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             }
         };
 
+        let fragment_fetcher = if config.compactor.use_fragment_fetch {
+            Some(Arc::new(
+                FragmentFetcher::new(storage.clone(), &config.fragment_fetcher_cache).await?,
+            ))
+        } else {
+            None
+        };
+
         CompactionManager::new(
             system.clone(),
             scheduler,
@@ -594,7 +603,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             repair_log_offsets_timeout_seconds,
             heap_service,
             disabled_function_collections,
-            use_fragment_fetch,
+            fragment_fetcher,
         )
     }
 }
@@ -1101,7 +1110,7 @@ mod tests {
             repair_log_offsets_timeout_seconds,
             None,           // heap_service not needed in tests
             HashSet::new(), // disabled_function_collections
-            false,          // use_fragment_fetch
+            None,           // fragment_fetcher
         )
         .expect("Failed to create compaction manager in test");
 
