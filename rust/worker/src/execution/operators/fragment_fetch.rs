@@ -27,6 +27,10 @@ pub struct FragmentPointer {
     pub num_bytes: u64,
     /// The storage prefix to prepend when reading from object storage.
     pub storage_prefix: String,
+    /// When true the parquet file stores absolute offsets and should be parsed
+    /// without a starting log position. When false the file stores relative
+    /// offsets and `start_offset` must be supplied as the base.
+    pub absolute_offsets: bool,
 }
 
 impl From<chroma_proto::LogFragmentPointer> for FragmentPointer {
@@ -37,6 +41,7 @@ impl From<chroma_proto::LogFragmentPointer> for FragmentPointer {
             limit_offset: proto.limit_offset,
             num_bytes: proto.num_bytes,
             storage_prefix: proto.storage_prefix,
+            absolute_offsets: proto.absolute_offsets,
         }
     }
 }
@@ -70,9 +75,12 @@ pub enum FragmentFetchError {
     },
     #[error("Fragment parquet parse error: {0}")]
     ParseError(#[from] wal3::Error),
-    #[error("Proto decode error for record at offset {offset}: {source}")]
+    #[error(
+        "Proto decode error for record at offset {offset} in fragment {fragment_path}: {source}"
+    )]
     ProtoDecode {
         offset: u64,
+        fragment_path: String,
         source: prost::DecodeError,
     },
     #[error("Record conversion error: {0}")]
@@ -209,9 +217,13 @@ impl FragmentFetcher {
             bytes
         };
 
-        let starting_position = LogPosition::from_offset(pointer.start_offset);
+        let starting_position = if pointer.absolute_offsets {
+            None
+        } else {
+            Some(LogPosition::from_offset(pointer.start_offset))
+        };
         let (parsed_records, _num_bytes, _now_us) =
-            wal3::interfaces::s3::parse_parquet_fast(&bytes, Some(starting_position)).await?;
+            wal3::interfaces::s3::parse_parquet_fast(&bytes, starting_position).await?;
 
         let mut records = Vec::new();
         for (log_position, record_bytes) in parsed_records {
@@ -220,7 +232,11 @@ impl FragmentFetcher {
                 continue;
             }
             let proto_op_record = chroma_proto::OperationRecord::decode(record_bytes.as_slice())
-                .map_err(|e| FragmentFetchError::ProtoDecode { offset, source: e })?;
+                .map_err(|e| FragmentFetchError::ProtoDecode {
+                    offset,
+                    fragment_path: pointer.path.clone(),
+                    source: e,
+                })?;
             let record: OperationRecord = proto_op_record.try_into()?;
             records.push(LogRecord {
                 log_offset: offset as i64,
@@ -273,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn fragment_pointer_from_proto() {
+    fn fragment_pointer_from_proto_absolute() {
         use chroma_types::chroma_proto::LogFragmentPointer;
         let proto = LogFragmentPointer {
             path: "log/Bucket=0/FragmentSeqNo=0000000000000001.parquet".to_string(),
@@ -281,6 +297,7 @@ mod tests {
             limit_offset: 10,
             num_bytes: 1024,
             storage_prefix: "tenant/database/collection".to_string(),
+            absolute_offsets: true,
         };
         let pointer: FragmentPointer = proto.into();
         assert_eq!(
@@ -291,6 +308,30 @@ mod tests {
         assert_eq!(pointer.limit_offset, 10);
         assert_eq!(pointer.num_bytes, 1024);
         assert_eq!(pointer.storage_prefix, "tenant/database/collection");
+        assert!(
+            pointer.absolute_offsets,
+            "absolute_offsets should be true for S3 fragments"
+        );
+    }
+
+    #[test]
+    fn fragment_pointer_from_proto_relative() {
+        use chroma_types::chroma_proto::LogFragmentPointer;
+        let proto = LogFragmentPointer {
+            path: "log/Bucket=0/FragmentSeqNo=0000000000000001.parquet".to_string(),
+            start_offset: 42,
+            limit_offset: 52,
+            num_bytes: 2048,
+            storage_prefix: "tenant/database/collection".to_string(),
+            absolute_offsets: false,
+        };
+        let pointer: FragmentPointer = proto.into();
+        assert_eq!(pointer.start_offset, 42);
+        assert_eq!(pointer.limit_offset, 52);
+        assert!(
+            !pointer.absolute_offsets,
+            "absolute_offsets should be false for replicated fragments"
+        );
     }
 
     #[test]

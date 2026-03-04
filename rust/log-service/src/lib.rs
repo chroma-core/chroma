@@ -2148,6 +2148,7 @@ impl LogServer {
             })?,
         };
         let storage_prefix = collection_id.storage_prefix_for_log();
+        let absolute_offsets = topology_name.is_none();
         let proto_fragments = fragments
             .into_iter()
             .map(|f| chroma_types::chroma_proto::LogFragmentPointer {
@@ -2156,6 +2157,7 @@ impl LogServer {
                 limit_offset: f.limit.offset(),
                 num_bytes: f.num_bytes,
                 storage_prefix: storage_prefix.clone(),
+                absolute_offsets,
             })
             .collect();
         Ok(Response::new(

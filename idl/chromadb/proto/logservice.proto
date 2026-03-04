@@ -207,6 +207,11 @@ message LogFragmentPointer {
   uint64 num_bytes = 4;
   // The storage prefix to prepend to fragment paths when reading from object storage.
   string storage_prefix = 5;
+  // When true the parquet file uses absolute offsets (column "offset").
+  // When false (or absent) the parquet file uses relative offsets
+  // (column "relative_offset") and start_offset must be supplied to
+  // reconstruct absolute positions.
+  bool absolute_offsets = 6;
 }
 
 message ScoutLogFragmentsRequest {
