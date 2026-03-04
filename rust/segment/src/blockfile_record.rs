@@ -940,6 +940,23 @@ impl RecordSegmentReader<'_> {
             .await
     }
 
+    /// Get the user id for a given offset id using the lightweight id_to_user_id blockfile.
+    /// This avoids loading the full DataRecord (embedding, metadata, document).
+    pub async fn get_user_id_for_offset_id(
+        &self,
+        offset_id: u32,
+    ) -> Result<Option<&str>, Box<dyn ChromaError>> {
+        self.id_to_user_id.get("", offset_id).await
+    }
+
+    /// Bulk prefetch for the id_to_user_id blockfile.
+    /// This is the lightweight alternative to load_id_to_data when only user IDs are needed.
+    pub async fn load_id_to_user_id(&self, keys: impl Iterator<Item = u32>) {
+        self.id_to_user_id
+            .load_data_for_keys(keys.map(|k| ("".to_string(), k)))
+            .await
+    }
+
     pub async fn get_total_logical_size_bytes(&self) -> Result<u64, Box<dyn ChromaError>> {
         self.id_to_data
             .get_range_stream(""..="", ..)

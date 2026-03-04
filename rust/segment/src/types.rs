@@ -262,6 +262,27 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
         }
     }
 
+    /// Get the user id for this record without hydrating the full data record.
+    /// When the user id is available in the log, it is returned directly (no I/O).
+    /// Otherwise, it falls back to the lightweight id_to_user_id blockfile lookup.
+    pub async fn get_user_id(
+        &self,
+        record_segment_reader: Option<&RecordSegmentReader<'_>>,
+    ) -> Result<String, LogMaterializerError> {
+        if let Some(id) = self.materialized_log_record.user_id_at_log_index {
+            return Ok(self.logs.get(id).unwrap().record.id.clone());
+        }
+
+        match record_segment_reader {
+            Some(reader) => Ok(reader
+                .get_user_id_for_offset_id(self.materialized_log_record.offset_id)
+                .await?
+                .expect("Expected user id for offset id in segment")
+                .to_string()),
+            None => panic!("Expected at least one source of user id"),
+        }
+    }
+
     /// Reads any record segment data that this log record may reference and returns a hydrated version of this record.
     /// The record segment reader passed here **must be over the same set of blockfiles** as the reader that was originally passed to `materialize_logs()`. If the two readers are different, the behavior is undefined.
     pub async fn hydrate<'segment_data>(
