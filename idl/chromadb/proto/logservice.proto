@@ -201,7 +201,7 @@ message LogFragmentPointer {
   string path = 1;
   // The first log offset contained in this fragment.
   uint64 start_offset = 2;
-  // The first log offset NOT contained in this fragment (exclusive upper bound).
+  // The first log offset >= start_offset NOT contained in this fragment (exclusive upper bound).
   uint64 limit_offset = 3;
   // The size of the fragment file in bytes.
   uint64 num_bytes = 4;
