@@ -217,6 +217,8 @@ def test_http_client_setting_overrides() -> None:
 )
 def test_local_ignores_extra_settings_param() -> None:
     settings = Settings(extra_param="asdsdsds", tenant_id="test")
+    # does not error if the extra param is present in the settings object
     assert settings.tenant_id == "test"
+    # but it should error if the extra param is accessed
     with pytest.raises(AttributeError):
         _ = settings.extra_param
