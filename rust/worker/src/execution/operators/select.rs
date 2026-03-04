@@ -113,18 +113,17 @@ impl Operator<SelectInput, SelectOutput> for Select {
             .map(|record| record.offset_id)
             .collect::<HashSet<_>>();
 
-        // Conditionally prefetch: only load full data records when needed,
-        // otherwise just prefetch the lightweight id_to_user_id mapping.
+        // Always prefetch id_to_user_id (used by get_user_id for all records).
+        // Additionally prefetch id_to_data when full hydration is needed.
         if let Some(reader) = &record_segment_reader {
+            reader
+                .load_id_to_user_id(offset_id_set.iter().cloned())
+                .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
+                .await;
             if needs_data {
                 reader
                     .load_id_to_data(offset_id_set.iter().cloned())
                     .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
-                    .await;
-            } else {
-                reader
-                    .load_id_to_user_id(offset_id_set.iter().cloned())
-                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
                     .await;
             }
         }
@@ -147,103 +146,78 @@ impl Operator<SelectInput, SelectOutput> for Select {
             .records
             .iter()
             .map(|record| async {
-                if needs_data {
-                    // Full hydration path: load complete data records
-                    let (id, document, embedding, mut full_metadata) =
-                        match offset_id_to_log_record.get(&record.offset_id) {
-                            // The offset id is in the log
-                            Some(log) => {
-                                let log = log
-                                    .hydrate(record_segment_reader.as_ref())
-                                    .await
-                                    .map_err(SelectError::LogMaterializer)?;
+                // Resolve user ID (shared across both paths)
+                let id = match offset_id_to_log_record.get(&record.offset_id) {
+                    Some(log) => log
+                        .get_user_id(record_segment_reader.as_ref())
+                        .await
+                        .map_err(SelectError::LogMaterializer)?,
+                    None => match &record_segment_reader {
+                        Some(reader) => reader
+                            .get_user_id_for_offset_id(record.offset_id)
+                            .await?
+                            .to_string(),
+                        None => return Err(SelectError::RecordSegmentUninitialized),
+                    },
+                };
 
-                                (
-                                    log.get_user_id().to_string(),
-                                    select_document
-                                        .then(|| log.merged_document_ref().map(str::to_string))
-                                        .flatten(),
-                                    select_embedding.then(|| log.merged_embeddings_ref().to_vec()),
-                                    log.merged_metadata(),
-                                )
-                            }
-                            // The offset id is in the record segment
-                            None => {
-                                if let Some(reader) = &record_segment_reader {
-                                    let data = reader
-                                        .get_data_for_offset_id(record.offset_id)
-                                        .await?
-                                        .ok_or(SelectError::RecordSegmentPhantomRecord(
-                                            record.offset_id,
-                                        ))?;
-
-                                    (
-                                        data.id.to_string(),
-                                        select_document
-                                            .then(|| data.document.map(|s| s.to_string()))
-                                            .flatten(),
-                                        select_embedding.then(|| data.embedding.to_vec()),
-                                        data.metadata.unwrap_or_default(),
-                                    )
-                                } else {
-                                    return Err(SelectError::RecordSegmentUninitialized);
-                                }
-                            }
-                        };
+                // Conditionally hydrate data fields
+                let (document, embedding, metadata) = if needs_data {
+                    let (doc, emb, mut full_metadata) = match offset_id_to_log_record
+                        .get(&record.offset_id)
+                    {
+                        Some(log) => {
+                            let log = log
+                                .hydrate(record_segment_reader.as_ref())
+                                .await
+                                .map_err(SelectError::LogMaterializer)?;
+                            (
+                                select_document
+                                    .then(|| log.merged_document_ref().map(str::to_string))
+                                    .flatten(),
+                                select_embedding.then(|| log.merged_embeddings_ref().to_vec()),
+                                log.merged_metadata(),
+                            )
+                        }
+                        None => {
+                            let reader = record_segment_reader
+                                .as_ref()
+                                .ok_or(SelectError::RecordSegmentUninitialized)?;
+                            let data = reader
+                                .get_data_for_offset_id(record.offset_id)
+                                .await?
+                                .ok_or(SelectError::RecordSegmentPhantomRecord(record.offset_id))?;
+                            (
+                                select_document
+                                    .then(|| data.document.map(|s| s.to_string()))
+                                    .flatten(),
+                                select_embedding.then(|| data.embedding.to_vec()),
+                                data.metadata.unwrap_or_default(),
+                            )
+                        }
+                    };
 
                     if !select_all_metadata {
                         full_metadata.retain(|key, _| metadata_fields_to_select.contains(key));
                     }
 
-                    Ok(SearchRecord {
-                        id,
-                        document: if select_document { document } else { None },
-                        embedding: if select_embedding { embedding } else { None },
-                        metadata: if full_metadata.is_empty() {
-                            None
-                        } else {
-                            Some(full_metadata)
-                        },
-                        score: if select_score {
-                            Some(record.measure)
-                        } else {
-                            None
-                        },
-                    })
-                } else {
-                    // Lightweight path: only resolve user ID, skip full data hydration
-                    let id = match offset_id_to_log_record.get(&record.offset_id) {
-                        Some(log) => log
-                            .get_user_id(record_segment_reader.as_ref())
-                            .await
-                            .map_err(SelectError::LogMaterializer)?,
-                        None => {
-                            if let Some(reader) = &record_segment_reader {
-                                reader
-                                    .get_user_id_for_offset_id(record.offset_id)
-                                    .await?
-                                    .ok_or(SelectError::RecordSegmentPhantomRecord(
-                                        record.offset_id,
-                                    ))?
-                                    .to_string()
-                            } else {
-                                return Err(SelectError::RecordSegmentUninitialized);
-                            }
-                        }
+                    let metadata = if full_metadata.is_empty() {
+                        None
+                    } else {
+                        Some(full_metadata)
                     };
+                    (doc, emb, metadata)
+                } else {
+                    (None, None, None)
+                };
 
-                    Ok(SearchRecord {
-                        id,
-                        document: None,
-                        embedding: None,
-                        metadata: None,
-                        score: if select_score {
-                            Some(record.measure)
-                        } else {
-                            None
-                        },
-                    })
-                }
+                Ok(SearchRecord {
+                    id,
+                    document,
+                    embedding,
+                    metadata,
+                    score: select_score.then_some(record.measure),
+                })
             })
             .collect::<Vec<_>>();
 

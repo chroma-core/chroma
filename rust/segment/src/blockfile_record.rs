@@ -942,11 +942,16 @@ impl RecordSegmentReader<'_> {
 
     /// Get the user id for a given offset id using the lightweight id_to_user_id blockfile.
     /// This avoids loading the full DataRecord (embedding, metadata, document).
+    /// Returns an error if the offset id is not found.
     pub async fn get_user_id_for_offset_id(
         &self,
         offset_id: u32,
-    ) -> Result<Option<&str>, Box<dyn ChromaError>> {
-        self.id_to_user_id.get("", offset_id).await
+    ) -> Result<&str, Box<dyn ChromaError>> {
+        self.id_to_user_id.get("", offset_id).await?.ok_or_else(|| {
+            Box::new(RecordSegmentReaderCreationError::DataRecordNotFound(
+                offset_id,
+            )) as Box<dyn ChromaError>
+        })
     }
 
     /// Bulk prefetch for the id_to_user_id blockfile.
