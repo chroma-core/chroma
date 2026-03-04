@@ -48,7 +48,7 @@ def test_log_backpressure(
             collection.add(ids=ids, embeddings=embeddings)
         except Exception as x:
             print(f"Caught exception:\n{x}")
-            if 'Backoff and retry' in str(x):
+            if 'log needs compaction before accepting more writes; please backoff exponentially and retry' in str(x):
                 excepted = True
                 break
     assert excepted, "Expected an exception to be thrown."
