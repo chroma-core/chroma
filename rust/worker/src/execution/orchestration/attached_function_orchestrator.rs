@@ -220,7 +220,10 @@ impl AttachedFunctionOrchestrator {
         data_fetch_records: Vec<MaterializeLogOutput>,
         is_for_backfill: bool,
     ) -> Self {
-        let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
+        let orchestrator_context = OrchestratorContext::new(
+            dispatcher.clone(),
+            input_collection_info.collection.tenant.clone(),
+        );
 
         AttachedFunctionOrchestrator {
             input_collection_info,
@@ -409,10 +412,7 @@ impl AttachedFunctionOrchestrator {
                 operator,
                 input,
                 ctx.receiver(),
-                self.output_context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.output_context.orchestrator_context,
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -445,12 +445,7 @@ impl Orchestrator for AttachedFunctionOrchestrator {
         let input = GetAttachedFunctionInput {
             collection_id: collection_info.collection_id,
         };
-        let task = wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context().task_cancellation_token.clone(),
-        );
+        let task = wrap(operator, input, ctx.receiver(), self.context());
         vec![(task, Some(Span::current()))]
     }
 
@@ -577,12 +572,7 @@ impl Handler<TaskResult<GetAttachedFunctionOutput, GetAttachedFunctionOperatorEr
                     database_name,
                 ));
                 let input = ();
-                let task = wrap(
-                    operator,
-                    input,
-                    ctx.receiver(),
-                    self.context().task_cancellation_token.clone(),
-                );
+                let task = wrap(operator, input, ctx.receiver(), self.context());
                 let res = self.dispatcher().send(task, None).await;
                 self.ok_or_terminate(res, ctx).await;
             }
@@ -843,12 +833,7 @@ impl Handler<TaskResult<CollectionAndSegments, GetCollectionAndSegmentsError>>
             is_for_backfill: self.is_for_backfill,
         };
 
-        let task = wrap(
-            operator,
-            input,
-            ctx.receiver(),
-            self.context().task_cancellation_token.clone(),
-        );
+        let task = wrap(operator, input, ctx.receiver(), self.context());
         let res = self.dispatcher().send(task, None).await;
         self.ok_or_terminate(res, ctx).await;
     }

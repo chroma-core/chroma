@@ -86,7 +86,10 @@ impl SpannKnnOrchestrator {
             } else {
                 query.clone()
             };
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(
+            dispatcher,
+            collection_and_segments.collection.tenant.clone(),
+        );
         let blockfile_provider = spann_provider.blockfile_provider.clone();
         Self {
             context,
@@ -125,7 +128,7 @@ impl SpannKnnOrchestrator {
                     batch_measures: batch_distances,
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -161,7 +164,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                 distance_function: self.knn_filter_output.distance_function.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         tasks.push((knn_log_task, Some(Span::current())));
         let reader_res = Box::pin(SpannSegmentReader::from_segment(
@@ -190,7 +193,7 @@ impl Orchestrator for SpannKnnOrchestrator {
                         k: self.k,
                     },
                     ctx.receiver(),
-                    self.context.task_cancellation_token.clone(),
+                    &self.context,
                 );
                 tasks.push((head_search_task, Some(Span::current())));
             }
@@ -272,7 +275,7 @@ impl Handler<TaskResult<SpannCentersSearchOutput, SpannCentersSearchError>>
                     head_id: head_id as u32,
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
 
             self.send(fetch_pl_task, ctx, Some(Span::current())).await;
@@ -308,7 +311,7 @@ impl Handler<TaskResult<SpannFetchPlOutput, SpannFetchPlError>> for SpannKnnOrch
                 query: self.normalized_query_emb.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
 
         self.send(bf_pl_task, ctx, Some(Span::current())).await;

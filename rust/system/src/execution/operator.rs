@@ -1,8 +1,8 @@
-use crate::{utils::PanicError, ReceiverForMessage};
+use crate::{execution::orchestrator::OrchestratorContext, utils::PanicError, ReceiverForMessage};
 use async_trait::async_trait;
 use chroma_error::{ChromaError, ErrorCodes};
 use futures::FutureExt;
-use std::{any::type_name, fmt::Debug, panic::AssertUnwindSafe};
+use std::{any::type_name, borrow::Cow, fmt::Debug, panic::AssertUnwindSafe};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -115,6 +115,7 @@ where
     task_id: Uuid,
     task_state: TaskState,
     cancellation_token: Option<CancellationToken>,
+    tenant: Cow<'static, str>,
 }
 
 impl<Input, Output, Error> Task<Input, Output, Error>
@@ -207,6 +208,11 @@ where
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TaskExecutorInfo {
+    pub tenant: Cow<'static, str>,
+}
+
 /// A message type used by the dispatcher to send tasks to worker threads.
 pub type TaskMessage = Box<dyn TaskWrapper>;
 
@@ -220,6 +226,7 @@ pub trait TaskWrapper: Send + Debug {
     fn id(&self) -> Uuid;
     fn get_type(&self) -> OperatorType;
     async fn abort(&mut self);
+    fn get_executor_info(&self) -> TaskExecutorInfo;
 }
 
 /// Implement the TaskWrapper trait for every Task. This allows us to
@@ -257,6 +264,12 @@ where
         self.operator.get_type()
     }
 
+    fn get_executor_info(&self) -> TaskExecutorInfo {
+        TaskExecutorInfo {
+            tenant: self.tenant.clone(),
+        }
+    }
+
     async fn abort(&mut self) {
         self.task_state = TaskState::Aborted;
         match self
@@ -290,12 +303,12 @@ where
     }
 }
 
-/// Wrap an operator and its input into a task message.
-pub fn wrap<Input, Output, Error>(
+fn wrap_internal<Input, Output, Error>(
     operator: Box<dyn Operator<Input, Output, Error = Error>>,
     input: Input,
     reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
     cancellation_token: CancellationToken,
+    tenant: Cow<'static, str>,
 ) -> TaskMessage
 where
     Error: ChromaError + Debug + Send + 'static,
@@ -315,7 +328,51 @@ where
         task_id: id,
         task_state: TaskState::NotStarted,
         cancellation_token: token,
+        tenant,
     })
+}
+
+/// Wrap an operator and its input into a task message.
+pub fn wrap<Input, Output, Error>(
+    operator: Box<dyn Operator<Input, Output, Error = Error>>,
+    input: Input,
+    reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
+    context: &OrchestratorContext,
+) -> TaskMessage
+where
+    Error: ChromaError + Debug + Send + 'static,
+    Input: Send + Sync + Debug + 'static,
+    Output: Send + Sync + Debug + 'static,
+{
+    wrap_internal(
+        operator,
+        input,
+        reply_channel,
+        context.task_cancellation_token.clone(),
+        context.tenant.clone(),
+    )
+}
+
+/// Wrap an operator and its input into a task message using a raw CancellationToken.
+/// Use this for non-orchestrator callers where an OrchestratorContext is not available.
+pub fn wrap_with_token<Input, Output, Error>(
+    operator: Box<dyn Operator<Input, Output, Error = Error>>,
+    input: Input,
+    reply_channel: Box<dyn ReceiverForMessage<TaskResult<Output, Error>>>,
+    cancellation_token: CancellationToken,
+) -> TaskMessage
+where
+    Error: ChromaError + Debug + Send + 'static,
+    Input: Send + Sync + Debug + 'static,
+    Output: Send + Sync + Debug + 'static,
+{
+    wrap_internal(
+        operator,
+        input,
+        reply_channel,
+        cancellation_token,
+        Cow::Borrowed(""),
+    )
 }
 
 #[cfg(test)]
@@ -364,7 +421,7 @@ mod tests {
         }
 
         async fn on_start(&mut self, ctx: &ComponentContext<Self>) {
-            let task = wrap(
+            let task = wrap_with_token(
                 Box::new(MockOperator {}),
                 (),
                 ctx.receiver(),

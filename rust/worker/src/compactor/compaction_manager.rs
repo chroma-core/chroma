@@ -29,7 +29,8 @@ use chroma_segment::spann_provider::SpannProvider;
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{
-    wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System, TaskResult,
+    wrap_with_token, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, System,
+    TaskResult,
 };
 use chroma_types::{CollectionUuid, JobId};
 use futures::stream::FuturesUnordered;
@@ -276,16 +277,16 @@ impl CompactionManager {
         let purge_dirty_log_input = PurgeDirtyLogInput {
             collection_uuids: deleted_collection_uuids.clone(),
         };
-        let purge_dirty_log_task = wrap(
+        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
+            return;
+        };
+        let purge_dirty_log_task = wrap_with_token(
             Box::new(purge_dirty_log),
             purge_dirty_log_input,
             ctx.receiver(),
             ctx.cancellation_token.clone(),
         );
-        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
-            tracing::error!("Unable to create background task to purge dirty log: Dispatcher is not set for compaction manager");
-            return;
-        };
         if let Err(err) = dispatcher
             .send(purge_dirty_log_task, Some(Span::current()))
             .await
@@ -312,16 +313,16 @@ impl CompactionManager {
         let repair_log_offsets_input = RepairLogOffsetsInput {
             log_offsets_to_repair,
         };
-        let repair_log_offsets_task = wrap(
+        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
+            tracing::error!("Unable to create background task to repair log offsets: Dispatcher is not set for compaction manager");
+            return;
+        };
+        let repair_log_offsets_task = wrap_with_token(
             Box::new(repair_log_offsets),
             repair_log_offsets_input,
             ctx.receiver(),
             ctx.cancellation_token.clone(),
         );
-        let Some(mut dispatcher) = self.context.dispatcher.clone() else {
-            tracing::error!("Unable to create background task to repair log offsets: Dispatcher is not set for compaction manager");
-            return;
-        };
         if let Err(err) = dispatcher
             .send(repair_log_offsets_task, Some(Span::current()))
             .await

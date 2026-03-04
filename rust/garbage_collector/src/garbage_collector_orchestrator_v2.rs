@@ -31,7 +31,7 @@ use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_sysdb::{GetCollectionsOptions, SysDb};
 use chroma_system::{
-    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler,
+    wrap_with_token, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler,
     OneshotMessageReceiver, Orchestrator, OrchestratorContext, PanicError, System, TaskError,
     TaskMessage, TaskResult,
 };
@@ -111,7 +111,7 @@ impl GarbageCollectorOrchestrator {
             version_absolute_cutoff_time,
             collection_soft_delete_absolute_cutoff_time,
             sysdb_client,
-            context: OrchestratorContext::new(dispatcher),
+            context: OrchestratorContext::new(dispatcher, ""),
             system,
             storage,
             logs,
@@ -341,7 +341,7 @@ impl GarbageCollectorOrchestrator {
             }
         }
 
-        let task = wrap(
+        let task = wrap_with_token(
             Box::new(ComputeVersionsToDeleteOperator {}),
             ComputeVersionsToDeleteInput {
                 graph: output.graph,
@@ -424,7 +424,7 @@ impl GarbageCollectorOrchestrator {
         // Now, list files for each version
         let root_manager = self.root_manager.clone();
         let dispatcher = self.dispatcher();
-        let task_cancellation_token = self.context.task_cancellation_token.clone();
+        let cancellation_token = self.context.task_cancellation_token.clone();
         let version_files = self.version_files.clone();
 
         let mut stream = futures::stream::iter(output.versions.into_iter().flat_map(
@@ -437,7 +437,7 @@ impl GarbageCollectorOrchestrator {
         ))
         .map(|(collection_id, version)| {
             let root_manager = root_manager.clone();
-            let task_cancellation_token = task_cancellation_token.clone();
+            let cancellation_token = cancellation_token.clone();
             let mut dispatcher = dispatcher.clone();
             let version_file = version_files.get(&collection_id).cloned();
 
@@ -449,11 +449,11 @@ impl GarbageCollectorOrchestrator {
                 let tx: OneshotMessageReceiver<
                     TaskResult<ListFilesAtVersionOutput, ListFilesAtVersionError>,
                 > = tx;
-                let task: TaskMessage = wrap(
+                let task: TaskMessage = wrap_with_token(
                     Box::new(ListFilesAtVersionsOperator {}),
                     ListFilesAtVersionInput::new(root_manager, version_file, version),
                     Box::new(tx),
-                    task_cancellation_token,
+                    cancellation_token,
                 );
 
                 dispatcher
@@ -553,7 +553,7 @@ impl GarbageCollectorOrchestrator {
             );
         }
 
-        let task = wrap(
+        let task = wrap_with_token(
             Box::new(DeleteUnusedLogsOperator {
                 enabled: self.enable_log_gc,
                 mode: self.cleanup_mode,
@@ -798,7 +798,7 @@ impl GarbageCollectorOrchestrator {
         let database_name = collection_info.database_name.clone();
         self.database_name = Some(database_name.clone());
 
-        let task = wrap(
+        let task = wrap_with_token(
             Box::new(DeleteUnusedFilesOperator::new(
                 self.storage.clone(),
                 self.cleanup_mode,
@@ -909,7 +909,7 @@ impl GarbageCollectorOrchestrator {
                 ),
             )?;
 
-            let delete_versions_task = wrap(
+            let delete_versions_task = wrap_with_token(
                 Box::new(DeleteVersionsAtSysDbOperator {
                     storage: self.storage.clone(),
                 }),

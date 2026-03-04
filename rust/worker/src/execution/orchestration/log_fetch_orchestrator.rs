@@ -281,10 +281,7 @@ impl Orchestrator for LogFetchOrchestrator {
                 }),
                 (),
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             ),
             Some(Span::current()),
         )]
@@ -347,10 +344,7 @@ impl LogFetchOrchestrator {
             operator,
             input,
             ctx.receiver(),
-            self.context
-                .orchestrator_context
-                .task_cancellation_token
-                .clone(),
+            &self.context.orchestrator_context,
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
@@ -407,10 +401,7 @@ impl LogFetchOrchestrator {
                 operator,
                 input,
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -464,10 +455,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     record_segment_reader: record_reader.clone(),
                 },
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             )
         } else {
             let database_name = match chroma_types::DatabaseName::new(collection.database.clone()) {
@@ -497,10 +485,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 }),
                 (),
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             )
         };
 
@@ -697,10 +682,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                 Box::new(PrefetchSegmentOperator::new()),
                 PrefetchSegmentInput::new(segment, self.context.blockfile_provider.clone()),
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             );
 
             // Prefetch task is detached from the orchestrator

@@ -93,7 +93,10 @@ impl CountOrchestrator {
         fetch_log: FetchLogOperator,
         read_level: ReadLevel,
     ) -> Self {
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(
+            dispatcher,
+            collection_and_segments.collection.tenant.clone(),
+        );
         Self {
             context,
             blockfile_provider,
@@ -138,7 +141,7 @@ impl Orchestrator for CountOrchestrator {
                         empty_logs,
                     ),
                     ctx.receiver(),
-                    self.context.task_cancellation_token.clone(),
+                    &self.context,
                 );
                 tasks.push((task, Some(Span::current())));
             }
@@ -147,7 +150,7 @@ impl Orchestrator for CountOrchestrator {
                     Box::new(self.fetch_log.clone()),
                     (),
                     ctx.receiver(),
-                    self.context.task_cancellation_token.clone(),
+                    &self.context,
                 );
                 tasks.push((fetch_log_task, Some(Span::current())));
             }
@@ -191,7 +194,7 @@ impl Handler<TaskResult<FetchLogOutput, FetchLogError>> for CountOrchestrator {
                 output,
             ),
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         self.send(task, ctx, Some(Span::current())).await;
     }
