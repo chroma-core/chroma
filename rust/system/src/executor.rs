@@ -32,11 +32,6 @@ where
 }
 
 #[derive(Clone)]
-pub(super) struct ExecutorRuntime {
-    pub(super) stats: Arc<ComponentRuntimeStats>,
-}
-
-#[derive(Clone)]
 struct ComponentExecutorMetrics {
     queue_depth: opentelemetry::metrics::Histogram<u64>,
     message_received_total: opentelemetry::metrics::Counter<u64>,
@@ -51,7 +46,7 @@ impl ComponentExecutorMetrics {
         let meter = opentelemetry::global::meter("chroma.system");
         Self {
             queue_depth: meter
-                .u64_histogram("component_queue_depth")
+                .u64_histogram("chroma.system.executor.queue_depth")
                 .with_description("The depth of the component's message queue")
                 .with_boundaries(
                     (0..=10)
@@ -93,12 +88,9 @@ where
         handler: C,
         system: System,
         scheduler: Scheduler,
-    ) -> (Self, ExecutorRuntime) {
+    ) -> (Self, Arc<ComponentRuntimeStats>) {
         let max_queue_depth = handler.queue_size();
         let runtime_stats = Arc::new(ComponentRuntimeStats::default());
-        let runtime = ExecutorRuntime {
-            stats: runtime_stats.clone(),
-        };
 
         (
             ComponentExecutor {
@@ -110,9 +102,9 @@ where
                 }),
                 handler,
                 metrics: ComponentExecutorMetrics::new(max_queue_depth),
-                runtime_stats,
+                runtime_stats: runtime_stats.clone(),
             },
-            runtime,
+            runtime_stats,
         )
     }
 

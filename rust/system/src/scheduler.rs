@@ -12,8 +12,6 @@ use super::{utils::duration_ms, Component, ComponentContext, Handler, Message};
 pub(crate) struct SchedulerTaskHandle {
     join_handle: Option<tokio::task::JoinHandle<()>>,
     cancel: tokio_util::sync::CancellationToken,
-    component: &'static str,
-    kind: &'static str,
 }
 
 impl Debug for SchedulerTaskHandle {
@@ -179,8 +177,6 @@ impl Scheduler {
         let handle = SchedulerTaskHandle {
             join_handle: Some(handle),
             cancel: ctx.cancellation_token.clone(),
-            component: C::get_name(),
-            kind: "once",
         };
         self.handles.write().insert(id, handle);
     }
@@ -270,8 +266,6 @@ impl Scheduler {
         let handle = SchedulerTaskHandle {
             join_handle: Some(handle),
             cancel: ctx.cancellation_token.clone(),
-            component: C::get_name(),
-            kind: "interval",
         };
         self.handles.write().insert(id, handle);
     }
@@ -311,13 +305,7 @@ impl Scheduler {
     pub(crate) fn stop(&self) {
         let handles = self.handles.read();
         for handle in handles.iter() {
-            SCHEDULER_METRICS.cancelled_total.add(
-                1,
-                &[
-                    opentelemetry::KeyValue::new("component", handle.1.component),
-                    opentelemetry::KeyValue::new("kind", handle.1.kind),
-                ],
-            );
+            // cancelled_total is recorded by the spawned task when it observes cancellation.
             handle.1.cancel.cancel();
         }
     }

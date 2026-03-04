@@ -40,7 +40,7 @@ impl System {
         let queue_capacity = rx.max_capacity();
         let sender: ComponentSender<C> = ComponentSender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
-        let (mut executor, runtime) = ComponentExecutor::new(
+        let (mut executor, runtime_stats) = ComponentExecutor::new(
             sender.clone(),
             cancel_token.clone(),
             component,
@@ -60,7 +60,7 @@ impl System {
                     sender,
                     C::runtime(),
                     queue_capacity,
-                    runtime.stats.clone(),
+                    runtime_stats,
                 )
             }
             ComponentRuntime::Dedicated => {
@@ -76,7 +76,7 @@ impl System {
                     sender,
                     C::runtime(),
                     queue_capacity,
-                    runtime.stats.clone(),
+                    runtime_stats,
                 )
             }
         }

@@ -8,14 +8,18 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+/// Categorizes an operator for dispatching purposes.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum OperatorType {
+    /// An IO-bound operator dispatched directly onto the tokio runtime.
     IO,
+    /// A CPU-bound or mixed operator dispatched to a worker thread.
     Other,
 }
 
 impl OperatorType {
-    pub fn as_str(self) -> &'static str {
+    /// Return the operator type as a lowercase label suitable for metric attributes.
+    pub fn as_str(&self) -> &'static str {
         match self {
             OperatorType::IO => "io",
             OperatorType::Other => "other",

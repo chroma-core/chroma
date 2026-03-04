@@ -14,7 +14,7 @@ use parking_lot::Mutex;
 use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::{trace_span, Instrument, Span};
 
@@ -75,9 +75,6 @@ struct DispatcherMetrics {
     task_queue_depth: opentelemetry::metrics::Histogram<u64>,
     waiter_depth: opentelemetry::metrics::Histogram<u64>,
     active_io_slots: opentelemetry::metrics::Histogram<u64>,
-    worker_queue_depth: opentelemetry::metrics::Histogram<u64>,
-    io_task_depth: opentelemetry::metrics::Histogram<u64>,
-    aborted_tasks: opentelemetry::metrics::Counter<u64>,
     task_enqueued_total: opentelemetry::metrics::Counter<u64>,
     task_dispatched_total: opentelemetry::metrics::Counter<u64>,
     task_abort_total: opentelemetry::metrics::Counter<u64>,
@@ -87,7 +84,7 @@ struct DispatcherMetrics {
 }
 
 impl DispatcherMetrics {
-    fn new(max_worker_queue_depth: u64, max_io_queue_depth: u64) -> Self {
+    fn new() -> Self {
         let meter = opentelemetry::global::meter("chroma.system");
         DispatcherMetrics {
             task_queue_depth: meter
@@ -100,29 +97,7 @@ impl DispatcherMetrics {
                 .build(),
             active_io_slots: meter
                 .u64_histogram("chroma.system.dispatcher.active_io_slots")
-                .with_description("Available IO slots in dispatcher")
-                .build(),
-            worker_queue_depth: meter
-                .u64_histogram("worker_queue_depth")
-                .with_description("The depth of the worker queue")
-                .with_boundaries(
-                    (0..=10)
-                        .map(|x| (x * (max_worker_queue_depth / 10)) as f64)
-                        .collect(),
-                )
-                .build(),
-            io_task_depth: meter
-                .u64_histogram("io_task_depth")
-                .with_description("The depth of the IO task queue")
-                .with_boundaries(
-                    (0..=10)
-                        .map(|x| (x * (max_io_queue_depth / 10)) as f64)
-                        .collect(),
-                )
-                .build(),
-            aborted_tasks: meter
-                .u64_counter("aborted_tasks")
-                .with_description("The total number of tasks that were aborted due to queue limits")
+                .with_description("Active IO task slots in use")
                 .build(),
             task_enqueued_total: meter
                 .u64_counter("chroma.system.dispatcher.task_enqueued_total")
@@ -152,14 +127,36 @@ impl DispatcherMetrics {
     }
 }
 
-static HOSTNAME: LazyLock<String> =
-    LazyLock::new(|| std::env::var("HOSTNAME").unwrap_or_else(|_| "unknown".to_string()));
+fn task_attrs(task_type: &'static str, operator: &'static str) -> [opentelemetry::KeyValue; 2] {
+    [
+        opentelemetry::KeyValue::new("task_type", task_type),
+        opentelemetry::KeyValue::new("operator", operator),
+    ]
+}
 
+fn task_attrs_with(
+    task_type: &'static str,
+    operator: &'static str,
+    key: &'static str,
+    value: &'static str,
+) -> [opentelemetry::KeyValue; 3] {
+    [
+        opentelemetry::KeyValue::new("task_type", task_type),
+        opentelemetry::KeyValue::new("operator", operator),
+        opentelemetry::KeyValue::new(key, value),
+    ]
+}
+
+/// Point-in-time snapshot of dispatcher queue depths and worker counts.
 #[derive(Debug, Clone, Copy)]
 pub struct DispatcherStats {
+    /// Number of tasks waiting in the dispatcher's queue.
     pub task_queue_depth: usize,
+    /// Number of idle workers waiting for tasks.
     pub waiter_depth: usize,
+    /// Remaining IO concurrency slots.
     pub active_io_slots: u64,
+    /// Total number of worker threads.
     pub num_workers: usize,
 }
 
@@ -172,10 +169,7 @@ impl Dispatcher {
             waiters: Vec::new(),
             active_io_tasks: Arc::new(AtomicU64::new(config.active_io_tasks as u64)),
             worker_handles: Arc::new(Mutex::new(Vec::new())),
-            metrics: DispatcherMetrics::new(
-                config.worker_queue_size as u64,
-                config.active_io_tasks as u64,
-            ),
+            metrics: DispatcherMetrics::new(),
         }
     }
 
@@ -199,6 +193,7 @@ impl Dispatcher {
         }
     }
 
+    /// Return a point-in-time snapshot of the dispatcher's internal state.
     pub fn stats(&self) -> DispatcherStats {
         DispatcherStats {
             task_queue_depth: self.task_queue.len(),
@@ -208,32 +203,25 @@ impl Dispatcher {
         }
     }
 
-    fn record_depths(&self, extra_attrs: &[opentelemetry::KeyValue]) {
+    fn record_depths(&self) {
         self.metrics
             .task_queue_depth
-            .record(self.task_queue.len() as u64, extra_attrs);
+            .record(self.task_queue.len() as u64, &[]);
         self.metrics
             .waiter_depth
-            .record(self.waiters.len() as u64, extra_attrs);
+            .record(self.waiters.len() as u64, &[]);
         self.metrics
             .active_io_slots
-            .record(self.active_io_tasks.load(Ordering::Relaxed), extra_attrs);
+            .record(self.active_io_tasks.load(Ordering::Relaxed), &[]);
     }
 
-    /// Enqueue a task to be processed
-    /// # Parameters
-    /// - task: The task to enqueue
+    /// Enqueue a task to be processed.
     async fn enqueue_task(&mut self, mut task: TaskMessage) {
-        let hostname_kv = [opentelemetry::KeyValue::new("hostname", HOSTNAME.clone())];
         let task_type = task.get_type().as_str();
         let operator = task.get_name();
-        self.metrics.task_enqueued_total.add(
-            1,
-            &[
-                opentelemetry::KeyValue::new("task_type", task_type),
-                opentelemetry::KeyValue::new("operator", operator),
-            ],
-        );
+        let task_kv = task_attrs(task_type, operator);
+        let task_created_at = task.created_at();
+        self.metrics.task_enqueued_total.add(1, &task_kv);
         match task.get_type() {
             OperatorType::IO => {
                 let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name(), task_type = "io");
@@ -246,26 +234,14 @@ impl Dispatcher {
                 // This is conceptually what a semaphore is doing, except that it bails if
                 // acquisition fails rather than blocking.
                 let mut witness = self.active_io_tasks.load(Ordering::Relaxed);
-                self.metrics.io_task_depth.record(witness, &hostname_kv);
                 loop {
                     if witness == 0 {
                         task.abort().await;
-                        self.metrics.aborted_tasks.add(
-                            1,
-                            &[
-                                opentelemetry::KeyValue::new("task", task.get_name()),
-                                opentelemetry::KeyValue::new("type", "io"),
-                            ],
-                        );
                         self.metrics.task_abort_total.add(
                             1,
-                            &[
-                                opentelemetry::KeyValue::new("task_type", "io"),
-                                opentelemetry::KeyValue::new("operator", operator),
-                                opentelemetry::KeyValue::new("reason", "io_limit"),
-                            ],
+                            &task_attrs_with(task_type, operator, "reason", "io_limit"),
                         );
-                        self.record_depths(&hostname_kv);
+                        self.record_depths();
                         return;
                     }
                     match self.active_io_tasks.compare_exchange(
@@ -284,50 +260,31 @@ impl Dispatcher {
                 let counter = IncrementOnDrop(counter);
                 self.metrics.task_dispatched_total.add(
                     1,
-                    &[
-                        opentelemetry::KeyValue::new("task_type", "io"),
-                        opentelemetry::KeyValue::new("operator", operator),
-                        opentelemetry::KeyValue::new("dispatch", "direct"),
-                    ],
+                    &task_attrs_with(task_type, operator, "dispatch", "direct"),
                 );
-                self.metrics.queue_latency_ms.record(
-                    duration_ms(task.created_at().elapsed()),
-                    &[
-                        opentelemetry::KeyValue::new("task_type", "io"),
-                        opentelemetry::KeyValue::new("operator", operator),
-                    ],
-                );
-                self.record_depths(&hostname_kv);
+                self.metrics
+                    .queue_latency_ms
+                    .record(duration_ms(task_created_at.elapsed()), &task_kv);
+                self.record_depths();
                 tokio::spawn(async move {
                     task.run().instrument(child_span).await;
                     drop(counter);
                 });
             }
             OperatorType::Other => {
-                // If a worker is waiting for a task, send it to the worker in FIFO order
-                // Otherwise, add it to the task queue
+                // If a worker is waiting for a task, send it to the worker in FIFO order.
+                // Otherwise, add it to the task queue.
                 let span = trace_span!(parent: Span::current(), "Other task execution", name = task.get_name(), task_type = "other");
-                self.metrics
-                    .worker_queue_depth
-                    .record(self.task_queue.len() as u64, &hostname_kv);
                 match self.waiters.pop() {
                     Some(channel) => match channel.reply_to.send(task, Some(span)).await {
                         Ok(_) => {
                             self.metrics.task_dispatched_total.add(
                                 1,
-                                &[
-                                    opentelemetry::KeyValue::new("task_type", "other"),
-                                    opentelemetry::KeyValue::new("operator", operator),
-                                    opentelemetry::KeyValue::new("dispatch", "direct"),
-                                ],
+                                &task_attrs_with(task_type, operator, "dispatch", "direct"),
                             );
-                            self.metrics.queue_latency_ms.record(
-                                duration_ms(channel.requested_at.elapsed()),
-                                &[
-                                    opentelemetry::KeyValue::new("task_type", "other"),
-                                    opentelemetry::KeyValue::new("operator", operator),
-                                ],
-                            );
+                            self.metrics
+                                .queue_latency_ms
+                                .record(duration_ms(task_created_at.elapsed()), &task_kv);
                         }
                         Err(e) => {
                             tracing::error!("Error sending task to worker: {:?}", e);
@@ -343,61 +300,40 @@ impl Dispatcher {
                     None => {
                         if self.task_queue.len() >= self.config.task_queue_limit {
                             task.abort().await;
-                            self.metrics.aborted_tasks.add(
-                                1,
-                                &[
-                                    opentelemetry::KeyValue::new("task", task.get_name()),
-                                    opentelemetry::KeyValue::new("type", "other"),
-                                ],
-                            );
                             self.metrics.task_abort_total.add(
                                 1,
-                                &[
-                                    opentelemetry::KeyValue::new("task_type", "other"),
-                                    opentelemetry::KeyValue::new("operator", operator),
-                                    opentelemetry::KeyValue::new("reason", "queue_limit"),
-                                ],
+                                &task_attrs_with(task_type, operator, "reason", "queue_limit"),
                             );
                         } else {
                             self.task_queue.push_back((task, span));
                         }
                     }
                 }
-                self.record_depths(&hostname_kv);
+                self.record_depths();
             }
         }
     }
 
-    /// Handle a work request from a worker thread
-    /// # Parameters
-    /// - worker: The request for work
-    ///   If no work is available, the worker will be placed in a queue and a task will be sent to
-    ///   it when one is available
+    /// Handle a work request from a worker thread.
+    /// If no work is available, the worker will be placed in a queue and a task will be sent to
+    /// it when one is available.
     async fn handle_work_request(&mut self, request: TaskRequestMessage) {
-        let hostname_kv = [opentelemetry::KeyValue::new("hostname", HOSTNAME.clone())];
         self.metrics.worker_request_total.add(1, &[]);
         match self.task_queue.pop_front() {
             Some((task, span)) => {
                 let task_type = task.get_type().as_str();
                 let operator = task.get_name();
-                let queue_latency_ms = duration_ms(task.created_at().elapsed());
+                let task_kv = task_attrs(task_type, operator);
+                let queue_latency = duration_ms(task.created_at().elapsed());
                 match request.reply_to.send(task, Some(span)).await {
                     Ok(_) => {
                         self.metrics.task_dispatched_total.add(
                             1,
-                            &[
-                                opentelemetry::KeyValue::new("task_type", task_type),
-                                opentelemetry::KeyValue::new("operator", operator),
-                                opentelemetry::KeyValue::new("dispatch", "queued"),
-                            ],
+                            &task_attrs_with(task_type, operator, "dispatch", "queued"),
                         );
-                        self.metrics.queue_latency_ms.record(
-                            queue_latency_ms,
-                            &[
-                                opentelemetry::KeyValue::new("task_type", task_type),
-                                opentelemetry::KeyValue::new("operator", operator),
-                            ],
-                        );
+                        self.metrics
+                            .queue_latency_ms
+                            .record(queue_latency, &task_kv);
                     }
                     Err(e) => {
                         tracing::error!("Error sending task to worker: {:?}", e);
@@ -415,7 +351,7 @@ impl Dispatcher {
                 self.waiters.push(request);
             }
         }
-        self.record_depths(&hostname_kv);
+        self.record_depths();
     }
 }
 
@@ -436,7 +372,6 @@ impl Configurable<DispatcherConfig> for Dispatcher {
 pub(super) struct TaskRequestMessage {
     reply_to: Box<dyn ReceiverForMessage<TaskMessage>>,
     worker_id: usize,
-    requested_at: std::time::Instant,
 }
 
 impl TaskRequestMessage {
@@ -451,7 +386,6 @@ impl TaskRequestMessage {
         TaskRequestMessage {
             reply_to,
             worker_id,
-            requested_at: std::time::Instant::now(),
         }
     }
 }

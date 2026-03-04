@@ -16,13 +16,12 @@ use super::{system::System, ReceiverForMessage};
 pub trait Message: Debug + Send + 'static {}
 impl<M: Debug + Send + 'static> Message for M {}
 
+/// The lifecycle state of a component within the system.
 #[derive(Debug, PartialEq, Clone, Copy)]
-/// The state of a component
-/// A component can be running or stopped
-/// A component is stopped when it is cancelled
-/// A component can be run with a system
 pub enum ComponentState {
+    /// The component is running and processing messages.
     Running,
+    /// The component has been cancelled and is no longer processing messages.
     Stopped,
 }
 
@@ -347,15 +346,24 @@ impl ComponentRuntimeStats {
     }
 }
 
+/// Point-in-time snapshot of a component's runtime statistics.
 #[derive(Debug, Clone)]
 pub struct ComponentStats {
+    /// The component's registered name.
     pub component: &'static str,
+    /// Whether the component is running or stopped.
     pub state: ComponentState,
+    /// The runtime the component is executing on.
     pub runtime: ComponentRuntime,
+    /// Maximum number of messages the component's channel can hold.
     pub queue_capacity: usize,
+    /// Number of remaining slots in the component's channel.
     pub queue_available: usize,
+    /// When this component was started.
     pub started_at: Instant,
+    /// Total number of messages handled since start.
     pub handled_messages: u64,
+    /// The most recent error string, if any.
     pub last_error: Option<String>,
 }
 
@@ -473,6 +481,7 @@ impl<C: Component> ComponentHandle<C> {
         self.sender.wrap_and_request(message, tracing_context).await
     }
 
+    /// Return a point-in-time snapshot of the component's runtime statistics.
     pub fn stats(&self) -> ComponentStats {
         ComponentStats {
             component: C::get_name(),
