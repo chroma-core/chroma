@@ -16,6 +16,7 @@ from chromadb.types import Metadata
 import numpy as np
 from uuid import UUID
 
+from chromadb.errors import InvalidArgumentError
 from chromadb.api.types import (
     URI,
     Schema,

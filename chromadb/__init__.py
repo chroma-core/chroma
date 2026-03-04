@@ -8,6 +8,7 @@ from chromadb.api.async_client import AsyncClient as AsyncClientCreator
 from chromadb.auth.token_authn import TokenTransportHeader
 import chromadb.config
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings
+from chromadb.errors import InvalidArgumentError
 from chromadb.api import AdminAPI, AsyncClientAPI, ClientAPI
 from chromadb.api.models.Collection import Collection
 from chromadb.api.types import (

@@ -453,7 +453,7 @@ def _validate_record_set_length_consistency(record_set: BaseRecordSet) -> None:
 
     if not lengths:
         raise InvalidArgumentError(
-            f"At least one of one of {', '.join(record_set.keys())} must be provided"
+            f"At least one of {', '.join(record_set.keys())} must be provided"
         )
 
     zero_lengths = [
@@ -1231,7 +1231,7 @@ def validate_where(where: Where) -> None:
                 if operator in ["$in", "$nin"]:
                     if not isinstance(operand, list):
                         raise InvalidArgumentError(
-                            f"Expected operand value to be an list for operator {operator}, got {operand}"
+                            f"Expected operand value to be a list for operator {operator}, got {operand}"
                         )
                 # $contains/$not_contains: scalar operand (checks if array field contains value)
                 if operator in ["$contains", "$not_contains"]:
