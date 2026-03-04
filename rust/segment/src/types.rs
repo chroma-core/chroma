@@ -273,13 +273,15 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
             return Ok(self.logs.get(id).unwrap().record.id.clone());
         }
 
+        // SAFETY: If user_id_at_log_index is None, the record must exist in the segment
+        // and the reader must be available. Returns empty string if invariant is violated.
         match record_segment_reader {
             Some(reader) => Ok(reader
                 .get_user_id_for_offset_id(self.materialized_log_record.offset_id)
                 .await?
-                .expect("Expected user id for offset id in segment")
+                .unwrap_or_default()
                 .to_string()),
-            None => panic!("Expected at least one source of user id"),
+            None => Ok(String::new()),
         }
     }
 

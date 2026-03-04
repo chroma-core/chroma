@@ -73,9 +73,12 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             return Ok(ProjectionOutput { records: vec![] });
         }
 
+        let needs_data = self.document || self.embedding || self.metadata;
+
         tracing::trace!(
-            "Running projection on {} offset ids",
-            input.offset_ids.len()
+            "Running projection on {} offset ids (needs_data={})",
+            input.offset_ids.len(),
+            needs_data,
         );
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -90,11 +93,27 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             Err(e) => Err(*e),
         }?;
 
+        let offset_id_set: HashSet<_> = HashSet::from_iter(input.offset_ids.iter().cloned());
+
+        // Conditionally prefetch: load full data records when needed,
+        // otherwise just prefetch the lightweight id_to_user_id mapping.
+        if let Some(reader) = &record_segment_reader {
+            if needs_data {
+                reader
+                    .load_id_to_data(offset_id_set.iter().cloned())
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
+                    .await;
+            } else {
+                reader
+                    .load_id_to_user_id(offset_id_set.iter().cloned())
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
+                    .await;
+            }
+        }
+
         let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
-
-        let offset_id_set: HashSet<_> = HashSet::from_iter(input.offset_ids.iter().cloned());
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
@@ -113,51 +132,83 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             .iter()
             .map(|offset_id| {
                 async {
-                    let record = match offset_id_to_log_record.get(offset_id) {
-                        // The offset id is in the log
-                        Some(log) => {
-                            let log = log
-                                .hydrate(record_segment_reader.as_ref())
-                                .await
-                                .map_err(ProjectionError::LogMaterializer)?;
+                    if needs_data {
+                        // Full hydration path: load complete data records
+                        let record = match offset_id_to_log_record.get(offset_id) {
+                            // The offset id is in the log
+                            Some(log) => {
+                                let log = log
+                                    .hydrate(record_segment_reader.as_ref())
+                                    .await
+                                    .map_err(ProjectionError::LogMaterializer)?;
 
-                            ProjectionRecord {
-                                id: log.get_user_id().to_string(),
-                                document: log
-                                    .merged_document_ref()
-                                    .filter(|_| self.document)
-                                    .map(str::to_string),
-                                embedding: self
-                                    .embedding
-                                    .then_some(log.merged_embeddings_ref().to_vec()),
-                                metadata: self
-                                    .metadata
-                                    .then_some(log.merged_metadata())
-                                    .filter(|metadata| !metadata.is_empty()),
-                            }
-                        }
-                        // The offset id is in the record segment
-                        None => {
-                            if let Some(reader) = &record_segment_reader {
-                                let record =
-                                    reader.get_data_for_offset_id(*offset_id).await?.ok_or(
-                                        ProjectionError::RecordSegmentPhantomRecord(*offset_id),
-                                    )?;
                                 ProjectionRecord {
-                                    id: record.id.to_string(),
-                                    document: record
-                                        .document
+                                    id: log.get_user_id().to_string(),
+                                    document: log
+                                        .merged_document_ref()
                                         .filter(|_| self.document)
                                         .map(str::to_string),
-                                    embedding: self.embedding.then_some(record.embedding.to_vec()),
-                                    metadata: record.metadata.filter(|_| self.metadata),
+                                    embedding: self
+                                        .embedding
+                                        .then_some(log.merged_embeddings_ref().to_vec()),
+                                    metadata: self
+                                        .metadata
+                                        .then_some(log.merged_metadata())
+                                        .filter(|metadata| !metadata.is_empty()),
                                 }
-                            } else {
-                                return Err(ProjectionError::RecordSegmentUninitialized);
                             }
-                        }
-                    };
-                    Ok::<_, ProjectionError>(record)
+                            // The offset id is in the record segment
+                            None => {
+                                if let Some(reader) = &record_segment_reader {
+                                    let record =
+                                        reader.get_data_for_offset_id(*offset_id).await?.ok_or(
+                                            ProjectionError::RecordSegmentPhantomRecord(*offset_id),
+                                        )?;
+                                    ProjectionRecord {
+                                        id: record.id.to_string(),
+                                        document: record
+                                            .document
+                                            .filter(|_| self.document)
+                                            .map(str::to_string),
+                                        embedding: self
+                                            .embedding
+                                            .then_some(record.embedding.to_vec()),
+                                        metadata: record.metadata.filter(|_| self.metadata),
+                                    }
+                                } else {
+                                    return Err(ProjectionError::RecordSegmentUninitialized);
+                                }
+                            }
+                        };
+                        Ok::<_, ProjectionError>(record)
+                    } else {
+                        // Lightweight path: only resolve user ID, skip full data hydration
+                        let id = match offset_id_to_log_record.get(offset_id) {
+                            Some(log) => log
+                                .get_user_id(record_segment_reader.as_ref())
+                                .await
+                                .map_err(ProjectionError::LogMaterializer)?,
+                            None => {
+                                if let Some(reader) = &record_segment_reader {
+                                    reader
+                                        .get_user_id_for_offset_id(*offset_id)
+                                        .await?
+                                        .ok_or(ProjectionError::RecordSegmentPhantomRecord(
+                                            *offset_id,
+                                        ))?
+                                        .to_string()
+                                } else {
+                                    return Err(ProjectionError::RecordSegmentUninitialized);
+                                }
+                            }
+                        };
+                        Ok(ProjectionRecord {
+                            id,
+                            document: None,
+                            embedding: None,
+                            metadata: None,
+                        })
+                    }
                 }
                 .instrument(current_span.clone())
             })
