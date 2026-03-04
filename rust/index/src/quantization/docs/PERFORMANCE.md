@@ -263,10 +263,10 @@ centroid recall while saving the memory cost of storing raw centroids.
 
 # Quantized KMeans Clustering
 
-Benchmark data from `cargo bench -p chroma-index --bench quantization_recall_ivf -- --size 100000`
+Benchmark data from `cargo bench -p chroma-index --bench quantization_recall_ivf -- --size 1000000`
 with `--cluster-bits 1`, `--cluster-bits 4`, and no flag (exact).
-(cohere_wiki, N=100K, 316 clusters, K=10, 1-bit data, 1-bit centroids).
-Full raw output in `saved_benchmarks/recall_100k_quantized_clustering.txt`.
+(cohere_wiki, N=1M, 1000 clusters, K=10, 1-bit data, 1-bit centroids, r6i.8xlarge).
+Full raw output in `saved_benchmarks/recall_ivf_1M_quantized_clustering_k10.txt`.
 
 This measures how much end-to-end recall degrades when KMeans uses quantized
 code-vs-code distances instead of exact f32 distances for cluster assignment.
@@ -276,26 +276,27 @@ Centroid computation still uses raw f32 vectors; only the vector assignment step
 
 | nprobe | exact KMeans | 4-bit KMeans | 1-bit KMeans |
 |--------|-------------|-------------|-------------|
-| 16 | 0.921 | 0.921 | 0.914 |
-| 32 | 0.958 | 0.944 | 0.946 |
-| 64 | 0.976 | 0.970 | 0.966 |
-| 128 | 0.988 | 0.983 | 0.980 |
+| 16 | 0.751 | 0.757 | 0.741 |
+| 32 | 0.820 | 0.826 | 0.816 |
+| 64 | 0.902 | 0.908 | 0.891 |
+| 128 | 0.931 | 0.947 | 0.922 |
 
 **Centroid recall ceiling** (exact centroid search at nprobe -- reflects clustering quality):
 
 | nprobe | exact KMeans | 4-bit KMeans | 1-bit KMeans |
 |--------|-------------|-------------|-------------|
-| 16 | 0.925 | 0.931 | 0.920 |
-| 32 | 0.963 | 0.957 | 0.956 |
-| 64 | 0.983 | 0.983 | 0.980 |
-| 128 | 0.998 | 0.997 | 0.994 |
+| 16 | 0.755 | 0.768 | 0.750 |
+| 32 | 0.829 | 0.840 | 0.830 |
+| 64 | 0.913 | 0.927 | 0.912 |
+| 128 | 0.950 | 0.972 | 0.948 |
 
 
-**Findings:** Quantized KMeans has negligible impact on recall. The worst-case
-end-to-end degradation is 0.8% (0.988 vs 0.980 at nprobe=128 for 1-bit), and at
-lower nprobes the differences are within noise. Centroid recall ceilings are nearly
-identical across all three methods, confirming that quantized assignment produces
-clusters of comparable quality to exact assignment.
+**Findings:** At 1M vectors, quantized KMeans produces clusters of comparable quality
+to exact KMeans. 1-bit KMeans shows a modest degradation of up to 0.9% end-to-end
+recall (0.931 vs 0.922 at nprobe=128), with smaller differences at lower nprobes.
+4-bit KMeans slightly outperforms exact in this run (+0.6--1.6%), likely due to KMeans
+converging to a different (better) local optimum rather than a systematic advantage.
+
 
 ---
 

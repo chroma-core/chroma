@@ -43,6 +43,12 @@
 //!   --data-bits B             quantization bits for data vectors: 1 (default) or 4
 //!   --cluster-bits B          quantization bits for KMeans assignment: 1 or 4 (default: exact)
 //!   --distance D              euclidean (default), cosine, ip
+//!
+//! When --cluster-bits is set, KMeans uses code-vs-code distance for the
+//! assignment step instead of exact f32 distance. Vectors are quantized once
+//! up front (relative to the global centroid of all rotated vectors).
+//! Centroids are re-quantized each iteration (since they change). The update
+//! step still uses raw f32 vectors to recompute centroid means.
 
 use std::collections::HashSet;
 use std::path::PathBuf;
