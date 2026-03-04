@@ -26,6 +26,9 @@ message PushLogsResponse {
 
 message ScoutLogsRequest {
   string collection_id = 1;
+  // When true, the response will include the storage paths of all fragments
+  // that a reader would need to fetch to read the log.
+  bool include_fragment_paths = 2;
   string database_name = 5;
 }
 
@@ -38,6 +41,9 @@ message ScoutLogsResponse {
   int64 first_uncompacted_record_offset = 3;
   // Whether the log is sealed.
   bool is_sealed = 4;
+  // Storage paths of all fragments the reader would need to fetch to read the log.
+  // Only populated when include_fragment_paths is set in the request.
+  repeated string fragment_paths = 5;
 }
 
 message PullLogsRequest {

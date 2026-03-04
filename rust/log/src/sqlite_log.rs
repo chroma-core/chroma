@@ -189,7 +189,7 @@ impl SqliteLog {
         &mut self,
         _collection_id: CollectionUuid,
         _starting_offset: i64,
-    ) -> Result<u64, SqlitePullLogsError> {
+    ) -> Result<crate::ScoutLogsResult, SqlitePullLogsError> {
         Err(SqlitePullLogsError::NotImplemented(
             "scout_logs".to_string(),
         ))
