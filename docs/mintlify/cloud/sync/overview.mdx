@@ -10,9 +10,11 @@ Chroma Sync has three primary concepts: **source types**, **sources** and **invo
 
 # Source Types
 
-A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. An example of a source type-and notably the only currently supported one-is a GitHub repository. Each source type defines its own schema for configuring sources of its type. For example, the sources of the GitHub repository type allow developers to define a parameter `include_globs`, which is an array of glob patterns for which matching files will be synced.
+A source type defines a kind of entity that contains data that can be chunked, embedded, and indexed. Each source type defines its own schema for configuring sources of its type. Chroma Sync currently supports three source types: **S3 buckets**, **GitHub repositories**, and **web scraping**. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
-Other examples of (future) source types may be S3 buckets, web pages, Notion workspaces, or any other corpus of continually updated content. If there is a specific source type for which you would like support, please reach out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
+## S3
+
+The S3 source type allows developers to sync files from Amazon S3 buckets into Chroma. It supports documents (PDFs, Office files, images, ebooks), code, and plain text. S3 sources can be configured with auto-sync to automatically index files as they are uploaded to S3. For a detailed walkthrough, see [S3 Sync docs](/cloud/sync/s3).
 
 ## GitHub Repositories
 
@@ -52,6 +54,60 @@ The global source configuration schema requires the following parameters:
 - `database_name` defines the Chroma database in which collections should be created by invocations run on this source. A database must exist before creating sources that point to it.
 - `embedding.dense.model` defines the embedding model that should be used to generate dense embeddings for chunked documents. Currently, only the [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) model is supported, but if there is a model you would like to use, please let us know by reaching out to [engineering@trychroma.com](mailto:engineering@trychroma.com).
 
+You can optionally configure sparse embeddings alongside dense embeddings:
+
+```json
+{
+  "embedding": {
+    "dense": {
+      "model": "Qwen/Qwen3-Embedding-0.6B"
+    },
+    "sparse": {
+      "model": "Chroma/BM25",
+      "key": "sparse_embedding"
+    }
+  }
+}
+```
+
+- `embedding.sparse.model` defines the sparse embedding model. Supported models: `Chroma/BM25`, `prithivida/Splade_PP_en_v1`.
+- `embedding.sparse.key` defines the metadata key under which sparse embeddings are stored.
+
+You can also configure chunking behavior:
+
+```json
+{
+  "chunking": {
+    "type": "tree_sitter",
+    "max_size_bytes": 8192
+  }
+}
+```
+
+- `chunking.type` can be `tree_sitter` (syntax-aware, with `max_size_bytes`) or `lines` (line-based, with `max_lines` and `max_size_bytes`).
+
+## S3
+
+A source of the S3 type is configured with a bucket name, region, collection name, and AWS credentials:
+
+```json
+{
+    "bucket_name": "string",
+    "region": "string",
+    "collection_name": "string",
+    "aws_credential_id": 0,
+    "path_prefix": "string",
+    "auto_sync": "none"
+}
+```
+
+- `bucket_name` is the name of the S3 bucket to sync from.
+- `region` is the AWS region of the bucket.
+- `collection_name` is the default target collection name for synced data.
+- `aws_credential_id` is the ID of AWS credentials.
+- `path_prefix` (optional) limits which S3 keys can be synced. Only keys starting with this prefix are allowed.
+- `auto_sync` (optional) sets the auto-sync mode: `none` (default), `direct`, or `metadata`. See [S3 Auto-Sync](/cloud/sync/s3#auto-sync).
+
 ## GitHub Repositories
 
 A source of the GitHub repository type is an individual GitHub repository configured with the global source configuration parameters, and the GitHub source-specific configuration parameters:
@@ -65,7 +121,7 @@ A source of the GitHub repository type is an individual GitHub repository config
 ```
 
 - `repository` defines the GitHub repository whose code should be synced. This must be the forward slash-separated combination of the repository owner's GitHub username and the repository name (e.g., `chroma-core/chroma`). Note that changing a repository name after creating a Chroma Sync source for it will result in invocations on that source failing, so a new source with the updated repository name must be created.
-- `app_id` defines the GitHub App ID of the GitHub App that has access to the provided `repository`. This parameter should only be supplied if the provided repository is private. If you are unsure of the GitHub App ID you should use, [see more](https://www.notion.so/Chroma-Sync-Docs-28b58a6d81918062b6ebf00deedde0ab?pvs=21) about the two tiers Chroma offers for the GitHub repository source type.
+- `app_id` defines the GitHub App ID of the GitHub App that has access to the provided `repository`. This parameter should only be supplied if the provided repository is private.
 - `include_globs` defines a set of glob patterns for which matching files should be synced. If this parameter is not provided, files matching `"*"` will be synced. Note that Chroma will not sync binary data, images, and other large or non-UTF-8 files.
 
 ## Web
@@ -95,7 +151,25 @@ The global invocation configuration parameters are:
 }
 ```
 
-- `target_collection_name` defines the name of the Chroma collection in which synced data should be stored. This must be a collection that does not already exist with synced data. Chroma Sync uses the metadata key `finished_ingest` to indicate whether a collection contains synced data. If an invocation creation request is received for a collection with metadata in which this key is present and set to true, the API will return a 409 Conflict.
+- `target_collection_name` defines the name of the Chroma collection in which synced data should be stored. This is required for GitHub and Web sources. For S3 sources, it is optional and defaults to the `collection_name` configured on the source. The target must be a collection that does not already exist with synced data. Chroma Sync uses the metadata key `finished_ingest` to indicate whether a collection contains synced data. If an invocation creation request is received for a collection with metadata in which this key is present and set to true, the API will return a 409 Conflict.
+
+## S3
+
+Invocations on sources of the S3 type sync individual files from the bucket. The configuration parameters specific to S3 invocations are:
+
+```json
+{
+    "object_key": "string",
+    "custom_id": "string",
+    "metadata": {},
+    "target_collection_name": "string"
+}
+```
+
+- `object_key` (required) is the full S3 object key to sync. Must include the `path_prefix` if one is configured on the source.
+- `custom_id` (optional) is a custom document ID (max 120 bytes). Chunk IDs become `custom_id-{chunk}` instead of `sha256(object_key)-{chunk}`.
+- `metadata` (optional) is additional metadata merged with standard chunk metadata. Values must be scalars (string, number, boolean, or null).
+- `target_collection_name` (optional) overrides the source's `collection_name`. If not provided, defaults to the `collection_name` configured on the source.
 
 ## GitHub Repositories
 
@@ -114,407 +188,4 @@ Invocations on sources of the GitHub repository type are sync runs over an indiv
 
 - `ref_identifier` is either the commit SHA-256 or the name of the branch from which to retrieve the code to be synced. If a branch is provided, the code will be retrieved from the branch's latest commit.
 
-# Endpoints
-
-## Sources
-
-### Create Source
-Creates a new source of the specified type with the provided configuration.
-
-**Method**
-
-    POST
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/sources
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Request Body**
-
-For a GitHub repository source:
-
-```json
-{
-    "database_name": "string",
-    "embedding": {
-        "dense": {
-            "model": "Qwen/Qwen3-Embedding-0.6B"
-        }
-    },
-    "github": {
-        "repository": "string",
-        "app_id": "string" | null, // optional
-        "include_globs": ["string", ...] | null, // optional
-    }
-}
-```
-
-For a web source:
-
-```json
-{
-    "database_name": "string",
-    "embedding": {
-        "dense": {
-            "model": "Qwen/Qwen3-Embedding-0.6B"
-        }
-    },
-    "web_scrape": {
-        "starting_url": "https://docs.trychroma.com",
-        "page_limit": 5
-    }
-}
-```
-
-**Responses**
-- `200 OK` If the source is successfully created.
-
-    ```json
-    {
-        "source_id": "string"
-    }
-    ```
-
-- `400 Bad Request` If the request payload is missing required fields or a provided field was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to create a source. Note that only team owners and administrators can create sources.
-- `404 Not Found` If the provided database or GitHub App does not exist.
-- `409 Conflict` If the source already exists.
-- `500 Internal Server Error` If an unknown error occurs while creating the source.
-
-### Get Source
-
-Retrieve a specific source by its ID.
-
-**Method**
-
-    GET
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/sources/{source_id}
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Request Parameters**
-- `source_id` is the ID of the source to retrieve.
-
-**Responses**
-- `200 OK` If the source is found.
-
-```json
-{
-    "id": "string",
-    "database_name": "string",
-    "embedding": {
-        "dense": {
-            "model": "string"
-        }
-    },
-    "github": {
-        "repository": "string",
-        "app_id": "string" | null,
-        "include_globs": ["string", ...]
-    },
-    "created_at": "string"
-}
-```
-
-- `400 Bad Request` If the request parameters are missing required values or a provided value was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to access this source.
-- `404 Not Found` If the requested source does not exist.
-- `500 Internal Server Error` If an unknown error occurs while retrieving the source.
-
-### List Sources
-
-List sources with optional filtering.
-
-**Method**
-
-    GET
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/sources
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Query Parameters**
-- `database_name` allows callers to optionally filter sources by their database.
-- `source_type` allows callers to optionally filter sources by their type. If provided, must be one of `[github]`.
-- `github.app_id` allows callers to optionally filter GitHub sources by their app ID. If provided, `source_type` must be `github`.
-- `github.repository` allows callers to optionally filter GitHub sources by their repository. If provided, `source_type` must be `github`.
-- `limit` specifies the maximum number of results to return. Defaults to 100.
-- `offset` specifies the number of results to skip before starting to assemble the list of returned sources when sorting by the sources' `created_at` timestamps. Defaults to 0.
-- `order_by` indicates whether to perform sorting by the sources' `created_at` timestamps in ascending or descending order. If provided, must be one of `[ASC, DESC]`. Defaults to `DESC`.
-
-**Responses**
-- `200 OK` If the request does not encounter any errors while listing sources.
-
-    ```json
-    [
-        {
-            "id": "string",
-            "database_name": "string",
-            "embedding": {
-                "dense": {
-                    "model": "string"
-                }
-            },
-            "source_type": {
-                "github": {
-                    "repository": "string",
-                    "app_id": "string" | null,
-                    "include_globs": ["string", ...]
-                }
-            },
-            "created_at": "string"
-        },
-        ...
-    ]
-    ```
-
-- `400 Bad Request` If the request parameters are missing required values or a provided value was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to list sources.
-- `500 Internal Server Error` If an unknown error occurs while retrieving sources.
-
-### Delete Source
-
-Delete a source. Does not cancel in-flight invocations on this source.
-
-**Method**
-
-    DELETE
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/sources/{source_id}
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Request Parameters**
-- `source_id` is the ID of the source to delete.
-
-**Responses**
-- `204 No Content` If the source is deleted.
-- `400 Bad Request` If the request parameters are missing required values or a provided value was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to delete this source. Note that only team owners and administrators can delete sources.
-- `404 Not Found` If the provided source does not exist.
-- `500 Internal Server Error` If an unknown error occurs while deleting the source.
-
-## Invocations
-
-### Create Invocation
-
-Creates a new invocation on the specified source with the provided configuration parameters.
-
-**Method**
-
-    POST
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/sources/{source_id}/invocations
-
-**Required Headers**
-    - `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Request Parameters**
-- `source_id` is the ID of the source for which to create an invocation.
-
-**Request Body**
-
-```json
-{
-    "target_collection_name": "string",
-    "ref_identifier": {
-        "$oneOf": {
-            "branch": "string",
-            "sha": "string"
-        }
-    }
-}
-```
-
-**Responses**
-- `200 OK` If the invocation is successfully created.
-
-    ```json
-    {
-        "invocation_id": "string"
-    }
-    ```
-
-- `400 Bad Request` If the request payload is missing required fields or a provided field was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to create an invocation.
-- `404 Not Found` If the provided source is not found.
-- `409 Conflict` If the provided `target_collection_name` exists with `finished_ingest` set to `true`.
-- `500 Internal Server Error` If an unknown error occurs while creating the invocation.
-
-### Get Invocation
-
-Retrieve a specific invocation by its ID.
-
-**Method**
-
-    GET
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/invocations/{invocation_id}
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Request Parameters**
-- `invocation_id` is the ID of the invocation to retrieve.
-
-**Responses**
-- `200 OK` If the invocation is found.
-
-    ```json
-    {
-        "invocation_id": "string",
-        "status": {
-            "$oneOf": {
-                "pending",
-                "processing",
-                "complete": {
-                    "finished_at": "string"
-                },
-                "failed": {
-                    "error": "string"
-                },
-                "cancelled"
-            }
-        },
-        "source_id": "string",
-        "metadata": {
-            "database_name": "string",
-            "collection_name": "string",
-            "github": {
-                "git_ref_identifier": {
-                    "$oneOf": {
-                        "branch": "string",
-                        "sha": "string"
-                    }
-                }
-            }
-        },
-        "created_at": "string"
-    }
-    ```
-
-- `400 Bad Request` If the request parameters are missing required values or a provided value was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to access this invocation.
-- `404 Not Found` If the requested invocation does not exist.
-- `500 Internal Server Error` If an unknown error occurs while retrieving the invocation.
-
-### List Invocations
-
-List invocations with optional filtering.
-
-**Method**
-
-    GET
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/invocations
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Query Parameters**
-- `source_id` allows callers to optionally filter invocations by their source.
-- `status` allows callers to optionally filter invocations by their status. If provided, must be one of `[pending, processing, complete, failed, cancelled]`.
-- `source_type` allows callers to optionally filter invocations by their source's type. If provided, must be one of `[github]`.
-- `github.app_id` allows callers to optionally filter invocations on sources of the GitHub repository source type by their source's app ID. If provided, `source_type` must be `github`.
-- `github.repository` allows callers to optionally filter invocations on sources of the GitHub repository source type by their source's repository. If provided, `source_type` must be `github`.
-- `limit` specifies the maximum number of results to return. Defaults to 100.
-- `offset` specifies the number of results to skip before starting to assemble the list of returned invocations when sorting by the invocations' `created_at` timestamps. Defaults to 0.
-- `order_by` indicates whether to perform sorting by the invocations' `created_at` timestamps in ascending or descending order. If provided, must be one of `[ASC, DESC]`. Defaults to `DESC`.
-
-**Responses**
-- `200 OK` If the request does not encounter any errors while listing invocations.
-
-    ```json
-    [
-        {
-            "invocation_id": "string",
-            "status": {
-                "$oneOf": {
-                    "pending",
-                    "processing",
-                    "complete": {
-                        "finished_at": "string"
-                    },
-                    "failed": {
-                        "error": "string"
-                    },
-                    "cancelled"
-                }
-            },
-            "source_id": "string",
-            "metadata": {
-                "database_name": "string",
-                "collection_name": "string",
-                "github": {
-                    "git_ref_identifier": {
-                        "$oneOf": {
-                            "branch": "string",
-                            "sha": "string"
-                        }
-                    }
-                }
-            },
-            "created_at": "string"
-        }
-        ...
-    ]
-    ```
-
-- `400 Bad Request` If the request parameters are missing required values or a provided value was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to list invocations.
-- `500 Internal Server Error` If an unknown error occurs while retrieving invocations.
-
-### Cancel Pending Invocation
-
-Cancel an invocation that is in the `pending` state. Invocations not in this state cannot be cancelled.
-
-**Method**
-
-    PUT
-
-**Endpoint**
-
-    https://sync.trychroma.com/api/v1/invocations/{invocation_id}
-
-**Required Headers**
-- `x-chroma-token` must carry the caller's Chroma Cloud API key.
-
-**Request Parameters**
-- `invocation_id` is the ID of the invocation to cancel.
-
-**Responses**
-- `202 Accepted` If the invocation is cancelled.
-- `400 Bad Request` If the request parameters are missing required values or a provided value was malformed.
-- `401 Unauthorized` If the `x-chroma-token` header is not present or invalid.
-- `403 Forbidden` If the user does not have permission to cancel this invocation.
-- `404 Not Found` If the provided invocation does not exist.
-- `412 Precondition Not Met` If the invocation is not in the `pending` state.
-- `500 Internal Server Error` If an unknown error occurs while cancelling the invocation.
-
-# Walkthrough
+For all API endpoints, see the [Sync API Reference](/reference/sync-api).
