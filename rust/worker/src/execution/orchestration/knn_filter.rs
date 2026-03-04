@@ -216,7 +216,10 @@ impl KnnFilterOrchestrator {
         filter: Filter,
         read_level: ReadLevel,
     ) -> Self {
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(
+            dispatcher,
+            collection_and_segments.collection.tenant.clone(),
+        );
         Self {
             context,
             blockfile_provider,
@@ -245,7 +248,7 @@ impl KnnFilterOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         )
     }
 }
@@ -276,7 +279,7 @@ impl Orchestrator for KnnFilterOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch spann segment", segment_id = %self.collection_and_segments.vector_segment.id);
@@ -291,7 +294,7 @@ impl Orchestrator for KnnFilterOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         // Prefetch task is detached from the orchestrator
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch record segment", segment_id = %self.collection_and_segments.record_segment.id);
@@ -306,7 +309,7 @@ impl Orchestrator for KnnFilterOrchestrator {
                 self.blockfile_provider.clone(),
             ),
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         let prefetch_span = tracing::info_span!(parent: None, "Prefetch metadata segment", segment_id = %self.collection_and_segments.metadata_segment.id);
         Span::current().add_link(prefetch_span.context().span().span_context().clone());
@@ -329,7 +332,7 @@ impl Orchestrator for KnnFilterOrchestrator {
                     Box::new(self.fetch_log.clone()),
                     (),
                     ctx.receiver(),
-                    self.context.task_cancellation_token.clone(),
+                    &self.context,
                 );
                 tasks.push((fetch_log_task, Some(Span::current())));
             }

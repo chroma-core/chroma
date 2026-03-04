@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use chroma_error::ChromaError;
 use core::fmt::Debug;
 use std::any::type_name;
+use std::borrow::Cow;
 use std::sync::LazyLock;
 use std::time::Instant;
 use tokio::sync::oneshot::{self, error::RecvError, Sender};
@@ -59,13 +60,19 @@ pub struct OrchestratorContext {
 
     // Used to cancel all spawned tasks.
     pub task_cancellation_token: CancellationToken,
+
+    pub tenant: Cow<'static, str>,
 }
 
 impl OrchestratorContext {
-    pub fn new(dispatcher: ComponentHandle<Dispatcher>) -> Self {
+    pub fn new(
+        dispatcher: ComponentHandle<Dispatcher>,
+        tenant: impl Into<Cow<'static, str>>,
+    ) -> Self {
         Self {
             dispatcher,
             task_cancellation_token: CancellationToken::new(),
+            tenant: tenant.into(),
         }
     }
 }
@@ -317,7 +324,7 @@ impl<O: Orchestrator> Component for O {
 mod tests {
     use super::*;
     use crate::{
-        execution::operator::{wrap, Operator, TaskResult},
+        execution::operator::{wrap, wrap_with_token, Operator, TaskResult},
         types::Handler,
         DispatcherConfig, ReceiverForMessage,
     };
@@ -399,12 +406,7 @@ mod tests {
             let mut tasks = Vec::new();
             for _ in 0..self.num_tasks {
                 let operator = SleepingOperator {};
-                let task = wrap(
-                    Box::new(operator),
-                    (),
-                    ctx.receiver(),
-                    self.context.task_cancellation_token.clone(),
-                );
+                let task = wrap(Box::new(operator), (), ctx.receiver(), &self.context);
                 tasks.push((task, None));
             }
             tasks
@@ -479,7 +481,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<TaskResult<(), TestError>>(2);
         let test_receiver: Box<dyn ReceiverForMessage<TaskResult<(), TestError>>> =
             Box::new(TestReceiver { sender: tx });
-        let task = wrap(
+        let task = wrap_with_token(
             Box::new(SimpleOperator {}),
             (),
             test_receiver,

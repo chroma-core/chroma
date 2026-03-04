@@ -113,7 +113,10 @@ impl SparseKnnOrchestrator {
         key: String,
         limit: u32,
     ) -> Self {
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(
+            dispatcher,
+            collection_and_segments.collection.tenant.clone(),
+        );
         Self {
             context,
             blockfile_provider,
@@ -147,7 +150,7 @@ impl SparseKnnOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
 
         let sparse_index_knn_task = wrap(
@@ -166,7 +169,7 @@ impl SparseKnnOrchestrator {
                 metadata_segment: self.collection_and_segments.metadata_segment.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         vec![sparse_log_knn_task, sparse_index_knn_task]
     }
@@ -179,7 +182,7 @@ impl SparseKnnOrchestrator {
                     batch_measures: self.batch_measures.drain(..).collect(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -238,7 +241,7 @@ impl Orchestrator for SparseKnnOrchestrator {
                     record_segment: self.collection_and_segments.record_segment.clone(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             vec![(idf_task, Some(Span::current()))]
         } else {

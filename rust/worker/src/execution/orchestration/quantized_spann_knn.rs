@@ -66,9 +66,10 @@ impl QuantizedSpannKnnOrchestrator {
         knn_filter_output: KnnFilterOutput,
         knn: Knn,
     ) -> Self {
+        let tenant = collection_and_segments.collection.tenant.clone();
         Self {
             collection_and_segments,
-            context: OrchestratorContext::new(dispatcher),
+            context: OrchestratorContext::new(dispatcher, tenant),
             knn,
             knn_filter_output,
             queue,
@@ -93,7 +94,7 @@ impl QuantizedSpannKnnOrchestrator {
                     batch_measures: std::mem::take(&mut self.log_and_bruteforce_results),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -130,7 +131,7 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
                 distance_function: self.knn_filter_output.distance_function.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
@@ -151,7 +152,7 @@ impl Orchestrator for QuantizedSpannKnnOrchestrator {
                 }),
                 (),
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             tasks.push((load_center_task, Some(Span::current())));
         }
@@ -222,7 +223,7 @@ impl Handler<TaskResult<QuantizedSpannLoadCenterOutput, QuantizedSpannLoadCenter
                 reader: output.reader,
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         self.send(center_search_task, ctx, Some(Span::current()))
             .await;
@@ -267,7 +268,7 @@ impl Handler<TaskResult<QuantizedSpannCenterSearchOutput, QuantizedSpannCenterSe
                 Box::new(load_cluster_operator.clone()),
                 QuantizedSpannLoadClusterInput { cluster_id },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             self.send(load_cluster_task, ctx, Some(Span::current()))
                 .await;
@@ -321,7 +322,7 @@ impl Handler<TaskResult<QuantizedSpannLoadClusterOutput, QuantizedSpannLoadClust
                 global_versions: output.global_versions,
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         self.send(bf_task, ctx, Some(Span::current())).await;
     }

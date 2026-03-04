@@ -216,10 +216,7 @@ impl Orchestrator for RegisterOrchestrator {
                         self.context.log.clone(),
                     ),
                     ctx.receiver(),
-                    self.context
-                        .orchestrator_context
-                        .task_cancellation_token
-                        .clone(),
+                    &self.context.orchestrator_context,
                 ),
                 Some(Span::current()),
             )]
@@ -294,10 +291,7 @@ impl Orchestrator for RegisterOrchestrator {
                             .clone(),
                     ),
                     ctx.receiver(),
-                    self.context
-                        .orchestrator_context
-                        .task_cancellation_token
-                        .clone(),
+                    &self.context.orchestrator_context,
                 ),
                 Some(Span::current()),
             )]

@@ -225,7 +225,7 @@ impl Dispatcher {
         self.metrics.task_enqueued_total.add(1, &task_kv);
         match task.get_type() {
             OperatorType::IO => {
-                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name(), task_type = "io");
+                let child_span = trace_span!(parent: Span::current(), "IO task execution", name = task.get_name(), task_type = "io", tenant = task.get_executor_info().tenant.as_ref());
                 // This spin loop:
                 // - reads a witness from active_io_tasks.
                 // - aborts the task if witness is zero.
@@ -275,7 +275,7 @@ impl Dispatcher {
             OperatorType::Other => {
                 // If a worker is waiting for a task, send it to the worker in FIFO order.
                 // Otherwise, add it to the task queue.
-                let span = trace_span!(parent: Span::current(), "Other task execution", name = task.get_name(), task_type = "other");
+                let span = trace_span!(parent: Span::current(), "Other task execution", name = task.get_name(), task_type = "other", tenant = task.get_executor_info().tenant.as_ref());
                 match self.waiters.pop() {
                     Some(channel) => match channel.reply_to.send(task, Some(span)).await {
                         Ok(_) => {
@@ -604,7 +604,7 @@ mod tests {
                 .map(char::from)
                 .collect();
             println!("Scheduling mock io operator with filename {}", filename);
-            let task = wrap(
+            let task = wrap_with_token(
                 Box::new(MockIoOperator {}),
                 filename,
                 ctx.receiver(),
@@ -665,7 +665,7 @@ mod tests {
 
         async fn handle(&mut self, _message: (), ctx: &ComponentContext<MockDispatchUser>) {
             println!("Scheduling mock cpu operator with input {}", 42.0);
-            let task = wrap(
+            let task = wrap_with_token(
                 Box::new(MockOperator {}),
                 42.0,
                 ctx.receiver(),

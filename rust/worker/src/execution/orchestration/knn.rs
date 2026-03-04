@@ -137,7 +137,10 @@ impl KnnOrchestrator {
         } else {
             Vec::new()
         };
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(
+            dispatcher,
+            collection_and_segments.collection.tenant.clone(),
+        );
         Self {
             context,
             blockfile_provider,
@@ -159,7 +162,7 @@ impl KnnOrchestrator {
                     batch_measures: self.batch_distances.drain(..).collect(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             self.send(task, ctx, Some(Span::current())).await;
         }
@@ -195,7 +198,7 @@ impl Orchestrator for KnnOrchestrator {
                 distance_function: self.knn_filter_output.distance_function.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
         tasks.push((knn_log_task, Some(Span::current())));
 
@@ -212,7 +215,7 @@ impl Orchestrator for KnnOrchestrator {
                     distance_function: self.knn_filter_output.distance_function.clone(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
             tasks.push((knn_segment_task, Some(Span::current())));
         }

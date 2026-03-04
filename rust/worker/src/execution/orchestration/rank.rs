@@ -163,7 +163,10 @@ impl RankOrchestrator {
         select: Select,
         collection_and_segments: CollectionAndSegments,
     ) -> Self {
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(
+            dispatcher,
+            collection_and_segments.collection.tenant.clone(),
+        );
         Self {
             context,
             blockfile_provider,
@@ -190,7 +193,7 @@ impl RankOrchestrator {
                 record_segment: self.collection_and_segments.record_segment.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
 
         self.send(task, ctx, Some(Span::current())).await;
@@ -237,7 +240,7 @@ impl Orchestrator for RankOrchestrator {
                     knn_results: self.knn_results.clone(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             ),
             None => wrap(
                 Box::new(self.limit.clone()),
@@ -253,7 +256,7 @@ impl Orchestrator for RankOrchestrator {
                         .clone(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             ),
         };
         vec![(task, Some(Span::current()))]
@@ -331,7 +334,7 @@ impl Handler<TaskResult<RankOutput, RankError>> for RankOrchestrator {
                     record_segment: self.collection_and_segments.record_segment.clone(),
                 },
                 ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
+                &self.context,
             );
 
             self.send(task, ctx, Some(Span::current())).await;

@@ -104,6 +104,7 @@ where
 }
 
 impl ProjectionOrchestrator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         dispatcher: ComponentHandle<Dispatcher>,
         queue: usize,
@@ -112,8 +113,9 @@ impl ProjectionOrchestrator {
         record_segment: Segment,
         record_distances: Vec<RecordMeasure>,
         knn_projection: KnnProjection,
+        tenant: String,
     ) -> Self {
-        let context = OrchestratorContext::new(dispatcher);
+        let context = OrchestratorContext::new(dispatcher, tenant);
         Self {
             context,
             blockfile_provider,
@@ -153,7 +155,7 @@ impl Orchestrator for ProjectionOrchestrator {
                 record_distances: self.record_distances.clone(),
             },
             ctx.receiver(),
-            self.context.task_cancellation_token.clone(),
+            &self.context,
         );
 
         vec![(projection_task, Some(Span::current()))]
