@@ -156,8 +156,7 @@ impl FragmentFetcher {
             .map(|pointer| self.fetch_fragment(pointer, start_offset, limit_offset))
             .collect();
         let results = try_join_all(futures).await?;
-        let mut all_records: Vec<LogRecord> =
-            results.into_iter().flatten().collect();
+        let mut all_records: Vec<LogRecord> = results.into_iter().flatten().collect();
         all_records.sort_by_key(|r| r.log_offset);
         check_contiguous(&all_records, start_offset)?;
         Ok(all_records)
