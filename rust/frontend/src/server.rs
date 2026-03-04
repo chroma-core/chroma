@@ -13,7 +13,9 @@ use chroma_metering::{
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
-    decode_embeddings, maybe_decode_update_embeddings, validate_name, AddCollectionRecordsPayload,
+    decode_embeddings, maybe_decode_update_embeddings,
+    plan::ReadLevel,
+    validate_name, AddCollectionRecordsPayload,
     AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
     Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
     CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
@@ -2287,6 +2289,12 @@ async fn collection_delete(
     Ok(Json(DeleteCollectionRecordsResponse {}))
 }
 
+#[derive(Deserialize, ToSchema, Debug)]
+struct CountParams {
+    #[serde(default)]
+    read_level: ReadLevel,
+}
+
 /// Get number of records
 /// Returns the number of records in a collection.
 #[utoipa::path(
@@ -2307,7 +2315,8 @@ async fn collection_delete(
     params(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("read_level" = Option<ReadLevel>, Query, description = "Read level for consistency vs performance tradeoffs")
     ),
     extensions(
         ("x-codeSamples" = json!([
@@ -2332,6 +2341,7 @@ async fn collection_delete(
 async fn collection_count(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    Query(CountParams { read_level }): Query<CountParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
     server.metrics.collection_count.add(1, &[]);
@@ -2388,6 +2398,7 @@ async fn collection_count(
         tenant,
         database,
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        read_level,
     )?;
 
     Ok(Json(

@@ -225,8 +225,9 @@ impl WorkerServer {
         &self,
         count: Request<chroma_proto::CountPlan>,
     ) -> Result<Response<chroma_proto::CountResult>, Status> {
-        let scan = count
-            .into_inner()
+        let count_plan = count.into_inner();
+        let read_level: ReadLevel = count_plan.read_level().into();
+        let scan = count_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
@@ -240,6 +241,7 @@ impl WorkerServer {
             1000,
             collection_and_segments,
             fetch_log,
+            read_level,
         );
 
         match count_orchestrator.run(self.system.clone()).await {
