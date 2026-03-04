@@ -67,6 +67,26 @@ use crate::state_hash_table::StateHashTable;
 
 ///////////////////////////////////////////// helpers //////////////////////////////////////////////
 
+/// The gRPC metadata key for the backoff reason.
+const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+
+/// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
+///
+/// `reason` should be `"batching"` for normal write backpressure or
+/// `"compaction"` for compaction-induced backpressure.
+fn status_with_backoff_reason(
+    code: tonic::Code,
+    message: impl Into<String>,
+    reason: &str,
+) -> Status {
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert(
+        BACKOFF_REASON_MD_KEY,
+        reason.parse().expect("valid ascii metadata value"),
+    );
+    Status::with_metadata(code, message, metadata)
+}
+
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
     let mut config = SessionConfig::default();
@@ -1123,7 +1143,11 @@ impl LogServer {
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
-            return Err(Status::resource_exhausted("log needs compaction; too full"));
+            return Err(status_with_backoff_reason(
+                tonic::Code::ResourceExhausted,
+                "log needs compaction; too full",
+                "compaction",
+            ));
         }
         Ok(())
     }
@@ -1954,9 +1978,10 @@ impl LogServer {
         match log.append_many(messages).await {
             Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
             Err(err @ wal3::Error::Backoff) => {
-                return Err(Status::new(
-                    chroma_error::ErrorCodes::Unavailable.into(),
+                return Err(status_with_backoff_reason(
+                    tonic::Code::ResourceExhausted,
                     err.to_string(),
+                    "batching",
                 ));
             }
             Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
@@ -6032,5 +6057,12 @@ mod tests {
     #[test]
     fn local_is_good_region_name() {
         let _r = RegionName::new("local").expect("'local' is unit tested to be a good region name");
+    }
+
+    #[test]
+    fn backoff_reason_md_key_is_valid_ascii_metadata() {
+        BACKOFF_REASON_MD_KEY
+            .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
+            .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
     }
 }
