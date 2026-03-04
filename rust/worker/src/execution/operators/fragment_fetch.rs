@@ -149,6 +149,12 @@ impl FragmentFetcher {
         limit_offset: u64,
     ) -> Result<Vec<LogRecord>, FragmentFetchError> {
         if pointers.is_empty() {
+            if start_offset < limit_offset {
+                return Err(FragmentFetchError::HoleInLog {
+                    expected: start_offset as i64,
+                    found: limit_offset as i64,
+                });
+            }
             return Ok(Vec::new());
         }
         let futures: Vec<_> = pointers
@@ -158,6 +164,12 @@ impl FragmentFetcher {
         let results = try_join_all(futures).await?;
         let mut all_records: Vec<LogRecord> = results.into_iter().flatten().collect();
         all_records.sort_by_key(|r| r.log_offset);
+        if all_records.is_empty() && start_offset < limit_offset {
+            return Err(FragmentFetchError::HoleInLog {
+                expected: start_offset as i64,
+                found: limit_offset as i64,
+            });
+        }
         check_contiguous(&all_records, start_offset)?;
         Ok(all_records)
     }
@@ -243,7 +255,7 @@ fn check_contiguous(records: &[LogRecord], start_offset: u64) -> Result<(), Frag
 
 #[cfg(test)]
 mod tests {
-    use super::{check_contiguous, FragmentFetchError, FragmentPointer};
+    use super::{check_contiguous, FragmentFetchError, FragmentFetcher, FragmentPointer};
     use chroma_types::{LogRecord, Operation, OperationRecord};
 
     fn make_record(log_offset: i64) -> LogRecord {
@@ -350,5 +362,33 @@ mod tests {
             }
             other => panic!("expected HoleInLog error, got: {:?}", other),
         }
+    }
+
+    #[tokio::test]
+    async fn fetch_records_empty_pointers_nonempty_range() {
+        let (_tmp, storage) = chroma_storage::test_storage();
+        let fetcher = FragmentFetcher::new_for_test(storage);
+        let err = fetcher
+            .fetch_records(&[], 5, 10)
+            .await
+            .expect_err("empty pointers with start < limit should be a hole");
+        match err {
+            FragmentFetchError::HoleInLog { expected, found } => {
+                assert_eq!(expected, 5, "expected start_offset 5");
+                assert_eq!(found, 10, "found limit_offset 10");
+            }
+            other => panic!("expected HoleInLog error, got: {:?}", other),
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_records_empty_pointers_empty_range() {
+        let (_tmp, storage) = chroma_storage::test_storage();
+        let fetcher = FragmentFetcher::new_for_test(storage);
+        let records = fetcher
+            .fetch_records(&[], 5, 5)
+            .await
+            .expect("empty pointers with start == limit should succeed");
+        assert!(records.is_empty(), "should return no records");
     }
 }
