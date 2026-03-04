@@ -149,10 +149,12 @@ impl FetchLogOperator {
 
     /// Fetch logs via ScoutLogFragments + direct object storage reads.
     async fn run_pointer_fetch(&self) -> Result<FetchLogOutput, FetchLogError> {
-        let fragment_fetcher = self
-            .fragment_fetcher
-            .as_ref()
-            .expect("fragment_fetcher must be set when use_pointer_fetch is true");
+        let fragment_fetcher =
+            self.fragment_fetcher
+                .as_ref()
+                .ok_or(FetchLogError::FragmentFetch(
+                    FragmentFetchError::NotConfigured,
+                ))?;
 
         let mut log_client = self.log_client.clone();
         let response = log_client

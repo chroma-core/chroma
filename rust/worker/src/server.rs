@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -28,7 +29,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use crate::{
     config::QueryServiceConfig,
     execution::{
-        operators::fetch_log::FetchLogOperator,
+        operators::{fetch_log::FetchLogOperator, fragment_fetch::FragmentFetcher},
         orchestration::{
             count::CountOrchestrator,
             get::GetOrchestrator,
@@ -61,6 +62,7 @@ pub struct WorkerServer {
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
     use_pointer_fetch: bool,
+    fragment_fetcher: Option<Arc<FragmentFetcher>>,
     shutdown_grace_period: Duration,
 }
 
@@ -100,6 +102,13 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
+        let fragment_fetcher = if config.use_pointer_fetch {
+            Some(Arc::new(
+                FragmentFetcher::new(storage.clone(), &config.fragment_fetcher_cache).await?,
+            ))
+        } else {
+            None
+        };
         Ok(WorkerServer {
             dispatcher: None,
             system: system.clone(),
@@ -113,6 +122,7 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
             use_pointer_fetch: config.use_pointer_fetch,
+            fragment_fetcher,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
@@ -221,7 +231,7 @@ impl WorkerServer {
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
             use_pointer_fetch: self.use_pointer_fetch,
-            fragment_fetcher: None,
+            fragment_fetcher: self.fragment_fetcher.clone(),
         })
     }
 
@@ -789,6 +799,7 @@ mod tests {
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
             use_pointer_fetch: false,
+            fragment_fetcher: None,
             shutdown_grace_period: Duration::from_secs(1),
         };
 

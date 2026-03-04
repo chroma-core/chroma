@@ -177,6 +177,10 @@ pub struct QueryServiceConfig {
     /// instead of gRPC PullLogs for log fetching.
     #[serde(default = "QueryServiceConfig::default_use_pointer_fetch")]
     pub use_pointer_fetch: bool,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
 }
 
 impl QueryServiceConfig {

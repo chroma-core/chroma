@@ -6,6 +6,7 @@ use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, Storage, StorageError};
 use chroma_types::chroma_proto;
 use chroma_types::{LogRecord, OperationRecord, RecordConversionError};
+use futures::future::try_join_all;
 use prost::Message;
 use thiserror::Error;
 use wal3::LogPosition;
@@ -85,6 +86,8 @@ pub enum FragmentFetchError {
         /// The offset that was actually found.
         found: i64,
     },
+    #[error("Fragment fetcher not configured")]
+    NotConfigured,
 }
 
 impl ChromaError for FragmentFetchError {
@@ -96,6 +99,7 @@ impl ChromaError for FragmentFetchError {
             FragmentFetchError::RecordConversion(_) => ErrorCodes::Internal,
             FragmentFetchError::CacheError(_) => ErrorCodes::Internal,
             FragmentFetchError::HoleInLog { .. } => ErrorCodes::DataLoss,
+            FragmentFetchError::NotConfigured => ErrorCodes::Internal,
         }
     }
 }
@@ -144,15 +148,18 @@ impl FragmentFetcher {
         start_offset: u64,
         limit_offset: u64,
     ) -> Result<Vec<LogRecord>, FragmentFetchError> {
-        let mut all_records = Vec::new();
-        for pointer in pointers {
-            let records = self
-                .fetch_fragment(pointer, start_offset, limit_offset)
-                .await?;
-            all_records.extend(records);
+        if pointers.is_empty() {
+            return Ok(Vec::new());
         }
+        let futures: Vec<_> = pointers
+            .iter()
+            .map(|pointer| self.fetch_fragment(pointer, start_offset, limit_offset))
+            .collect();
+        let results = try_join_all(futures).await?;
+        let mut all_records: Vec<LogRecord> =
+            results.into_iter().flatten().collect();
         all_records.sort_by_key(|r| r.log_offset);
-        check_for_holes(&all_records)?;
+        check_contiguous(&all_records, start_offset)?;
         Ok(all_records)
     }
 
@@ -213,8 +220,17 @@ impl FragmentFetcher {
     }
 }
 
-/// Verify that a sorted slice of log records has no gaps in offsets.
-fn check_for_holes(records: &[LogRecord]) -> Result<(), FragmentFetchError> {
+/// Verify that a sorted slice of log records starts at `start_offset` and has
+/// no gaps in offsets.
+fn check_contiguous(records: &[LogRecord], start_offset: u64) -> Result<(), FragmentFetchError> {
+    if let Some(first) = records.first() {
+        if first.log_offset != start_offset as i64 {
+            return Err(FragmentFetchError::HoleInLog {
+                expected: start_offset as i64,
+                found: first.log_offset,
+            });
+        }
+    }
     for window in records.windows(2) {
         if window[1].log_offset != window[0].log_offset + 1 {
             return Err(FragmentFetchError::HoleInLog {
@@ -228,7 +244,7 @@ fn check_for_holes(records: &[LogRecord]) -> Result<(), FragmentFetchError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_for_holes, FragmentFetchError, FragmentPointer};
+    use super::{check_contiguous, FragmentFetchError, FragmentPointer};
     use chroma_types::{LogRecord, Operation, OperationRecord};
 
     fn make_record(log_offset: i64) -> LogRecord {
@@ -267,26 +283,26 @@ mod tests {
     }
 
     #[test]
-    fn check_for_holes_empty() {
-        check_for_holes(&[]).expect("empty records should have no holes");
+    fn check_contiguous_empty() {
+        check_contiguous(&[], 0).expect("empty records should have no holes");
     }
 
     #[test]
-    fn check_for_holes_single_record() {
+    fn check_contiguous_single_record() {
         let records = vec![make_record(5)];
-        check_for_holes(&records).expect("single record should have no holes");
+        check_contiguous(&records, 5).expect("single record at start_offset should pass");
     }
 
     #[test]
-    fn check_for_holes_contiguous() {
+    fn check_contiguous_records() {
         let records = vec![make_record(1), make_record(2), make_record(3)];
-        check_for_holes(&records).expect("contiguous records should have no holes");
+        check_contiguous(&records, 1).expect("contiguous records from start_offset should pass");
     }
 
     #[test]
-    fn check_for_holes_detects_gap() {
+    fn check_contiguous_detects_interior_gap() {
         let records = vec![make_record(1), make_record(2), make_record(5)];
-        let err = check_for_holes(&records).expect_err("should detect hole between 2 and 5");
+        let err = check_contiguous(&records, 1).expect_err("should detect hole between 2 and 5");
         match err {
             FragmentFetchError::HoleInLog { expected, found } => {
                 assert_eq!(expected, 3, "expected offset 3 after offset 2");
@@ -297,13 +313,41 @@ mod tests {
     }
 
     #[test]
-    fn check_for_holes_detects_first_gap() {
+    fn check_contiguous_detects_first_interior_gap() {
         let records = vec![make_record(1), make_record(3), make_record(7)];
-        let err = check_for_holes(&records).expect_err("should detect first hole between 1 and 3");
+        let err =
+            check_contiguous(&records, 1).expect_err("should detect first hole between 1 and 3");
         match err {
             FragmentFetchError::HoleInLog { expected, found } => {
                 assert_eq!(expected, 2, "expected offset 2 after offset 1");
                 assert_eq!(found, 3, "found offset 3 instead of 2");
+            }
+            other => panic!("expected HoleInLog error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn check_contiguous_detects_leading_gap() {
+        let records = vec![make_record(5), make_record(6), make_record(7)];
+        let err = check_contiguous(&records, 3).expect_err("should detect missing leading records");
+        match err {
+            FragmentFetchError::HoleInLog { expected, found } => {
+                assert_eq!(expected, 3, "expected start_offset 3");
+                assert_eq!(found, 5, "found offset 5 instead of 3");
+            }
+            other => panic!("expected HoleInLog error, got: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn check_contiguous_single_record_leading_gap() {
+        let records = vec![make_record(10)];
+        let err = check_contiguous(&records, 7)
+            .expect_err("single record not at start_offset should fail");
+        match err {
+            FragmentFetchError::HoleInLog { expected, found } => {
+                assert_eq!(expected, 7, "expected start_offset 7");
+                assert_eq!(found, 10, "found offset 10 instead of 7");
             }
             other => panic!("expected HoleInLog error, got: {:?}", other),
         }
