@@ -1,6 +1,9 @@
 from chromadb.config import Component, System, Settings
 from overrides import overrides
 from threading import local
+from unittest.mock import patch
+import pytest
+import os
 import random
 
 data = local()  # use thread local just in case tests ever run in parallel
@@ -207,3 +210,13 @@ def test_http_client_setting_overrides() -> None:
     assert settings.chroma_http_keepalive_secs == 5.5
     assert settings.chroma_http_max_connections == 123
     assert settings.chroma_http_max_keepalive_connections == 17
+
+
+@patch.dict(
+    os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
+)
+def test_local_ignores_extra_settings_param() -> None:
+    settings = Settings(extra_param="asdsdsds", tenant_id="test")
+    assert settings.tenant_id == "test"
+    with pytest.raises(AttributeError):
+        _ = settings.extra_param

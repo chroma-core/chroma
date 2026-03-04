@@ -53,15 +53,6 @@ class GetAPITest(unittest.TestCase):
         assert mock_api.called
         client.clear_system_cache()
 
-    @patch("chromadb.api.segment.SegmentAPI", autospec=True)
-    @patch.dict(
-        os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
-    )
-    def test_local_ignores_extra_settings_param(self, mock_api: Mock) -> None:
-        client = chromadb.Client(chromadb.config.Settings(extra_param="asdsdsds"))
-        assert mock_api.called
-        client.clear_system_cache()
-
     @patch("chromadb.db.impl.sqlite.SqliteDB", autospec=True)
     @patch.dict(
         os.environ, {"CHROMA_API_IMPL": "chromadb.api.segment.SegmentAPI"}, clear=True
