@@ -2129,10 +2129,12 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), collection_id)
+            .instrument(tracing::info_span!("make_log_reader"))
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let manifest_and_witness = match self
             .manifest_with_head_check(&*log_reader, collection_id)
+            .instrument(tracing::info_span!("manifest_with_head_check"))
             .await
         {
             Ok(Some(mw)) => mw,
@@ -2167,12 +2169,16 @@ impl LogServer {
         let from = LogPosition::from_offset(req.start_from_offset);
         let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
             Some(fragments) => fragments,
-            None => log_reader.scan(from, limits).await.map_err(|err| {
-                Status::new(
-                    err.code().into(),
-                    format!("could not scout log fragments: {err:?}"),
-                )
-            })?,
+            None => log_reader
+                .scan(from, limits)
+                .instrument(tracing::info_span!("log_reader::scan"))
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("could not scout log fragments: {err:?}"),
+                    )
+                })?,
         };
         let storage_prefix = collection_id.storage_prefix_for_log();
         let absolute_offsets = topology_name.is_none();
