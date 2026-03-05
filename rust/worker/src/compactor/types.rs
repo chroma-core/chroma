@@ -40,3 +40,15 @@ pub struct InProgressJobEntry {
 pub struct ListInProgressJobsMessage {
     pub response_tx: oneshot::Sender<Vec<InProgressJobEntry>>,
 }
+
+#[derive(Debug)]
+pub struct GetCollectionAssignmentMessage {
+    pub collection_id: CollectionUuid,
+    pub response_tx: oneshot::Sender<GetCollectionAssignmentResponse>,
+}
+
+#[derive(Debug)]
+pub struct GetCollectionAssignmentResponse {
+    pub assigned_node: String,
+    pub memberlist: Vec<String>,
+}
