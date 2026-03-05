@@ -217,6 +217,7 @@ struct FactoryCreationContext<'a> {
     topology_name: Option<&'a TopologyName>,
     collection_id: CollectionUuid,
     prefix: String,
+    snapshot_cache: Arc<dyn SnapshotCache>,
 }
 
 impl<'a> FactoryCreationContext<'a> {
@@ -224,6 +225,7 @@ impl<'a> FactoryCreationContext<'a> {
         storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
         topology_name: Option<&'a TopologyName>,
         collection_id: CollectionUuid,
+        snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Self {
         let prefix = collection_id.storage_prefix_for_log();
         Self {
@@ -231,6 +233,7 @@ impl<'a> FactoryCreationContext<'a> {
             topology_name,
             collection_id,
             prefix,
+            snapshot_cache,
         }
     }
 
@@ -298,7 +301,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.prefix.clone(),
             "log-reader".to_string(),
             Arc::new(()),
-            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
@@ -406,7 +409,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.prefix.clone(),
             "copy".to_string(),
             Arc::new(()),
-            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
@@ -1125,7 +1128,13 @@ impl LogServer {
         topology_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let ctx = FactoryCreationContext::new(&self.storages, topology_name, collection_id);
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+        let ctx = FactoryCreationContext::new(
+            &self.storages,
+            topology_name,
+            collection_id,
+            snapshot_cache,
+        );
         ctx.make_log_reader(&self.config.writer, &self.config.reader)
             .await
     }
@@ -2154,6 +2163,17 @@ impl LogServer {
             if let Some(fragments) = fragments {
                 return Ok(fragments);
             }
+            // Reuse the already-loaded manifest instead of calling scan() which would load
+            // the manifest a second time.
+            let mut short_read = false;
+            return Ok(log_reader
+                .scan_with_cache(
+                    &manifest_and_witness.manifest,
+                    from,
+                    limits,
+                    &mut short_read,
+                )
+                .await?);
         }
         Ok(log_reader.scan(from, limits).await?)
     }
@@ -2304,10 +2324,12 @@ impl LogServer {
         tracing::event!(Level::INFO, offset = ?cursor);
 
         // Use FactoryCreationContext to handle both replicated and S3 targets
+        let snapshot_cache = self.snapshot_cache_for_collection(target_collection_id);
         let target_ctx = FactoryCreationContext::new(
             &self.storages,
             topology_name.as_ref(),
             target_collection_id,
+            snapshot_cache,
         );
         target_ctx
             .fork_to_target(
