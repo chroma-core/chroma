@@ -17,7 +17,7 @@ variable "machine_type" {
 
 variable "chroma_version" {
   description = "Chroma version to install"
-  default     = "1.5.1"
+  default     = "1.5.2"
 }
 
 variable "chroma_server_auth_credentials" {

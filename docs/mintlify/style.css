@@ -9,9 +9,9 @@
 }
 
 .dark [data-component-part="step-number"]>div {
-  border-color: #f3f4f6;
+  border-color: #c4c5c8;
   background-color: #111827;
-  box-shadow: 2px 2px 0 0 #e5e7eb;
+  box-shadow: 2px 2px 0 0 #babbbf;
 }
 
 [data-component-part="step-line"] {
@@ -20,7 +20,7 @@
 }
 
 .dark [data-component-part="step-line"] {
-  background-color: #ffffff;
+  background-color: #c4c5c8;
 }
 
 /* TypeScript tab icon - use CSS mask to match text color */
@@ -58,4 +58,8 @@ a[href="/reference/typescript"] [data-component-part="card-icon"] svg {
   mask-size: contain;
   -webkit-mask-repeat: no-repeat;
   mask-repeat: no-repeat;
+}
+
+.dark #topbar-cta-button {
+  opacity: 0.85;
 }

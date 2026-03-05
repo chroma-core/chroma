@@ -1,12 +1,12 @@
-use crate::grpc_log::{GrpcLog, GrpcSealLogError};
+use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
-use chroma_error::ChromaError;
+use chroma_error::{ChromaError, ErrorCodes};
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkCollectionError, ForkLogsResponse, LogRecord,
-    OperationRecord, ResetError, ResetResponse,
+    OperationRecord, ResetError, ResetResponse, TopologyName,
 };
 use std::fmt::Debug;
 
@@ -35,6 +35,42 @@ pub enum GarbageCollectError {
     NotEnabled,
     #[error("log implementation not supported")]
     Unimplemented,
+}
+
+/// Structured error for `Log::push_logs` that preserves the backoff reason.
+#[derive(Debug, thiserror::Error)]
+pub enum PushLogsError {
+    /// Backoff due to write batching pressure.
+    #[error("log is under write batching pressure; please backoff exponentially and retry")]
+    Backoff,
+    /// Backoff because the log needs compaction.
+    #[error(
+        "log needs compaction before accepting more writes; please backoff exponentially and retry"
+    )]
+    BackoffCompaction,
+    /// Any other push failure.
+    #[error(transparent)]
+    Other(Box<dyn ChromaError>),
+}
+
+impl ChromaError for PushLogsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
+            PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
+            PushLogsError::Other(e) => e.code(),
+        }
+    }
+}
+
+impl From<GrpcPushLogsError> for PushLogsError {
+    fn from(err: GrpcPushLogsError) -> Self {
+        match err {
+            GrpcPushLogsError::Backoff => PushLogsError::Backoff,
+            GrpcPushLogsError::BackoffCompaction => PushLogsError::BackoffCompaction,
+            other => PushLogsError::Other(Box::new(other)),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -110,16 +146,16 @@ impl Log {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
-    ) -> Result<(), Box<dyn ChromaError>> {
+    ) -> Result<(), PushLogsError> {
         match self {
             Log::Sqlite(log) => log
                 .push_logs(collection_id, records)
                 .await
-                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+                .map_err(|e| PushLogsError::Other(Box::new(e))),
             Log::Grpc(log) => log
                 .push_logs(database_name, collection_id, records, cmek)
                 .await
-                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+                .map_err(PushLogsError::from),
             Log::InMemory(_) => unimplemented!(),
         }
     }
@@ -216,7 +252,7 @@ impl Log {
     #[tracing::instrument(skip(self), err(Display))]
     pub async fn purge_dirty_for_collection(
         &mut self,
-        collection_ids: Vec<CollectionUuid>,
+        collection_ids: Vec<(CollectionUuid, Option<TopologyName>)>,
     ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(_) => unimplemented!("not implemented for sqlite"),

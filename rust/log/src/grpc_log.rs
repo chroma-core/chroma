@@ -19,7 +19,7 @@ use chroma_types::chroma_proto::log_service_client::LogServiceClient;
 use chroma_types::chroma_proto::{self, GetAllCollectionInfoToCompactResponse};
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkLogsResponse, LogRecord, OperationRecord,
-    RecordConversionError,
+    RecordConversionError, TopologyName,
 };
 use std::fmt::Debug;
 use std::time::Duration;
@@ -30,6 +30,14 @@ use tracing::Level;
 use uuid::Uuid;
 
 use crate::GarbageCollectError;
+
+/// The gRPC metadata key carrying the backoff reason.
+const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+
+/// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
+fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
+    status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
+}
 
 //////////////// Errors ////////////////
 
@@ -78,8 +86,8 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
-            GrpcPushLogsError::BackoffCompaction => ErrorCodes::AlreadyExists,
+            GrpcPushLogsError::Backoff => ErrorCodes::ResourceExhausted,
+            GrpcPushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
@@ -353,7 +361,7 @@ impl GrpcLog {
         match response {
             Ok(response) => {
                 let logs = response.into_inner().records;
-                let mut result = Vec::new();
+                let mut result = Vec::with_capacity(logs.len());
                 for log_record_proto in logs {
                     let log_record = log_record_proto.try_into();
                     match log_record {
@@ -409,18 +417,16 @@ impl GrpcLog {
             .client_for(collection_id)?
             .push_logs(request)
             .await
-            .map_err(|err| {
-                if err.code() == ErrorCodes::Unavailable.into()
-                    || err.code() == ErrorCodes::AlreadyExists.into()
-                {
-                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
-                    GrpcPushLogsError::Backoff
-                } else if err.code() == ErrorCodes::ResourceExhausted.into() {
-                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
+            .map_err(|err| match backoff_reason_from_status(&err) {
+                Some("compaction") => {
+                    tracing::event!(Level::INFO, name = "backoff", reason = "compaction", error =? err);
                     GrpcPushLogsError::BackoffCompaction
-                } else {
-                    err.into()
                 }
+                Some(reason) => {
+                    tracing::event!(Level::INFO, name = "backoff", reason, error =? err);
+                    GrpcPushLogsError::Backoff
+                }
+                None => err.into(),
             })?;
         let resp = resp.into_inner();
         if resp.log_is_sealed {
@@ -603,29 +609,38 @@ impl GrpcLog {
 
     pub(super) async fn purge_dirty_for_collection(
         &mut self,
-        collection_ids: Vec<CollectionUuid>,
+        collection_ids: Vec<(CollectionUuid, Option<TopologyName>)>,
     ) -> Result<(), GrpcPurgeDirtyForCollectionError> {
+        let mut by_topology: std::collections::HashMap<Option<TopologyName>, Vec<CollectionUuid>> =
+            std::collections::HashMap::new();
+        for (collection_id, topology_name) in collection_ids {
+            by_topology
+                .entry(topology_name)
+                .or_default()
+                .push(collection_id);
+        }
         let mut futures = vec![];
         let limiter = Arc::new(tokio::sync::Semaphore::new(10));
-        for client in self.client_assigner.all().into_iter() {
-            let mut client = client.clone();
-            let limiter = Arc::clone(&limiter);
-            let collection_ids_clone = collection_ids.clone();
-            let request = async move {
-                // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
-                // error-check.
-                let _permit = limiter.acquire().await;
-                client
-                    .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
-                        collection_ids: collection_ids_clone
-                            .iter()
-                            .map(ToString::to_string)
-                            .collect(),
-                    })
-                    .await
-                    .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
-            };
-            futures.push(request);
+        for (topology_name, ids) in by_topology {
+            for client in self.client_assigner.all().into_iter() {
+                let mut client = client.clone();
+                let limiter = Arc::clone(&limiter);
+                let ids_clone = ids.clone();
+                let topology_name_clone = topology_name.clone();
+                let request = async move {
+                    // NOTE(rescrv): This can never fail and the result is to fail open.  Don't
+                    // error-check.
+                    let _permit = limiter.acquire().await;
+                    client
+                        .purge_dirty_for_collection(chroma_proto::PurgeDirtyForCollectionRequest {
+                            collection_ids: ids_clone.iter().map(ToString::to_string).collect(),
+                            topology_name: topology_name_clone.map(|t| t.to_string()),
+                        })
+                        .await
+                        .map_err(GrpcPurgeDirtyForCollectionError::FailedToPurgeDirty)
+                };
+                futures.push(request);
+            }
         }
         if !futures.is_empty() {
             futures::future::try_join_all(futures.into_iter()).await?;

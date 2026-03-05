@@ -67,6 +67,26 @@ use crate::state_hash_table::StateHashTable;
 
 ///////////////////////////////////////////// helpers //////////////////////////////////////////////
 
+/// The gRPC metadata key for the backoff reason.
+const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
+
+/// Construct a `tonic::Status` with a `backoff-reason` metadata entry.
+///
+/// `reason` should be `"batching"` for normal write backpressure or
+/// `"compaction"` for compaction-induced backpressure.
+fn status_with_backoff_reason(
+    code: tonic::Code,
+    message: impl Into<String>,
+    reason: &str,
+) -> Status {
+    let mut metadata = tonic::metadata::MetadataMap::new();
+    metadata.insert(
+        BACKOFF_REASON_MD_KEY,
+        reason.parse().expect("valid ascii metadata value"),
+    );
+    Status::with_metadata(code, message, metadata)
+}
+
 /// Converts a SpannerSessionPoolConfig to the library's SessionConfig.
 fn to_session_config(cfg: &SpannerSessionPoolConfig) -> SessionConfig {
     let mut config = SessionConfig::default();
@@ -197,6 +217,7 @@ struct FactoryCreationContext<'a> {
     topology_name: Option<&'a TopologyName>,
     collection_id: CollectionUuid,
     prefix: String,
+    snapshot_cache: Arc<dyn SnapshotCache>,
 }
 
 impl<'a> FactoryCreationContext<'a> {
@@ -204,6 +225,7 @@ impl<'a> FactoryCreationContext<'a> {
         storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
         topology_name: Option<&'a TopologyName>,
         collection_id: CollectionUuid,
+        snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Self {
         let prefix = collection_id.storage_prefix_for_log();
         Self {
@@ -211,6 +233,7 @@ impl<'a> FactoryCreationContext<'a> {
             topology_name,
             collection_id,
             prefix,
+            snapshot_cache,
         }
     }
 
@@ -278,7 +301,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.prefix.clone(),
             "log-reader".to_string(),
             Arc::new(()),
-            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
@@ -386,7 +409,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.prefix.clone(),
             "copy".to_string(),
             Arc::new(()),
-            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
@@ -1105,7 +1128,13 @@ impl LogServer {
         topology_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let ctx = FactoryCreationContext::new(&self.storages, topology_name, collection_id);
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+        let ctx = FactoryCreationContext::new(
+            &self.storages,
+            topology_name,
+            collection_id,
+            snapshot_cache,
+        );
         ctx.make_log_reader(&self.config.writer, &self.config.reader)
             .await
     }
@@ -1123,7 +1152,11 @@ impl LogServer {
             Arc::clone(&backpressure)
         };
         if backpressure.contains(&collection_id) {
-            return Err(Status::resource_exhausted("log needs compaction; too full"));
+            return Err(status_with_backoff_reason(
+                tonic::Code::ResourceExhausted,
+                "log needs compaction; too full",
+                "compaction",
+            ));
         }
         Ok(())
     }
@@ -1437,6 +1470,7 @@ impl LogServer {
             let need_to_compact_s3 = self.need_to_compact_s3.lock();
             for (collection_id, rollup) in need_to_compact_s3.iter() {
                 if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
                     backpressure.push(*collection_id);
                 }
             }
@@ -1445,6 +1479,7 @@ impl LogServer {
             let need_to_compact_repl = self.need_to_compact_repl.lock();
             for ((_, collection_id), rollup) in need_to_compact_repl.iter() {
                 if rollup.requires_backpressure(self.config.num_records_before_backpressure) {
+                    tracing::info!(collection_id =? collection_id, rollup =? rollup, "requires backpressure");
                     backpressure.push(*collection_id);
                 }
             }
@@ -1952,9 +1987,10 @@ impl LogServer {
         match log.append_many(messages).await {
             Ok(_) | Err(wal3::Error::LogContentionDurable) => {}
             Err(err @ wal3::Error::Backoff) => {
-                return Err(Status::new(
-                    chroma_error::ErrorCodes::Unavailable.into(),
+                return Err(status_with_backoff_reason(
+                    tonic::Code::ResourceExhausted,
                     err.to_string(),
+                    "batching",
                 ));
             }
             Err(err) => return Err(Status::new(err.code().into(), err.to_string())),
@@ -2127,6 +2163,17 @@ impl LogServer {
             if let Some(fragments) = fragments {
                 return Ok(fragments);
             }
+            // Reuse the already-loaded manifest instead of calling scan() which would load
+            // the manifest a second time.
+            let mut short_read = false;
+            return Ok(log_reader
+                .scan_with_cache(
+                    &manifest_and_witness.manifest,
+                    from,
+                    limits,
+                    &mut short_read,
+                )
+                .await?);
         }
         Ok(log_reader.scan(from, limits).await?)
     }
@@ -2154,10 +2201,8 @@ impl LogServer {
             "Pulling logs",
         );
 
-        let read_fragments_span = tracing::info_span!("read_fragments");
         let fragments = match self
             .read_fragments(topology_name.as_ref(), collection_id, &pull_logs)
-            .instrument(read_fragments_span)
             .await
         {
             Ok(fragments) => fragments,
@@ -2200,10 +2245,8 @@ impl LogServer {
                 }
             })
             .collect::<Vec<_>>();
-        let try_join_all_span = tracing::info_span!("join all");
         let record_batches = if !fragment_futures.is_empty() {
             futures::future::try_join_all(fragment_futures)
-                .instrument(try_join_all_span)
                 .await
                 .map_err(|err: Error| Status::new(err.code().into(), err.to_string()))?
         } else {
@@ -2211,8 +2254,6 @@ impl LogServer {
             vec![]
         };
         let mut records = Vec::with_capacity(pull_logs.batch_size as usize);
-        let record_batch_iter = tracing::info_span!("record_batch_iter");
-        let _guard = record_batch_iter.enter();
         for record_batch in record_batches.into_iter() {
             for (log_offset, record_bytes) in record_batch.into_iter() {
                 if log_offset.offset() < pull_logs.start_from_offset as u64
@@ -2283,10 +2324,12 @@ impl LogServer {
         tracing::event!(Level::INFO, offset = ?cursor);
 
         // Use FactoryCreationContext to handle both replicated and S3 targets
+        let snapshot_cache = self.snapshot_cache_for_collection(target_collection_id);
         let target_ctx = FactoryCreationContext::new(
             &self.storages,
             topology_name.as_ref(),
             target_collection_id,
+            snapshot_cache,
         );
         target_ctx
             .fork_to_target(
@@ -2437,23 +2480,46 @@ impl LogServer {
             .map_err(|err| {
                 Status::invalid_argument(format!("Failed to parse collection id: {err}"))
             })?;
-        tracing::info!("Purging collections in dirty log: [{collection_ids:?}]");
-        let dirty_marker_json_blobs = collection_ids
-            .into_iter()
-            .map(|collection_id| {
-                serde_json::to_string(&DirtyMarker::Purge { collection_id }).map(String::into_bytes)
-            })
-            .collect::<Result<_, _>>()
-            .map_err(|err| Status::internal(format!("Failed to serialize dirty marker: {err}")))?;
-        if let Some(dirty_log) = self.dirty_log.as_ref() {
-            dirty_log
-                .append_many(dirty_marker_json_blobs)
+        let topology_name = request
+            .topology_name
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|err| Status::invalid_argument(format!("Invalid topology name: {err}")))?;
+        tracing::info!(
+            "Purging collections in dirty log: [{collection_ids:?}] topology={topology_name:?}"
+        );
+        if let Some(topology_name) = topology_name {
+            let Some((_regions, topology)) = self.storages.lookup_topology(&topology_name) else {
+                return Err(Status::not_found(format!(
+                    "topology not found: {topology_name}"
+                )));
+            };
+            let uuids: Vec<_> = collection_ids.iter().map(|id| id.0).collect();
+            ReplManifestManager::purge_dirty_for_collections(&topology.config.spanner, &uuids)
                 .await
-                .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                .map_err(|err| Status::internal(format!("Failed to purge dirty: {err}")))?;
             Ok(Response::new(PurgeDirtyForCollectionResponse {}))
         } else {
-            tracing::error!("dirty log not set and purge dirty received");
-            Err(Status::failed_precondition("dirty log not configured"))
+            let dirty_marker_json_blobs = collection_ids
+                .into_iter()
+                .map(|collection_id| {
+                    serde_json::to_string(&DirtyMarker::Purge { collection_id })
+                        .map(String::into_bytes)
+                })
+                .collect::<Result<_, _>>()
+                .map_err(|err| {
+                    Status::internal(format!("Failed to serialize dirty marker: {err}"))
+                })?;
+            if let Some(dirty_log) = self.dirty_log.as_ref() {
+                dirty_log
+                    .append_many(dirty_marker_json_blobs)
+                    .await
+                    .map_err(|err| Status::new(err.code().into(), err.to_string()))?;
+                Ok(Response::new(PurgeDirtyForCollectionResponse {}))
+            } else {
+                tracing::error!("dirty log not set and purge dirty received");
+                Err(Status::failed_precondition("dirty log not configured"))
+            }
         }
     }
 
@@ -6013,5 +6079,12 @@ mod tests {
     #[test]
     fn local_is_good_region_name() {
         let _r = RegionName::new("local").expect("'local' is unit tested to be a good region name");
+    }
+
+    #[test]
+    fn backoff_reason_md_key_is_valid_ascii_metadata() {
+        BACKOFF_REASON_MD_KEY
+            .parse::<tonic::metadata::MetadataKey<tonic::metadata::Ascii>>()
+            .expect("BACKOFF_REASON_MD_KEY must be a valid ASCII metadata key");
     }
 }

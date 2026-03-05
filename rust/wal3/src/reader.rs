@@ -312,7 +312,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
         Ok(post_process_fragments(fragments, from, limits, short_read))
     }
 
-    #[tracing::instrument(skip(self))]
     #[allow(clippy::type_complexity)]
     pub async fn read_parquet(
         &self,
@@ -323,13 +322,11 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
             .await
     }
 
-    #[tracing::instrument(skip(self))]
     pub async fn read_bytes(&self, fragment: &Fragment) -> Result<Arc<Vec<u8>>, Error> {
         self.fragment_consumer.read_bytes(&fragment.path).await
     }
 
     /// Parse parquet previously returned by read_bytes.
-    #[tracing::instrument(skip(self, parquet))]
     #[allow(clippy::type_complexity)]
     pub async fn parse_parquet(
         &self,
@@ -342,7 +339,6 @@ impl<P: FragmentPointer, FC: FragmentConsumer, MC: ManifestConsumer<P>> LogReade
     }
 
     /// Parse parquet previously returned by read_bytes, skipping setsum computation.
-    #[tracing::instrument(skip(self, parquet))]
     #[allow(clippy::type_complexity)]
     pub async fn parse_parquet_fast(
         &self,
