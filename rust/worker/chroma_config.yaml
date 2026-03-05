@@ -92,6 +92,10 @@ query_service:
           name: "usearch_cache"
           capacity: 8192 # 8192 MiB = 8GB
   fetch_log_batch_size: 1000
+  use_fragment_fetch: true
+  fragment_fetcher_cache:
+    memory:
+      capacity: 100000000 # 100 MB
 compaction_service:
   service_name: "compaction-service"
   otel_endpoint: "http://otel-collector.chroma.svc.cluster.local:4317"

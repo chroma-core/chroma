@@ -67,6 +67,34 @@ impl ChromaError for GrpcPullLogsError {
     }
 }
 
+/// Errors from the ScoutLogFragments RPC.
+#[derive(Error, Debug)]
+pub enum GrpcScoutLogFragmentsError {
+    #[error("Failed to scout log fragments: {0}")]
+    FailedToScoutLogFragments(#[from] tonic::Status),
+    #[error(transparent)]
+    ClientAssignerError(#[from] ClientAssignmentError),
+}
+
+impl ChromaError for GrpcScoutLogFragmentsError {
+    fn code(&self) -> ErrorCodes {
+        match self {
+            GrpcScoutLogFragmentsError::FailedToScoutLogFragments(err) => err.code().into(),
+            GrpcScoutLogFragmentsError::ClientAssignerError(e) => e.code(),
+        }
+    }
+}
+
+/// The response from ScoutLogFragments: the upper bound offset and the
+/// fragment pointers for the requested window.
+#[derive(Clone, Debug)]
+pub struct ScoutLogFragmentsResponse {
+    /// The offset of the next record to be inserted.
+    pub first_uninserted_record_offset: u64,
+    /// Fragment pointers covering the requested log window.
+    pub fragments: Vec<chroma_proto::LogFragmentPointer>,
+}
+
 #[derive(Error, Debug)]
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
@@ -338,6 +366,29 @@ impl GrpcLog {
         };
         let scout = response.into_inner();
         Ok(scout.first_uninserted_record_offset as u64)
+    }
+
+    /// Returns fragment pointers for the requested log window so that the
+    /// caller can read fragment data directly from object storage.
+    pub(super) async fn scout_log_fragments(
+        &mut self,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        start_from: u64,
+    ) -> Result<ScoutLogFragmentsResponse, GrpcScoutLogFragmentsError> {
+        let mut client = self.client_for(collection_id)?;
+        let response = client
+            .scout_log_fragments(chroma_proto::ScoutLogFragmentsRequest {
+                collection_id: collection_id.0.to_string(),
+                database_name: database_name.into_string(),
+                start_from_offset: start_from,
+            })
+            .await?;
+        let inner = response.into_inner();
+        Ok(ScoutLogFragmentsResponse {
+            first_uninserted_record_offset: inner.first_uninserted_record_offset,
+            fragments: inner.fragments,
+        })
     }
 
     pub(super) async fn read(

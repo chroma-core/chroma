@@ -5,6 +5,7 @@ pub mod execute_task;
 pub mod fetch_log;
 pub mod finish_attached_function;
 pub mod flush_segment_writer;
+pub mod fragment_fetch;
 pub mod get_attached_function;
 pub mod get_collection_and_segments;
 pub mod materialize_logs;
