@@ -369,8 +369,9 @@
             ]
           },
           {
-            "group": "Other",
+            "group": "Dictionary Syntax",
             "pages": [
+              "reference/search",
               "reference/where-filter"
             ]
           }
