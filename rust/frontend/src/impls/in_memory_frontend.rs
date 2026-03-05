@@ -536,6 +536,7 @@ impl InMemoryFrontend {
                         record_segment: collection.record_segment.clone(),
                     },
                 },
+                read_level: request.read_level,
             })
             .map_err(|e| e.boxed())?;
 
@@ -693,8 +694,8 @@ impl InMemoryFrontend {
 #[cfg(test)]
 mod tests {
     use chroma_types::{
-        DatabaseName, DocumentExpression, IncludeList, Metadata, MetadataComparison,
-        MetadataExpression, MetadataValue, PrimitiveOperator, Where,
+        plan::ReadLevel, DatabaseName, DocumentExpression, IncludeList, Metadata,
+        MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
 
     use super::*;
@@ -767,6 +768,7 @@ mod tests {
                     collection.tenant.clone(),
                     collection.database.clone(),
                     collection.collection_id,
+                    ReadLevel::default(),
                 )
                 .unwrap(),
             )

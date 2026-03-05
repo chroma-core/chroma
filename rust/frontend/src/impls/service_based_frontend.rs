@@ -1429,6 +1429,7 @@ impl ServiceBasedFrontend {
         CountRequest {
             database_name,
             collection_id,
+            read_level,
             ..
         }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
@@ -1451,6 +1452,7 @@ impl ServiceBasedFrontend {
                 scan: Scan {
                     collection_and_segments,
                 },
+                read_level,
             })
             .await?;
         let return_bytes = count_result.size_bytes();

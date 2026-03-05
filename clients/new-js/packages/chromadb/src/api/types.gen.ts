@@ -1531,7 +1531,12 @@ export type CollectionCountData = {
          */
         collection_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Read level for consistency vs performance tradeoffs
+         */
+        read_level?: ReadLevel;
+    };
     url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count';
 };
 

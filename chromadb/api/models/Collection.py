@@ -39,12 +39,21 @@ if TYPE_CHECKING:
 
 
 class Collection(CollectionCommon["ServerAPI"]):
-    def count(self) -> int:
-        """Return the number of records in the collection."""
+    def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
+        """Return the number of records in the collection.
+
+        Args:
+            read_level: Controls whether to read from the write-ahead log (WAL):
+                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
+                  All committed writes will be visible.
+                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+                  Faster, but recent writes that haven't been compacted may not be visible.
+        """
         return self._client._count(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
+            read_level=read_level,
         )
 
     def get_indexing_status(self) -> IndexingStatus:
