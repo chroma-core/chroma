@@ -208,13 +208,11 @@ impl Scheduler {
         let one_off_collections = self
             .oneoff_collections
             .iter()
-            .filter_map(|x| {
-                Some(CollectionInfo {
-                    collection_id: *x.0,
-                    topology_name: x.1.topology().map(|t| TopologyName::new(t).ok())?,
-                    first_log_offset: 1,
-                    first_log_ts: 1,
-                })
+            .map(|x| CollectionInfo {
+                collection_id: *x.0,
+                topology_name: x.1.topology().and_then(|t| TopologyName::new(t).ok()),
+                first_log_offset: 1,
+                first_log_ts: 1,
             })
             .collect::<Vec<_>>();
 
@@ -419,9 +417,12 @@ impl Scheduler {
                 .max_concurrent_jobs
                 .saturating_sub(self.in_progress_jobs.len());
             if !oneoff_collections.is_empty() {
-                // Take so we clear the oneoff collections for the next pass.
                 dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
-                for (database_name, record) in oneoff_collections.iter().take(rem_capacity) {
+                // Take so we clear the oneoff collections for the next pass.
+                for (database_name, record) in std::mem::take(&mut oneoff_collections)
+                    .into_iter()
+                    .take(rem_capacity)
+                {
                     tracing::info!(
                         "Creating one-off compaction job for collection: {}",
                         record.collection_version
