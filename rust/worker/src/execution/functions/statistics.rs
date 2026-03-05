@@ -1372,6 +1372,7 @@ mod tests {
             dispatcher_handle.clone(),
             false,
             None,
+            None,
         ))
         .await
         .expect("Compaction should succeed");

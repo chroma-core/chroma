@@ -1,4 +1,4 @@
-use crate::grpc_log::{GrpcLog, GrpcSealLogError};
+use crate::grpc_log::{GrpcLog, GrpcSealLogError, ScoutLogFragmentsResponse};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
@@ -99,6 +99,38 @@ impl Log {
                 .scout_logs(collection_id, starting_offset)
                 .await
                 .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+        }
+    }
+
+    /// Returns fragment pointers for the requested log window.
+    ///
+    /// Only supported by the gRPC log implementation.  Sqlite and InMemory
+    /// variants return an error because they do not store fragments in object
+    /// storage.
+    #[tracing::instrument(skip(self), err(Display))]
+    pub async fn scout_log_fragments(
+        &mut self,
+        database_name: DatabaseName,
+        collection_id: CollectionUuid,
+        starting_offset: u64,
+    ) -> Result<ScoutLogFragmentsResponse, Box<dyn ChromaError>> {
+        match self {
+            Log::Grpc(log) => log
+                .scout_log_fragments(database_name, collection_id, starting_offset)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
+            Log::Sqlite(_) => Err(Box::new(
+                crate::grpc_log::GrpcScoutLogFragmentsError::FailedToScoutLogFragments(
+                    tonic::Status::unimplemented("ScoutLogFragments not supported by sqlite log"),
+                ),
+            )),
+            Log::InMemory(_) => Err(Box::new(
+                crate::grpc_log::GrpcScoutLogFragmentsError::FailedToScoutLogFragments(
+                    tonic::Status::unimplemented(
+                        "ScoutLogFragments not supported by in-memory log",
+                    ),
+                ),
+            )),
         }
     }
 
