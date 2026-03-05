@@ -212,7 +212,11 @@ impl Dispatcher {
             .record(self.waiters.len() as u64, &[]);
         self.metrics
             .active_io_slots
-            .record(self.active_io_tasks.load(Ordering::Relaxed), &[]);
+            .record(
+                self.config.active_io_tasks as u64
+                    - self.active_io_tasks.load(Ordering::Relaxed),
+                &[],
+            );
     }
 
     /// Enqueue a task to be processed.

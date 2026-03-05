@@ -42,17 +42,12 @@ struct ComponentExecutorMetrics {
 }
 
 impl ComponentExecutorMetrics {
-    fn new(max_queue_depth: usize) -> Self {
+    fn new() -> Self {
         let meter = opentelemetry::global::meter("chroma.system");
         Self {
             queue_depth: meter
                 .u64_histogram("chroma.system.executor.queue_depth")
                 .with_description("The depth of the component's message queue")
-                .with_boundaries(
-                    (0..=10)
-                        .map(|i| (i * (max_queue_depth / 10)) as f64)
-                        .collect::<Vec<_>>(),
-                )
                 .build(),
             message_received_total: meter
                 .u64_counter("chroma.system.executor.message_received_total")
@@ -89,7 +84,6 @@ where
         system: System,
         scheduler: Scheduler,
     ) -> (Self, Arc<ComponentRuntimeStats>) {
-        let max_queue_depth = handler.queue_size();
         let runtime_stats = Arc::new(ComponentRuntimeStats::default());
 
         (
@@ -101,7 +95,7 @@ where
                     scheduler,
                 }),
                 handler,
-                metrics: ComponentExecutorMetrics::new(max_queue_depth),
+                metrics: ComponentExecutorMetrics::new(),
                 runtime_stats: runtime_stats.clone(),
             },
             runtime_stats,
