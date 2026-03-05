@@ -883,12 +883,43 @@ mod tests {
         });
         let request = chroma_proto::CountPlan {
             scan: Some(scan_operator.clone()),
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
         };
 
         // invalid segment uuid
         let response = executor.count(request).await;
         assert!(response.is_err());
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_and_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_only() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexOnly as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
     }
 
     #[tokio::test]
