@@ -95,17 +95,18 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
 
         let offset_id_set: HashSet<_> = HashSet::from_iter(input.offset_ids.iter().cloned());
 
-        // Always prefetch id_to_user_id (used by get_user_id for all records).
-        // Additionally prefetch id_to_data when full hydration is needed.
+        // Prefetch: when needs_data, load full data records (which contain the user ID);
+        // otherwise, load only the lightweight id_to_user_id mapping.
         if let Some(reader) = &record_segment_reader {
-            reader
-                .load_id_to_user_id(offset_id_set.iter().cloned())
-                .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
-                .await;
             if needs_data {
                 reader
                     .load_id_to_data(offset_id_set.iter().cloned())
                     .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
+                    .await;
+            } else {
+                reader
+                    .load_id_to_user_id(offset_id_set.iter().cloned())
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
                     .await;
             }
         }
@@ -131,74 +132,76 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             .iter()
             .map(|offset_id| {
                 async {
-                    // Resolve user ID (shared across both paths)
-                    let id = match offset_id_to_log_record.get(offset_id) {
-                        Some(log) => log
-                            .get_user_id(record_segment_reader.as_ref())
-                            .await
-                            .map_err(ProjectionError::LogMaterializer)?,
-                        None => match &record_segment_reader {
-                            Some(reader) => reader
-                                .get_user_id_for_offset_id(*offset_id)
-                                .await?
-                                .to_string(),
-                            None => return Err(ProjectionError::RecordSegmentUninitialized),
-                        },
-                    };
+                    if needs_data {
+                        // Full hydration path: get ID and data from hydrated record
+                        let (id, document, embedding, metadata) =
+                            match offset_id_to_log_record.get(offset_id) {
+                                Some(log) => {
+                                    let log = log
+                                        .hydrate(record_segment_reader.as_ref())
+                                        .await
+                                        .map_err(ProjectionError::LogMaterializer)?;
+                                    (
+                                        log.get_user_id().to_string(),
+                                        log.merged_document_ref()
+                                            .filter(|_| self.document)
+                                            .map(str::to_string),
+                                        self.embedding
+                                            .then_some(log.merged_embeddings_ref().to_vec()),
+                                        self.metadata
+                                            .then_some(log.merged_metadata())
+                                            .filter(|metadata| !metadata.is_empty()),
+                                    )
+                                }
+                                None => {
+                                    let reader = record_segment_reader
+                                        .as_ref()
+                                        .ok_or(ProjectionError::RecordSegmentUninitialized)?;
+                                    let record =
+                                        reader.get_data_for_offset_id(*offset_id).await?.ok_or(
+                                            ProjectionError::RecordSegmentPhantomRecord(*offset_id),
+                                        )?;
+                                    (
+                                        record.id.to_string(),
+                                        record
+                                            .document
+                                            .filter(|_| self.document)
+                                            .map(str::to_string),
+                                        self.embedding.then_some(record.embedding.to_vec()),
+                                        record.metadata.filter(|_| self.metadata),
+                                    )
+                                }
+                            };
 
-                    if !needs_data {
-                        return Ok(ProjectionRecord {
+                        Ok(ProjectionRecord {
+                            id,
+                            document,
+                            embedding,
+                            metadata,
+                        })
+                    } else {
+                        // Lightweight path: resolve user ID only via id_to_user_id blockfile
+                        let id = match offset_id_to_log_record.get(offset_id) {
+                            Some(log) => log
+                                .get_user_id(record_segment_reader.as_ref())
+                                .await
+                                .map_err(ProjectionError::LogMaterializer)?,
+                            None => match &record_segment_reader {
+                                Some(reader) => reader
+                                    .get_user_id_for_offset_id(*offset_id)
+                                    .await?
+                                    .to_string(),
+                                None => return Err(ProjectionError::RecordSegmentUninitialized),
+                            },
+                        };
+
+                        Ok(ProjectionRecord {
                             id,
                             document: None,
                             embedding: None,
                             metadata: None,
-                        });
+                        })
                     }
-
-                    // Hydrate data fields
-                    let (document, embedding, metadata) =
-                        match offset_id_to_log_record.get(offset_id) {
-                            Some(log) => {
-                                let log = log
-                                    .hydrate(record_segment_reader.as_ref())
-                                    .await
-                                    .map_err(ProjectionError::LogMaterializer)?;
-                                (
-                                    log.merged_document_ref()
-                                        .filter(|_| self.document)
-                                        .map(str::to_string),
-                                    self.embedding
-                                        .then_some(log.merged_embeddings_ref().to_vec()),
-                                    self.metadata
-                                        .then_some(log.merged_metadata())
-                                        .filter(|metadata| !metadata.is_empty()),
-                                )
-                            }
-                            None => {
-                                let reader = record_segment_reader
-                                    .as_ref()
-                                    .ok_or(ProjectionError::RecordSegmentUninitialized)?;
-                                let record =
-                                    reader.get_data_for_offset_id(*offset_id).await?.ok_or(
-                                        ProjectionError::RecordSegmentPhantomRecord(*offset_id),
-                                    )?;
-                                (
-                                    record
-                                        .document
-                                        .filter(|_| self.document)
-                                        .map(str::to_string),
-                                    self.embedding.then_some(record.embedding.to_vec()),
-                                    record.metadata.filter(|_| self.metadata),
-                                )
-                            }
-                        };
-
-                    Ok(ProjectionRecord {
-                        id,
-                        document,
-                        embedding,
-                        metadata,
-                    })
                 }
                 .instrument(current_span.clone())
             })

@@ -113,17 +113,18 @@ impl Operator<SelectInput, SelectOutput> for Select {
             .map(|record| record.offset_id)
             .collect::<HashSet<_>>();
 
-        // Always prefetch id_to_user_id (used by get_user_id for all records).
-        // Additionally prefetch id_to_data when full hydration is needed.
+        // Prefetch: when needs_data, load full data records (which contain the user ID);
+        // otherwise, load only the lightweight id_to_user_id mapping.
         if let Some(reader) = &record_segment_reader {
-            reader
-                .load_id_to_user_id(offset_id_set.iter().cloned())
-                .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
-                .await;
             if needs_data {
                 reader
                     .load_id_to_data(offset_id_set.iter().cloned())
                     .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
+                    .await;
+            } else {
+                reader
+                    .load_id_to_user_id(offset_id_set.iter().cloned())
+                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
                     .await;
             }
         }
@@ -146,24 +147,9 @@ impl Operator<SelectInput, SelectOutput> for Select {
             .records
             .iter()
             .map(|record| async {
-                // Resolve user ID (shared across both paths)
-                let id = match offset_id_to_log_record.get(&record.offset_id) {
-                    Some(log) => log
-                        .get_user_id(record_segment_reader.as_ref())
-                        .await
-                        .map_err(SelectError::LogMaterializer)?,
-                    None => match &record_segment_reader {
-                        Some(reader) => reader
-                            .get_user_id_for_offset_id(record.offset_id)
-                            .await?
-                            .to_string(),
-                        None => return Err(SelectError::RecordSegmentUninitialized),
-                    },
-                };
-
-                // Conditionally hydrate data fields
-                let (document, embedding, metadata) = if needs_data {
-                    let (doc, emb, mut full_metadata) = match offset_id_to_log_record
+                if needs_data {
+                    // Full hydration path: get ID and data from hydrated record
+                    let (id, document, embedding, mut full_metadata) = match offset_id_to_log_record
                         .get(&record.offset_id)
                     {
                         Some(log) => {
@@ -172,6 +158,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
                                 .await
                                 .map_err(SelectError::LogMaterializer)?;
                             (
+                                log.get_user_id().to_string(),
                                 select_document
                                     .then(|| log.merged_document_ref().map(str::to_string))
                                     .flatten(),
@@ -188,6 +175,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
                                 .await?
                                 .ok_or(SelectError::RecordSegmentPhantomRecord(record.offset_id))?;
                             (
+                                data.id.to_string(),
                                 select_document
                                     .then(|| data.document.map(|s| s.to_string()))
                                     .flatten(),
@@ -201,23 +189,41 @@ impl Operator<SelectInput, SelectOutput> for Select {
                         full_metadata.retain(|key, _| metadata_fields_to_select.contains(key));
                     }
 
-                    let metadata = if full_metadata.is_empty() {
-                        None
-                    } else {
-                        Some(full_metadata)
-                    };
-                    (doc, emb, metadata)
+                    Ok(SearchRecord {
+                        id,
+                        document,
+                        embedding,
+                        metadata: if full_metadata.is_empty() {
+                            None
+                        } else {
+                            Some(full_metadata)
+                        },
+                        score: select_score.then_some(record.measure),
+                    })
                 } else {
-                    (None, None, None)
-                };
+                    // Lightweight path: resolve user ID only via id_to_user_id blockfile
+                    let id = match offset_id_to_log_record.get(&record.offset_id) {
+                        Some(log) => log
+                            .get_user_id(record_segment_reader.as_ref())
+                            .await
+                            .map_err(SelectError::LogMaterializer)?,
+                        None => match &record_segment_reader {
+                            Some(reader) => reader
+                                .get_user_id_for_offset_id(record.offset_id)
+                                .await?
+                                .to_string(),
+                            None => return Err(SelectError::RecordSegmentUninitialized),
+                        },
+                    };
 
-                Ok(SearchRecord {
-                    id,
-                    document,
-                    embedding,
-                    metadata,
-                    score: select_score.then_some(record.measure),
-                })
+                    Ok(SearchRecord {
+                        id,
+                        document: None,
+                        embedding: None,
+                        metadata: None,
+                        score: select_score.then_some(record.measure),
+                    })
+                }
             })
             .collect::<Vec<_>>();
 
