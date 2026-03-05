@@ -43,6 +43,7 @@ use crate::{
             sparse_knn::SparseKnnOrchestrator,
         },
     },
+    utils::fragment_fetch::fragment_fetcher_for_collection as resolve_fragment_fetcher_for_collection,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -265,12 +266,12 @@ impl WorkerServer {
         &self,
         collection_id: CollectionUuid,
     ) -> Option<Arc<FragmentFetcher>> {
-        let fetcher = self.fragment_fetcher.as_ref()?;
-        if self.use_fragment_fetch || self.collections_for_fragment_fetch.contains(&collection_id) {
-            Some(Arc::clone(fetcher))
-        } else {
-            None
-        }
+        resolve_fragment_fetcher_for_collection(
+            &self.fragment_fetcher,
+            self.use_fragment_fetch,
+            &self.collections_for_fragment_fetch,
+            collection_id,
+        )
     }
 
     async fn orchestrate_count(

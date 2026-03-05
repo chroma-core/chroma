@@ -14,6 +14,7 @@ use crate::execution::operators::repair_log_offsets::RepairLogOffsetsError;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsInput;
 use crate::execution::operators::repair_log_offsets::RepairLogOffsetsOutput;
 use crate::execution::orchestration::compact::{compact, CompactionResponse};
+use crate::utils::fragment_fetch::fragment_fetcher_for_collection as resolve_fragment_fetcher_for_collection;
 use async_trait::async_trait;
 use chroma_blockstore::provider::BlockfileProvider;
 use chroma_config::assignment::assignment_policy::AssignmentPolicy;
@@ -397,12 +398,12 @@ impl CompactionManagerContext {
         &self,
         collection_id: CollectionUuid,
     ) -> Option<Arc<FragmentFetcher>> {
-        let fetcher = self.fragment_fetcher.as_ref()?;
-        if self.use_fragment_fetch || self.collections_for_fragment_fetch.contains(&collection_id) {
-            Some(Arc::clone(fetcher))
-        } else {
-            None
-        }
+        resolve_fragment_fetcher_for_collection(
+            &self.fragment_fetcher,
+            self.use_fragment_fetch,
+            &self.collections_for_fragment_fetch,
+            collection_id,
+        )
     }
 
     #[instrument(name = "CompactionManager::compact", skip(self))]
