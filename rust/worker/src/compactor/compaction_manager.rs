@@ -2,7 +2,9 @@ use super::scheduler::Scheduler;
 use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
-use crate::compactor::types::{ListDeadJobsMessage, ScheduledCompactMessage};
+use crate::compactor::types::{
+    InProgressJobEntry, ListDeadJobsMessage, ListInProgressJobsMessage, ScheduledCompactMessage,
+};
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLog;
 use crate::execution::operators::purge_dirty_log::PurgeDirtyLogError;
@@ -819,6 +821,36 @@ impl Handler<ListDeadJobsMessage> for CompactionManager {
         // TODO(tanujnay112): remove this endpoint
         if let Err(e) = message.response_tx.send(Vec::new()) {
             tracing::warn!("Failed to send dead jobs response: {:?}", e);
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<ListInProgressJobsMessage> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: ListInProgressJobsMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        let entries = self
+            .scheduler
+            .get_in_progress_jobs()
+            .into_iter()
+            .map(|(job_id, job)| InProgressJobEntry {
+                job_id,
+                database_name: job.database_name.as_ref().to_string(),
+                expires_at_epoch_secs: job
+                    .expires_at
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+            })
+            .collect();
+
+        if let Err(e) = message.response_tx.send(entries) {
+            tracing::warn!("Failed to send in-progress jobs response: {:?}", e);
         }
     }
 }

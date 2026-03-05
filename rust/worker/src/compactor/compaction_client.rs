@@ -1,6 +1,6 @@
 use chroma_types::chroma_proto::{
     compactor_client::CompactorClient, CollectionIds, CompactRequest, ListDeadJobsRequest,
-    RebuildRequest, SegmentScope,
+    ListInProgressJobsRequest, RebuildRequest, SegmentScope,
 };
 use clap::{Parser, Subcommand};
 use thiserror::Error;
@@ -47,6 +47,8 @@ pub enum CompactionCommand {
     },
     /// List all dead jobs (collections with failed compactions)
     ListDeadJobs,
+    /// List all in-progress compaction jobs
+    ListInProgressJobs,
 }
 
 impl CompactionClient {
@@ -114,6 +116,26 @@ impl CompactionClient {
                     }
                 } else {
                     println!("No dead jobs response didn't contain an ids field");
+                }
+            }
+            CompactionCommand::ListInProgressJobs => {
+                let mut client = self.grpc_client().await?;
+                let response = client
+                    .list_in_progress_jobs(ListInProgressJobsRequest {})
+                    .await
+                    .map_err(|e| CompactionClientError::Compactor(e.to_string()))?;
+
+                let jobs = response.into_inner().jobs;
+                println!("In-progress compaction jobs:");
+                if jobs.is_empty() {
+                    println!("  None");
+                } else {
+                    for job in jobs {
+                        println!(
+                            "  job_id={} database={} expires_at_epoch_secs={}",
+                            job.job_id, job.database_name, job.expires_at_epoch_secs
+                        );
+                    }
                 }
             }
         };

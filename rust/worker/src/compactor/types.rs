@@ -28,3 +28,15 @@ pub struct RebuildMessage {
 pub struct ListDeadJobsMessage {
     pub response_tx: oneshot::Sender<Vec<JobId>>,
 }
+
+#[derive(Debug)]
+pub struct InProgressJobEntry {
+    pub job_id: JobId,
+    pub database_name: String,
+    pub expires_at_epoch_secs: i64,
+}
+
+#[derive(Debug)]
+pub struct ListInProgressJobsMessage {
+    pub response_tx: oneshot::Sender<Vec<InProgressJobEntry>>,
+}
