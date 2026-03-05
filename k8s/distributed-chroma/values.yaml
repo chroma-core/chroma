@@ -37,6 +37,10 @@ rustLogService:
     type: DirectoryOrCreate
     mountPath: '/cache/'
     additionalVolumes: []
+  hpa:
+    enabled: false
+    maxReplicaCount: 10
+    averageUtilization: 80
 queryService:
   image:
     repository: 'query-service'
