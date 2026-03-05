@@ -278,8 +278,9 @@ impl WorkerServer {
         &self,
         count: Request<chroma_proto::CountPlan>,
     ) -> Result<Response<chroma_proto::CountResult>, Status> {
-        let scan = count
-            .into_inner()
+        let count_plan = count.into_inner();
+        let read_level: ReadLevel = count_plan.read_level().into();
+        let scan = count_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
@@ -293,6 +294,7 @@ impl WorkerServer {
             1000,
             collection_and_segments,
             fetch_log,
+            read_level,
         );
 
         match count_orchestrator.run(self.system.clone()).await {
@@ -937,12 +939,43 @@ mod tests {
         });
         let request = chroma_proto::CountPlan {
             scan: Some(scan_operator.clone()),
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
         };
 
         // invalid segment uuid
         let response = executor.count(request).await;
         assert!(response.is_err());
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_and_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_only() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexOnly as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
     }
 
     #[tokio::test]

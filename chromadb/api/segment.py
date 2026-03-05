@@ -799,6 +799,7 @@ class SegmentAPI(ServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         add_attributes_to_current_span({"collection_id": str(collection_id)})
         return self._executor.count(CountPlan(self._scan(collection_id)))

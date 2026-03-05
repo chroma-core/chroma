@@ -1735,6 +1735,8 @@ pub struct CountRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    #[serde(default)]
+    pub read_level: ReadLevel,
 }
 
 impl CountRequest {
@@ -1742,11 +1744,13 @@ impl CountRequest {
         tenant_id: String,
         database_name: String,
         collection_id: CollectionUuid,
+        read_level: ReadLevel,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
+            read_level,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
