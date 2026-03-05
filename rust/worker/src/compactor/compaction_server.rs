@@ -3,8 +3,9 @@ use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
-    CollectionIds, CompactRequest, CompactResponse, ListDeadJobsRequest, ListDeadJobsResponse,
-    RebuildRequest, RebuildResponse,
+    CollectionIds, CompactRequest, CompactResponse, InProgressJobInfo, ListDeadJobsRequest,
+    ListDeadJobsResponse, ListInProgressJobsRequest, ListInProgressJobsResponse, RebuildRequest,
+    RebuildResponse,
 };
 use tokio::{
     signal::unix::{signal, SignalKind},
@@ -13,7 +14,9 @@ use tokio::{
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
-use crate::compactor::{ListDeadJobsMessage, OneOffCompactMessage, RegisterOnReadySignal};
+use crate::compactor::{
+    ListDeadJobsMessage, ListInProgressJobsMessage, OneOffCompactMessage, RegisterOnReadySignal,
+};
 
 use super::{CompactionManager, RebuildMessage};
 
@@ -138,6 +141,34 @@ impl Compactor for CompactionServer {
             ids: Some(CollectionIds {
                 ids: dead_jobs.iter().map(ToString::to_string).collect(),
             }),
+        }))
+    }
+
+    async fn list_in_progress_jobs(
+        &self,
+        _request: Request<ListInProgressJobsRequest>,
+    ) -> Result<Response<ListInProgressJobsResponse>, Status> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+
+        self.manager
+            .receiver()
+            .send(ListInProgressJobsMessage { response_tx }, None)
+            .await
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let in_progress_jobs = response_rx
+            .await
+            .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?;
+
+        Ok(Response::new(ListInProgressJobsResponse {
+            jobs: in_progress_jobs
+                .into_iter()
+                .map(|entry| InProgressJobInfo {
+                    job_id: entry.job_id.to_string(),
+                    database_name: entry.database_name,
+                    expires_at_epoch_secs: entry.expires_at_epoch_secs,
+                })
+                .collect(),
         }))
     }
 }
