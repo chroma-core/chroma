@@ -136,13 +136,8 @@ func InitTracing(ctx context.Context, config *TracingConfig) (err error) {
 		return
 	}
 
-	// Create resource with service name; merge with default so our service name
-	// overrides any from environment (OTEL_SERVICE_NAME, etc.) for both traces and metrics.
-	res, err := resource.Merge(resource.Default(),
-		resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(config.Service)))
-	if err != nil {
-		return fmt.Errorf("failed to merge resource: %w", err)
-	}
+	// Create resource with service name that will be used for both traces and metrics.
+	res := resource.NewWithAttributes(semconv.SchemaURL, semconv.ServiceNameKey.String(config.Service))
 
 	// Create a new tracer provider with a batch span processor and the OTLP exporter.
 	tp := sdktrace.NewTracerProvider(
