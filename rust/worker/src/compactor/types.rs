@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
-use chroma_types::{CollectionUuid, DatabaseName, JobId, SegmentScope};
-use tokio::sync::oneshot;
+use chroma_types::{CollectionUuid, DatabaseName, SegmentScope};
 
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub(crate) struct CompactionJob {
@@ -22,9 +21,4 @@ pub struct RebuildMessage {
     pub collection_ids: Vec<CollectionUuid>,
     /// Segment scopes to rebuild. If empty, rebuilds all segments (metadata + vector).
     pub segment_scopes: HashSet<SegmentScope>,
-}
-
-#[derive(Debug)]
-pub struct ListDeadJobsMessage {
-    pub response_tx: oneshot::Sender<Vec<JobId>>,
 }

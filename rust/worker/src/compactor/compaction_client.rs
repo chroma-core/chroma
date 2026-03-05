@@ -1,6 +1,5 @@
 use chroma_types::chroma_proto::{
-    compactor_client::CompactorClient, CollectionIds, CompactRequest, ListDeadJobsRequest,
-    RebuildRequest, SegmentScope,
+    compactor_client::CompactorClient, CollectionIds, CompactRequest, RebuildRequest, SegmentScope,
 };
 use clap::{Parser, Subcommand};
 use thiserror::Error;
@@ -45,8 +44,6 @@ pub enum CompactionCommand {
         #[arg(long = "segment", value_parser = ["metadata", "vector"])]
         segment_scopes: Vec<String>,
     },
-    /// List all dead jobs (collections with failed compactions)
-    ListDeadJobs,
 }
 
 impl CompactionClient {
@@ -93,27 +90,6 @@ impl CompactionClient {
                     .await;
                 if let Err(status) = response {
                     return Err(CompactionClientError::Compactor(status.to_string()));
-                }
-            }
-            CompactionCommand::ListDeadJobs => {
-                let mut client = self.grpc_client().await?;
-                let response = client
-                    .list_dead_jobs(ListDeadJobsRequest {})
-                    .await
-                    .map_err(|e| CompactionClientError::Compactor(e.to_string()))?;
-
-                let dead_jobs = response.into_inner();
-                if let Some(ids) = dead_jobs.ids {
-                    println!("Dead jobs (collections with failed compactions):");
-                    if ids.ids.is_empty() {
-                        println!("  None");
-                    } else {
-                        for id in ids.ids {
-                            println!("  {}", id);
-                        }
-                    }
-                } else {
-                    println!("No dead jobs response didn't contain an ids field");
                 }
             }
         };
