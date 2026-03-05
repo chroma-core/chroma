@@ -211,8 +211,8 @@ impl Scheduler {
             .map(|x| CollectionInfo {
                 collection_id: *x.0,
                 topology_name: x.1.topology().and_then(|t| TopologyName::new(t).ok()),
-                first_log_offset: 1,
-                first_log_ts: 1,
+                first_log_offset: 0,
+                first_log_ts: 0,
             })
             .collect::<Vec<_>>();
 
@@ -990,6 +990,108 @@ mod tests {
             "offset must be log_position + 1 ({expected_offset}), not first_log_offset ({first_log_offset}); \
              using first_log_offset would rewind compaction and reprocess already-compacted records"
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_with_negative_log_position_not_dropped() {
+        SchedulerFixture::clear_env_vars();
+
+        // Set up a collection whose log_position is -1 (never compacted).
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut in_memory_log) => in_memory_log,
+            _ => panic!("Invalid log type"),
+        };
+
+        let tenant = "tenant_1".to_string();
+        let sysdb_log_position: i64 = -1;
+        let collection = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000099")
+                .unwrap(),
+            name: "oneoff_collection".to_string(),
+            dimension: Some(1),
+            tenant: tenant.clone(),
+            database: "database_1".to_string(),
+            log_position: sysdb_log_position,
+            ..Default::default()
+        };
+        let collection_id = collection.collection_id;
+
+        in_memory_log.add_log(
+            collection_id,
+            InternalLogRecord {
+                collection_id,
+                log_offset: 0,
+                log_ts: 1,
+                record: LogRecord {
+                    log_offset: 0,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+            },
+        );
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.add_collection(collection);
+                test_sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_member.member_id.clone(),
+            log,
+            sysdb.clone(),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            3600,
+            3,
+        );
+
+        // Simulate a one-off collection entry with the values that
+        // get_collections_with_new_data produces (first_log_offset=0).
+        let collection_infos = vec![CollectionInfo {
+            collection_id,
+            topology_name: None,
+            first_log_offset: 0,
+            first_log_ts: 0,
+        }];
+
+        let records = scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        // The collection must not be dropped by the invariant check.
+        // log_position + 1 = -1 + 1 = 0, and first_log_offset = 0,
+        // so the condition (0 < 0) is false and the collection is kept.
+        assert_eq!(
+            records.len(),
+            1,
+            "one-off collection with log_position=-1 must not be dropped; \
+             first_log_offset=0 avoids false positive in the invariant check"
+        );
+        println!("records[0].offset = {}", records[0].offset);
+        println!("records[0].collection_id = {}", records[0].collection_id);
     }
 
     #[tokio::test]
