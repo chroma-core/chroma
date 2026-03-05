@@ -441,11 +441,12 @@ impl Scheduler {
                     records.push(record);
                 }
                 let selected = self.policy.determine(records.clone(), rem_capacity as i32);
+                let seen = selected
+                    .iter()
+                    .map(|r| r.collection_id)
+                    .collect::<HashSet<_>>();
                 for record in records {
-                    if !selected
-                        .iter()
-                        .any(|rec| rec.collection_id == record.collection_id)
-                    {
+                    if !seen.contains(&record.collection_id) {
                         tracing::info!(
                             "Max concurrent jobs reached, skipping compaction for {}",
                             record.collection_id
