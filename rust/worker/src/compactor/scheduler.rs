@@ -521,6 +521,10 @@ impl Scheduler {
     pub(crate) fn has_memberlist(&self) -> bool {
         self.memberlist.is_some()
     }
+
+    pub(crate) fn get_assignment_policy(&mut self) -> &mut Box<dyn AssignmentPolicy> {
+        &mut self.assignment_policy
+    }
 }
 
 #[cfg(test)]

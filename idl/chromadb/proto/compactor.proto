@@ -48,9 +48,19 @@ message ListInProgressJobsResponse {
   repeated InProgressJobInfo jobs = 1;
 }
 
+message GetCollectionAssignmentRequest {
+  string collection_id = 1;
+}
+
+message GetCollectionAssignmentResponse {
+  string assigned_node = 1;
+  repeated string memberlist = 2;
+}
+
 service Compactor {
   rpc Compact(CompactRequest) returns (CompactResponse) {}
   rpc Rebuild(RebuildRequest) returns (RebuildResponse) {}
   rpc ListDeadJobs(ListDeadJobsRequest) returns (ListDeadJobsResponse) {}
   rpc ListInProgressJobs(ListInProgressJobsRequest) returns (ListInProgressJobsResponse) {}
+  rpc GetCollectionAssignment(GetCollectionAssignmentRequest) returns (GetCollectionAssignmentResponse) {}
 }

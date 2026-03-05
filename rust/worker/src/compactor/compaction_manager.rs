@@ -3,7 +3,8 @@ use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::{
-    InProgressJobEntry, ListDeadJobsMessage, ListInProgressJobsMessage, ScheduledCompactMessage,
+    GetCollectionAssignmentMessage, GetCollectionAssignmentResponse, InProgressJobEntry,
+    ListDeadJobsMessage, ListInProgressJobsMessage, ScheduledCompactMessage,
 };
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
@@ -903,6 +904,36 @@ impl Handler<ListInProgressJobsMessage> for CompactionManager {
 
         if let Err(e) = message.response_tx.send(entries) {
             tracing::warn!("Failed to send in-progress jobs response: {:?}", e);
+        }
+    }
+}
+
+#[async_trait]
+impl Handler<GetCollectionAssignmentMessage> for CompactionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        message: GetCollectionAssignmentMessage,
+        _ctx: &ComponentContext<CompactionManager>,
+    ) {
+        let assignment_policy = self.scheduler.get_assignment_policy();
+
+        let assigned_node = assignment_policy
+            .assign_one(&message.collection_id.0.to_string())
+            .unwrap_or_else(|_| "no_assignment".to_string());
+
+        let mut member_ids = assignment_policy.get_members();
+
+        member_ids.sort();
+
+        let response = GetCollectionAssignmentResponse {
+            assigned_node,
+            memberlist: member_ids,
+        };
+
+        if let Err(e) = message.response_tx.send(response) {
+            tracing::warn!("Failed to send collection assignment response: {:?}", e);
         }
     }
 }
