@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-use crate::grpc_log::{GrpcLog, GrpcSealLogError};
-=======
-use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError, ScoutLogFragmentsResponse};
->>>>>>> 3160e30a9 ([ENH](log) add pointer-based log fetch via ScoutLogFragments (#6533))
+use crate::grpc_log::{GrpcLog, GrpcSealLogError, ScoutLogFragmentsResponse};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
