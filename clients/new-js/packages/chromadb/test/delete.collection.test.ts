@@ -34,6 +34,20 @@ describe("delete collection", () => {
     );
   });
 
+  test("it should delete all documents when called with no arguments", async () => {
+    const collection = await client.createCollection({ name: "test" });
+    await collection.add({
+      ids: IDS,
+      embeddings: EMBEDDINGS,
+      metadatas: METADATAS,
+    });
+    let count = await collection.count();
+    expect(count).toBe(3);
+    await collection.delete();
+    count = await collection.count();
+    expect(count).toBe(0);
+  });
+
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });

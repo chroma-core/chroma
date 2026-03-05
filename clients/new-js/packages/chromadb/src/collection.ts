@@ -202,7 +202,7 @@ export interface Collection {
    * Deletes records from the collection based on filters.
    * @param args - Deletion criteria
    */
-  delete(args: {
+  delete(args?: {
     /** Specific record IDs to delete */
     ids?: string[];
     /** Metadata-based filtering for deletion */
@@ -1100,7 +1100,7 @@ export class CollectionImpl implements Collection {
     ids?: string[];
     where?: Where;
     whereDocument?: WhereDocument;
-  }): Promise<void> {
+  } = {}): Promise<void> {
     this.validateDelete(ids, where, whereDocument);
 
     await RecordService.collectionDelete({
