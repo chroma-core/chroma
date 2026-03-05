@@ -298,56 +298,6 @@ const search = new Search()
 ```
 </CodeGroup>
 
-## Dictionary Syntax
-
-You can also construct GroupBy using dictionary syntax for programmatic query building.
-
-<CodeGroup>
-```python Python
-# GroupBy with MinK
-search = Search(
-    rank={"$knn": {"query": "machine learning", "limit": 100}},
-    group_by={
-        "keys": ["category"],
-        "aggregate": {"$min_k": {"keys": ["#score"], "k": 3}}
-    },
-    limit=30
-)
-
-# GroupBy with MaxK
-search = Search(
-    rank={"$knn": {"query": "top rated products", "limit": 100}},
-    group_by={
-        "keys": ["category", "brand"],
-        "aggregate": {"$max_k": {"keys": ["rating", "#score"], "k": 2}}
-    },
-    limit=20
-)
-```
-
-```typescript TypeScript
-// GroupBy with MinK
-const search1 = new Search({
-  rank: { $knn: { query: "machine learning", limit: 100 } },
-  groupBy: {
-    keys: ["category"],
-    aggregate: { $min_k: { keys: ["#score"], k: 3 } }
-  },
-  limit: 30
-});
-
-// GroupBy with MaxK
-const search2 = new Search({
-  rank: { $knn: { query: "top rated products", limit: 100 } },
-  groupBy: {
-    keys: ["category", "brand"],
-    aggregate: { $max_k: { keys: ["rating", "#score"], k: 2 } }
-  },
-  limit: 20
-});
-```
-</CodeGroup>
-
 ## Edge Cases and Important Behavior
 
 ### Groups with Fewer Records
