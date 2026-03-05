@@ -752,7 +752,8 @@ impl Handler<OneOffCompactMessage> for CompactionManager {
         _ctx: &ComponentContext<CompactionManager>,
     ) {
         self.scheduler
-            .add_oneoff_collections(message.collection_ids);
+            .add_oneoff_collections(message.collection_ids)
+            .await;
         tracing::info!(
             "One-off collections queued: {:?}",
             self.scheduler.get_oneoff_collections()
