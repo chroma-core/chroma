@@ -729,3 +729,32 @@ func (s *collectionDb) IncrementCompactionFailureCount(collectionID string) erro
 	}
 	return nil
 }
+
+// GetDLQFailureCounts returns a map of compaction_failure_count to the number of collections with that count.
+// This uses the read replica to minimize overhead on the primary database.
+func (s *collectionDb) GetDLQFailureCounts() (map[int32]int64, error) {
+	type result struct {
+		CompactionFailureCount int32 `gorm:"column:compaction_failure_count"`
+		Count                  int64 `gorm:"column:count"`
+	}
+
+	var results []result
+	err := s.read_db.Model(&dbmodel.Collection{}).
+		Select("compaction_failure_count, COUNT(*) as count").
+		Where("compaction_failure_count > 0").
+		Group("compaction_failure_count").
+		Find(&results).Error
+
+	if err != nil {
+		log.Error("GetCompactionDLQSize failed", zap.Error(err))
+		return nil, err
+	}
+
+	// Convert to map for easier access
+	countMap := make(map[int32]int64)
+	for _, r := range results {
+		countMap[r.CompactionFailureCount] = r.Count
+	}
+
+	return countMap, nil
+}
