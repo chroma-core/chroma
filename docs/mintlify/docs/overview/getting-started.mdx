@@ -344,7 +344,7 @@ summary.
 
     ```typescript TypeScript
     const results = await collection.query({
-      queryTexts: "This is a query document about hawaii", // Chroma will embed this for you
+      queryTexts: ["This is a query document about hawaii"], // Chroma will embed this for you
       nResults: 2, // how many results to return
     });
 
