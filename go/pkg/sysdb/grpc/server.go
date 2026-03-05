@@ -9,7 +9,7 @@ import (
 	"github.com/chroma-core/chroma/go/pkg/leader"
 	"github.com/chroma-core/chroma/go/pkg/memberlist_manager"
 	"github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb"
-	"github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
+	coordinatorpkg "github.com/chroma-core/chroma/go/pkg/sysdb/coordinator"
 	"github.com/chroma-core/chroma/go/pkg/sysdb/metastore/db/dbcore"
 	s3metastore "github.com/chroma-core/chroma/go/pkg/sysdb/metastore/s3"
 	"github.com/chroma-core/chroma/go/pkg/utils"
@@ -77,7 +77,7 @@ type Config struct {
 // convenient for end-to-end property based testing.
 type Server struct {
 	coordinatorpb.UnimplementedSysDBServer
-	coordinator  coordinator.Coordinator
+	coordinator  coordinatorpkg.Coordinator
 	grpcServer   grpcutils.GrpcServer
 	healthServer *health.Server
 }
@@ -151,7 +151,7 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		return nil, err
 	}
 
-	coordinator, err := coordinator.NewCoordinator(ctx, coordinator.CoordinatorConfig{
+	coordinator, err := coordinatorpkg.NewCoordinator(ctx, coordinatorpkg.CoordinatorConfig{
 		ObjectStore:                 s3MetaStore,
 		VersionFileEnabled:          config.VersionFileEnabled,
 		HeapServiceEnabled:          config.HeapServiceEnabled,
@@ -168,11 +168,19 @@ func NewWithGrpcProvider(config Config, provider grpcutils.GrpcProvider) (*Serve
 		// Start leader election for memberlist management
 		go leader.AcquireLeaderLock(context.Background(), func(leaderCtx context.Context) {
 			log.Info("Acquired leadership for memberlist management")
+
+			// Start DLQ metrics while leader is active
+			metricCtx, cancel := context.WithCancel(leaderCtx)
+			defer cancel()
+			go coordinatorpkg.StartDLQMetrics(metricCtx)
+			log.Info("Started DLQ metrics goroutine")
+
 			if err := StartMemberListManagers(leaderCtx, config); err != nil {
 				log.Error("Failed to start memberlist manager", zap.Error(err))
 			}
 			log.Info("Released leadership for memberlist management")
 		})
+
 		log.Info("Starting GRPC server")
 		s.grpcServer, err = provider.StartGrpcServer("coordinator", config.GrpcConfig, func(registrar grpc.ServiceRegistrar) {
 			coordinatorpb.RegisterSysDBServer(registrar, s)
