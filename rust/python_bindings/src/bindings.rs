@@ -595,7 +595,12 @@ impl Bindings {
             uuid::Uuid::parse_str(&collection_id).map_err(WrappedUuidError)?,
         );
 
-        let request = chroma_types::CountRequest::try_new(tenant, database, collection_id)?;
+        let request = chroma_types::CountRequest::try_new(
+            tenant,
+            database,
+            collection_id,
+            chroma_types::plan::ReadLevel::default(),
+        )?;
 
         let mut frontend_clone = self.frontend.clone();
         let result = self

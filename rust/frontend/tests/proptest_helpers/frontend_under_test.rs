@@ -5,7 +5,8 @@ use chroma_frontend::{config::FrontendServerConfig, Frontend};
 use chroma_sqlite::config::SqliteDBConfig;
 use chroma_system::System;
 use chroma_types::{
-    Collection, CountRequest, CreateCollectionRequest, DatabaseName, GetRequest, IncludeList,
+    plan::ReadLevel, Collection, CountRequest, CreateCollectionRequest, DatabaseName, GetRequest,
+    IncludeList,
 };
 use proptest_state_machine::{ReferenceStateMachine, StateMachineTest};
 use std::sync::Arc;
@@ -172,6 +173,7 @@ impl StateMachineTest for FrontendUnderTest {
                                     collection.tenant,
                                     collection.database,
                                     collection.collection_id,
+                                    ReadLevel::default(),
                                 )
                                 .unwrap(),
                             )
@@ -235,6 +237,7 @@ impl StateMachineTest for FrontendUnderTest {
                                     collection.tenant,
                                     collection.database,
                                     collection.collection_id,
+                                    ReadLevel::default(),
                                 )
                                 .unwrap(),
                             )
@@ -300,6 +303,7 @@ impl StateMachineTest for FrontendUnderTest {
                         reference_collection.tenant.clone(),
                         reference_collection.database.clone(),
                         reference_collection.collection_id,
+                        ReadLevel::default(),
                     )
                     .unwrap(),
                 )
@@ -310,6 +314,7 @@ impl StateMachineTest for FrontendUnderTest {
                         collection_under_test.tenant.clone(),
                         collection_under_test.database.clone(),
                         collection_under_test.collection_id,
+                        ReadLevel::default(),
                     )
                     .unwrap(),
                 )
