@@ -59,6 +59,7 @@ jobs:
               - '!sample_apps/**'
               - '!examples/**'
             outside-js-client:
+              - '**'
               - '!clients/js/**'
 
       - name: Determine tests to run
@@ -78,7 +79,7 @@ jobs:
           fi
 
           # Check for JS-only changes (changes in JS but not outside JS)
-          if [[ "${{ steps.filter.outputs.js-client }}" == "true" && "${{ steps.exclusion-filter.outputs.outside-js-client }}" == "false" ]]; then
+          if [[ "${{ steps.filter.outputs.js-client }}" == "true" && "${{ steps.filter.outputs.outside-js-client }}" == "false" ]]; then
             echo "JavaScript-only changes detected"
             TESTS_TO_RUN='["js-client"]'
             echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
