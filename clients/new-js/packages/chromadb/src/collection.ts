@@ -70,8 +70,18 @@ export interface Collection {
   embeddingFunction?: EmbeddingFunction;
   /** Collection schema describing index configuration */
   schema?: Schema;
-  /** Gets the total number of records in the collection */
-  count(): Promise<number>;
+  /**
+   * Gets the total number of records in the collection.
+   * @param options - Optional settings
+   */
+  count(options?: {
+    /**
+     * Controls whether to read from the write-ahead log.
+     * - ReadLevel.INDEX_AND_WAL: Read from both index and WAL (default)
+     * - ReadLevel.INDEX_ONLY: Read only from index, faster but recent writes may not be visible
+     */
+    readLevel?: ReadLevel;
+  }): Promise<number>;
   /**
    * Adds new records to the collection.
    * @param args - Record data to add
@@ -746,10 +756,11 @@ export class CollectionImpl implements Collection {
     if (whereDocument) validateWhereDocument(whereDocument);
   }
 
-  public async count(): Promise<number> {
+  public async count(options?: { readLevel?: ReadLevel }): Promise<number> {
     const { data } = await RecordService.collectionCount({
       client: this.apiClient,
       path: await this.path(),
+      query: options?.readLevel ? { read_level: options.readLevel } : undefined,
     });
 
     return data;
@@ -953,12 +964,12 @@ export class CollectionImpl implements Collection {
 
     const { updateConfiguration, updateEmbeddingFunction } = configuration
       ? await processUpdateCollectionConfig({
-        collectionName: this.name,
-        currentConfiguration: this.configuration,
-        newConfiguration: configuration,
-        currentEmbeddingFunction: this.embeddingFunction,
-        client: this.chromaClient,
-      })
+          collectionName: this.name,
+          currentConfiguration: this.configuration,
+          newConfiguration: configuration,
+          currentEmbeddingFunction: this.embeddingFunction,
+          client: this.chromaClient,
+        })
       : {};
 
     if (updateEmbeddingFunction) {
