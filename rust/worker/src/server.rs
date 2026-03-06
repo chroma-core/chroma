@@ -481,6 +481,7 @@ impl WorkerServer {
                             collection_and_segments.record_segment.clone(),
                             record_distances,
                             knn_projection,
+                            collection_and_segments.collection.tenant.clone(),
                         );
                         projection_orchestrator
                             .run(system)
@@ -539,6 +540,7 @@ impl WorkerServer {
                             collection_and_segments.record_segment.clone(),
                             record_distances,
                             knn_projection,
+                            collection_and_segments.collection.tenant.clone(),
                         );
                         projection_orchestrator
                             .run(system)

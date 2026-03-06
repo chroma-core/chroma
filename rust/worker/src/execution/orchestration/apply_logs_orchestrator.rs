@@ -231,10 +231,7 @@ impl ApplyLogsOrchestrator {
                 operator,
                 input,
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             );
             tasks_to_run.push((task, Some(span)));
         }
@@ -266,10 +263,7 @@ impl ApplyLogsOrchestrator {
                 operator,
                 input,
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             );
             tasks_to_run.push((task, Some(span)));
         }
@@ -297,10 +291,7 @@ impl ApplyLogsOrchestrator {
                 operator,
                 input,
                 ctx.receiver(),
-                self.context
-                    .orchestrator_context
-                    .task_cancellation_token
-                    .clone(),
+                &self.context.orchestrator_context,
             );
             tasks_to_run.push((task, Some(span)));
         }
@@ -320,10 +311,7 @@ impl ApplyLogsOrchestrator {
             operator,
             input,
             ctx.receiver(),
-            self.context
-                .orchestrator_context
-                .task_cancellation_token
-                .clone(),
+            &self.context.orchestrator_context,
         );
         let res = self.dispatcher().send(task, Some(span)).await;
         self.ok_or_terminate(res, ctx).await;
@@ -341,10 +329,7 @@ impl ApplyLogsOrchestrator {
             operator,
             input,
             ctx.receiver(),
-            self.context
-                .orchestrator_context
-                .task_cancellation_token
-                .clone(),
+            &self.context.orchestrator_context,
         );
         let res = self.dispatcher().send(task, Some(span)).await;
         self.ok_or_terminate(res, ctx).await;

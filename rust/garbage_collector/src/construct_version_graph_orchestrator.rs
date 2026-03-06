@@ -21,8 +21,8 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use chroma_sysdb::SysDb;
 use chroma_system::{
-    wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
-    OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
+    wrap_with_token, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler,
+    Orchestrator, OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
 use chroma_types::{chroma_proto::CollectionVersionFile, CollectionUuid};
 use chrono::DateTime;
@@ -71,7 +71,7 @@ impl ConstructVersionGraphOrchestrator {
         lineage_file_path: Option<String>,
     ) -> Self {
         Self {
-            context: OrchestratorContext::new(dispatcher),
+            context: OrchestratorContext::new(dispatcher, ""),
             storage,
             sysdb,
             result_channel: None,
@@ -175,7 +175,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
         );
 
         let mut tasks = vec![(
-            wrap(
+            wrap_with_token(
                 Box::new(FetchVersionFileOperator {}),
                 FetchVersionFileInput::new(self.version_file_path.clone(), self.storage.clone()),
                 ctx.receiver(),
@@ -186,7 +186,7 @@ impl Orchestrator for ConstructVersionGraphOrchestrator {
 
         if let Some(lineage_file_path) = &self.lineage_file_path {
             tasks.push((
-                wrap(
+                wrap_with_token(
                     Box::new(FetchLineageFileOperator {}),
                     FetchLineageFileInput::new(self.storage.clone(), lineage_file_path.clone()),
                     ctx.receiver(),
@@ -454,7 +454,7 @@ impl Handler<TaskResult<FetchLineageFileOutput, FetchLineageFileError>>
 
         if !collection_ids_to_fetch_version_files.is_empty() {
             self.num_pending_tasks += 1;
-            let list_files_at_versions_task = wrap(
+            let list_files_at_versions_task = wrap_with_token(
                 Box::new(GetVersionFilePathsOperator {}),
                 GetVersionFilePathsInput::new(
                     collection_ids_to_fetch_version_files.into_iter().collect(),
@@ -503,7 +503,7 @@ impl Handler<TaskResult<GetVersionFilePathsOutput, GetVersionFilePathsError>>
 
         for path in output.0.values() {
             let version_file = FetchVersionFileInput::new(path.clone(), self.storage.clone());
-            let fetch_version_file_task = wrap(
+            let fetch_version_file_task = wrap_with_token(
                 Box::new(FetchVersionFileOperator {}),
                 version_file,
                 ctx.receiver(),

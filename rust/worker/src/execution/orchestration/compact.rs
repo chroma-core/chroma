@@ -15,8 +15,8 @@ use chroma_segment::{
 };
 use chroma_sysdb::SysDb;
 use chroma_system::{
-    wrap, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError, System,
-    TaskError,
+    wrap_with_token, ComponentHandle, Dispatcher, Orchestrator, OrchestratorContext, PanicError,
+    System, TaskError,
 };
 use chroma_types::{Collection, CollectionUuid, JobId, Schema, SegmentFlushInfo, SegmentUuid};
 use opentelemetry::metrics::Counter;
@@ -148,7 +148,10 @@ pub struct CompactionContext {
 
 impl Clone for CompactionContext {
     fn clone(&self) -> Self {
-        let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
+        let orchestrator_context = OrchestratorContext::new(
+            self.dispatcher.clone(),
+            self.orchestrator_context.tenant.clone(),
+        );
         Self {
             collection_info: self.collection_info.clone(),
             log: self.log.clone(),
@@ -183,7 +186,10 @@ impl CompactionContext {
     /// Create an empty output context for attached function orchestrator
     /// This creates a new context with an empty collection_info OnceCell
     fn clone_for_new_collection(&self) -> Self {
-        let orchestrator_context = OrchestratorContext::new(self.dispatcher.clone());
+        let orchestrator_context = OrchestratorContext::new(
+            self.dispatcher.clone(),
+            self.orchestrator_context.tenant.clone(),
+        );
         Self {
             collection_info: OnceCell::new(), // Start empty for output context
             log: self.log.clone(),
@@ -307,7 +313,7 @@ impl CompactionContext {
         is_function_disabled: bool,
         fragment_fetcher: Option<Arc<FragmentFetcher>>,
     ) -> Self {
-        let orchestrator_context = OrchestratorContext::new(dispatcher.clone());
+        let orchestrator_context = OrchestratorContext::new(dispatcher.clone(), "");
         CompactionContext {
             collection_info: OnceCell::new(),
             is_rebuild,
@@ -600,7 +606,7 @@ impl CompactionContext {
         let (receiver, rx) = chroma_system::OneshotMessageReceiver::new();
 
         // Wrap the operator as a task
-        let task = wrap(
+        let task = wrap_with_token(
             operator,
             input,
             Box::new(receiver),

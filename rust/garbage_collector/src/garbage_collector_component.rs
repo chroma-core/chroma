@@ -16,8 +16,8 @@ use chroma_memberlist::memberlist_provider::Memberlist;
 use chroma_storage::Storage;
 use chroma_sysdb::{CollectionToGcInfo, GetCollectionsToGcError, SysDb, SysDbConfig};
 use chroma_system::{
-    wrap, Component, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator, System,
-    TaskResult,
+    wrap_with_token, Component, ComponentContext, ComponentHandle, Dispatcher, Handler,
+    Orchestrator, System, TaskResult,
 };
 use chroma_types::CollectionUuid;
 use chrono::{DateTime, Utc};
@@ -303,7 +303,7 @@ impl GarbageCollector {
             tracing::error!("Uninitialized dispatcher for garbage collector");
             return;
         };
-        let truncate_dirty_log_task = wrap(
+        let truncate_dirty_log_task = wrap_with_token(
             Box::new(TruncateDirtyLogOperator {
                 storage: self.storage.clone(),
                 logs: self.logs.clone(),

@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use chroma_log::Log;
 use chroma_storage::Storage;
 use chroma_system::{
-    wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
+    wrap_with_token, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskResult,
 };
 use chroma_types::CollectionUuid;
@@ -33,7 +33,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
         collection_to_destroy: CollectionUuid,
     ) -> Self {
         Self {
-            context: OrchestratorContext::new(dispatcher),
+            context: OrchestratorContext::new(dispatcher, ""),
             storage,
             logs,
             result_channel: None,
@@ -89,7 +89,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
         let collections_to_destroy =
             HashSet::from_iter(vec![self.collection_to_destroy].into_iter());
         let collections_to_garbage_collect = HashMap::new();
-        let task = wrap(
+        let task = wrap_with_token(
             Box::new(DeleteUnusedLogsOperator {
                 enabled: true,
                 mode: CleanupMode::DeleteV2,
