@@ -187,9 +187,10 @@ export type Database = {
  */
 export type DeleteCollectionRecordsPayload = RawWhereFields & {
     ids?: Array<string> | null;
+    limit?: number | null;
 };
 
-export type DeleteCollectionRecordsResponse = {
+export type DeleteCollectionResponse = {
     [key: string]: unknown;
 };
 
@@ -1336,7 +1337,7 @@ export type DeleteCollectionResponses = {
     200: UpdateCollectionResponse;
 };
 
-export type DeleteCollectionResponse = DeleteCollectionResponses[keyof DeleteCollectionResponses];
+export type DeleteCollectionResponse2 = DeleteCollectionResponses[keyof DeleteCollectionResponses];
 
 export type GetCollectionData = {
     body?: never;
@@ -1607,7 +1608,7 @@ export type CollectionDeleteResponses = {
     /**
      * Records deleted successfully
      */
-    200: DeleteCollectionRecordsResponse;
+    200: DeleteCollectionResponse;
 };
 
 export type CollectionDeleteResponse = CollectionDeleteResponses[keyof CollectionDeleteResponses];

@@ -770,9 +770,10 @@ impl ChromaCollection {
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.delete(
     ///     Some(vec!["doc1".to_string(), "doc2".to_string()]),
-    ///     None
+    ///     None,
+    ///     None,
     /// ).await?;
-    /// println!("Deleted records successfully");
+    /// println!("Deleted {} records", response.deleted);
     /// # Ok(())
     /// # }
     /// ```
@@ -780,6 +781,7 @@ impl ChromaCollection {
         &self,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        limit: Option<u32>,
     ) -> Result<DeleteCollectionRecordsResponse, ChromaHttpClientError> {
         let request = DeleteCollectionRecordsRequest::try_new(
             self.collection.tenant.clone(),
@@ -787,6 +789,7 @@ impl ChromaCollection {
             self.collection.collection_id,
             ids,
             r#where,
+            limit,
         )?;
         let request = request.into_payload()?;
         self.send("delete", "delete", Method::POST, Some(request))
@@ -1771,7 +1774,7 @@ mod tests {
                 .unwrap();
 
             collection
-                .delete(Some(vec!["id1".to_string(), "id3".to_string()]), None)
+                .delete(Some(vec!["id1".to_string(), "id3".to_string()]), None, None)
                 .await
                 .unwrap();
 
@@ -1812,7 +1815,10 @@ mod tests {
                     MetadataValue::Str("a".to_string()),
                 ),
             });
-            collection.delete(None, Some(where_clause)).await.unwrap();
+            collection
+                .delete(None, Some(where_clause), None)
+                .await
+                .unwrap();
 
             let count = collection.count().await.unwrap();
             println!("Count after delete: {}", count);

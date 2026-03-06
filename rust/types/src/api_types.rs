@@ -1553,6 +1553,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsPayload {
     pub ids: Option<Vec<String>>,
+    pub limit: Option<u32>,
     #[serde(flatten)]
     pub where_fields: RawWhereFields,
 }
@@ -1566,6 +1567,7 @@ pub struct DeleteCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
+    pub limit: Option<u32>,
 }
 
 impl DeleteCollectionRecordsRequest {
@@ -1575,6 +1577,7 @@ impl DeleteCollectionRecordsRequest {
         collection_id: CollectionUuid,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        limit: Option<u32>,
     ) -> Result<Self, ChromaValidationError> {
         if ids.as_ref().map(|ids| ids.is_empty()).unwrap_or(false) && r#where.is_none() {
             return Err(ChromaValidationError::from((
@@ -1590,6 +1593,7 @@ impl DeleteCollectionRecordsRequest {
             collection_id,
             ids,
             r#where,
+            limit,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1603,6 +1607,7 @@ impl DeleteCollectionRecordsRequest {
         };
         Ok(DeleteCollectionRecordsPayload {
             ids: self.ids.clone(),
+            limit: self.limit,
             where_fields,
         })
     }
@@ -1610,7 +1615,9 @@ impl DeleteCollectionRecordsRequest {
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct DeleteCollectionRecordsResponse {}
+pub struct DeleteCollectionRecordsResponse {
+    pub deleted: u32,
+}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionRecordsError {

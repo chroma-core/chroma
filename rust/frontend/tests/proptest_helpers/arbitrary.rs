@@ -190,35 +190,41 @@ impl Arbitrary for CollectionRequest {
                 }
             });
 
-        let delete_strategy = prop_oneof![
-            (
-                Just::<Option<TestWhereFilter>>(None),
-                proptest::collection::vec(id_strategy.clone(), 1..=10).prop_map(Some)
-            ),
-            (any::<TestWhereFilter>().prop_map(Some), Just(None)),
-            (
-                any::<TestWhereFilter>().prop_map(Some),
-                proptest::collection::vec(id_strategy, 1..=10).prop_map(Some)
-            ),
-        ]
-        .prop_map({
-            let tenant = collection.tenant.clone();
-            let database = collection.database.clone();
-            let collection_id = collection.collection_id;
+        let limit_strategy = prop_oneof![Just::<Option<u32>>(None), (1u32..=100).prop_map(Some)];
 
-            move |(filter, ids)| {
-                CollectionRequest::Delete(
-                    DeleteCollectionRecordsRequest::try_new(
-                        tenant.clone(),
-                        database.clone(),
-                        collection_id,
-                        ids,
-                        filter.map(|filter| filter.clause),
+        let delete_strategy = (
+            prop_oneof![
+                (
+                    Just::<Option<TestWhereFilter>>(None),
+                    proptest::collection::vec(id_strategy.clone(), 1..=10).prop_map(Some)
+                ),
+                (any::<TestWhereFilter>().prop_map(Some), Just(None)),
+                (
+                    any::<TestWhereFilter>().prop_map(Some),
+                    proptest::collection::vec(id_strategy, 1..=10).prop_map(Some)
+                ),
+            ],
+            limit_strategy,
+        )
+            .prop_map({
+                let tenant = collection.tenant.clone();
+                let database = collection.database.clone();
+                let collection_id = collection.collection_id;
+
+                move |((filter, ids), limit)| {
+                    CollectionRequest::Delete(
+                        DeleteCollectionRecordsRequest::try_new(
+                            tenant.clone(),
+                            database.clone(),
+                            collection_id,
+                            ids,
+                            filter.map(|filter| filter.clause),
+                            limit,
+                        )
+                        .unwrap(),
                     )
-                    .unwrap(),
-                )
-            }
-        });
+                }
+            });
 
         prop_oneof![
             add_strategy,

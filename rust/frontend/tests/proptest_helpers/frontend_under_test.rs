@@ -123,7 +123,7 @@ impl StateMachineTest for FrontendUnderTest {
                                         collection.collection_id,
                                         request.ids.clone(),
                                         request.r#where.clone(),
-                                        None,
+                                        request.limit,
                                         0,
                                         IncludeList(vec![]),
                                     )
@@ -139,7 +139,11 @@ impl StateMachineTest for FrontendUnderTest {
                         }
 
                         if let Some(ids) = &request.ids {
-                            STATS.with_borrow_mut(|stats| stats.num_log_operations += ids.len());
+                            let mut count = ids.len();
+                            if let Some(limit) = request.limit {
+                                count = count.min(limit as usize);
+                            }
+                            STATS.with_borrow_mut(|stats| stats.num_log_operations += count);
                         }
                     }
 
