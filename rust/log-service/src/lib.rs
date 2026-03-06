@@ -2171,7 +2171,7 @@ impl LogServer {
             Some(fragments) => fragments,
             None => log_reader
                 .scan(from, limits)
-                .instrument(tracing::info_span!("log_reader::scan", %collection_id))
+                .instrument(tracing::info_span!("log_reader::scan", %collection_id, start_offset = req.start_from_offset))
                 .await
                 .map_err(|err| {
                     Status::new(
