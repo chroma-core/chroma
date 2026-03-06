@@ -6,6 +6,8 @@ use chroma::client::ChromaHttpClientOptions;
 use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
 use chroma::ChromaHttpClient;
 use clap::Parser;
+use futures_util::stream::FuturesUnordered;
+use futures_util::StreamExt;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -117,67 +119,77 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let gmm = Arc::new(GaussianMixtureModel::new(42));
 
-    println!("Starting query verification loop (one query per second)...");
+    println!(
+        "Starting query verification loop ({} outstanding)...",
+        args.max_outstanding_ops
+    );
     let mut query_rng = StdRng::seed_from_u64(12345);
     let mut query_count: u64 = 0;
+    let mut in_flight = FuturesUnordered::new();
+
     loop {
-        let batch_idx = query_rng.gen_range(0..total_batches);
-        let start_idx = batch_idx * args.batch_size;
-        let batch_size = (args.total_ops - start_idx).min(args.batch_size);
+        while in_flight.len() < args.max_outstanding_ops {
+            let batch_idx = query_rng.gen_range(0..total_batches);
+            let start_idx = batch_idx * args.batch_size;
+            let batch_size = (args.total_ops - start_idx).min(args.batch_size);
 
-        let mut batch_rng = StdRng::seed_from_u64(42 + batch_idx as u64);
-        let embeddings = gmm.generate_batch(&mut batch_rng, batch_size);
+            let mut batch_rng = StdRng::seed_from_u64(42 + batch_idx as u64);
+            let embeddings = gmm.generate_batch(&mut batch_rng, batch_size);
 
-        let pick = query_rng.gen_range(0..batch_size);
-        let query_embedding = embeddings[pick].clone();
-        let expected_id = format!("id_{:07}", start_idx + pick);
+            let pick = query_rng.gen_range(0..batch_size);
+            let query_embedding = embeddings[pick].clone();
+            let expected_id = format!("id_{:07}", start_idx + pick);
 
-        let search = SearchPayload::default()
-            .rank(RankExpr::Knn {
-                query: QueryVector::Dense(query_embedding),
-                key: Key::Embedding,
-                limit: 10,
-                default: None,
-                return_rank: false,
-            })
-            .limit(Some(10), 0)
-            .select([Key::Score]);
+            let search = SearchPayload::default()
+                .rank(RankExpr::Knn {
+                    query: QueryVector::Dense(query_embedding),
+                    key: Key::Embedding,
+                    limit: 10,
+                    default: None,
+                    return_rank: false,
+                })
+                .limit(Some(10), 0)
+                .select([Key::Score]);
 
-        let query_start = Instant::now();
-        let result = collection.search(vec![search]).await;
-
-        match result {
-            Ok(response) => {
-                let elapsed_ms = query_start.elapsed().as_millis();
-                let found = response
-                    .ids
-                    .first()
-                    .map(|ids| ids.contains(&expected_id))
-                    .unwrap_or(false);
-                let top_ids: Vec<&str> = response
-                    .ids
-                    .first()
-                    .map(|ids| ids.iter().map(|s| s.as_str()).collect())
-                    .unwrap_or_default();
-                query_count += 1;
-                if found {
-                    println!(
-                        "[query {}] OK  expected={} found in top-10  ({}ms)  top: {:?}",
-                        query_count, expected_id, elapsed_ms, top_ids
-                    );
-                } else {
-                    println!(
-                        "[query {}] MISS expected={} NOT in top-10  ({}ms)  top: {:?}",
-                        query_count, expected_id, elapsed_ms, top_ids
-                    );
-                }
-            }
-            Err(err) => {
-                query_count += 1;
-                println!("[query {}] ERROR: {}", query_count, err);
-            }
+            let collection = collection.clone();
+            let query_start = Instant::now();
+            in_flight.push(async move {
+                let result = collection.search(vec![search]).await;
+                (expected_id, query_start, result)
+            });
         }
 
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if let Some((expected_id, query_start, result)) = in_flight.next().await {
+            query_count += 1;
+            match result {
+                Ok(response) => {
+                    let elapsed_ms = query_start.elapsed().as_millis();
+                    let found = response
+                        .ids
+                        .first()
+                        .map(|ids| ids.contains(&expected_id))
+                        .unwrap_or(false);
+                    let top_ids: Vec<&str> = response
+                        .ids
+                        .first()
+                        .map(|ids| ids.iter().map(|s| s.as_str()).collect())
+                        .unwrap_or_default();
+                    if found {
+                        println!(
+                            "[query {}] OK  expected={} found in top-10  ({}ms)  top: {:?}",
+                            query_count, expected_id, elapsed_ms, top_ids
+                        );
+                    } else {
+                        println!(
+                            "[query {}] MISS expected={} NOT in top-10  ({}ms)  top: {:?}",
+                            query_count, expected_id, elapsed_ms, top_ids
+                        );
+                    }
+                }
+                Err(err) => {
+                    println!("[query {}] ERROR: {}", query_count, err);
+                }
+            }
+        }
     }
 }
