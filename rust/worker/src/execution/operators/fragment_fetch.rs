@@ -153,15 +153,13 @@ impl FragmentFetcher {
     /// Fetch and decode log records from a set of fragment pointers.
     ///
     /// Records are filtered to the half-open range [start_offset, limit_offset)
-    /// and returned sorted by log_offset.  At most `max_concurrency` fragment
-    /// fetches are in flight at any given time.
+    /// and returned sorted by log_offset.
     #[tracing::instrument(skip(self, pointers), fields(num_fragments = pointers.len()))]
     pub async fn fetch_records(
         &self,
         pointers: &[FragmentPointer],
         start_offset: u64,
         limit_offset: u64,
-        max_concurrency: usize,
     ) -> Result<Vec<LogRecord>, FragmentFetchError> {
         if pointers.is_empty() {
             if start_offset < limit_offset {
@@ -172,16 +170,11 @@ impl FragmentFetcher {
             }
             return Ok(Vec::new());
         }
-        let sema = Arc::new(tokio::sync::Semaphore::new(max_concurrency));
         let futures: Vec<_> = pointers
             .iter()
-            .map(|pointer| {
-                let sema = Arc::clone(&sema);
-                async move {
-                    let _permit = sema.acquire().await;
-                    self.fetch_fragment(pointer, start_offset, limit_offset)
-                        .await
-                }
+            .map(|pointer| async move {
+                self.fetch_fragment(pointer, start_offset, limit_offset)
+                    .await
             })
             .collect();
         let results = try_join_all(futures).await?;
@@ -430,7 +423,7 @@ mod tests {
         let (_tmp, storage) = chroma_storage::test_storage();
         let fetcher = FragmentFetcher::new_for_test(storage);
         let err = fetcher
-            .fetch_records(&[], 5, 10, 10)
+            .fetch_records(&[], 5, 10)
             .await
             .expect_err("empty pointers with start < limit should be a hole");
         match err {
@@ -447,7 +440,7 @@ mod tests {
         let (_tmp, storage) = chroma_storage::test_storage();
         let fetcher = FragmentFetcher::new_for_test(storage);
         let records = fetcher
-            .fetch_records(&[], 5, 5, 10)
+            .fetch_records(&[], 5, 5)
             .await
             .expect("empty pointers with start == limit should succeed");
         assert!(records.is_empty(), "should return no records");

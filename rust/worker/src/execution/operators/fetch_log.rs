@@ -189,7 +189,6 @@ impl FetchLogOperator {
                 &pointers,
                 self.start_log_offset_id,
                 limit_offset,
-                self.fetch_log_concurrency,
             )
             .await?;
 
