@@ -143,12 +143,12 @@ impl Operator<SelectInput, SelectOutput> for Select {
             })
             .collect::<HashMap<_, _>>();
 
-        let futures = input
-            .records
-            .iter()
-            .map(|record| async {
-                if needs_data {
-                    // Full hydration path: get ID and data from hydrated record
+        let records: Vec<SearchRecord> = if needs_data {
+            // Full hydration: use buffered stream (query result sets are typically bounded)
+            let futures = input
+                .records
+                .iter()
+                .map(|record| async {
                     let (id, document, embedding, mut full_metadata) = match offset_id_to_log_record
                         .get(&record.offset_id)
                     {
@@ -189,7 +189,7 @@ impl Operator<SelectInput, SelectOutput> for Select {
                         full_metadata.retain(|key, _| metadata_fields_to_select.contains(key));
                     }
 
-                    Ok(SearchRecord {
+                    Ok::<_, SelectError>(SearchRecord {
                         id,
                         document,
                         embedding,
@@ -200,38 +200,43 @@ impl Operator<SelectInput, SelectOutput> for Select {
                         },
                         score: select_score.then_some(record.measure),
                     })
-                } else {
-                    // Lightweight path: resolve user ID only via id_to_user_id blockfile
-                    let id = match offset_id_to_log_record.get(&record.offset_id) {
-                        Some(log) => log
-                            .get_user_id(record_segment_reader.as_ref())
-                            .await
-                            .map_err(SelectError::LogMaterializer)?,
-                        None => match &record_segment_reader {
-                            Some(reader) => reader
-                                .get_user_id_for_offset_id(record.offset_id)
-                                .await?
-                                .to_string(),
-                            None => return Err(SelectError::RecordSegmentUninitialized),
-                        },
-                    };
+                })
+                .collect::<Vec<_>>();
 
-                    Ok(SearchRecord {
-                        id,
-                        document: None,
-                        embedding: None,
-                        metadata: None,
-                        score: select_score.then_some(record.measure),
-                    })
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let records = stream::iter(futures)
-            .buffered(32)
-            .try_collect()
-            .instrument(tracing::trace_span!(parent: Span::current(), "Select records", num_records = input.records.len()))
-            .await?;
+            stream::iter(futures)
+                .buffered(32)
+                .try_collect()
+                .instrument(tracing::trace_span!(parent: Span::current(), "Select records", num_records = input.records.len()))
+                .await?
+        } else {
+            // Lightweight ID-only path: iterate sequentially instead of
+            // allocating a future per record. Blocks are already prefetched
+            // so each lookup resolves from cache without I/O.
+            let mut records = Vec::with_capacity(input.records.len());
+            for record in &input.records {
+                let id = match offset_id_to_log_record.get(&record.offset_id) {
+                    Some(log) => log
+                        .get_user_id(record_segment_reader.as_ref())
+                        .await
+                        .map_err(SelectError::LogMaterializer)?,
+                    None => match &record_segment_reader {
+                        Some(reader) => reader
+                            .get_user_id_for_offset_id(record.offset_id)
+                            .await?
+                            .to_string(),
+                        None => return Err(SelectError::RecordSegmentUninitialized),
+                    },
+                };
+                records.push(SearchRecord {
+                    id,
+                    document: None,
+                    embedding: None,
+                    metadata: None,
+                    score: select_score.then_some(record.measure),
+                });
+            }
+            records
+        };
 
         Ok(SearchPayloadResult { records })
     }

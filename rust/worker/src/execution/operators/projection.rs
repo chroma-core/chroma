@@ -126,14 +126,14 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             })
             .collect();
 
-        let current_span = Span::current();
-        let futures: Vec<_> = input
-            .offset_ids
-            .iter()
-            .map(|offset_id| {
-                async {
-                    if needs_data {
-                        // Full hydration path: get ID and data from hydrated record
+        let records: Vec<ProjectionRecord> = if needs_data {
+            // Full hydration: use concurrent futures (query result sets are typically bounded)
+            let current_span = Span::current();
+            let futures: Vec<_> = input
+                .offset_ids
+                .iter()
+                .map(|offset_id| {
+                    async {
                         let (id, document, embedding, metadata) =
                             match offset_id_to_log_record.get(offset_id) {
                                 Some(log) => {
@@ -173,41 +173,46 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
                                 }
                             };
 
-                        Ok(ProjectionRecord {
+                        Ok::<_, ProjectionError>(ProjectionRecord {
                             id,
                             document,
                             embedding,
                             metadata,
                         })
-                    } else {
-                        // Lightweight path: resolve user ID only via id_to_user_id blockfile
-                        let id = match offset_id_to_log_record.get(offset_id) {
-                            Some(log) => log
-                                .get_user_id(record_segment_reader.as_ref())
-                                .await
-                                .map_err(ProjectionError::LogMaterializer)?,
-                            None => match &record_segment_reader {
-                                Some(reader) => reader
-                                    .get_user_id_for_offset_id(*offset_id)
-                                    .await?
-                                    .to_string(),
-                                None => return Err(ProjectionError::RecordSegmentUninitialized),
-                            },
-                        };
-
-                        Ok(ProjectionRecord {
-                            id,
-                            document: None,
-                            embedding: None,
-                            metadata: None,
-                        })
                     }
-                }
-                .instrument(current_span.clone())
-            })
-            .collect();
-
-        let records: Vec<ProjectionRecord> = try_join_all(futures).await?;
+                    .instrument(current_span.clone())
+                })
+                .collect();
+            try_join_all(futures).await?
+        } else {
+            // Lightweight ID-only path (e.g. delete-where): iterate sequentially
+            // instead of spawning a future per offset ID. Blocks are already
+            // prefetched above, so each get_user_id_for_offset_id hits the cache
+            // and resolves without I/O.
+            let mut records = Vec::with_capacity(input.offset_ids.len());
+            for offset_id in &input.offset_ids {
+                let id = match offset_id_to_log_record.get(offset_id) {
+                    Some(log) => log
+                        .get_user_id(record_segment_reader.as_ref())
+                        .await
+                        .map_err(ProjectionError::LogMaterializer)?,
+                    None => match &record_segment_reader {
+                        Some(reader) => reader
+                            .get_user_id_for_offset_id(*offset_id)
+                            .await?
+                            .to_string(),
+                        None => return Err(ProjectionError::RecordSegmentUninitialized),
+                    },
+                };
+                records.push(ProjectionRecord {
+                    id,
+                    document: None,
+                    embedding: None,
+                    metadata: None,
+                });
+            }
+            records
+        };
 
         Ok(ProjectionOutput { records })
     }
