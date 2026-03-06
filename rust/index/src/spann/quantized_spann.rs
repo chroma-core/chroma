@@ -272,7 +272,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         };
 
-        let code_size = Code::<&[u8]>::size(self.dimension);
+        let code_size = Code::<4, &[u8]>::size(self.dimension);
         if let Some(mut delta) = self.cluster_deltas.get_mut(&cluster_id) {
             if delta.ids.len() < delta.length {
                 for ((id, version), code) in persisted
@@ -358,7 +358,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let dist_to_source = self.distance(&embedding, &source_center);
 
             if dist_to_target <= dist_to_source {
-                let code = Code::<Vec<u8>>::quantize(&embedding, &target_center)
+                let code = Code::<4>::quantize(&embedding, &target_center)
                     .as_ref()
                     .into();
                 if self
@@ -444,9 +444,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                 continue;
             };
 
-            let code = Code::<Vec<u8>>::quantize(&embedding, &centroid)
-                .as_ref()
-                .into();
+            let code = Code::<4>::quantize(&embedding, &centroid).as_ref().into();
 
             let Some(len) = self.append(*cluster_id, id, version, code) else {
                 continue;
@@ -464,9 +462,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         }
 
         if !registered {
-            let code = Code::<Vec<u8>>::quantize(&embedding, &embedding)
-                .as_ref()
-                .into();
+            let code = Code::<4>::quantize(&embedding, &embedding).as_ref().into();
             let delta = QuantizedDelta {
                 center: embedding,
                 codes: vec![code],
@@ -620,7 +616,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: left_center.clone(),
             codes: left_group
                 .iter()
-                .map(|(_, _, emb)| Code::<Vec<u8>>::quantize(emb, &left_center).as_ref().into())
+                .map(|(_, _, emb)| Code::<4>::quantize(emb, &left_center).as_ref().into())
                 .collect(),
             ids: left_group.iter().map(|(id, _, _)| *id).collect(),
             length: left_group.len(),
@@ -632,11 +628,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             center: right_center.clone(),
             codes: right_group
                 .iter()
-                .map(|(_, _, emb)| {
-                    Code::<Vec<u8>>::quantize(emb, &right_center)
-                        .as_ref()
-                        .into()
-                })
+                .map(|(_, _, emb)| Code::<4>::quantize(emb, &right_center).as_ref().into())
                 .collect(),
             ids: right_group.iter().map(|(id, _, _)| *id).collect(),
             length: right_group.len(),
@@ -761,7 +753,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     continue;
                 }
 
-                let code = Code::<&[u8]>::new(code.as_ref());
+                let code = Code::<4, &[u8]>::new(code.as_ref());
 
                 let left_dist = code.distance_query(
                     &self.distance_function,
@@ -1716,7 +1708,7 @@ mod tests {
         // --- append ---
         // Create a test embedding for point 10 and quantize it relative to center1
         let emb_10 = [1.0f32, 0.1, 0.0, 0.0];
-        let code_10: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_10, &center1).as_ref().into();
+        let code_10: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&emb_10, &center1).as_ref().into();
         let v10 = writer.remove(10);
         let new_len = writer.append(cluster_id_1, 10, v10, code_10.clone());
         assert_eq!(new_len, Some(1));
@@ -1869,9 +1861,9 @@ mod tests {
         let emb_100 = [1.0f32, 0.0, 0.0, 0.0];
         let emb_101 = [0.0f32, 1.0, 0.0, 0.0];
         let emb_102 = [0.0f32, 0.0, 1.0, 0.0];
-        let code_100: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_100, &center).as_ref().into();
-        let code_101: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_101, &center).as_ref().into();
-        let code_102: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_102, &center).as_ref().into();
+        let code_100: Arc<[u8]> = Code::<4>::quantize(&emb_100, &center).as_ref().into();
+        let code_101: Arc<[u8]> = Code::<4>::quantize(&emb_101, &center).as_ref().into();
+        let code_102: Arc<[u8]> = Code::<4>::quantize(&emb_102, &center).as_ref().into();
 
         // Get versions via remove()
         let v100 = writer.remove(100);
@@ -2009,12 +2001,8 @@ mod tests {
         // Create properly quantized codes
         let emb_200 = [0.0f32, 0.0, 0.0, 1.0];
         let emb_201 = [0.0f32, 0.0, 0.5, 0.5];
-        let code_200: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_200, &center2)
-            .as_ref()
-            .into();
-        let code_201: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_201, &center2)
-            .as_ref()
-            .into();
+        let code_200: Arc<[u8]> = Code::<4>::quantize(&emb_200, &center2).as_ref().into();
+        let code_201: Arc<[u8]> = Code::<4>::quantize(&emb_201, &center2).as_ref().into();
 
         // Get versions via remove()
         let v200 = writer.remove(200);
@@ -2060,15 +2048,9 @@ mod tests {
         let emb_300 = [0.5f32, 0.0, 0.5, 0.0];
         let emb_301 = [0.5f32, 0.5, 0.0, 0.0];
         let emb_302 = [0.0f32, 0.5, 0.5, 0.0];
-        let code_300: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_300, &center3)
-            .as_ref()
-            .into();
-        let code_301: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_301, &center3)
-            .as_ref()
-            .into();
-        let code_302: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_302, &center3)
-            .as_ref()
-            .into();
+        let code_300: Arc<[u8]> = Code::<4>::quantize(&emb_300, &center3).as_ref().into();
+        let code_301: Arc<[u8]> = Code::<4>::quantize(&emb_301, &center3).as_ref().into();
+        let code_302: Arc<[u8]> = Code::<4>::quantize(&emb_302, &center3).as_ref().into();
 
         // Get versions via remove()
         let v300 = writer.remove(300);
@@ -2203,10 +2185,10 @@ mod tests {
         writer.embeddings.insert(101, misplaced_emb_2.clone());
 
         // Create proper quantization codes
-        let code_100: Arc<[u8]> = Code::<Vec<u8>>::quantize(&misplaced_emb_1, &neighbor_center)
+        let code_100: Arc<[u8]> = Code::<4>::quantize(&misplaced_emb_1, &neighbor_center)
             .as_ref()
             .into();
-        let code_101: Arc<[u8]> = Code::<Vec<u8>>::quantize(&misplaced_emb_2, &neighbor_center)
+        let code_101: Arc<[u8]> = Code::<4>::quantize(&misplaced_emb_2, &neighbor_center)
             .as_ref()
             .into();
 
@@ -2234,9 +2216,7 @@ mod tests {
         for id in 50..55 {
             let v = writer.remove(id);
             let emb = writer.rotate(&[1.0, 0.0, 0.0, 0.0]);
-            let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
-                .as_ref()
-                .into();
+            let code: Arc<[u8]> = Code::<4>::quantize(&emb, &mixed_center).as_ref().into();
             writer.embeddings.insert(id, emb);
             mixed_ids.push(id);
             mixed_versions.push(v);
@@ -2247,9 +2227,7 @@ mod tests {
         for id in 55..60 {
             let v = writer.remove(id);
             let emb = writer.rotate(&[-1.0, 0.0, 0.0, 0.0]);
-            let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
-                .as_ref()
-                .into();
+            let code: Arc<[u8]> = Code::<4>::quantize(&emb, &mixed_center).as_ref().into();
             writer.embeddings.insert(id, emb);
             mixed_ids.push(id);
             mixed_versions.push(v);
@@ -2306,16 +2284,16 @@ mod tests {
         writer.embeddings.insert(202, emb_202.clone());
         writer.embeddings.insert(203, emb_203.clone());
 
-        let code_200: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_200, &isolated_center)
+        let code_200: Arc<[u8]> = Code::<4>::quantize(&emb_200, &isolated_center)
             .as_ref()
             .into();
-        let code_201: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_201, &isolated_center)
+        let code_201: Arc<[u8]> = Code::<4>::quantize(&emb_201, &isolated_center)
             .as_ref()
             .into();
-        let code_202: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_202, &isolated_center)
+        let code_202: Arc<[u8]> = Code::<4>::quantize(&emb_202, &isolated_center)
             .as_ref()
             .into();
-        let code_203: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_203, &isolated_center)
+        let code_203: Arc<[u8]> = Code::<4>::quantize(&emb_203, &isolated_center)
             .as_ref()
             .into();
 
@@ -2394,7 +2372,7 @@ mod tests {
         let v10 = writer.remove(10);
         let v11 = writer.remove(11);
         let v12 = writer.remove(12);
-        let code_a: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[1.0, 0.0, 0.0, 0.0], &center_a)
+        let code_a: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&[1.0, 0.0, 0.0, 0.0], &center_a)
             .as_ref()
             .into();
         let delta_a = QuantizedDelta {
@@ -2412,7 +2390,7 @@ mod tests {
         let v21 = writer.remove(21);
         let v22 = writer.remove(22);
         let v23 = writer.remove(23);
-        let code_b: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 1.0, 0.0, 0.0], &center_b)
+        let code_b: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&[0.0, 1.0, 0.0, 0.0], &center_b)
             .as_ref()
             .into();
         let delta_b = QuantizedDelta {
@@ -2433,7 +2411,7 @@ mod tests {
         let center_c: Arc<[f32]> = Arc::from([0.0f32, 0.0, 1.0, 0.0]);
         let v30 = writer.remove(30);
         let v31 = writer.remove(31);
-        let code_c: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 1.0, 0.0], &center_c)
+        let code_c: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&[0.0, 0.0, 1.0, 0.0], &center_c)
             .as_ref()
             .into();
         let delta_c = QuantizedDelta {
@@ -2449,7 +2427,7 @@ mod tests {
         let center_d: Arc<[f32]> = Arc::from([0.0f32, 0.0, 0.0, 1.0]);
         let v40 = writer.remove(40);
         let v41 = writer.remove(41);
-        let code_d: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 0.0, 1.0], &center_d)
+        let code_d: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&[0.0, 0.0, 0.0, 1.0], &center_d)
             .as_ref()
             .into();
         let delta_d = QuantizedDelta {
@@ -2970,7 +2948,7 @@ mod tests {
         // --- Spawn a target cluster with a filler point ---
         let center: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
         let emb_20 = [1.0f32, 0.0, 0.0, 0.0];
-        let code_20: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_20, &center).as_ref().into();
+        let code_20: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&emb_20, &center).as_ref().into();
         let v20 = writer.remove(20);
 
         let delta = QuantizedDelta {

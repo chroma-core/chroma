@@ -1,0 +1,113 @@
+//! Extended RaBitQ quantization for approximate nearest neighbor search.
+//!
+//! ## Assumptions
+//!
+//! Data, centroid, and query vectors have been transformed by the same random rotation.
+//!
+//! ## Notation
+//!
+//! | Symbol | Description |
+//! |--------|-------------|
+//! | `c` | Cluster centroid |
+//! | `d` | Original data vector |
+//! | `r` | Data residual (`d - c`) |
+//! | `q` | Query vector |
+//! | `r_q` | Query residual (`q - c`) |
+//! | `n = r / ‖r‖` | Normalized data residual |
+//! | `g` | Grid point (approximates direction of `n`) |
+//!
+//! ## Stored Values
+//!
+//! | Field | Value | Description |
+//! |-------|-------|-------------|
+//! | `bytes` | packed codes | Encodes grid point `g` |
+//! | `correction` | `⟨g, n⟩` | For estimating `⟨n, r_q⟩` |
+//! | `norm` | `‖r‖` | Data residual norm |
+//! | `radial` | `⟨r, c⟩` | Residual dot centroid |
+//!
+//! ## Inner Product Estimation
+//!
+//! The key insight is that `⟨n, r_q⟩` can be estimated using the quantized vector:
+//!
+//! ```text
+//! ⟨n, r_q⟩ ≈ ⟨g, r_q⟩ / ⟨g, n⟩
+//! ```
+//!
+//! where `⟨g, r_q⟩` is computed at query time from packed codes, and `⟨g, n⟩`
+//! is stored as the correction factor.
+//!
+//! ## Distance Estimation
+//!
+//! For original data vector `d = c + r` and query `q`:
+//!
+//! ```text
+//! ⟨d, q⟩ = ⟨c + r, q⟩
+//!        = ⟨c, q⟩ + ⟨r, q⟩
+//!        = ⟨c, q⟩ + ‖r‖ * ⟨n, q⟩
+//!        = ⟨c, q⟩ + ‖r‖ * ⟨n, c + r_q⟩
+//!        = ⟨c, q⟩ + ⟨r, c⟩ + ‖r‖ * ⟨n, r_q⟩
+//! ```
+//!
+//! For two data vectors `d_a = c + r_a` and `d_b = c + r_b` in the same cluster:
+//!
+//! ```text
+//! ⟨d_a, d_b⟩ = ⟨c + r_a, c + r_b⟩
+//!            = ⟨c, c⟩ + ⟨c, r_b⟩ + ⟨r_a, c⟩ + ⟨r_a, r_b⟩
+//!            = ‖c‖² + ⟨r_a, c⟩ + ⟨r_b, c⟩ + ‖r_a‖ * ‖r_b‖ * ⟨n_a, n_b⟩
+//!
+//! ⟨n_a, n_b⟩ ≈ ⟨g_a, n_b⟩ / ⟨g_a, n_a⟩
+//!            ≈ ⟨g_a, g_b⟩ / (⟨g_a, n_a⟩ * ⟨g_b, n_b⟩)
+//!
+//! ‖d‖² = ⟨d, d⟩
+//!      = ‖c‖² + 2 * ⟨r, c⟩ + ‖r‖²
+//! ```
+//!
+//! Distance formulas:
+//!
+//! ```text
+//! Cosine:       1 - ⟨a, b⟩ / (‖a‖ * ‖b‖)
+//! Euclidean:    ‖a‖² + ‖b‖² - 2 * ⟨a, b⟩
+//! InnerProduct: 1 - ⟨a, b⟩
+//! ```
+//!
+//! ## Code types
+//!
+//! Two concrete implementations cover the supported bit widths:
+//!
+//! | Type | Header | Quantization |
+//! |------|--------|-------------|
+//! | [`Code<1>`] | 16 bytes (includes `signed_sum`) | Sign of residual |
+//! | [`Code<4>`] | 12 bytes | Ray-walk |
+//!
+//! The shared distance math lives in `utils::rabitq_distance_query` and
+//! `utils::rabitq_distance_code`; each concrete type supplies only the
+//! type-specific inner product kernel before calling the helper.
+
+mod multi_bit;
+mod single_bit;
+mod utils;
+
+pub struct Code<const BITS: u8, T = Vec<u8>>(T);
+
+impl<const BITS: u8, T> Code<BITS, T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
+impl<const BITS: u8, T: AsRef<[u8]>> Code<BITS, T> {
+    /// Correction factor `⟨g, n⟩`.
+    pub fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    /// Data residual norm `‖r‖`.
+    pub fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    /// Radial component `⟨r, c⟩`.
+    pub fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    }
+}
+
+pub use single_bit::{BatchQueryLuts, QuantizedQuery};
