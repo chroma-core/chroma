@@ -7,6 +7,7 @@ use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, DatabaseName, LogRecord};
 use thiserror::Error;
+use tracing::Instrument;
 
 use crate::execution::operators::fragment_fetch::{
     FragmentFetchError, FragmentFetcher, FragmentPointer,
@@ -163,6 +164,9 @@ impl FetchLogOperator {
                 self.database_name.clone(),
                 self.collection_uuid,
                 self.start_log_offset_id,
+            )
+            .instrument(
+                tracing::info_span!("scout_log_fragments", collection_id = %self.collection_uuid, start_log_offset = self.start_log_offset_id),
             )
             .await?;
 
