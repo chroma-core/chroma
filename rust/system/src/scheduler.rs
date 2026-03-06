@@ -1,12 +1,13 @@
 use parking_lot::RwLock;
 use std::sync::atomic::AtomicU64;
+use std::sync::LazyLock;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{collections::HashMap, fmt::Debug};
 use tokio::select;
 use tracing::Span;
 
-use super::{Component, ComponentContext, Handler, Message};
+use super::{utils::duration_ms, Component, ComponentContext, Handler, Message};
 
 pub(crate) struct SchedulerTaskHandle {
     join_handle: Option<tokio::task::JoinHandle<()>>,
@@ -42,6 +43,44 @@ pub struct Scheduler {
     next_id: Arc<AtomicU64>,
 }
 
+struct SchedulerMetrics {
+    scheduled_total: opentelemetry::metrics::Counter<u64>,
+    executed_total: opentelemetry::metrics::Counter<u64>,
+    cancelled_total: opentelemetry::metrics::Counter<u64>,
+    send_fail_total: opentelemetry::metrics::Counter<u64>,
+    delay_ms: opentelemetry::metrics::Histogram<f64>,
+}
+
+impl SchedulerMetrics {
+    fn new() -> Self {
+        let meter = opentelemetry::global::meter("chroma.system");
+        Self {
+            scheduled_total: meter
+                .u64_counter("chroma.system.scheduler.scheduled_total")
+                .with_description("Scheduled tasks created")
+                .build(),
+            executed_total: meter
+                .u64_counter("chroma.system.scheduler.executed_total")
+                .with_description("Scheduled tasks executed")
+                .build(),
+            cancelled_total: meter
+                .u64_counter("chroma.system.scheduler.cancelled_total")
+                .with_description("Scheduled tasks cancelled")
+                .build(),
+            send_fail_total: meter
+                .u64_counter("chroma.system.scheduler.send_fail_total")
+                .with_description("Scheduled task send failures")
+                .build(),
+            delay_ms: meter
+                .f64_histogram("chroma.system.scheduler.delay_ms")
+                .with_description("Scheduler trigger delay in milliseconds")
+                .build(),
+        }
+    }
+}
+
+static SCHEDULER_METRICS: LazyLock<SchedulerMetrics> = LazyLock::new(SchedulerMetrics::new);
+
 impl Scheduler {
     pub(crate) fn new() -> Scheduler {
         Scheduler {
@@ -75,9 +114,17 @@ impl Scheduler {
     {
         let id = self.allocate_id();
         let handles_weak = Arc::downgrade(&self.handles);
+        SCHEDULER_METRICS.scheduled_total.add(
+            1,
+            &[
+                opentelemetry::KeyValue::new("component", C::get_name()),
+                opentelemetry::KeyValue::new("kind", "once"),
+            ],
+        );
 
         let cancel = ctx.cancellation_token.clone();
         let sender = ctx.receiver().clone();
+        let intended_at = Instant::now() + duration;
         let handle = tokio::spawn(async move {
             let _guard = HandleGuard {
                 weak_handles: handles_weak,
@@ -85,13 +132,42 @@ impl Scheduler {
             };
 
             select! {
-                _ = cancel.cancelled() => {}
+                _ = cancel.cancelled() => {
+                    SCHEDULER_METRICS.cancelled_total.add(
+                        1,
+                        &[
+                            opentelemetry::KeyValue::new("component", C::get_name()),
+                            opentelemetry::KeyValue::new("kind", "once"),
+                        ],
+                    );
+                }
                 _ = tokio::time::sleep(duration) => {
+                    SCHEDULER_METRICS.executed_total.add(
+                        1,
+                        &[
+                            opentelemetry::KeyValue::new("component", C::get_name()),
+                            opentelemetry::KeyValue::new("kind", "once"),
+                        ],
+                    );
+                    SCHEDULER_METRICS.delay_ms.record(
+                        duration_ms(Instant::now().duration_since(intended_at)),
+                        &[
+                            opentelemetry::KeyValue::new("component", C::get_name()),
+                            opentelemetry::KeyValue::new("kind", "once"),
+                        ],
+                    );
                     let span = span_factory();
                     match sender.send(message, span).await {
                         Ok(_) => {
                         },
                         Err(e) => {
+                            SCHEDULER_METRICS.send_fail_total.add(
+                                1,
+                                &[
+                                    opentelemetry::KeyValue::new("component", C::get_name()),
+                                    opentelemetry::KeyValue::new("kind", "once"),
+                                ],
+                            );
                             tracing::error!("Error: {:?}", e);
                         }
                     }
@@ -123,6 +199,13 @@ impl Scheduler {
     {
         let id = self.allocate_id();
         let handles_weak = Arc::downgrade(&self.handles);
+        SCHEDULER_METRICS.scheduled_total.add(
+            1,
+            &[
+                opentelemetry::KeyValue::new("component", C::get_name()),
+                opentelemetry::KeyValue::new("kind", "interval"),
+            ],
+        );
         let cancel = ctx.cancellation_token.clone();
         let sender = ctx.receiver().clone();
 
@@ -133,16 +216,45 @@ impl Scheduler {
             };
             let mut counter = 0;
             while Self::should_continue(num_times, counter) {
+                let intended_at = Instant::now() + duration;
                 select! {
                     _ = cancel.cancelled() => {
+                        SCHEDULER_METRICS.cancelled_total.add(
+                            1,
+                            &[
+                                opentelemetry::KeyValue::new("component", C::get_name()),
+                                opentelemetry::KeyValue::new("kind", "interval"),
+                            ],
+                        );
                         return;
                     }
                     _ = tokio::time::sleep(duration) => {
+                        SCHEDULER_METRICS.executed_total.add(
+                            1,
+                            &[
+                                opentelemetry::KeyValue::new("component", C::get_name()),
+                                opentelemetry::KeyValue::new("kind", "interval"),
+                            ],
+                        );
+                        SCHEDULER_METRICS.delay_ms.record(
+                            duration_ms(Instant::now().duration_since(intended_at)),
+                            &[
+                                opentelemetry::KeyValue::new("component", C::get_name()),
+                                opentelemetry::KeyValue::new("kind", "interval"),
+                            ],
+                        );
                         let span = span_factory();
                         match sender.send(message.clone(), span).await {
                             Ok(_) => {
                             },
                             Err(e) => {
+                                SCHEDULER_METRICS.send_fail_total.add(
+                                    1,
+                                    &[
+                                        opentelemetry::KeyValue::new("component", C::get_name()),
+                                        opentelemetry::KeyValue::new("kind", "interval"),
+                                    ],
+                                );
                                 tracing::error!("Error: {:?}", e);
                             }
                         }
@@ -193,6 +305,7 @@ impl Scheduler {
     pub(crate) fn stop(&self) {
         let handles = self.handles.read();
         for handle in handles.iter() {
+            // cancelled_total is recorded by the spawned task when it observes cancellation.
             handle.1.cancel.cancel();
         }
     }
