@@ -149,42 +149,41 @@ impl Operator<SelectInput, SelectOutput> for Select {
                 .records
                 .iter()
                 .map(|record| async {
-                    let (id, document, embedding, mut full_metadata) =
-                        match offset_id_to_log_record.get(&record.offset_id) {
-                            Some(log) => {
-                                let log = log
-                                    .hydrate(record_segment_reader.as_ref())
-                                    .await
-                                    .map_err(SelectError::LogMaterializer)?;
-                                (
-                                    log.get_user_id().to_string(),
-                                    select_document
-                                        .then(|| log.merged_document_ref().map(str::to_string))
-                                        .flatten(),
-                                    select_embedding.then(|| log.merged_embeddings_ref().to_vec()),
-                                    log.merged_metadata(),
-                                )
-                            }
-                            None => {
-                                let reader = record_segment_reader
-                                    .as_ref()
-                                    .ok_or(SelectError::RecordSegmentUninitialized)?;
-                                let data = reader
-                                    .get_data_for_offset_id(record.offset_id)
-                                    .await?
-                                    .ok_or(SelectError::RecordSegmentPhantomRecord(
-                                        record.offset_id,
-                                    ))?;
-                                (
-                                    data.id.to_string(),
-                                    select_document
-                                        .then(|| data.document.map(|s| s.to_string()))
-                                        .flatten(),
-                                    select_embedding.then(|| data.embedding.to_vec()),
-                                    data.metadata.unwrap_or_default(),
-                                )
-                            }
-                        };
+                    let (id, document, embedding, mut full_metadata) = match offset_id_to_log_record
+                        .get(&record.offset_id)
+                    {
+                        Some(log) => {
+                            let log = log
+                                .hydrate(record_segment_reader.as_ref())
+                                .await
+                                .map_err(SelectError::LogMaterializer)?;
+                            (
+                                log.get_user_id().to_string(),
+                                select_document
+                                    .then(|| log.merged_document_ref().map(str::to_string))
+                                    .flatten(),
+                                select_embedding.then(|| log.merged_embeddings_ref().to_vec()),
+                                log.merged_metadata(),
+                            )
+                        }
+                        None => {
+                            let reader = record_segment_reader
+                                .as_ref()
+                                .ok_or(SelectError::RecordSegmentUninitialized)?;
+                            let data = reader
+                                .get_data_for_offset_id(record.offset_id)
+                                .await?
+                                .ok_or(SelectError::RecordSegmentPhantomRecord(record.offset_id))?;
+                            (
+                                data.id.to_string(),
+                                select_document
+                                    .then(|| data.document.map(|s| s.to_string()))
+                                    .flatten(),
+                                select_embedding.then(|| data.embedding.to_vec()),
+                                data.metadata.unwrap_or_default(),
+                            )
+                        }
+                    };
 
                     if !select_all_metadata {
                         full_metadata.retain(|key, _| metadata_fields_to_select.contains(key));
