@@ -1,10 +1,8 @@
 use chroma_types::chroma_proto::{
-    compactor_client::CompactorClient, CollectionIds, CompactRequest,
-    GetCollectionAssignmentRequest, ListDeadJobsRequest, ListInProgressJobsRequest, RebuildRequest,
-    SegmentScope,
+    compactor_client::CompactorClient, CollectionIds, CompactRequest, ListDeadJobsRequest,
+    RebuildRequest, SegmentScope,
 };
 use clap::{Parser, Subcommand};
-use std::io::Write;
 use thiserror::Error;
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -16,8 +14,6 @@ pub enum CompactionClientError {
     Compactor(String),
     #[error("Unable to connect to compactor: {0}")]
     Connection(#[from] tonic::transport::Error),
-    #[error("IO error: {0}")]
-    Io(#[from] std::io::Error),
 }
 
 /// Tool to control compaction service
@@ -51,14 +47,6 @@ pub enum CompactionCommand {
     },
     /// List all dead jobs (collections with failed compactions)
     ListDeadJobs,
-    /// List all in-progress compaction jobs
-    ListInProgressJobs,
-    /// Get collection assignment info (which node would handle a collection)
-    GetCollectionAssignment {
-        /// Collection ID to check assignment for
-        #[arg(short, long)]
-        collection_id: Uuid,
-    },
 }
 
 impl CompactionClient {
@@ -66,7 +54,7 @@ impl CompactionClient {
         Ok(CompactorClient::connect(self.url.clone()).await?)
     }
 
-    pub async fn run(&self, w: &mut dyn Write) -> Result<(), CompactionClientError> {
+    pub async fn run(&self) -> Result<(), CompactionClientError> {
         match &self.command {
             CompactionCommand::Compact { id } => {
                 let mut client = self.grpc_client().await?;
@@ -116,59 +104,16 @@ impl CompactionClient {
 
                 let dead_jobs = response.into_inner();
                 if let Some(ids) = dead_jobs.ids {
-                    writeln!(w, "Dead jobs (collections with failed compactions):")?;
+                    println!("Dead jobs (collections with failed compactions):");
                     if ids.ids.is_empty() {
-                        writeln!(w, "  None")?;
+                        println!("  None");
                     } else {
                         for id in ids.ids {
-                            writeln!(w, "  {}", id)?;
+                            println!("  {}", id);
                         }
                     }
                 } else {
-                    writeln!(w, "No dead jobs response didn't contain an ids field")?;
-                }
-            }
-            CompactionCommand::ListInProgressJobs => {
-                let mut client = self.grpc_client().await?;
-                let response = client
-                    .list_in_progress_jobs(ListInProgressJobsRequest {})
-                    .await
-                    .map_err(|e| CompactionClientError::Compactor(e.to_string()))?;
-
-                let jobs = response.into_inner().jobs;
-                writeln!(w, "In-progress compaction jobs:")?;
-                if jobs.is_empty() {
-                    writeln!(w, "  None")?;
-                } else {
-                    for job in jobs {
-                        writeln!(
-                            w,
-                            "  job_id={} database={} expires_at_epoch_secs={}",
-                            job.job_id, job.database_name, job.expires_at_epoch_secs
-                        )?;
-                    }
-                }
-            }
-            CompactionCommand::GetCollectionAssignment { collection_id } => {
-                let mut client = self.grpc_client().await?;
-                let response = client
-                    .get_collection_assignment(GetCollectionAssignmentRequest {
-                        collection_id: collection_id.to_string(),
-                    })
-                    .await
-                    .map_err(|e| CompactionClientError::Compactor(e.to_string()))?;
-
-                let assignment = response.into_inner();
-                writeln!(w, "Collection assignment information:")?;
-                writeln!(w, "  Collection ID: {}", collection_id)?;
-                writeln!(w, "  Assigned to node: {}", assignment.assigned_node)?;
-                writeln!(w, "  Current memberlist:")?;
-                if assignment.memberlist.is_empty() {
-                    writeln!(w, "    (empty)")?;
-                } else {
-                    for member in assignment.memberlist {
-                        writeln!(w, "    - {}", member)?;
-                    }
+                    println!("No dead jobs response didn't contain an ids field");
                 }
             }
         };

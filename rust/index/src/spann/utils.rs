@@ -7,7 +7,12 @@ use rand::{seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng};
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
-use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
+use crate::{
+    hnsw_provider::HnswIndexRef,
+    quantization::{Code, RabitqCode},
+    SearchResult,
+};
+
 
 /// A point with its ID, version, and embedding.
 pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);
@@ -816,7 +821,6 @@ pub fn query_quantized_cluster(
         return SearchResult::default();
     }
 
-    // Precompute query-related values.
     let c_norm = (f32::dot(cluster.center, cluster.center).unwrap_or(0.0) as f32).sqrt();
     let c_dot_q = f32::dot(cluster.center, query).unwrap_or(0.0) as f32;
     let q_norm = (f32::dot(query, query).unwrap_or(0.0) as f32).sqrt();
@@ -826,7 +830,7 @@ pub fn query_quantized_cluster(
         .map(|(q, c)| q - c)
         .collect::<Vec<_>>();
 
-    let code_size = Code::<&[u8]>::size(cluster.center.len());
+    let code_size = Code::<4>::size(cluster.center.len());
     let mut seen = HashSet::new();
     let mut keys = Vec::new();
     let mut distances = Vec::new();
@@ -840,7 +844,7 @@ pub fn query_quantized_cluster(
         if !predicate(*id, *version) || !seen.insert(*id) {
             continue;
         }
-        let code = Code::<&[u8]>::new(code_bytes);
+        let code = Code::<4, _>::new(code_bytes);
         let distance = code.distance_query(distance_function, &r_q, c_norm, c_dot_q, q_norm);
         keys.push(*id);
         distances.push(distance);

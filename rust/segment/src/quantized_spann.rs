@@ -429,7 +429,7 @@ impl QuantizedSpannSegmentReader {
         let cluster_id = parsed[0].1;
         let embedding_metadata_id = parsed[1].1;
         let quantized_centroid_id = IndexUuid(parsed[2].1);
-        // parsed[3] is raw_centroid — not needed for the reader.
+        // parsed[3] is raw_centroid - not needed for the reader.
         let scalar_metadata_id = parsed[4].1;
 
         // Step 1: Open embedding_metadata → load rotation matrix + center.
@@ -494,6 +494,7 @@ impl QuantizedSpannSegmentReader {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: Some(center),
+            centroid_quantization_bits: spann_config.centroid_bits(),
         };
         let quantized_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Open(quantized_centroid_id))

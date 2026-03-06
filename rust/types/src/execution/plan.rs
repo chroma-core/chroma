@@ -33,20 +33,17 @@ pub enum PlanToProtoError {
 #[derive(Clone)]
 pub struct Count {
     pub scan: Scan,
-    pub read_level: ReadLevel,
 }
 
 impl TryFrom<chroma_proto::CountPlan> for Count {
     type Error = QueryConversionError;
 
     fn try_from(value: chroma_proto::CountPlan) -> Result<Self, Self::Error> {
-        let read_level = value.read_level().into();
         Ok(Self {
             scan: value
                 .scan
                 .ok_or(QueryConversionError::field("scan"))?
                 .try_into()?,
-            read_level,
         })
     }
 }
@@ -57,7 +54,6 @@ impl TryFrom<Count> for chroma_proto::CountPlan {
     fn try_from(value: Count) -> Result<Self, Self::Error> {
         Ok(Self {
             scan: Some(value.scan.try_into()?),
-            read_level: chroma_proto::ReadLevel::from(value.read_level).into(),
         })
     }
 }

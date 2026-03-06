@@ -1,8 +1,8 @@
-use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError, ScoutLogFragmentsResponse};
+use crate::grpc_log::{GrpcLog, GrpcSealLogError};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
-use chroma_error::{ChromaError, ErrorCodes};
+use chroma_error::ChromaError;
 use chroma_memberlist::client_manager::ClientAssignmentError;
 use chroma_types::{
     Cmek, CollectionUuid, DatabaseName, ForkCollectionError, ForkLogsResponse, LogRecord,
@@ -35,42 +35,6 @@ pub enum GarbageCollectError {
     NotEnabled,
     #[error("log implementation not supported")]
     Unimplemented,
-}
-
-/// Structured error for `Log::push_logs` that preserves the backoff reason.
-#[derive(Debug, thiserror::Error)]
-pub enum PushLogsError {
-    /// Backoff due to write batching pressure.
-    #[error("log is under write batching pressure; please backoff exponentially and retry")]
-    Backoff,
-    /// Backoff because the log needs compaction.
-    #[error(
-        "log needs compaction before accepting more writes; please backoff exponentially and retry"
-    )]
-    BackoffCompaction,
-    /// Any other push failure.
-    #[error(transparent)]
-    Other(Box<dyn ChromaError>),
-}
-
-impl ChromaError for PushLogsError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            PushLogsError::Backoff => ErrorCodes::ResourceExhausted,
-            PushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
-            PushLogsError::Other(e) => e.code(),
-        }
-    }
-}
-
-impl From<GrpcPushLogsError> for PushLogsError {
-    fn from(err: GrpcPushLogsError) -> Self {
-        match err {
-            GrpcPushLogsError::Backoff => PushLogsError::Backoff,
-            GrpcPushLogsError::BackoffCompaction => PushLogsError::BackoffCompaction,
-            other => PushLogsError::Other(Box::new(other)),
-        }
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -138,38 +102,6 @@ impl Log {
         }
     }
 
-    /// Returns fragment pointers for the requested log window.
-    ///
-    /// Only supported by the gRPC log implementation.  Sqlite and InMemory
-    /// variants return an error because they do not store fragments in object
-    /// storage.
-    #[tracing::instrument(skip(self), err(Display))]
-    pub async fn scout_log_fragments(
-        &mut self,
-        database_name: DatabaseName,
-        collection_id: CollectionUuid,
-        starting_offset: u64,
-    ) -> Result<ScoutLogFragmentsResponse, Box<dyn ChromaError>> {
-        match self {
-            Log::Grpc(log) => log
-                .scout_log_fragments(database_name, collection_id, starting_offset)
-                .await
-                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
-            Log::Sqlite(_) => Err(Box::new(
-                crate::grpc_log::GrpcScoutLogFragmentsError::FailedToScoutLogFragments(
-                    tonic::Status::unimplemented("ScoutLogFragments not supported by sqlite log"),
-                ),
-            )),
-            Log::InMemory(_) => Err(Box::new(
-                crate::grpc_log::GrpcScoutLogFragmentsError::FailedToScoutLogFragments(
-                    tonic::Status::unimplemented(
-                        "ScoutLogFragments not supported by in-memory log",
-                    ),
-                ),
-            )),
-        }
-    }
-
     #[tracing::instrument(skip(self, records), err(Display))]
     pub async fn push_logs(
         &mut self,
@@ -178,16 +110,16 @@ impl Log {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
-    ) -> Result<(), PushLogsError> {
+    ) -> Result<(), Box<dyn ChromaError>> {
         match self {
             Log::Sqlite(log) => log
                 .push_logs(collection_id, records)
                 .await
-                .map_err(|e| PushLogsError::Other(Box::new(e))),
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::Grpc(log) => log
                 .push_logs(database_name, collection_id, records, cmek)
                 .await
-                .map_err(PushLogsError::from),
+                .map_err(|e| Box::new(e) as Box<dyn ChromaError>),
             Log::InMemory(_) => unimplemented!(),
         }
     }

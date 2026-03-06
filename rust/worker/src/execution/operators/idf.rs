@@ -80,40 +80,29 @@ impl Operator<IdfInput, IdfOutput> for Idf {
     async fn run(&self, input: &IdfInput) -> Result<IdfOutput, IdfError> {
         let mut n = 0;
         let mut nts = HashMap::new();
-
-        // Create both segment readers in parallel since they are independent
-        let record_segment_reader_fut = async {
-            match Box::pin(RecordSegmentReader::from_segment(
-                &input.record_segment,
-                &input.blockfile_provider,
-            ))
-            .await
-            {
-                Ok(reader) => {
-                    let count = reader.count().await?;
-                    Ok((Some(reader), count))
-                }
-                Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
-                    Ok((None, 0))
-                }
-                Err(e) => Err(IdfError::from(*e)),
+        let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
+            &input.record_segment,
+            &input.blockfile_provider,
+        ))
+        .await
+        {
+            Ok(reader) => {
+                n += reader.count().await?;
+                Ok(Some(reader))
             }
-        };
-
-        let metadata_segment_reader_fut = async {
-            Box::pin(MetadataSegmentReader::from_segment(
-                &input.metadata_segment,
-                &input.blockfile_provider,
-            ))
-            .await
-            .map_err(IdfError::from)
-        };
-
-        let ((record_segment_reader, count), metadata_segment_reader) =
-            tokio::try_join!(record_segment_reader_fut, metadata_segment_reader_fut)?;
-        n += count;
+            Err(e) if matches!(*e, RecordSegmentReaderCreationError::UninitializedSegment) => {
+                Ok(None)
+            }
+            Err(e) => Err(*e),
+        }?;
 
         let logs = materialize_logs(&record_segment_reader, input.logs.clone(), None).await?;
+
+        let metadata_segment_reader = Box::pin(MetadataSegmentReader::from_segment(
+            &input.metadata_segment,
+            &input.blockfile_provider,
+        ))
+        .await?;
 
         if let Some(sparse_index_reader) = metadata_segment_reader.sparse_index_reader.as_ref() {
             let encoded_dimensions = self

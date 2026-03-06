@@ -36,6 +36,7 @@ repos:
     rev: "v1.10.0"
     hooks:
       - id: mypy
+        exclude: "rust/index/benches/datasets/compute_ground_truth\\.py"
         args:
           [
             --strict,

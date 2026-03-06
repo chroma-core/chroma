@@ -1,0 +1,203 @@
+
+thread_scaling/quant-4bit/1
+                        time:   [86.771 ms 86.907 ms 87.043 ms]
+                        thrpt:  [45.954 MiB/s 46.026 MiB/s 46.098 MiB/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking thread_scaling/quant-1bit/1: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.9s, enable flat sampling, or reduce sample count to 60.
+thread_scaling/quant-1bit/1
+                        time:   [1.1648 ms 1.1656 ms 1.1664 ms]
+                        thrpt:  [3.3488 GiB/s 3.3513 GiB/s 3.3537 GiB/s]
+                 change:
+                        time:   [+0.3740% +0.4767% +0.5708%] (p = 0.00 < 0.05)
+                        thrpt:  [−0.5675% −0.4744% −0.3726%]
+                        Change within noise threshold.
+Found 22 outliers among 100 measurements (22.00%)
+  13 (13.00%) low mild
+  7 (7.00%) high mild
+  2 (2.00%) high severe
+thread_scaling/dq-4f/1  time:   [3.4751 ms 3.4757 ms 3.4763 ms]
+                        thrpt:  [1.2674 GiB/s 1.2677 GiB/s 1.2679 GiB/s]
+Found 2 outliers among 100 measurements (2.00%)
+  2 (2.00%) high mild
+thread_scaling/dq-float/1
+                        time:   [2.9399 ms 2.9405 ms 2.9412 ms]
+                        thrpt:  [1.3748 GiB/s 1.3751 GiB/s 1.3754 GiB/s]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) high mild
+thread_scaling/dq-bw/1  time:   [4.8384 ms 4.8405 ms 4.8432 ms]
+                        thrpt:  [854.93 MiB/s 855.41 MiB/s 855.78 MiB/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high severe
+thread_scaling/d-lut/1  time:   [7.0213 ms 7.0233 ms 7.0255 ms]
+                        thrpt:  [589.37 MiB/s 589.55 MiB/s 589.72 MiB/s]
+Found 8 outliers among 100 measurements (8.00%)
+  6 (6.00%) high mild
+  2 (2.00%) high severe
+Benchmarking thread_scaling/quant-4bit/2: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 5.2s, or reduce sample count to 90.
+thread_scaling/quant-4bit/2
+                        time:   [52.331 ms 52.405 ms 52.479 ms]
+                        thrpt:  [76.220 MiB/s 76.328 MiB/s 76.436 MiB/s]
+thread_scaling/quant-1bit/2
+                        time:   [598.36 µs 599.81 µs 601.17 µs]
+                        thrpt:  [6.4977 GiB/s 6.5125 GiB/s 6.5283 GiB/s]
+Benchmarking thread_scaling/dq-4f/2: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.0s, enable flat sampling, or reduce sample count to 50.
+thread_scaling/dq-4f/2  time:   [1.7801 ms 1.7819 ms 1.7836 ms]
+                        thrpt:  [2.4703 GiB/s 2.4726 GiB/s 2.4751 GiB/s]
+Found 12 outliers among 100 measurements (12.00%)
+  9 (9.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking thread_scaling/dq-float/2: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 7.6s, enable flat sampling, or reduce sample count to 50.
+thread_scaling/dq-float/2
+                        time:   [1.4995 ms 1.5008 ms 1.5021 ms]
+                        thrpt:  [2.6920 GiB/s 2.6943 GiB/s 2.6967 GiB/s]
+Found 21 outliers among 100 measurements (21.00%)
+  11 (11.00%) low severe
+  7 (7.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/dq-bw/2  time:   [2.4049 ms 2.4059 ms 2.4069 ms]
+                        thrpt:  [1.6800 GiB/s 1.6807 GiB/s 1.6814 GiB/s]
+Found 6 outliers among 100 measurements (6.00%)
+  3 (3.00%) high mild
+  3 (3.00%) high severe
+thread_scaling/d-lut/2  time:   [3.5485 ms 3.5504 ms 3.5524 ms]
+                        thrpt:  [1.1383 GiB/s 1.1389 GiB/s 1.1395 GiB/s]
+Found 4 outliers among 100 measurements (4.00%)
+  4 (4.00%) high mild
+thread_scaling/quant-4bit/4
+                        time:   [25.015 ms 25.206 ms 25.393 ms]
+                        thrpt:  [157.52 MiB/s 158.69 MiB/s 159.90 MiB/s]
+thread_scaling/quant-1bit/4
+                        time:   [314.43 µs 315.56 µs 316.65 µs]
+                        thrpt:  [12.336 GiB/s 12.379 GiB/s 12.423 GiB/s]
+Found 28 outliers among 100 measurements (28.00%)
+  21 (21.00%) low severe
+  2 (2.00%) low mild
+  4 (4.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/dq-4f/4  time:   [888.72 µs 889.56 µs 890.36 µs]
+                        thrpt:  [4.9485 GiB/s 4.9530 GiB/s 4.9577 GiB/s]
+Found 4 outliers among 100 measurements (4.00%)
+  3 (3.00%) low mild
+  1 (1.00%) high mild
+thread_scaling/dq-float/4
+                        time:   [782.99 µs 783.70 µs 784.39 µs]
+                        thrpt:  [5.1551 GiB/s 5.1596 GiB/s 5.1643 GiB/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+Benchmarking thread_scaling/dq-bw/4: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 6.2s, enable flat sampling, or reduce sample count to 60.
+thread_scaling/dq-bw/4  time:   [1.2280 ms 1.2294 ms 1.2308 ms]
+                        thrpt:  [3.2853 GiB/s 3.2890 GiB/s 3.2929 GiB/s]
+Found 10 outliers among 100 measurements (10.00%)
+  7 (7.00%) low mild
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+Benchmarking thread_scaling/d-lut/4: Warming up for 3.0000 s
+Warning: Unable to complete 100 samples in 5.0s. You may wish to increase target time to 9.1s, enable flat sampling, or reduce sample count to 50.
+thread_scaling/d-lut/4  time:   [1.8035 ms 1.8067 ms 1.8101 ms]
+                        thrpt:  [2.2339 GiB/s 2.2381 GiB/s 2.2421 GiB/s]
+Found 3 outliers among 100 measurements (3.00%)
+  3 (3.00%) low mild
+thread_scaling/quant-4bit/8
+                        time:   [11.686 ms 11.714 ms 11.744 ms]
+                        thrpt:  [340.59 MiB/s 341.47 MiB/s 342.29 MiB/s]
+Found 15 outliers among 100 measurements (15.00%)
+  12 (12.00%) high mild
+  3 (3.00%) high severe
+thread_scaling/quant-1bit/8
+                        time:   [180.37 µs 182.36 µs 184.27 µs]
+                        thrpt:  [21.199 GiB/s 21.421 GiB/s 21.656 GiB/s]
+                 change:
+                        time:   [−2.6475% −1.3244% −0.0112%] (p = 0.05 > 0.05)
+                        thrpt:  [+0.0112% +1.3422% +2.7196%]
+                        No change in performance detected.
+thread_scaling/dq-4f/8  time:   [465.41 µs 466.49 µs 467.58 µs]
+                        thrpt:  [9.4229 GiB/s 9.4449 GiB/s 9.4669 GiB/s]
+Found 7 outliers among 100 measurements (7.00%)
+  6 (6.00%) low mild
+  1 (1.00%) high severe
+thread_scaling/dq-float/8
+                        time:   [402.02 µs 404.01 µs 406.19 µs]
+                        thrpt:  [9.9548 GiB/s 10.009 GiB/s 10.058 GiB/s]
+thread_scaling/dq-bw/8  time:   [635.34 µs 637.45 µs 639.66 µs]
+                        thrpt:  [6.3215 GiB/s 6.3434 GiB/s 6.3645 GiB/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+thread_scaling/d-lut/8  time:   [922.25 µs 924.13 µs 925.79 µs]
+                        thrpt:  [4.3677 GiB/s 4.3755 GiB/s 4.3845 GiB/s]
+Found 21 outliers among 100 measurements (21.00%)
+  11 (11.00%) low severe
+  6 (6.00%) low mild
+  4 (4.00%) high mild
+thread_scaling/quant-4bit/16
+                        time:   [6.0765 ms 6.0934 ms 6.1115 ms]
+                        thrpt:  [654.50 MiB/s 656.45 MiB/s 658.27 MiB/s]
+Found 9 outliers among 100 measurements (9.00%)
+  7 (7.00%) high mild
+  2 (2.00%) high severe
+thread_scaling/quant-1bit/16
+                        time:   [107.44 µs 108.14 µs 108.88 µs]
+                        thrpt:  [35.875 GiB/s 36.122 GiB/s 36.358 GiB/s]
+thread_scaling/dq-4f/16 time:   [259.93 µs 260.77 µs 261.52 µs]
+                        thrpt:  [16.848 GiB/s 16.896 GiB/s 16.951 GiB/s]
+Found 18 outliers among 100 measurements (18.00%)
+  5 (5.00%) low severe
+  9 (9.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/dq-float/16
+                        time:   [223.09 µs 223.90 µs 224.68 µs]
+                        thrpt:  [17.997 GiB/s 18.060 GiB/s 18.126 GiB/s]
+Found 12 outliers among 100 measurements (12.00%)
+  10 (10.00%) low mild
+  1 (1.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/dq-bw/16 time:   [343.93 µs 344.66 µs 345.34 µs]
+                        thrpt:  [11.709 GiB/s 11.732 GiB/s 11.757 GiB/s]
+Found 5 outliers among 100 measurements (5.00%)
+  1 (1.00%) low mild
+  3 (3.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/d-lut/16 time:   [488.39 µs 490.47 µs 492.79 µs]
+                        thrpt:  [8.2054 GiB/s 8.2443 GiB/s 8.2793 GiB/s]
+Found 1 outliers among 100 measurements (1.00%)
+  1 (1.00%) high mild
+thread_scaling/quant-4bit/32
+                        time:   [4.5294 ms 4.5423 ms 4.5549 ms]
+                        thrpt:  [878.17 MiB/s 880.62 MiB/s 883.12 MiB/s]
+thread_scaling/quant-1bit/32
+                        time:   [113.90 µs 114.23 µs 114.57 µs]
+                        thrpt:  [34.096 GiB/s 34.198 GiB/s 34.295 GiB/s]
+Found 3 outliers among 100 measurements (3.00%)
+  2 (2.00%) high mild
+  1 (1.00%) high severe
+thread_scaling/dq-4f/32 time:   [166.82 µs 167.95 µs 169.52 µs]
+                        thrpt:  [25.991 GiB/s 26.233 GiB/s 26.412 GiB/s]
+Found 4 outliers among 100 measurements (4.00%)
+  1 (1.00%) low mild
+  1 (1.00%) high mild
+  2 (2.00%) high severe
+thread_scaling/dq-float/32
+                        time:   [142.19 µs 142.74 µs 143.62 µs]
+                        thrpt:  [28.154 GiB/s 28.328 GiB/s 28.437 GiB/s]
+Found 7 outliers among 100 measurements (7.00%)
+  1 (1.00%) low mild
+  2 (2.00%) high mild
+  4 (4.00%) high severe
+thread_scaling/dq-bw/32 time:   [249.92 µs 250.45 µs 251.04 µs]
+                        thrpt:  [16.107 GiB/s 16.145 GiB/s 16.180 GiB/s]
+Found 9 outliers among 100 measurements (9.00%)
+  1 (1.00%) high mild
+  8 (8.00%) high severe
+thread_scaling/d-lut/32 time:   [400.67 µs 400.82 µs 400.97 µs]
+                        thrpt:  [10.084 GiB/s 10.088 GiB/s 10.092 GiB/s]
+Found 5 outliers among 100 measurements (5.00%)
+  3 (3.00%) high mild
+  2 (2.00%) high severe

@@ -1,0 +1,134 @@
+ nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 16 --data-bits 1 --centroid-bits 1 > quantized_spann_1bit_wikipedia.txt 2>&1 &
+[1] 12884
+ubuntu@ip-172-31-75-166:~/chroma$ tail -f quantized_spann_1bit_wikipedia.txt
+nohup: ignoring input
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.36s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-6be0c3ba684c8ced)
+Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 5 | Threads: 16 | Data bits: 1 | Centroid bits: 1
+Total vectors to index: 5.00M
+
+Checkpoint 1: 1.00M vec | load 11.49s | raw 10.99s | index 45.38s | commit 1.66s | 22034 vec/s
+  Recall: np16=0.82/0.69 np32=0.88/0.74 np64=0.92/0.78 np128=0.94/0.80 np256=0.97/0.81
+Checkpoint 2: 1.00M vec | load 8.56s | raw 9.89s | index 1.0m | commit 3.36s | 16467 vec/s
+  Recall: np16=0.80/0.68 np32=0.85/0.73 np64=0.90/0.76 np128=0.93/0.78 np256=0.95/0.79
+Checkpoint 3: 1.00M vec | load 8.65s | raw 9.92s | index 1.2m | commit 4.81s | 14249 vec/s
+  Recall: np16=0.72/0.61 np32=0.79/0.67 np64=0.84/0.71 np128=0.89/0.73 np256=0.92/0.75
+Checkpoint 4: 1.00M vec | load 8.63s | raw 9.93s | index 1.3m | commit 6.19s | 12857 vec/s
+  Recall: np16=0.77/0.62 np32=0.83/0.68 np64=0.88/0.72 np128=0.92/0.75 np256=0.94/0.76
+Checkpoint 5: 1.00M vec | load 8.65s | raw 9.96s | index 1.4m | commit 7.46s | 11526 vec/s
+  Recall: np16=0.72/0.62 np32=0.80/0.69 np64=0.85/0.73 np128=0.88/0.75 np256=0.92/0.77
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.6K |    10 |   512 |    383 |   488 |   511 |  368.2 |  102.4 |
+|  2 |     11.2K |    12 |   512 |    386 |   488 |   510 |  372.4 |   97.7 |
+|  3 |     16.6K |     3 |   512 |    389 |   490 |   510 |  375.0 |   96.2 |
+|  4 |     22.1K |     2 |   512 |    387 |   489 |   511 |  374.3 |   96.4 |
+|  5 |     27.5K |     1 |   512 |    388 |   489 |   511 |  375.3 |   95.9 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    4.02M |    2.38M |    11.3K |   199.0K |     5.7K |        0 |    3.07M |     5.7K |   199.0K |    11.3K |    7.59M |        0 |    11.3K |     5.7K |    11.3K |     5.7K |
+|  2 |    1.00M |    4.06M |    2.33M |    11.3K |   195.4K |     5.7K |        0 |    3.07M |     5.7K |   195.4K |    11.3K |    7.48M |        0 |    11.3K |     5.7K |    11.3K |     5.7K |
+|  3 |    1.00M |    4.03M |    2.29M |    11.0K |   191.6K |     5.6K |        4 |    3.03M |     5.6K |   191.6K |    11.0K |    7.36M |        0 |    11.0K |     5.6K |    11.0K |     5.6K |
+|  4 |    1.00M |    4.08M |    2.30M |    11.2K |   194.2K |     5.7K |       20 |    3.09M |     5.7K |   194.2K |    11.2K |    7.41M |        0 |    11.2K |     5.7K |    11.2K |     5.7K |
+|  5 |    1.00M |    3.96M |    2.25M |    10.9K |   189.5K |     5.5K |       21 |    2.97M |     5.6K |   189.5K |    11.0K |    7.26M |        0 |    10.9K |     5.6K |    10.9K |     5.6K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|
+|  1 |  667.52s |  357.88s |   10.97s |   10.32s |    8.59s |  564.20s |      0ns |  429.38s |    2.27s |   5.62ms |   1.43ms |   13.20s |      0ns |    5.27s | 290.57ms |    5.04s |    1.74s |       0 |       - |
+|  2 |  913.16s |  444.38s |   11.85s |   15.17s |   12.04s |  837.87s |      0ns |  546.01s |   84.57s | 538.12ms |  140.21s |   13.78s |      0ns |    9.25s | 545.02ms |    5.91s |    2.14s |  887.9K | 157.9µs |
+|  3 | 1032.19s |  455.84s |   11.76s |   16.88s |   13.06s |  966.30s |  34.18ms |  565.33s |  148.01s | 856.82ms |  248.33s |   13.62s |      0ns |   10.90s | 571.51ms |    5.96s |    2.12s |   1.61M | 153.9µs |
+|  4 | 1138.31s |  476.60s |   12.09s |   18.54s |   14.23s | 1115.69s | 528.92ms |  627.09s |  195.73s |    1.21s |  331.92s |   13.77s |      0ns |   12.30s | 626.41ms |    6.23s |    2.20s |   2.21M | 150.4µs |
+|  5 | 1227.82s |  484.18s |   11.75s |   19.59s |   14.64s | 1217.68s |    1.17s |  655.83s |  236.92s |    1.56s |  406.20s |   13.50s |      0ns |   13.31s | 636.31ms |    6.26s |    2.11s |   2.52M | 161.1µs |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |  667.5µs |   88.9µs |    4.6µs |  912.0µs |   43.2µs |  99.54ms |        - |  140.0µs |  400.1µs |     28ns |    126ns |    1.7µs |        - |  465.8µs |   51.3µs |  445.1µs |  307.8µs |
+|  2 |  913.2µs |  109.3µs |    5.1µs |   1.35ms |   61.6µs | 146.12ms |        - |  177.8µs |  14.75ms |    2.8µs |  12.46ms |    1.8µs |        - |  820.8µs |   95.1µs |  525.0µs |  373.4µs |
+|  3 |   1.03ms |  113.2µs |    5.1µs |   1.53ms |   68.2µs | 172.15ms |   8.54ms |  186.4µs |  26.35ms |    4.5µs |  22.49ms |    1.9µs |        - |  987.1µs |  101.7µs |  539.8µs |  377.4µs |
+|  4 |   1.14ms |  116.7µs |    5.3µs |   1.66ms |   73.3µs | 196.67ms |  26.45ms |  203.0µs |  34.38ms |    6.2µs |  29.64ms |    1.9µs |        - |   1.10ms |  110.0µs |  557.0µs |  386.5µs |
+|  5 |   1.23ms |  122.1µs |    5.2µs |   1.79ms |   77.3µs | 219.72ms |  55.50ms |  221.0µs |  42.59ms |    8.3µs |  37.08ms |    1.9µs |        - |   1.22ms |  114.4µs |  572.5µs |  379.6µs |
+
+
+=== Indexing Summary ===
+Total vectors: 5.00M
+Total time: 7.9m
+Overall throughput: 10597 vec/s
+
+=== Recall Summary ===
+|  CP |  Vectors |    Index |   Commit | Queries |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |          |          |          |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|----------|----------|----------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    1.00M |   45.38s |    1.66s |     100 |  0.82  0.69  7.2ms |  0.88  0.74  7.7ms |  0.92  0.78   14ms |  0.94  0.80   26ms |  0.97  0.81   49ms |
+|   2 |    2.00M |     1.0m |    3.36s |     100 |  0.80  0.68  9.5ms |  0.85  0.73  8.9ms |  0.90  0.76   16ms |  0.93  0.78   30ms |  0.95  0.79   57ms |
+|   3 |    3.00M |     1.2m |    4.81s |     100 |  0.72  0.61   10ms |  0.79  0.67  9.6ms |  0.84  0.71   16ms |  0.89  0.73   30ms |  0.92  0.75   58ms |
+|   4 |    4.00M |     1.3m |    6.19s |     100 |  0.77  0.62   11ms |  0.83  0.68   11ms |  0.88  0.72   18ms |  0.92  0.75   34ms |  0.94  0.76   63ms |
+|   5 |    5.00M |     1.4m |    7.46s |     100 |  0.72  0.62   12ms |  0.80  0.69   12ms |  0.85  0.73   20ms |  0.88  0.75   34ms |  0.92  0.77   64ms |
+
+
+
+
+
+
+
+
+
+
+
+
+nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 1 --threads 16 --data-bits 1 --centroid-bits 1 > quantized_spann_1bit_wikipedia.txt 2>&1 &
+[1] 10358
+ubuntu@ip-172-31-75-166:~/chroma$ tail -f quantized_spann_1bit_wikipedia.txt
+nohup: ignoring input
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 32.64s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-6be0c3ba684c8ced)
+Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 1 | Threads: 16 | Data bits: 1 | Centroid bits: 1
+Total vectors to index: 1.00M
+
+Checkpoint 1: 1.00M vec | load 11.70s | raw 11.16s | index 46.60s | commit 1.72s | 21458 vec/s
+  Recall: np16=0.82/0.69 np32=0.88/0.74 np64=0.92/0.77 np128=0.94/0.79 np256=0.97/0.80
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.7K |     4 |   512 |    382 |   487 |   510 |  364.6 |  103.9 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    4.05M |    2.38M |    11.4K |   200.8K |     5.7K |        0 |    3.09M |     5.7K |   200.8K |    11.4K |    7.63M |        0 |    11.4K |     5.7K |    11.4K |     5.7K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|
+|  1 |  687.05s |  367.63s |   11.09s |   10.69s |    8.71s |  563.37s |      0ns |  426.88s |    2.42s |   5.54ms |   1.18ms |   13.39s |      0ns |    5.40s | 301.57ms |    5.28s |    1.88s |       0 |       - |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |  687.1µs |   90.7µs |    4.7µs |  935.5µs |   43.4µs |  98.46ms |        - |  138.0µs |  423.7µs |     27ns |    102ns |    1.8µs |        - |  472.3µs |   52.7µs |  462.1µs |  329.4µs |
+
+
+=== Indexing Summary ===
+Total vectors: 1.00M
+Total time: 1.2m
+Overall throughput: 13817 vec/s
+
+=== Recall Summary ===
+|  CP |  Vectors |    Index |   Commit | Queries |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |          |          |          |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|----------|----------|----------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    1.00M |   46.60s |    1.72s |     100 |  0.82  0.69  7.1ms |  0.88  0.74  7.7ms |  0.92  0.77   14ms |  0.94  0.79   26ms |  0.97  0.80   49ms |
+|   1 |    1.00M |     1.1m |    1.64s |     100 |  0.86  0.73  7.4ms |  0.90  0.76  8.0ms |  0.92  0.78   15ms |  0.95  0.80   27ms |  0.98  0.81   52ms |

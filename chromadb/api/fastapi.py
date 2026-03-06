@@ -460,13 +460,11 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         """Returns the number of embeddings in the database"""
         resp_json = self._make_request(
             "get",
             f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/count",
-            params={"read_level": read_level.value},
         )
         return cast(int, resp_json)
 

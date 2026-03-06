@@ -361,7 +361,6 @@ class RustBindingsAPI(ServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         return self.bindings.count(str(collection_id), tenant, database)
 

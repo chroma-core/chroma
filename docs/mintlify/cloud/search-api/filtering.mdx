@@ -376,6 +376,145 @@ Key::Id.is_in(["id1", "id2"]) | Key::field("featured").eq(true);
 Always use parentheses around each condition when using logical operators. Python's operator precedence may not work as expected without them.
 </Warning>
 
+## Dictionary Syntax (MongoDB-style)
+
+You can also use dictionary syntax instead of K expressions. This is useful when building filters programmatically.
+
+**Supported dictionary operators:**
+- Direct value - Shorthand for equality
+- `$eq` - Equality
+- `$ne` - Not equal
+- `$gt` - Greater than (numeric only)
+- `$gte` - Greater than or equal (numeric only)
+- `$lt` - Less than (numeric only)
+- `$lte` - Less than or equal (numeric only)
+- `$in` - Value in list
+- `$nin` - Value not in list
+- `$contains` - On `#document`: substring search. On metadata fields: array contains value.
+- `$not_contains` - On `#document`: excludes by substring. On metadata fields: array does not contain value.
+- `$regex` - Regex match
+- `$not_regex` - Regex doesn't match
+- `$and` - Logical AND
+- `$or` - Logical OR
+
+<CodeGroup>
+```python Python
+# Direct equality (shorthand)
+{"status": "active"}                        # Same as K("status") == "active"
+
+# Comparison operators
+{"status": {"$eq": "published"}}            # Same as K("status") == "published"
+{"count": {"$ne": 0}}                       # Same as K("count") != 0
+{"price": {"$gt": 100}}                     # Same as K("price") > 100 (numbers only)
+{"rating": {"$gte": 4.5}}                   # Same as K("rating") >= 4.5 (numbers only)
+{"stock": {"$lt": 10}}                      # Same as K("stock") < 10 (numbers only)
+{"discount": {"$lte": 0.25}}                # Same as K("discount") <= 0.25 (numbers only)
+
+# Set membership operators
+{"#id": {"$in": ["id1", "id2"]}}            # Same as K.ID.is_in(["id1", "id2"])
+{"category": {"$in": ["tech", "ai"]}}       # Same as K("category").is_in(["tech", "ai"])
+{"status": {"$nin": ["draft", "deleted"]}}  # Same as K("status").not_in(["draft", "deleted"])
+
+# String operators (K.DOCUMENT only)
+{"#document": {"$contains": "API"}}         # Same as K.DOCUMENT.contains("API")
+# {"email": {"$regex": ".*@example\\.com"}} # Not yet supported - metadata fields
+# {"version": {"$not_regex": "^beta"}}      # Not yet supported - metadata fields
+
+# Array membership operators (metadata fields)
+{"genres": {"$contains": "action"}}         # Same as K("genres").contains("action")
+{"genres": {"$not_contains": "draft"}}      # Same as K("genres").not_contains("draft")
+{"scores": {"$contains": 42}}               # Works with numbers
+
+# Logical operators
+{"$and": [
+    {"status": "published"},
+    {"year": {"$gte": 2020}},
+    {"#document": {"$contains": "AI"}}
+]}                                          # Combines multiple conditions with AND
+
+{"$or": [
+    {"category": "tech"},
+    {"category": "science"},
+    {"featured": True}
+]}                                          # Combines multiple conditions with OR
+
+# Complex nested example
+{
+    "$and": [
+        {"$or": [
+            {"category": "tech"},
+            {"category": "science"}
+        ]},
+        {"status": "published"},
+        {"quality_score": {"$gte": 0.8}}
+    ]
+}
+```
+
+```typescript TypeScript
+// Direct equality (shorthand)
+{ status: "active" }                        // Same as K("status").eq("active")
+
+// Comparison operators
+{ status: { $eq: "published" } }            // Same as K("status").eq("published")
+{ count: { $ne: 0 } }                       // Same as K("count").ne(0)
+{ price: { $gt: 100 } }                     // Same as K("price").gt(100) (numbers only)
+{ rating: { $gte: 4.5 } }                   // Same as K("rating").gte(4.5) (numbers only)
+{ stock: { $lt: 10 } }                      // Same as K("stock").lt(10) (numbers only)
+{ discount: { $lte: 0.25 } }                // Same as K("discount").lte(0.25) (numbers only)
+
+// Set membership operators
+{ "#id": { $in: ["id1", "id2"] } }          // Same as K.ID.isIn(["id1", "id2"])
+{ category: { $in: ["tech", "ai"] } }       // Same as K("category").isIn(["tech", "ai"])
+{ status: { $nin: ["draft", "deleted"] } }  // Same as K("status").notIn(["draft", "deleted"])
+
+// String operators (K.DOCUMENT only)
+{ "#document": { $contains: "API" } }       // Same as K.DOCUMENT.contains("API")
+// { email: { $regex: ".*@example\\.com" } } // Not yet supported - metadata fields
+// { version: { $not_regex: "^beta" } }     // Not yet supported - metadata fields
+
+// Array membership operators (metadata fields)
+{ genres: { $contains: "action" } }         // Same as K("genres").contains("action")
+{ genres: { $not_contains: "draft" } }      // Same as K("genres").notContains("draft")
+{ scores: { $contains: 42 } }               // Works with numbers
+
+// Logical operators
+{
+  $and: [
+    { status: "published" },
+    { year: { $gte: 2020 } },
+    { "#document": { $contains: "AI" } }
+  ]
+}                                           // Combines multiple conditions with AND
+
+{
+  $or: [
+    { category: "tech" },
+    { category: "science" },
+    { featured: true }
+  ]
+}                                           // Combines multiple conditions with OR
+
+// Complex nested example
+{
+  $and: [
+    {
+      $or: [
+        { category: "tech" },
+        { category: "science" }
+      ]
+    },
+    { status: "published" },
+    { quality_score: { $gte: 0.8 } }
+  ]
+}
+```
+</CodeGroup>
+
+<Callout>
+Each dictionary can only contain one field or one logical operator (`$and`/`$or`). For field dictionaries, only one operator is allowed per field.
+</Callout>
+
 ## Common Filtering Patterns
 
 <CodeGroup>

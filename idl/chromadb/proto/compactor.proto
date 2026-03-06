@@ -34,33 +34,8 @@ message ListDeadJobsResponse {
   CollectionIds ids = 1;
 }
 
-message ListInProgressJobsRequest {
-  // Empty
-}
-
-message InProgressJobInfo {
-  string job_id = 1;
-  string database_name = 2;
-  int64 expires_at_epoch_secs = 3;
-}
-
-message ListInProgressJobsResponse {
-  repeated InProgressJobInfo jobs = 1;
-}
-
-message GetCollectionAssignmentRequest {
-  string collection_id = 1;
-}
-
-message GetCollectionAssignmentResponse {
-  string assigned_node = 1;
-  repeated string memberlist = 2;
-}
-
 service Compactor {
   rpc Compact(CompactRequest) returns (CompactResponse) {}
   rpc Rebuild(RebuildRequest) returns (RebuildResponse) {}
   rpc ListDeadJobs(ListDeadJobsRequest) returns (ListDeadJobsResponse) {}
-  rpc ListInProgressJobs(ListInProgressJobsRequest) returns (ListInProgressJobsResponse) {}
-  rpc GetCollectionAssignment(GetCollectionAssignmentRequest) returns (GetCollectionAssignmentResponse) {}
 }

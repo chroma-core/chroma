@@ -403,7 +403,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
             let max_writer = {
                 let mut options =
-                    BlockfileWriterOptions::new(max_prefix.to_string()).ordered_mutations();
+                    BlockfileWriterOptions::new(max_prefix.to_string()).fork(max_uuid);
                 if let Some(cmek) = &cmek {
                     options = options.with_cmek(cmek.clone());
                 }
@@ -425,8 +425,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                 .map_err(|e| MetadataSegmentError::BlockfileOpenError(*e))?;
             let offset_value_writer = {
                 let mut options = BlockfileWriterOptions::new(offset_value_prefix.to_string())
-                    .fork(offset_value_uuid)
-                    .ordered_mutations();
+                    .fork(offset_value_uuid);
                 if let Some(cmek) = &cmek {
                     options = options.with_cmek(cmek.clone());
                 }
@@ -443,8 +442,7 @@ impl<'me> MetadataSegmentWriter<'me> {
             ))
         } else {
             let max_writer = {
-                let mut options =
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
                 if let Some(cmek) = &cmek {
                     options = options.with_cmek(cmek.clone());
                 }
@@ -454,8 +452,7 @@ impl<'me> MetadataSegmentWriter<'me> {
                     .map_err(|e| MetadataSegmentError::BlockfileError(*e))?
             };
             let offset_value_writer = {
-                let mut options =
-                    BlockfileWriterOptions::new(prefix_path.clone()).ordered_mutations();
+                let mut options = BlockfileWriterOptions::new(prefix_path.clone());
                 if let Some(cmek) = &cmek {
                     options = options.with_cmek(cmek.clone());
                 }

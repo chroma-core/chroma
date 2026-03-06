@@ -42,7 +42,6 @@ message KNNProjectionOperator {
 
 message CountPlan {
     ScanOperator scan = 1;
-    ReadLevel read_level = 2;
 }
 
 message CountResult {

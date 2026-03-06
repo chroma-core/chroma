@@ -73,12 +73,9 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             return Ok(ProjectionOutput { records: vec![] });
         }
 
-        let needs_data = self.document || self.embedding || self.metadata;
-
         tracing::trace!(
-            "Running projection on {} offset ids (needs_data={})",
-            input.offset_ids.len(),
-            needs_data,
+            "Running projection on {} offset ids",
+            input.offset_ids.len()
         );
         let record_segment_reader = match Box::pin(RecordSegmentReader::from_segment(
             &input.record_segment,
@@ -93,27 +90,11 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             Err(e) => Err(*e),
         }?;
 
-        let offset_id_set: HashSet<_> = HashSet::from_iter(input.offset_ids.iter().cloned());
-
-        // Prefetch: when needs_data, load full data records (which contain the user ID);
-        // otherwise, load only the lightweight id_to_user_id mapping.
-        if let Some(reader) = &record_segment_reader {
-            if needs_data {
-                reader
-                    .load_id_to_data(offset_id_set.iter().cloned())
-                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to data", num_ids = offset_id_set.len()))
-                    .await;
-            } else {
-                reader
-                    .load_id_to_user_id(offset_id_set.iter().cloned())
-                    .instrument(tracing::trace_span!(parent: Span::current(), "Load ID to user ID", num_ids = offset_id_set.len()))
-                    .await;
-            }
-        }
-
         let materialized_logs = materialize_logs(&record_segment_reader, input.logs.clone(), None)
             .instrument(tracing::trace_span!(parent: Span::current(), "Materialize logs"))
             .await?;
+
+        let offset_id_set: HashSet<_> = HashSet::from_iter(input.offset_ids.iter().cloned());
 
         // Create a hash map that maps an offset id to the corresponding log
         // It contains all records from the logs that should be present in the final result
@@ -126,93 +107,63 @@ impl Operator<ProjectionInput, ProjectionOutput> for Projection {
             })
             .collect();
 
-        let records: Vec<ProjectionRecord> = if needs_data {
-            // Full hydration: use concurrent futures (query result sets are typically bounded)
-            let current_span = Span::current();
-            let futures: Vec<_> = input
-                .offset_ids
-                .iter()
-                .map(|offset_id| {
-                    async {
-                        let (id, document, embedding, metadata) =
-                            match offset_id_to_log_record.get(offset_id) {
-                                Some(log) => {
-                                    let log = log
-                                        .hydrate(record_segment_reader.as_ref())
-                                        .await
-                                        .map_err(ProjectionError::LogMaterializer)?;
-                                    (
-                                        log.get_user_id().to_string(),
-                                        log.merged_document_ref()
-                                            .filter(|_| self.document)
-                                            .map(str::to_string),
-                                        self.embedding
-                                            .then_some(log.merged_embeddings_ref().to_vec()),
-                                        self.metadata
-                                            .then_some(log.merged_metadata())
-                                            .filter(|metadata| !metadata.is_empty()),
-                                    )
-                                }
-                                None => {
-                                    let reader = record_segment_reader
-                                        .as_ref()
-                                        .ok_or(ProjectionError::RecordSegmentUninitialized)?;
-                                    let record =
-                                        reader.get_data_for_offset_id(*offset_id).await?.ok_or(
-                                            ProjectionError::RecordSegmentPhantomRecord(*offset_id),
-                                        )?;
-                                    (
-                                        record.id.to_string(),
-                                        record
-                                            .document
-                                            .filter(|_| self.document)
-                                            .map(str::to_string),
-                                        self.embedding.then_some(record.embedding.to_vec()),
-                                        record.metadata.filter(|_| self.metadata),
-                                    )
-                                }
-                            };
+        let current_span = Span::current();
+        let futures: Vec<_> = input
+            .offset_ids
+            .iter()
+            .map(|offset_id| {
+                async {
+                    let record = match offset_id_to_log_record.get(offset_id) {
+                        // The offset id is in the log
+                        Some(log) => {
+                            let log = log
+                                .hydrate(record_segment_reader.as_ref())
+                                .await
+                                .map_err(ProjectionError::LogMaterializer)?;
 
-                        Ok::<_, ProjectionError>(ProjectionRecord {
-                            id,
-                            document,
-                            embedding,
-                            metadata,
-                        })
-                    }
-                    .instrument(current_span.clone())
-                })
-                .collect();
-            try_join_all(futures).await?
-        } else {
-            // Lightweight ID-only path (e.g. delete-where): iterate sequentially
-            // instead of spawning a future per offset ID. Blocks are already
-            // prefetched above, so each get_user_id_for_offset_id hits the cache
-            // and resolves without I/O.
-            let mut records = Vec::with_capacity(input.offset_ids.len());
-            for offset_id in &input.offset_ids {
-                let id = match offset_id_to_log_record.get(offset_id) {
-                    Some(log) => log
-                        .get_user_id(record_segment_reader.as_ref())
-                        .await
-                        .map_err(ProjectionError::LogMaterializer)?,
-                    None => match &record_segment_reader {
-                        Some(reader) => reader
-                            .get_user_id_for_offset_id(*offset_id)
-                            .await?
-                            .to_string(),
-                        None => return Err(ProjectionError::RecordSegmentUninitialized),
-                    },
-                };
-                records.push(ProjectionRecord {
-                    id,
-                    document: None,
-                    embedding: None,
-                    metadata: None,
-                });
-            }
-            records
-        };
+                            ProjectionRecord {
+                                id: log.get_user_id().to_string(),
+                                document: log
+                                    .merged_document_ref()
+                                    .filter(|_| self.document)
+                                    .map(str::to_string),
+                                embedding: self
+                                    .embedding
+                                    .then_some(log.merged_embeddings_ref().to_vec()),
+                                metadata: self
+                                    .metadata
+                                    .then_some(log.merged_metadata())
+                                    .filter(|metadata| !metadata.is_empty()),
+                            }
+                        }
+                        // The offset id is in the record segment
+                        None => {
+                            if let Some(reader) = &record_segment_reader {
+                                let record =
+                                    reader.get_data_for_offset_id(*offset_id).await?.ok_or(
+                                        ProjectionError::RecordSegmentPhantomRecord(*offset_id),
+                                    )?;
+                                ProjectionRecord {
+                                    id: record.id.to_string(),
+                                    document: record
+                                        .document
+                                        .filter(|_| self.document)
+                                        .map(str::to_string),
+                                    embedding: self.embedding.then_some(record.embedding.to_vec()),
+                                    metadata: record.metadata.filter(|_| self.metadata),
+                                }
+                            } else {
+                                return Err(ProjectionError::RecordSegmentUninitialized);
+                            }
+                        }
+                    };
+                    Ok::<_, ProjectionError>(record)
+                }
+                .instrument(current_span.clone())
+            })
+            .collect();
+
+        let records: Vec<ProjectionRecord> = try_join_all(futures).await?;
 
         Ok(ProjectionOutput { records })
     }

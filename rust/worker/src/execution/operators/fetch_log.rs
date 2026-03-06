@@ -7,21 +7,8 @@ use chroma_log::Log;
 use chroma_system::{Operator, OperatorType};
 use chroma_types::{Chunk, CollectionUuid, DatabaseName, LogRecord};
 use thiserror::Error;
-use tracing::Instrument;
 
-use crate::execution::operators::fragment_fetch::{
-    FragmentFetchError, FragmentFetcher, FragmentPointer,
-};
-
-/// The `FetchLogOperator` fetches logs from the log service.
-///
-/// Two strategies are supported, selected by `fragment_fetcher`:
-///
-/// 1. **gRPC pull** (default, when `fragment_fetcher` is `None`): `ScoutLogs` +
-///    chunked concurrent `PullLogs` calls.
-/// 2. **Pointer fetch** (when `fragment_fetcher` is `Some`):
-///    `ScoutLogFragments` returns fragment pointers, then the embedded
-///    `FragmentFetcher` reads parquet data directly from object storage.
+/// The `FetchLogOperator` fetches logs from the log service
 ///
 /// # Parameters
 /// - `log_client`: The log service reader
@@ -30,7 +17,6 @@ use crate::execution::operators::fragment_fetch::{
 /// - `maximum_fetch_count`: The maximum number of logs to fetch in total
 /// - `collection_uuid`: The uuid of the collection where the fetched logs should belong
 /// - `fetch_log_concurrency`: The maximum number of concurrent log fetch requests
-/// - `fragment_fetcher`: When `Some`, use ScoutLogFragments + direct storage reads
 ///
 /// # Inputs
 /// - No input is required
@@ -52,7 +38,6 @@ pub struct FetchLogOperator {
     pub tenant: String,
     pub database_name: DatabaseName,
     pub fetch_log_concurrency: usize,
-    pub fragment_fetcher: Option<Arc<FragmentFetcher>>,
 }
 
 type FetchLogInput = ();
@@ -65,8 +50,6 @@ pub enum FetchLogError {
     PullLog(#[from] Box<dyn ChromaError>),
     #[error("Error when capturing system time: {0}")]
     SystemTime(#[from] SystemTimeError),
-    #[error("Error dereferencing fragment pointer: {0}")]
-    FragmentFetch(#[from] FragmentFetchError),
 }
 
 impl ChromaError for FetchLogError {
@@ -74,15 +57,28 @@ impl ChromaError for FetchLogError {
         match self {
             FetchLogError::PullLog(e) => e.code(),
             FetchLogError::SystemTime(_) => ErrorCodes::Internal,
-            FetchLogError::FragmentFetch(e) => e.code(),
         }
     }
 }
 
-impl FetchLogOperator {
-    /// Fetch logs via the existing ScoutLogs + PullLogs gRPC path.
-    #[tracing::instrument(skip(self))]
-    async fn run_grpc_pull(&self) -> Result<FetchLogOutput, FetchLogError> {
+#[async_trait]
+impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
+    type Error = FetchLogError;
+
+    fn get_type(&self) -> OperatorType {
+        OperatorType::IO
+    }
+
+    async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
+        tracing::debug!(
+            batch_size = self.batch_size,
+            start_log_offset_id = self.start_log_offset_id,
+            maximum_fetch_count = self.maximum_fetch_count,
+            collection_uuid = ?self.collection_uuid.0,
+            "[{}]",
+            self.get_name(),
+        );
+
         let mut log_client = self.log_client.clone();
         let mut limit_offset = log_client
             .scout_logs(
@@ -147,76 +143,6 @@ impl FetchLogOperator {
         fetched.sort_by_key(|f| f.log_offset);
         Ok(Chunk::new(fetched.into()))
     }
-
-    /// Fetch logs via ScoutLogFragments + direct object storage reads.
-    #[tracing::instrument(skip(self))]
-    async fn run_pointer_fetch(&self) -> Result<FetchLogOutput, FetchLogError> {
-        let fragment_fetcher =
-            self.fragment_fetcher
-                .as_ref()
-                .ok_or(FetchLogError::FragmentFetch(
-                    FragmentFetchError::NotConfigured,
-                ))?;
-
-        let mut log_client = self.log_client.clone();
-        let response = log_client
-            .scout_log_fragments(
-                self.database_name.clone(),
-                self.collection_uuid,
-                self.start_log_offset_id,
-            )
-            .instrument(
-                tracing::info_span!("scout_log_fragments", collection_id = %self.collection_uuid, start_log_offset = self.start_log_offset_id),
-            )
-            .await?;
-
-        let mut limit_offset = response.first_uninserted_record_offset;
-        if let Some(maximum_fetch_count) = self.maximum_fetch_count {
-            limit_offset = std::cmp::min(
-                limit_offset,
-                self.start_log_offset_id + maximum_fetch_count as u64,
-            );
-        }
-
-        let pointers: Vec<FragmentPointer> = response
-            .fragments
-            .into_iter()
-            .map(FragmentPointer::from)
-            .collect();
-
-        let fetched = fragment_fetcher
-            .fetch_records(&pointers, self.start_log_offset_id, limit_offset)
-            .await?;
-
-        Ok(Chunk::new(fetched.into()))
-    }
-}
-
-#[async_trait]
-impl Operator<FetchLogInput, FetchLogOutput> for FetchLogOperator {
-    type Error = FetchLogError;
-
-    fn get_type(&self) -> OperatorType {
-        OperatorType::IO
-    }
-
-    async fn run(&self, _: &FetchLogInput) -> Result<FetchLogOutput, FetchLogError> {
-        tracing::debug!(
-            batch_size = self.batch_size,
-            start_log_offset_id = self.start_log_offset_id,
-            maximum_fetch_count = self.maximum_fetch_count,
-            collection_uuid = ?self.collection_uuid.0,
-            use_fragment_fetch = self.fragment_fetcher.is_some(),
-            "[{}]",
-            self.get_name(),
-        );
-
-        if self.fragment_fetcher.is_some() {
-            self.run_pointer_fetch().await
-        } else {
-            self.run_grpc_pull().await
-        }
-    }
 }
 
 #[cfg(test)]
@@ -265,7 +191,6 @@ mod tests {
             tenant: "test-tenant".to_string(),
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
-            fragment_fetcher: None,
         };
 
         let logs = fetch_log_operator
@@ -293,7 +218,6 @@ mod tests {
             tenant: "test-tenant".to_string(),
             database_name: chroma_types::DatabaseName::new("test-db").unwrap(),
             fetch_log_concurrency: 10,
-            fragment_fetcher: None,
         };
 
         let logs = fetch_log_operator

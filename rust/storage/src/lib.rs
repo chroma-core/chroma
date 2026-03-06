@@ -267,7 +267,7 @@ impl Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Option<ETag>), StorageError>
     where
-        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + Clone + 'static,
+        FetchFn: FnOnce(Result<Arc<Vec<u8>>, StorageError>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -302,8 +302,7 @@ impl Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
     where
-        FetchFn:
-            FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + Clone + 'static,
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {
@@ -328,8 +327,7 @@ impl Storage {
         fetch_fn: FetchFn,
     ) -> Result<(FetchReturn, Vec<Option<ETag>>), StorageError>
     where
-        FetchFn:
-            FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + Clone + 'static,
+        FetchFn: FnOnce(Vec<Result<Arc<Vec<u8>>, StorageError>>) -> FetchFut + Send + 'static,
         FetchFut: Future<Output = Result<FetchReturn, StorageError>> + Send + 'static,
         FetchReturn: Clone + Any + Sync + Send,
     {

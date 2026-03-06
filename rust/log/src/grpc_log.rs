@@ -31,14 +31,6 @@ use uuid::Uuid;
 
 use crate::GarbageCollectError;
 
-/// The gRPC metadata key carrying the backoff reason.
-const BACKOFF_REASON_MD_KEY: &str = "backoff-reason";
-
-/// Extract the `backoff-reason` value from a `tonic::Status` metadata map.
-fn backoff_reason_from_status(status: &tonic::Status) -> Option<&str> {
-    status.metadata().get(BACKOFF_REASON_MD_KEY)?.to_str().ok()
-}
-
 //////////////// Errors ////////////////
 
 #[derive(Error, Debug)]
@@ -67,34 +59,6 @@ impl ChromaError for GrpcPullLogsError {
     }
 }
 
-/// Errors from the ScoutLogFragments RPC.
-#[derive(Error, Debug)]
-pub enum GrpcScoutLogFragmentsError {
-    #[error("Failed to scout log fragments: {0}")]
-    FailedToScoutLogFragments(#[from] tonic::Status),
-    #[error(transparent)]
-    ClientAssignerError(#[from] ClientAssignmentError),
-}
-
-impl ChromaError for GrpcScoutLogFragmentsError {
-    fn code(&self) -> ErrorCodes {
-        match self {
-            GrpcScoutLogFragmentsError::FailedToScoutLogFragments(err) => err.code().into(),
-            GrpcScoutLogFragmentsError::ClientAssignerError(e) => e.code(),
-        }
-    }
-}
-
-/// The response from ScoutLogFragments: the upper bound offset and the
-/// fragment pointers for the requested window.
-#[derive(Clone, Debug)]
-pub struct ScoutLogFragmentsResponse {
-    /// The offset of the next record to be inserted.
-    pub first_uninserted_record_offset: u64,
-    /// Fragment pointers covering the requested log window.
-    pub fragments: Vec<chroma_proto::LogFragmentPointer>,
-}
-
 #[derive(Error, Debug)]
 pub enum GrpcPushLogsError {
     #[error("Please backoff exponentially and retry")]
@@ -114,8 +78,8 @@ pub enum GrpcPushLogsError {
 impl ChromaError for GrpcPushLogsError {
     fn code(&self) -> ErrorCodes {
         match self {
-            GrpcPushLogsError::Backoff => ErrorCodes::ResourceExhausted,
-            GrpcPushLogsError::BackoffCompaction => ErrorCodes::ResourceExhausted,
+            GrpcPushLogsError::Backoff => ErrorCodes::AlreadyExists,
+            GrpcPushLogsError::BackoffCompaction => ErrorCodes::AlreadyExists,
             GrpcPushLogsError::FailedToPushLogs(_) => ErrorCodes::Internal,
             GrpcPushLogsError::ConversionError(_) => ErrorCodes::Internal,
             GrpcPushLogsError::Sealed => ErrorCodes::FailedPrecondition,
@@ -368,29 +332,6 @@ impl GrpcLog {
         Ok(scout.first_uninserted_record_offset as u64)
     }
 
-    /// Returns fragment pointers for the requested log window so that the
-    /// caller can read fragment data directly from object storage.
-    pub(super) async fn scout_log_fragments(
-        &mut self,
-        database_name: DatabaseName,
-        collection_id: CollectionUuid,
-        start_from: u64,
-    ) -> Result<ScoutLogFragmentsResponse, GrpcScoutLogFragmentsError> {
-        let mut client = self.client_for(collection_id)?;
-        let response = client
-            .scout_log_fragments(chroma_proto::ScoutLogFragmentsRequest {
-                collection_id: collection_id.0.to_string(),
-                database_name: database_name.into_string(),
-                start_from_offset: start_from,
-            })
-            .await?;
-        let inner = response.into_inner();
-        Ok(ScoutLogFragmentsResponse {
-            first_uninserted_record_offset: inner.first_uninserted_record_offset,
-            fragments: inner.fragments,
-        })
-    }
-
     pub(super) async fn read(
         &mut self,
         database_name: DatabaseName,
@@ -412,7 +353,7 @@ impl GrpcLog {
         match response {
             Ok(response) => {
                 let logs = response.into_inner().records;
-                let mut result = Vec::with_capacity(logs.len());
+                let mut result = Vec::new();
                 for log_record_proto in logs {
                     let log_record = log_record_proto.try_into();
                     match log_record {
@@ -468,16 +409,18 @@ impl GrpcLog {
             .client_for(collection_id)?
             .push_logs(request)
             .await
-            .map_err(|err| match backoff_reason_from_status(&err) {
-                Some("compaction") => {
-                    tracing::event!(Level::INFO, name = "backoff", reason = "compaction", error =? err);
-                    GrpcPushLogsError::BackoffCompaction
-                }
-                Some(reason) => {
-                    tracing::event!(Level::INFO, name = "backoff", reason, error =? err);
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable.into()
+                    || err.code() == ErrorCodes::AlreadyExists.into()
+                {
+                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
                     GrpcPushLogsError::Backoff
+                } else if err.code() == ErrorCodes::ResourceExhausted.into() {
+                    tracing::event!(Level::INFO, name = "backoff reason", error =? err);
+                    GrpcPushLogsError::BackoffCompaction
+                } else {
+                    err.into()
                 }
-                None => err.into(),
             })?;
         let resp = resp.into_inner();
         if resp.log_is_sealed {

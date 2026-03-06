@@ -7,7 +7,7 @@ use backon::{ExponentialBuilder, Retryable};
 use chroma_api_types::HeartbeatResponse;
 use chroma_config::{registry, Configurable};
 use chroma_error::{ChromaError, ErrorCodes};
-use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log, PushLogsError};
+use chroma_log::{LocalCompactionManager, LocalCompactionManagerConfig, Log};
 use chroma_metering::{
     CollectionForkContext, CollectionReadContext, CollectionWriteContext, Enterable,
     ExternalCollectionReadContext, FinishRequest, FtsQueryLength, LatestCollectionLogicalSizeBytes,
@@ -864,7 +864,7 @@ impl ServiceBasedFrontend {
         collection_id: CollectionUuid,
         records: Vec<OperationRecord>,
         cmek: Option<Cmek>,
-    ) -> Result<(), PushLogsError> {
+    ) -> Result<(), Box<dyn ChromaError>> {
         self.log_client
             .push_logs(tenant_id, database_name, collection_id, records, cmek)
             .await
@@ -927,7 +927,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e, PushLogsError::Backoff))
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -963,10 +963,13 @@ impl ServiceBasedFrontend {
                 }
                 Ok(AddCollectionRecordsResponse {})
             }
-            Err(e) => match e {
-                PushLogsError::Backoff => Err(AddCollectionRecordsError::Backoff),
-                other => Err(AddCollectionRecordsError::Other(Box::new(other) as _)),
-            },
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(AddCollectionRecordsError::Backoff)
+                } else {
+                    Err(AddCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
         }
     }
 
@@ -1031,7 +1034,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e, PushLogsError::Backoff))
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1067,10 +1070,13 @@ impl ServiceBasedFrontend {
                 }
                 Ok(UpdateCollectionRecordsResponse {})
             }
-            Err(e) => match e {
-                PushLogsError::Backoff => Err(UpdateCollectionRecordsError::Backoff),
-                other => Err(UpdateCollectionRecordsError::Other(Box::new(other) as _)),
-            },
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(UpdateCollectionRecordsError::Backoff)
+                } else {
+                    Err(UpdateCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
         }
     }
 
@@ -1137,7 +1143,7 @@ impl ServiceBasedFrontend {
         };
         let res = add_to_retry
             .retry(self.retries_builder)
-            .when(|e| matches!(e, PushLogsError::Backoff))
+            .when(|e| matches!(e.code(), ErrorCodes::AlreadyExists))
             .notify(|_, _| {
                 let retried = retries.fetch_add(1, Ordering::Relaxed);
                 if retried > 0 {
@@ -1173,10 +1179,13 @@ impl ServiceBasedFrontend {
                 }
                 Ok(UpsertCollectionRecordsResponse {})
             }
-            Err(e) => match e {
-                PushLogsError::Backoff => Err(UpsertCollectionRecordsError::Backoff),
-                other => Err(UpsertCollectionRecordsError::Other(Box::new(other) as _)),
-            },
+            Err(e) => {
+                if e.code() == ErrorCodes::AlreadyExists {
+                    Err(UpsertCollectionRecordsError::Backoff)
+                } else {
+                    Err(UpsertCollectionRecordsError::Other(Box::new(e) as _))
+                }
+            }
         }
     }
 
@@ -1325,9 +1334,12 @@ impl ServiceBasedFrontend {
                 cmek,
             )
             .await
-            .map_err(|err| match err {
-                PushLogsError::Backoff => DeleteCollectionRecordsError::Backoff,
-                other => DeleteCollectionRecordsError::Internal(Box::new(other)),
+            .map_err(|err| {
+                if err.code() == ErrorCodes::Unavailable {
+                    DeleteCollectionRecordsError::Backoff
+                } else {
+                    DeleteCollectionRecordsError::Internal(Box::new(err) as _)
+                }
             })?;
 
             // Attach metadata to the write context
@@ -1393,7 +1405,8 @@ impl ServiceBasedFrontend {
         let res = Box::pin(
             delete_to_retry
                 .retry(self.collections_with_segments_provider.get_retry_backoff())
-                .when(|e| matches!(e, DeleteCollectionRecordsError::Backoff))
+                // NOTE: Transport level errors will manifest as unknown errors, and they should also be retried
+                .when(|e| matches!(e.code(), ErrorCodes::NotFound | ErrorCodes::Unknown))
                 .notify(|_, _| {
                     let retried = retries.fetch_add(1, Ordering::Relaxed);
                     if retried > 0 {
@@ -1416,7 +1429,6 @@ impl ServiceBasedFrontend {
         CountRequest {
             database_name,
             collection_id,
-            read_level,
             ..
         }: CountRequest,
     ) -> Result<CountResponse, QueryError> {
@@ -1439,7 +1451,6 @@ impl ServiceBasedFrontend {
                 scan: Scan {
                     collection_and_segments,
                 },
-                read_level,
             })
             .await?;
         let return_bytes = count_result.size_bytes();
@@ -2203,8 +2214,7 @@ impl ServiceBasedFrontend {
 
         let cmek = collection.schema.and_then(|schema| schema.cmek.clone());
         self.retryable_push_logs(&tenant, database_name, collection_id, logs, cmek)
-            .await
-            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+            .await?;
         Ok(())
     }
 

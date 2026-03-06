@@ -85,24 +85,17 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             database=self.database,
         )
 
-    async def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
-        """Return the number of records in the collection.
-
-        Args:
-            read_level: Controls whether to read from the write-ahead log (WAL):
-                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
-                  All committed writes will be visible.
-                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
-                  Faster, but recent writes that haven't been compacted may not be visible.
+    async def count(self) -> int:
+        """The total number of embeddings added to the database
 
         Returns:
             int: The total number of embeddings added to the database
+
         """
         return await self._client._count(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
-            read_level=read_level,
         )
 
     async def get_indexing_status(self) -> IndexingStatus:

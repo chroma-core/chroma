@@ -106,10 +106,6 @@ pub enum LogMaterializerError {
     EmbeddingMaterialization,
     #[error("Error reading record segment {0}")]
     RecordSegment(#[from] Box<dyn ChromaError>),
-    #[error("Log index {0} out of bounds when resolving user ID")]
-    LogIndexOutOfBounds(usize),
-    #[error("Record segment reader required but not available")]
-    RecordSegmentReaderRequired,
 }
 
 impl ChromaError for LogMaterializerError {
@@ -118,8 +114,6 @@ impl ChromaError for LogMaterializerError {
             LogMaterializerError::MetadataMaterialization(e) => e.code(),
             LogMaterializerError::EmbeddingMaterialization => ErrorCodes::Internal,
             LogMaterializerError::RecordSegment(e) => e.code(),
-            LogMaterializerError::LogIndexOutOfBounds(_) => ErrorCodes::Internal,
-            LogMaterializerError::RecordSegmentReaderRequired => ErrorCodes::Internal,
         }
     }
 }
@@ -265,32 +259,6 @@ impl<'log_data> BorrowedMaterializedLogRecord<'log_data> {
                     .as_ref()?,
             ),
             None => None,
-        }
-    }
-
-    /// Get the user id for this record without hydrating the full data record.
-    /// When the user id is available in the log, it is returned directly (no I/O).
-    /// Otherwise, it falls back to the lightweight id_to_user_id blockfile lookup.
-    pub async fn get_user_id(
-        &self,
-        record_segment_reader: Option<&RecordSegmentReader<'_>>,
-    ) -> Result<String, LogMaterializerError> {
-        if let Some(id) = self.materialized_log_record.user_id_at_log_index {
-            return Ok(self
-                .logs
-                .get(id)
-                .ok_or(LogMaterializerError::LogIndexOutOfBounds(id))?
-                .record
-                .id
-                .clone());
-        }
-
-        match record_segment_reader {
-            Some(reader) => Ok(reader
-                .get_user_id_for_offset_id(self.materialized_log_record.offset_id)
-                .await?
-                .to_string()),
-            None => Err(LogMaterializerError::RecordSegmentReaderRequired),
         }
     }
 

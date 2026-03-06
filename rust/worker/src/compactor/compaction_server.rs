@@ -3,11 +3,9 @@ use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
-    CollectionIds, CompactRequest, CompactResponse, GetCollectionAssignmentRequest,
-    GetCollectionAssignmentResponse, InProgressJobInfo, ListDeadJobsRequest, ListDeadJobsResponse,
-    ListInProgressJobsRequest, ListInProgressJobsResponse, RebuildRequest, RebuildResponse,
+    CollectionIds, CompactRequest, CompactResponse, ListDeadJobsRequest, ListDeadJobsResponse,
+    RebuildRequest, RebuildResponse,
 };
-use std::str::FromStr;
 use tokio::{
     signal::unix::{signal, SignalKind},
     sync::oneshot,
@@ -15,10 +13,7 @@ use tokio::{
 use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
-use crate::compactor::{
-    GetCollectionAssignmentMessage, ListDeadJobsMessage, ListInProgressJobsMessage,
-    OneOffCompactMessage, RegisterOnReadySignal,
-};
+use crate::compactor::{ListDeadJobsMessage, OneOffCompactMessage, RegisterOnReadySignal};
 
 use super::{CompactionManager, RebuildMessage};
 
@@ -143,68 +138,6 @@ impl Compactor for CompactionServer {
             ids: Some(CollectionIds {
                 ids: dead_jobs.iter().map(ToString::to_string).collect(),
             }),
-        }))
-    }
-
-    async fn list_in_progress_jobs(
-        &self,
-        _request: Request<ListInProgressJobsRequest>,
-    ) -> Result<Response<ListInProgressJobsResponse>, Status> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-
-        self.manager
-            .receiver()
-            .send(ListInProgressJobsMessage { response_tx }, None)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let in_progress_jobs = response_rx
-            .await
-            .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?;
-
-        Ok(Response::new(ListInProgressJobsResponse {
-            jobs: in_progress_jobs
-                .into_iter()
-                .map(|entry| InProgressJobInfo {
-                    job_id: entry.job_id.to_string(),
-                    database_name: entry.database_name,
-                    expires_at_epoch_secs: entry.expires_at_epoch_secs,
-                })
-                .collect(),
-        }))
-    }
-
-    async fn get_collection_assignment(
-        &self,
-        request: Request<GetCollectionAssignmentRequest>,
-    ) -> Result<Response<GetCollectionAssignmentResponse>, Status> {
-        let req = request.into_inner();
-
-        // Parse collection ID
-        let collection_id = chroma_types::CollectionUuid::from_str(&req.collection_id)
-            .map_err(|e| Status::invalid_argument(format!("Invalid collection ID: {}", e)))?;
-
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-
-        self.manager
-            .receiver()
-            .send(
-                GetCollectionAssignmentMessage {
-                    collection_id,
-                    response_tx,
-                },
-                None,
-            )
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let assignment_info = response_rx
-            .await
-            .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?;
-
-        Ok(Response::new(GetCollectionAssignmentResponse {
-            assigned_node: assignment_info.assigned_node,
-            memberlist: assignment_info.memberlist,
         }))
     }
 }

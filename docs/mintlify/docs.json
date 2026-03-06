@@ -124,7 +124,6 @@
             "group": "Sync",
             "pages": [
               "cloud/sync/overview",
-              "cloud/sync/s3",
               "cloud/sync/github",
               "cloud/sync/web"
             ]
@@ -274,7 +273,7 @@
               {
                 "group": "Chroma Core API",
                 "openapi": {
-                  "source": "https://api.trychroma.com/openapi.json",
+                  "source": "openapi.json",
                   "directory": "/reference/chroma-api"
                 },
                 "pages": [
@@ -340,7 +339,7 @@
               {
                 "group": "Chroma Cloud API",
                 "openapi": {
-                  "source": "https://api.trychroma.com/openapi.json",
+                  "source": "openapi.json",
                   "directory": "api-reference"
                 },
                 "pages": [
@@ -366,24 +365,12 @@
                   "source": "sync.openapi.json",
                   "directory": "reference/sync-api"
                 }
-              },
-              {
-                "group": "Chroma Cloud Embeddings API",
-                "openapi": {
-                  "source": "https://embed.trychroma.com/openapi.json",
-                  "directory": "reference/embeddings-api"
-                },
-                "pages": [
-                  "POST /embed",
-                  "POST /embed_sparse"
-                ]
               }
             ]
           },
           {
-            "group": "Dictionary Syntax",
+            "group": "Other",
             "pages": [
-              "reference/search",
               "reference/where-filter"
             ]
           }

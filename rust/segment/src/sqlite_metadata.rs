@@ -967,7 +967,6 @@ impl SqliteMetadataReader {
             scan: Scan {
                 collection_and_segments,
             },
-            ..
         }: Count,
     ) -> Result<CountResult, SqliteMetadataError> {
         let (sql, values) = Query::select()
@@ -1158,7 +1157,7 @@ mod tests {
     use chroma_sqlite::db::test_utils::get_new_sqlite_db;
     use chroma_types::{
         operator::{Filter, Limit, Projection, Scan},
-        plan::{Count, Get, ReadLevel},
+        plan::{Count, Get},
         strategies::{any_collection_data_and_where_filter, TestCollectionData},
         Chunk, CollectionAndSegments, ContainsOperator, DocumentOperator, LogRecord,
         MetadataComparison, MetadataExpression, MetadataValue, Operation, OperationRecord,
@@ -1199,7 +1198,7 @@ mod tests {
             let sqlite_seg_reader = SqliteMetadataReader {
                 db: sqlite_seg_writer.db
             };
-            let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone() }, read_level: ReadLevel::default() };
+            let plan = Count { scan: Scan { collection_and_segments: test_data.collection_and_segments.clone() }};
             let ref_count = ref_seg.count(plan.clone()).expect("Count should not fail").count;
             let sqlite_count = runtime.block_on(sqlite_seg_reader.count(plan)).expect("Count should not fail").count;
             assert_eq!(sqlite_count, ref_count);

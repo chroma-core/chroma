@@ -39,9 +39,9 @@ impl SchedulerMetrics {
     }
 }
 
-pub(crate) struct InProgressJob {
-    pub(crate) expires_at: SystemTime,
-    pub(crate) database_name: DatabaseName,
+struct InProgressJob {
+    expires_at: SystemTime,
+    database_name: DatabaseName,
 }
 
 impl InProgressJob {
@@ -507,23 +507,12 @@ impl Scheduler {
         self.job_queue.iter()
     }
 
-    pub(crate) fn get_in_progress_jobs(&self) -> Vec<(JobId, &InProgressJob)> {
-        self.in_progress_jobs
-            .iter()
-            .map(|(id, job)| (*id, job))
-            .collect()
-    }
-
     pub(crate) fn set_memberlist(&mut self, memberlist: Memberlist) {
         self.memberlist = Some(memberlist);
     }
 
     pub(crate) fn has_memberlist(&self) -> bool {
         self.memberlist.is_some()
-    }
-
-    pub(crate) fn get_assignment_policy(&mut self) -> &mut Box<dyn AssignmentPolicy> {
-        &mut self.assignment_policy
     }
 }
 

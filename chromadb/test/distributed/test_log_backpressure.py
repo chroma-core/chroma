@@ -20,6 +20,7 @@ from chromadb.test.utils.wait_for_version_increase import wait_for_version_incre
 RECORDS = 2000000
 BATCH_SIZE = 100
 
+
 @skip_if_not_cluster()
 def test_log_backpressure(
     client: ClientAPI,
@@ -35,7 +36,7 @@ def test_log_backpressure(
 
     time.sleep(1)
 
-    print('backpressuring for', collection.id)
+    print("backpressuring for", collection.id)
 
     excepted = False
     # Add RECORDS records, where each embedding has 3 dimensions randomly generated between 0 and 1
@@ -48,7 +49,7 @@ def test_log_backpressure(
             collection.add(ids=ids, embeddings=embeddings)
         except Exception as x:
             print(f"Caught exception:\n{x}")
-            if 'log needs compaction before accepting more writes; please backoff exponentially and retry' in str(x):
+            if "Backoff and retry" in str(x):
                 excepted = True
                 break
     assert excepted, "Expected an exception to be thrown."

@@ -183,7 +183,7 @@ pub async fn compaction_service_entrypoint() {
 
 pub async fn compaction_client_entrypoint() {
     let client = CompactionClient::parse();
-    if let Err(e) = client.run(&mut std::io::stdout()).await {
+    if let Err(e) = client.run().await {
         eprintln!("{e}");
     }
 }

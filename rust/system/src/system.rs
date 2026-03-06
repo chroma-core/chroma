@@ -37,10 +37,9 @@ impl System {
         C: Component + Send + 'static,
     {
         let (tx, rx) = tokio::sync::mpsc::channel(component.queue_size());
-        let queue_capacity = rx.max_capacity();
         let sender: ComponentSender<C> = ComponentSender::new(tx);
         let cancel_token = tokio_util::sync::CancellationToken::new();
-        let (mut executor, runtime_stats) = ComponentExecutor::new(
+        let mut executor = ComponentExecutor::new(
             sender.clone(),
             cancel_token.clone(),
             component,
@@ -58,9 +57,6 @@ impl System {
                     cancel_token,
                     Some(ConsumableJoinHandle::from_tokio_task_handle(join_handle)),
                     sender,
-                    C::runtime(),
-                    queue_capacity,
-                    runtime_stats,
                 )
             }
             ComponentRuntime::Dedicated => {
@@ -74,9 +70,6 @@ impl System {
                     cancel_token,
                     Some(ConsumableJoinHandle::from_thread_handle(join_handle)),
                     sender,
-                    C::runtime(),
-                    queue_capacity,
-                    runtime_stats,
                 )
             }
         }
