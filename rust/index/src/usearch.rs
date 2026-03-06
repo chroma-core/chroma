@@ -19,7 +19,8 @@ use usearch::{IndexOptions, MetricKind, ScalarKind};
 use uuid::Uuid;
 
 use crate::{
-    quantization::Code, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    quantization::Code,
+    IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 /// Buffer for index resizing
@@ -117,7 +118,7 @@ impl USearchIndex {
     ) {
         let c_norm = f32::dot(center, center).unwrap_or(0.0).sqrt() as f32;
         let dim = center.len();
-        let code_len = Code::<&[u8]>::size(dim);
+        let code_len = Code::<4, &[u8]>::size(dim);
 
         index.change_metric::<i8>(Box::new(move |a_ptr, b_ptr| {
             // SAFETY: usearch passes valid pointers of `code_len` i8 elements
@@ -125,9 +126,7 @@ impl USearchIndex {
             let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
-            let code_a = Code::<_>::new(a);
-            let code_b = Code::<_>::new(b);
-            code_a.distance_code(&distance_function, &code_b, c_norm, dim)
+            Code::<4, _>::new(a).distance_code(&Code::<4, _>::new(b), &distance_function, c_norm, dim)
         }));
     }
 
@@ -180,7 +179,7 @@ impl USearchIndex {
                         got: center.len(),
                     });
                 }
-                (ScalarKind::I8, Code::<&[u8]>::size(config.dimensions))
+                (ScalarKind::I8, Code::<4, &[u8]>::size(config.dimensions))
             }
             None => (ScalarKind::F32, config.dimensions),
         };
@@ -205,7 +204,11 @@ impl USearchIndex {
             usearch::Index::new(&options).map_err(|e| USearchError::Index(e.to_string()))?;
 
         if let Some(center) = &config.quantization_center {
-            Self::apply_quantization_metric(&mut index, center, config.distance_function.clone());
+            Self::apply_quantization_metric(
+                &mut index,
+                center,
+                config.distance_function.clone(),
+            );
         }
 
         Ok(Self {
@@ -232,7 +235,7 @@ impl VectorIndex for USearchIndex {
             .config
             .quantization_center
             .as_ref()
-            .map(|center| Code::<_>::quantize(vector, center));
+            .map(|center| Code::<4>::quantize(vector, center));
 
         let index = self.index.write();
         if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
@@ -300,7 +303,7 @@ impl VectorIndex for USearchIndex {
         }
 
         let matches = if let Some(center) = &self.config.quantization_center {
-            let code = Code::<_>::quantize(query, center);
+            let code = Code::<4>::quantize(query, center);
             let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
             self.index.read().search(i8_slice, count)
         } else {
