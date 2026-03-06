@@ -155,7 +155,7 @@ impl FragmentFetcher {
     /// Records are filtered to the half-open range [start_offset, limit_offset)
     /// and returned sorted by log_offset.  At most `max_concurrency` fragment
     /// fetches are in flight at any given time.
-    #[tracing::instrument(skip(pointers))]
+    #[tracing::instrument(skip(self, pointers))]
     pub async fn fetch_records(
         &self,
         pointers: &[FragmentPointer],
@@ -198,7 +198,7 @@ impl FragmentFetcher {
     }
 
     /// Fetch a single fragment from storage, using the cache if available.
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     async fn fetch_fragment(
         &self,
         pointer: &FragmentPointer,

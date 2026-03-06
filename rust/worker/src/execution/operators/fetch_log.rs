@@ -166,7 +166,7 @@ impl FetchLogOperator {
                 self.start_log_offset_id,
             )
             .instrument(
-                tracing::info_span!("scout_log_fragments", collection_uuid = %self.collection_uuid),
+                tracing::info_span!("scout_log_fragments", collection_id = %self.collection_uuid),
             )
             .await?;
 
