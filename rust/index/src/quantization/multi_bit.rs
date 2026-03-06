@@ -10,8 +10,19 @@ use bitpacking::{BitPacker, BitPacker8x};
 use chroma_distance::DistanceFunction;
 use simsimd::SpatialSimilarity;
 
-use super::utils::{rabitq_distance_code, rabitq_distance_query, CodeHeader};
+use bytemuck::{Pod, Zeroable};
+
+use super::{rabitq_distance_code, rabitq_distance_query};
 use super::Code;
+
+/// Byte header for 4-bit quantized codes. 12 bytes.
+#[repr(C)]
+#[derive(Copy, Clone, Pod, Zeroable)]
+pub(super) struct CodeHeader4Bit {
+    pub correction: f32,
+    pub norm: f32,
+    pub radial: f32,
+}
 
 // ── Code<4, T> ────────────────────────────────────────────────────────────────
 
@@ -28,14 +39,27 @@ impl<T> Code<4, T> {
 
     /// Total byte size of the code buffer for a given dimension.
     pub fn size(dim: usize) -> usize {
-        size_of::<CodeHeader>() + Self::packed_len(dim)
+        size_of::<CodeHeader4Bit>() + Self::packed_len(dim)
     }
 }
 
 impl<T: AsRef<[u8]>> Code<4, T> {
+    /// Correction factor `⟨g, n⟩`.
+    pub fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    /// Data residual norm `‖r‖`.
+    pub fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    /// Radial component `⟨r, c⟩`.
+    pub fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    }
+
     /// Packed quantization codes (excluding the header).
     pub fn packed(&self) -> &[u8] {
-        &self.0.as_ref()[size_of::<CodeHeader>()..]
+        &self.0.as_ref()[size_of::<CodeHeader4Bit>()..]
     }
 
     /// Estimates distance from data vector `d` to query `q`.
@@ -106,11 +130,7 @@ impl<T: AsRef<[u8]>> Code<4, T> {
     }
 }
 
-impl<T: AsRef<[u8]>> AsRef<[u8]> for Code<4, T> {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
+
 
 impl Code<4, Vec<u8>> {
     const BITS: u8 = 4;
@@ -131,7 +151,7 @@ impl Code<4, Vec<u8>> {
         // Early return for near-zero residual
         if dim == 0 || norm < f32::EPSILON {
             let mut bytes = Vec::with_capacity(Self::size(dim));
-            bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader {
+            bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader4Bit {
                 correction: 1.0,
                 norm,
                 radial,
@@ -203,7 +223,7 @@ impl Code<4, Vec<u8>> {
         }
 
         let mut bytes = Vec::with_capacity(Self::size(dim));
-        bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader {
+        bytes.extend_from_slice(bytemuck::bytes_of(&CodeHeader4Bit {
             correction,
             norm,
             radial,
@@ -214,7 +234,8 @@ impl Code<4, Vec<u8>> {
 }
 
 /// Unpacks 4-bit packed codes to grid values (for distance_code trait impl).
-pub fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
+// / move up to be static meathod and rm BITS, CEIL, GRID_OFFSET
+fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
     const BITS: u8 = 4;
     const CEIL: u8 = 8;
     const GRID_OFFSET: f32 = 0.5;
@@ -229,7 +250,7 @@ pub fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
 }
 
 /// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
-pub fn padded_dim_4bit(dim: usize) -> usize {
+fn padded_dim_4bit(dim: usize) -> usize {
     dim.div_ceil(BitPacker8x::BLOCK_LEN) * BitPacker8x::BLOCK_LEN
 }
 
@@ -240,7 +261,7 @@ mod tests {
     use simsimd::SpatialSimilarity;
 
     use super::*;
-    use crate::quantization::{Code};
+    use crate::quantization::Code;
 
     #[test]
     fn test_attributes() {
