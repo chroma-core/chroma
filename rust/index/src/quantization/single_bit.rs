@@ -11,7 +11,7 @@ use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
 use simsimd::{BinarySimilarity, SpatialSimilarity};
 
-use super::utils::{rabitq_distance_code, rabitq_distance_query};
+use super::{rabitq_distance_code, rabitq_distance_query};
 use super::Code;
 
 const B_Q: u8 = 4;
@@ -19,9 +19,9 @@ const B_Q: u8 = 4;
 // ── Header ────────────────────────────────────────────────────────────────────
 
 /// Header for 1-bit codes. Extends the 4-bit layout with `signed_sum`
-/// (2·popcount(x_b) − dim), precomputed at index time for zero-cost query scoring.
+/// (2·popcount(packed) − dim), precomputed at index time for zero-cost query scoring.
 /// 16 bytes.
-/// field order must start with the common fields to maintain compatibility with
+/// Field order must start with the common fields to maintain compatibility with
 /// the generic Code functions: correction, norm, radial.
 #[repr(C)]
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -35,6 +35,19 @@ struct CodeHeader1 {
 // ── Code<1, T> ────────────────────────────────────────────────────────────────
 
 impl<T: AsRef<[u8]>> Code<1, T> {
+    /// Correction factor `⟨g, n⟩`.
+    pub fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    /// Data residual norm `‖r‖`.
+    pub fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    /// Radial component `⟨r, c⟩`.
+    pub fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    }
+
     /// Packed quantization codes (excluding the header).
     pub fn packed(&self) -> &[u8] {
         &self.0.as_ref()[size_of::<CodeHeader1>()..]
@@ -119,7 +132,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         )
     }
 
-    /// Precomputed `signed_sum = 2·popcount(x_b) − dim`, stored in the header.
+    /// Precomputed `signed_sum = 2·popcount(packed) − dim`, stored in the header.
     pub fn signed_sum(&self) -> i32 {
         bytemuck::pod_read_unaligned::<i32>(&self.0.as_ref()[12..16])
     }
@@ -128,10 +141,9 @@ impl<T: AsRef<[u8]>> Code<1, T> {
 
     /// Estimates distance from a stored data code to a quantized query.
     ///
-    /// # Paper equation 22 (Paper Section 3.3.2)
+    /// # Paper equation 22 (Section 3.3.2)
     ///
-    /// The paper estimates the inner product `⟨x̄, q̄⟩` between the quantized
-    /// data vector and a quantized query using `B_q` rounds of AND + popcount
+    /// The paper estimates `⟨x̄, q̄⟩` using `B_q` rounds of AND + popcount
     /// on packed D-bit strings. The key identity is:
     ///
     /// ```text
@@ -150,7 +162,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     ///
     /// # Our derivation of Equation 20
     ///
-    /// We adapt to our conventions — residuals (`r_q = q − centroid`) and
+    /// We adapt to our conventions — residuals (`r_q = q − c`) and
     /// `g[i] = ±0.5` — through four algebraic steps:
     ///
     /// **Step 1 — Paper Equation 20** (unit vectors, ō[i] = ±1/√D):
@@ -160,22 +172,21 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     ///
     /// **Step 2 — Our scaling** (residuals, g[i] = ±0.5):
     /// Replace 1/√D with 0.5 and √D with dim. We want `⟨g, r_q⟩` where
-    /// `r_q[i] ≈ Δ·q_u[i] + v_l`:
+    /// `r_q[i] ≈ delta·q_u[i] + v_l`:
     /// ```text
-    /// ⟨g, r_q⟩ = 0.5·(2Δ·⟨x_b, q_u⟩ + 2·v_l·popcount(x_b) - Δ·Σ q_u[i] - dim·v_l)
+    /// ⟨g, r_q⟩ = 0.5·(2·delta·⟨packed, q_u⟩ + 2·v_l·popcount(packed) - delta·Σ q_u[i] - dim·v_l)
     /// ```
     ///
-    /// **Step 3 — Factor** (group Δ terms and v_l terms):
+    /// **Step 3 — Factor** (group delta terms and v_l terms):
     /// ```text
-    /// ⟨g, r_q⟩ = 0.5·(Δ·(2·⟨x_b, q_u⟩ - Σ q_u[i]) + v_l·(2·popcount(x_b) - dim))
+    /// ⟨g, r_q⟩ = 0.5·(delta·(2·⟨packed, q_u⟩ - Σ q_u[i]) + v_l·(2·popcount(packed) - dim))
     /// ```
     ///
-    /// **Step 4 — Substitute** sign[i] = 2·x_b[i] − 1, and note that
-    /// `Σ x_b[i] = popcount(x_b)`:
+    /// **Step 4 — Substitute** sign[i] = 2·bit[i] − 1:
     /// ```text
-    /// signed_dot_qu = Σ sign[i]·q_u[i] = 2·⟨x_b, q_u⟩ − Σ q_u[i]
-    /// signed_sum    = Σ sign[i]        = 2·popcount(x_b) − dim
-    /// ⟨g, r_q⟩      = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+    /// signed_dot_qu = Σ sign[i]·q_u[i] = 2·⟨packed, q_u⟩ − Σ q_u[i]
+    /// signed_sum    = Σ sign[i]        = 2·popcount(packed) − dim
+    /// ⟨g, r_q⟩      = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
     /// ```
     ///
     /// `signed_sum` is precomputed at index time and stored in the code header,
@@ -185,29 +196,29 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// # Notation
     ///
     /// - `v_l` = min(r_q[i]), `v_r` = max(r_q[i])
-    /// - `Δ` = (v_r − v_l) / (2^B_q − 1)
-    /// - `x_b` = 1-bit data code (packed sign bits), `g[i] = +0.5` when `x_b[i]=1` else `−0.5`
-    /// - `q_u` = quantized query, `r_q[i] ≈ Δ·q_u[i] + v_l`
-    /// - `q_u^(j)` = bit plane j of q_u (packed into D/8 bytes)
+    /// - `delta` = (v_r − v_l) / (2^B_q − 1)
+    /// - `packed` = 1-bit data code (sign bits), `g[i] = +0.5` when bit=1 else `−0.5`
+    /// - `q_u` = quantized query, `r_q[i] ≈ delta·q_u[i] + v_l`
+    /// - `q_u^(j)` = bit plane j of q_u (packed into dim/8 bytes)
     ///
     /// # Naive pseudocode
     ///
     /// The straightforward implementation iterates over each bit plane separately,
-    /// re-reading `x_b` once per plane:
+    /// re-reading `packed` once per plane:
     ///
     /// ```text
-    /// xb_dot_qu = 0
+    /// packed_dot_qu = 0
     /// for j in 0..B_q:
     ///     plane_pop = 0
     ///     for i in 0..packed_len step 8:
-    ///         x_word = u64(x_b[i..i+8])
-    ///         q_word = u64(q_u^(j)[i..i+8])
-    ///         plane_pop += popcount(x_word AND q_word)
-    ///     xb_dot_qu += plane_pop << j     // weight plane j by 2^j
+    ///         packed_word = u64(packed[i..i+8])
+    ///         q_word      = u64(q_u^(j)[i..i+8])
+    ///         plane_pop  += popcount(packed_word AND q_word)
+    ///     packed_dot_qu += plane_pop << j     // weight plane j by 2^j
     ///
-    /// signed_sum    = self.signed_sum()   // precomputed: 2·popcount(x_b) − dim
-    /// signed_dot_qu = 2·xb_dot_qu − sum_q_u
-    /// g_dot_r_q     = 0.5 · (Δ · signed_dot_qu + v_l · signed_sum)
+    /// signed_sum    = self.signed_sum()   // precomputed: 2·popcount(packed) − dim
+    /// signed_dot_qu = 2·packed_dot_qu − sum_q_u
+    /// g_dot_r_q     = 0.5 · (delta · signed_dot_qu + v_l · signed_sum)
     /// ```
     ///
     /// # Optimized implementation
@@ -215,27 +226,25 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// The production code applies two optimizations over the naive approach:
     ///
     /// **[B1] Interleaved planes**: instead of looping over planes in the outer
-    /// loop and re-reading `x_b` once per plane (4× for `B_q=4`), we fix
-    /// `B_q=4` and read each `x_b` word exactly once, ANDing it with all four
-    /// plane words in the same inner iteration. Four independent accumulators
-    /// (`pop0..pop3`) are summed with their weights at the end:
+    /// loop and re-reading `packed` once per plane (4x for `B_q=4`), we read
+    /// each `packed` word exactly once, ANDing it with all four plane words in
+    /// the same inner iteration. Four independent accumulators (`pop0..pop3`)
+    /// are summed with their weights at the end:
     ///
     /// ```text
     /// for each 8-byte chunk (x, q0, q1, q2, q3):
-    ///     x    = u64(x_b chunk)
+    ///     x    = u64(packed chunk)
     ///     pop0 += popcount(x AND u64(q0 chunk))
     ///     pop1 += popcount(x AND u64(q1 chunk))
     ///     pop2 += popcount(x AND u64(q2 chunk))
     ///     pop3 += popcount(x AND u64(q3 chunk))
     ///
-    /// xb_dot_qu = pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
+    /// packed_dot_qu = pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
     /// ```
     ///
     /// **[B2] `chunks_exact(8)` instead of `step_by(8)+index`**: exposes the
     /// stride as a type-level invariant, lets LLVM eliminate bounds checks and
-    /// auto-vectorize the body to NEON/AVX-512. On Apple M-series, B2 alone
-    /// yields ~2.4× speedup on the primitive; B1+B2 combined yield ~2.7×,
-    /// and −56% / +126% on the full 2048-code hot scan.
+    /// auto-vectorize the body to NEON/AVX-512.
     ///
     /// The `bit_planes` field is stored as a flat `Vec<u8>` (plane `j` at
     /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
@@ -244,10 +253,10 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     pub fn distance_4bit_query(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
         let packed = self.packed();
 
-        // Compute ⟨x_b, q_u⟩ (the binary versions of g and r_q) via bit planes.
-        // ⟨x_b, q_u⟩ = Σ_j 2^j · popcount(x_b AND q_u^(j))
+        // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
+        // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
         let pb = qq.padded_bytes;
-        let xb_dot_qu: u32 = {
+        let packed_dot_qu: u32 = {
             let p0 = &qq.bit_planes[0 * pb..1 * pb];
             let p1 = &qq.bit_planes[1 * pb..2 * pb];
             let p2 = &qq.bit_planes[2 * pb..3 * pb];
@@ -268,10 +277,10 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             pop0 + (pop1 << 1) + (pop2 << 2) + (pop3 << 3)
         };
 
-        // signed_sum = 2·popcount(x_b) − dim, precomputed at index time
+        // signed_sum = 2·popcount(packed) − dim, precomputed at index time
         let signed_sum = self.signed_sum() as f32;
-        let signed_dot_qu = 2.0 * xb_dot_qu as f32 - qq.sum_q_u as f32;
-        // ⟨g, r_q⟩ = 0.5·(Δ·signed_dot_qu + v_l·signed_sum)
+        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - qq.sum_q_u as f32;
+        // ⟨g, r_q⟩ = 0.5·(delta·signed_dot_qu + v_l·signed_sum)
         let g_dot_r_q = 0.5 * (qq.delta * signed_dot_qu + qq.v_l * signed_sum);
 
         rabitq_distance_query(
@@ -304,49 +313,32 @@ impl<T> Code<1, T> {
     }
 }
 
-impl<T: AsRef<[u8]>> AsRef<[u8]> for Code<1, T> {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
+
 
 impl Code<1, Vec<u8>> {
     const GRID_OFFSET: f32 = 0.5;
 
-    /// Quantizes a data vector relative to its cluster centroid (1-bit path).
+    /// Quantizes a data vector `d` relative to its cluster centroid `c` (1-bit path).
     ///
     /// # Paper equation (Section 3.1.3)
     ///
     /// RaBitQ represents a data vector `o` with a 1-bit code `x_b` and a
-    /// corresponding quantized vector `g`:
+    /// quantized vector `ō`: `x_b[i] = 1 if o[i] >= 0`, `ō[i] = (2·x_b[i]−1)/√D`.
     ///
-    /// ```text
-    /// x_b[i] = 1     if o[i] >= 0
-    ///          0     otherwise
-    ///
-    /// g[i]   = +1/√D if x_b[i] = 1
-    ///          -1/√D if x_b[i] = 0
-    ///      i.e. g[i] = (2·x_b[i] − 1) / √D
-    /// ```
-    ///
-    /// The correction factor `⟨g, n⟩` (where `n = o / ‖o‖`) is stored so that
-    /// the distance estimator can recover an unbiased estimate of the true distance.
+    /// The correction factor `⟨ō, o/‖o‖⟩` is stored so that the distance
+    /// estimator can recover an unbiased estimate of the true distance.
     ///
     /// # Our derivation
     ///
-    /// We work with the **residual** `r = embedding − centroid` rather than the
-    /// raw data vector, because the SPANN index stores embeddings relative to
-    /// their cluster centroid. The math is identical: just substitute `r` for `o`.
-    ///
-    /// We also use a **different scale** for `g`. Instead of `±1/√D` we use
-    /// `±0.5` (= `GRID_OFFSET`). This is a fixed rescaling of the paper's `g`
-    /// by `√D / 2`, which cancels out uniformly across the distance formula and
-    /// simplifies all inner products. Under our scaling:
+    /// We quantize the residual `r = d − c` (the SPANN index stores
+    /// embeddings relative to their cluster centroid). The grid point `g`
+    /// uses ±0.5 scaling instead of the paper's ±1/√D (a fixed rescaling
+    /// by √D/2 that cancels uniformly across the distance formula):
     ///
     /// ```text
-    /// g[i] = +0.5   if r[i] >= 0   (x_b[i] = 1)
-    ///        -0.5   if r[i] <  0   (x_b[i] = 0)
-    ///     i.e. g[i] = (2·x_b[i] − 1) · 0.5
+    /// g[i] = +0.5   if r[i] >= 0   (bit = 1)
+    ///        -0.5   if r[i] <  0   (bit = 0)
+    ///     i.e. g[i] = (2·bit[i] − 1) · 0.5
     /// ```
     ///
     /// Because `g[i]` always has the **same sign** as `r[i]`, we can simplify
@@ -362,13 +354,13 @@ impl Code<1, Vec<u8>> {
     /// correction = ⟨g, n⟩ = ⟨g, r⟩ / ‖r‖
     ///           = (Σ g[i]·r[i]) / ‖r‖
     ///           = (Σ 0.5·|r[i]|) / ‖r‖
-    ///           = 0.5 · abs_sum / norm
-    ///           = GRID_OFFSET · abs_sum / norm
+    ///           = 0.5 · Σ|r[i]| / ‖r‖
+    ///           = GRID_OFFSET · sum_abs / norm
     /// ```
     ///
-    /// We also precompute `signed_sum = 2·popcount(x_b) − dim`, which equals
-    /// `Σ (2·x_b[i] − 1)` — the sum of the ±1 signs over all dimensions.
-    /// This is used by `distance_query` to recover
+    /// We also precompute `signed_sum = 2·popcount(packed) − dim`, which equals
+    /// `Σ (2·bit[i] − 1)` — the sum of the ±1 signs over all dimensions.
+    /// This is used by `distance_4bit_query` to recover
     /// `⟨g, r_q⟩` from a bitwise AND+popcount without expanding `g` to floats.
     ///
     /// # Naive pseudocode
@@ -392,6 +384,8 @@ impl Code<1, Vec<u8>> {
     ///
     /// 1. Branchless sign extraction -- (val.to_bits() >> 31) ^ 1 reads the
     ///    IEEE 754 sign bit directly, avoiding a conditional branch per element.
+    ///    For IEEE 754, the sign bit is bit 31: 0 for non-negative, 1 for negative.
+    ///    XOR with 1 inverts it so that non-negative -> 1 (bit set) and negative -> 0.
     ///
     /// 2. Single allocation -- Output buffer allocated once; packed bytes written
     ///    directly into their final position, header filled last. No temporary Vec or memcpy.
@@ -402,77 +396,83 @@ impl Code<1, Vec<u8>> {
     ///
     /// Two key optimizations over a naive fused loop:
     ///
-    /// 4. `chunks_exact(16)` — one AVX-512 cache line read, and guarantees the
-    ///    chunk length to LLVM, enabling bounds-check elimination and wider code generation.
+    /// 4. `chunks_exact(16)` — 16 f32s = 64 bytes = one AVX-512 cache line
+    ///    read. Guaranteeing the exact chunk length to LLVM enables bounds-check
+    ///    elimination and wider code generation (see note below).
     ///
     /// 5. Dual accumulators — each reduction (`abs_sum`, `norm_sq`,
     ///    `radial`) is split into two independent chains (e.g. elements
     ///    0..3 into `_a`, 4..7 into `_b`), breaking the FP dependency
     ///    chain and allowing OoO cores to pipeline the sequential additions.
+    ///
+    /// **Note**: `chunks_exact(16)` enables wider code gen: LLVM can statically
+    /// prove 16 elements and emit 4x f32x4 NEON or 1x f32x16 AVX-512. Without
+    /// chunks_exact, the loop body includes a length check that inhibits
+    /// vectorisation. In benchmarks, chunks_exact(16) is 3.7x faster than
+    /// `for (i in 0..chunk.len())` on M-series due to this.
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
         let dim = embedding.len();
         let header_len = std::mem::size_of::<CodeHeader1>();
         let mut bytes = vec![0u8; Self::size(dim)];
         let packed = &mut bytes[header_len..];
 
-        let mut abs_sum = 0.0f32;
-        let mut norm_sq = 0.0f32;
-        let mut radial = 0.0f32;
-        let mut abs_sum_b = 0.0f32;
-        let mut norm_sq_b = 0.0f32;
-        let mut radial_b = 0.0f32;
-        let mut popcount = 0u32;
+        // Dual accumulators: chain_a and chain_b are independent FP chains
+        // that get merged at the end, halving the dependency depth.
+        let mut sum_abs_a = 0.0f32;
+        let mut sum_sq_a = 0.0f32;
+        let mut dot_rc_a = 0.0f32;
+        let mut sum_abs_b = 0.0f32;
+        let mut sum_sq_b = 0.0f32;
+        let mut dot_rc_b = 0.0f32;
+        let mut ones = 0u32;
 
-        // For each outer loop iteration, we process 16 elements (2 output bytes).
-        // 16 elements = 64 bytes (512 bits) = one AVX-512 cache line read
-        // 4 inner loops of 4: alternate between accumulator chains (_a, _b, _a, _b)
+        // 16 elements = 64 bytes = one cache line = four NEON / one AVX-512 load.
+        // 4 inner loops of 4: alternate between chains (a, b, a, b)
         // so each chain's additions are independent and the OoO core can pipeline them.
-        for (out_pair, (emb16, cen16)) in packed
+        for (out_pair, (emb_chunk, cen_chunk)) in packed
             .chunks_exact_mut(2)
             .zip(embedding.chunks_exact(16).zip(centroid.chunks_exact(16)))
         {
-            let mut b0 = 0u8;
-            let mut b1 = 0u8;
+            let mut byte_lo = 0u8;
+            let mut byte_hi = 0u8;
 
-            // Parallelism:
-            //
-            // Loops 1 and 2 can overlap. Loops 3 and 4 can overlap.
-            // Loop 1 (_a chain) ──→ Loop 3 (_a chain)
-            // Loop 2 (_b chain) ──→ Loop 4 (_b chain)
-            // AKA:           b0 ──→ b1
-            // But loop 3 must wait for loop 1, (and same for loop 4 and 2)
-            // because floating point addition is not associative because of rounding errors.
+            // Dependency structure:
+            //   Loops 1 and 2 can overlap (different accumulator chains).
+            //   Loop 3 depends on loop 1 (chain_a). Loop 4 depends on loop 2 (chain_b).
+            //   Within each loop, bit-packing and residual computation are independent
+            //   across iterations, but each accumulator is a 4-deep chain
+            //   (FP addition is not associative, so the compiler preserves eval order).
             for j in 0..4 {
-                let val = emb16[j] - cen16[j];
-                b0 |= ((val.to_bits() >> 31) as u8 ^ 1) << j;
-                abs_sum += val.abs();
-                norm_sq += val * val;
-                radial += val * cen16[j];
+                let residual = emb_chunk[j] - cen_chunk[j];
+                byte_lo |= ((residual.to_bits() >> 31) as u8 ^ 1) << j;
+                sum_abs_a += residual.abs();
+                sum_sq_a += residual * residual;
+                dot_rc_a += residual * cen_chunk[j];
             }
             for j in 4..8 {
-                let val = emb16[j] - cen16[j];
-                b0 |= ((val.to_bits() >> 31) as u8 ^ 1) << j;
-                abs_sum_b += val.abs();
-                norm_sq_b += val * val;
-                radial_b += val * cen16[j];
+                let residual = emb_chunk[j] - cen_chunk[j];
+                byte_lo |= ((residual.to_bits() >> 31) as u8 ^ 1) << j;
+                sum_abs_b += residual.abs();
+                sum_sq_b += residual * residual;
+                dot_rc_b += residual * cen_chunk[j];
             }
             for j in 0..4 {
-                let val = emb16[j + 8] - cen16[j + 8];
-                b1 |= ((val.to_bits() >> 31) as u8 ^ 1) << j;
-                abs_sum += val.abs();
-                norm_sq += val * val;
-                radial += val * cen16[j + 8];
+                let residual = emb_chunk[j + 8] - cen_chunk[j + 8];
+                byte_hi |= ((residual.to_bits() >> 31) as u8 ^ 1) << j;
+                sum_abs_a += residual.abs();
+                sum_sq_a += residual * residual;
+                dot_rc_a += residual * cen_chunk[j + 8];
             }
             for j in 4..8 {
-                let val = emb16[j + 8] - cen16[j + 8];
-                b1 |= ((val.to_bits() >> 31) as u8 ^ 1) << j;
-                abs_sum_b += val.abs();
-                norm_sq_b += val * val;
-                radial_b += val * cen16[j + 8];
+                let residual = emb_chunk[j + 8] - cen_chunk[j + 8];
+                byte_hi |= ((residual.to_bits() >> 31) as u8 ^ 1) << j;
+                sum_abs_b += residual.abs();
+                sum_sq_b += residual * residual;
+                dot_rc_b += residual * cen_chunk[j + 8];
             }
-            popcount += b0.count_ones() + b1.count_ones();
-            out_pair[0] = b0;
-            out_pair[1] = b1;
+            ones += byte_lo.count_ones() + byte_hi.count_ones();
+            out_pair[0] = byte_lo;
+            out_pair[1] = byte_hi;
         }
 
         // Remainder: handle dims that aren't multiples of 16 but are multiples of 8,
@@ -481,33 +481,31 @@ impl Code<1, Vec<u8>> {
         let tail_emb = &embedding[processed..];
         let tail_cen = &centroid[processed..];
         let tail_packed = &mut packed[(processed / 8)..];
-        for (byte_ref, (emb_chunk, cen_chunk)) in tail_packed
+        for (byte_ref, (emb_tail, cen_tail)) in tail_packed
             .iter_mut()
             .zip(tail_emb.chunks(8).zip(tail_cen.chunks(8)))
         {
             let mut byte = 0u8;
-            for (j, (&e, &c)) in emb_chunk.iter().zip(cen_chunk).enumerate() {
-                let val = e - c;
-                byte |= ((val.to_bits() >> 31) as u8 ^ 1) << j;
-                abs_sum_b += val.abs();
-                norm_sq_b += val * val;
-                radial_b += val * c;
+            for (j, (&e, &c)) in emb_tail.iter().zip(cen_tail).enumerate() {
+                let residual = e - c;
+                byte |= ((residual.to_bits() >> 31) as u8 ^ 1) << j;
+                sum_abs_b += residual.abs();
+                sum_sq_b += residual * residual;
+                dot_rc_b += residual * c;
             }
-            popcount += byte.count_ones();
+            ones += byte.count_ones();
             *byte_ref = byte;
         }
 
-        abs_sum += abs_sum_b;
-        norm_sq += norm_sq_b;
-        radial += radial_b;
-
-        let norm = norm_sq.sqrt();
+        let sum_abs = sum_abs_a + sum_abs_b;
+        let norm = (sum_sq_a + sum_sq_b).sqrt();
+        let radial = dot_rc_a + dot_rc_b;
         let correction = if dim == 0 || norm < f32::EPSILON {
             1.0
         } else {
-            Self::GRID_OFFSET * abs_sum / norm
+            Self::GRID_OFFSET * sum_abs / norm
         };
-        let signed_sum = 2 * popcount as i32 - dim as i32;
+        let signed_sum = 2 * ones as i32 - dim as i32;
 
         bytes[..header_len].copy_from_slice(bytemuck::bytes_of(&CodeHeader1 {
             correction,
@@ -615,24 +613,24 @@ fn signed_dot(packed: &[u8], values: &[f32]) -> f32 {
 // ── Bitwise distance estimation (paper Section 3.3) ──────────────────────────
 //
 // The paper's efficient estimator quantizes the query residual r_q into B_q-bit
-// unsigned integers, then computes ⟨x_bar_b, q_bar_u⟩ using B_q rounds of
-// bitwise AND + popcount on D-bit strings.  This eliminates all float
+// unsigned integers, then computes ⟨packed, q_u⟩ using B_q rounds of
+// bitwise AND + popcount on dim-bit strings. This eliminates all float
 // arithmetic from the per-code inner product.
 //
-// Notation mapping (paper → our code):
-//   o, q       → n (normalized residual), r_q/‖r_q‖
-//   x_bar_b    → self.packed() (the stored D-bit quantization code)
-//   q'         → r_q (already P⁻¹-rotated before reaching us)
-//   q_bar_u    → quantized query (computed once per cluster scan)
-//   ⟨o_bar, o⟩ → correction (= ⟨g, n⟩, stored in the header)
-//   ⟨o_bar, q⟩ → g_dot_r_q (what we estimate per code)
+// Notation mapping (paper -> our code):
+//   o, q       -> n (normalized residual), r_q/‖r_q‖
+//   x_bar_b    -> self.packed() (the stored dim-bit quantization code)
+//   q'         -> r_q (already P^-1-rotated before reaching us)
+//   q_bar_u    -> quantized query (computed once per cluster scan)
+//   ⟨o_bar, o⟩ -> correction (= ⟨g, n⟩, stored in the header)
+//   ⟨o_bar, q⟩ -> g_dot_r_q (what we estimate per code)
 
 /// Pre-computed query quantization for the bitwise distance path.
 ///
 /// Computed once per query-cluster pair and reused across all codes in the
-/// cluster.  For BITS=1 with B_q=4, this stores:
-///   - 4 bit planes of the quantized query in a flat contiguous buffer
-///   - v_l, delta, sum_q_u: scalar factors for Equation 20
+/// cluster. For BITS=1 with B_q=4, this stores:
+///   - 4 bit planes of the quantized query (`r_q`) in a flat contiguous buffer
+///   - `v_l`, `delta`, `sum_q_u`: scalar factors for Equation 20
 pub struct QuantizedQuery {
     /// Flat bit-plane buffer: plane j occupies bytes [j*padded_bytes .. (j+1)*padded_bytes].
     /// bit_planes[j*padded_bytes + i] holds the j-th bit of q_u[i*8 .. i*8+8], packed LSB-first.
@@ -653,7 +651,7 @@ pub struct QuantizedQuery {
 }
 
 impl QuantizedQuery {
-    /// Quantize a query residual r_q into B_q-bit unsigned integers and
+    /// Quantize a query residual `r_q` into B_q-bit unsigned integers and
     /// decompose into bit planes for AND+popcount inner products.
     ///
     /// `padded_bytes` is the byte length of the packed data codes (for alignment).
@@ -741,19 +739,19 @@ impl QuantizedQuery {
 /// - BatchQueryLuts precomputes all possible _partial_ inner products and saves
 ///   them in lookup tables:
 /// - For each group of 4 dimensions, a 16-entry table gives the partial
-///   ⟨x_b, q_u⟩ for every possible 4-bit chunk (nibble) of the data code (x_b)
+///   `⟨packed, q_u⟩` for every possible 4-bit chunk (nibble) of the data code
 /// - At query time you only do nibble extraction and table lookups.
 /// - Results: Large table (8 KB for dim=1024), but less compute per code.
 ///
 /// Specifically:
-/// Splits the D-bit data code into D/4 nibbles.  For each nibble position,
+/// Splits the packed data code into dim/4 nibbles. For each nibble position,
 /// precomputes a 16-entry LUT: the partial inner product between the nibble
-/// of x_b and the corresponding 4 elements of the quantized query.
+/// of `packed` and the corresponding 4 elements of the quantized query.
 ///
-/// At scan time, each code's distance requires D/4 LUT lookups + accumulation
+/// At scan time, each code's distance requires dim/4 LUT lookups + accumulation
 /// (no float expansion, no AND+popcount).
 ///
-/// Why distance_query_bitwise beats BatchQueryLuts::distance_query:
+/// Why `distance_4bit_query` beats `BatchQueryLuts::distance_query`:
 // The working set sizes explain the gap:
 //   - Bitwise: 4 bit planes x 128 bytes = 512 bytes of query data (fits in L1),
 //     plus 128 bytes per code. The inner loop is 4 rounds of 16 AND+popcount
@@ -762,9 +760,11 @@ impl QuantizedQuery {
 //     plus 128 bytes per code. The inner loop is 256 iterations of nibble extraction
 //     + array indexing + accumulation -- more iterations, more cache pressure, and
 //     indirect addressing (table lookup) prevents pipelining.
-// The bitwise approach reads less data, does fewer iterations, and each iteration is a simpler instruction sequence (AND, POPCNT, ADD) that modern CPUs pipeline perfectly.
+// The bitwise approach reads less data, does fewer iterations, and each iteration
+// is a simpler instruction sequence (AND, POPCNT, ADD) that modern CPUs pipeline
+// perfectly.
 pub struct BatchQueryLuts {
-    /// luts[nibble_idx][nibble_value] = partial ⟨x_b, q_u⟩ contribution.
+    /// luts[nibble_idx][nibble_value] = partial `⟨packed, q_u⟩` contribution.
     /// nibble_idx ranges over 0..dim/4 (padded to byte boundary).
     pub luts: Vec<[u16; 16]>,
     pub v_l: f32,
@@ -777,16 +777,16 @@ pub struct BatchQueryLuts {
 }
 
 impl BatchQueryLuts {
-    /// Build Lookup Tables (LUTs) from a query residual for 1-bit codes.
+    /// Build Lookup Tables (LUTs) from a query residual `r_q` for 1-bit codes.
     ///
-    /// Each nibble of the data code covers 4 bits (i.e., 4 dimensions).
+    /// Each nibble of the packed data code covers 4 bits (i.e., 4 dimensions).
     /// For each of the 16 possible nibble values, we precompute the partial
     /// sum of q_u[i] for the bits that are set.
     pub fn new(r_q: &[f32], c_norm: f32, c_dot_q: f32, q_norm: f32) -> Self {
         let dim = r_q.len();
         let max_val = 15u32; // B_q = 4
 
-        // Quantize the query residual.
+        // Quantize r_q.
         let v_l = r_q.iter().copied().fold(f32::INFINITY, f32::min);
         let v_r = r_q.iter().copied().fold(f32::NEG_INFINITY, f32::max);
         let range = v_r - v_l;
@@ -845,8 +845,8 @@ impl BatchQueryLuts {
     pub fn distance_query(&self, code: &Code<1, &[u8]>, distance_fn: &DistanceFunction) -> f32 {
         let packed = code.packed();
 
-        // ⟨x_b, q_u⟩ via LUT: iterate over nibbles of packed data.
-        let mut xb_dot_qu = 0u32;
+        // ⟨packed, q_u⟩ via LUT: iterate over nibbles of packed data.
+        let mut packed_dot_qu = 0u32;
         for (nib_idx, lut) in self.luts.iter().enumerate() {
             let byte_idx = nib_idx / 2;
             let byte = if byte_idx < packed.len() {
@@ -859,10 +859,10 @@ impl BatchQueryLuts {
             } else {
                 byte >> 4
             };
-            xb_dot_qu += lut[nibble as usize] as u32;
+            packed_dot_qu += lut[nibble as usize] as u32;
         }
 
-        let signed_dot_qu = 2.0 * xb_dot_qu as f32 - self.sum_q_u as f32;
+        let signed_dot_qu = 2.0 * packed_dot_qu as f32 - self.sum_q_u as f32;
         let signed_sum = code.signed_sum() as f32;
         let g_dot_r_q = 0.5 * (self.delta * signed_dot_qu + self.v_l * signed_sum);
 
