@@ -125,9 +125,16 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
         let needs_fragment_fetcher =
             config.use_fragment_fetch || !collections_for_fragment_fetch.is_empty();
         let fragment_fetcher = if needs_fragment_fetcher {
-            Some(Arc::new(
-                FragmentFetcher::new(storage.clone(), &config.fragment_fetcher_cache).await?,
-            ))
+            if let Some(fragment_storage_config) = config.fragment_storage.as_ref() {
+                let fragment_storage =
+                    Storage::try_from_config(fragment_storage_config, registry).await?;
+                Some(Arc::new(
+                    FragmentFetcher::new(fragment_storage, &config.fragment_fetcher_cache).await?,
+                ))
+            } else {
+                tracing::warn!("Fragment fetch is enabled but no fragment_storage is configured; disabling fragment fetch");
+                None
+            }
         } else {
             None
         };
