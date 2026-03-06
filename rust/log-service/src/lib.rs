@@ -2129,12 +2129,12 @@ impl LogServer {
             .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
         let log_reader = self
             .make_log_reader(topology_name.as_ref(), collection_id)
-            .instrument(tracing::info_span!("make_log_reader"))
+            .instrument(tracing::info_span!("make_log_reader", %collection_id))
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
         let manifest_and_witness = match self
             .manifest_with_head_check(&*log_reader, collection_id)
-            .instrument(tracing::info_span!("manifest_with_head_check"))
+            .instrument(tracing::info_span!("manifest_with_head_check", %collection_id))
             .await
         {
             Ok(Some(mw)) => mw,
@@ -2171,7 +2171,7 @@ impl LogServer {
             Some(fragments) => fragments,
             None => log_reader
                 .scan(from, limits)
-                .instrument(tracing::info_span!("log_reader::scan"))
+                .instrument(tracing::info_span!("log_reader::scan", %collection_id))
                 .await
                 .map_err(|err| {
                     Status::new(

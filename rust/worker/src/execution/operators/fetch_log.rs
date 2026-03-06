@@ -165,7 +165,9 @@ impl FetchLogOperator {
                 self.collection_uuid,
                 self.start_log_offset_id,
             )
-            .instrument(tracing::info_span!("scout_log_fragments"))
+            .instrument(
+                tracing::info_span!("scout_log_fragments", collection_uuid = %self.collection_uuid),
+            )
             .await?;
 
         let mut limit_offset = response.first_uninserted_record_offset;
