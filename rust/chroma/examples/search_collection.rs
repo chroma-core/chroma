@@ -6,8 +6,6 @@ use chroma::client::ChromaHttpClientOptions;
 use chroma::types::{Key, QueryVector, RankExpr, SearchPayload};
 use chroma::ChromaHttpClient;
 use clap::Parser;
-use futures_util::stream::FuturesUnordered;
-use futures_util::StreamExt;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 
@@ -117,55 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     println!("Outstanding ops: {}", args.max_outstanding_ops);
     println!("Total batches: {}", total_batches);
 
-    let start = Instant::now();
     let gmm = Arc::new(GaussianMixtureModel::new(42));
-    let mut in_flight = FuturesUnordered::new();
-
-    for batch_idx in 0..total_batches {
-        while in_flight.len() >= args.max_outstanding_ops {
-            if let Some((done_batch_idx, Err(err))) = in_flight.next().await {
-                return Err(Error::other(format!(
-                    "upsert failed for batch {}: {}",
-                    done_batch_idx, err
-                ))
-                .into());
-            }
-        }
-
-        let start_idx = batch_idx * args.batch_size;
-        let batch_size = (args.total_ops - start_idx).min(args.batch_size);
-
-        let ids: Vec<String> = (start_idx..start_idx + batch_size)
-            .map(|i| format!("id_{:07}", i))
-            .collect();
-        let mut rng = StdRng::seed_from_u64(42 + batch_idx as u64);
-        let embeddings = gmm.generate_batch(&mut rng, batch_size);
-        let collection = collection.clone();
-
-        in_flight.push(async move {
-            (
-                batch_idx,
-                collection
-                    .upsert(ids, embeddings, None, None, None)
-                    .await
-                    .map(|_| ()),
-            )
-        });
-    }
-
-    while let Some((batch_idx, result)) = in_flight.next().await {
-        if let Err(err) = result {
-            return Err(
-                Error::other(format!("upsert failed for batch {}: {}", batch_idx, err)).into(),
-            );
-        }
-    }
-
-    println!(
-        "Completed {} ops in {:.2}s",
-        args.total_ops,
-        start.elapsed().as_secs_f64()
-    );
 
     println!("Starting query verification loop (one query per second)...");
     let mut query_rng = StdRng::seed_from_u64(12345);
