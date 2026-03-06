@@ -185,12 +185,7 @@ impl FetchLogOperator {
             .collect();
 
         let fetched = fragment_fetcher
-            .fetch_records(
-                &pointers,
-                self.start_log_offset_id,
-                limit_offset,
-                self.fetch_log_concurrency,
-            )
+            .fetch_records(&pointers, self.start_log_offset_id, limit_offset)
             .await?;
 
         Ok(Chunk::new(fetched.into()))
