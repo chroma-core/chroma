@@ -123,7 +123,7 @@ impl StateMachineTest for FrontendUnderTest {
                                         collection.collection_id,
                                         request.ids.clone(),
                                         request.r#where.clone(),
-                                        None,
+                                        request.limit,
                                         0,
                                         IncludeList(vec![]),
                                     )
