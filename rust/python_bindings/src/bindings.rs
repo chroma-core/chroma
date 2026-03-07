@@ -574,6 +574,7 @@ impl Bindings {
             collection_id,
             ids,
             r#where,
+            None,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
