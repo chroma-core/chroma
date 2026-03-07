@@ -179,6 +179,14 @@ pub struct QueryServiceConfig {
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
 
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the query pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
+
     /// The grace period for shutting down the gRPC server.
     #[serde(
         rename = "grpc_shutdown_grace_period_seconds",
@@ -314,6 +322,14 @@ pub struct CompactionServiceConfig {
     /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
     #[serde(default)]
     pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the compaction pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
 }
 
 impl CompactionServiceConfig {
