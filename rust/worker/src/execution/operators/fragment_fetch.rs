@@ -175,6 +175,7 @@ impl FragmentFetcher {
         }
         // NOTE(rescrv): The way this works, it will construct at most max_concurrency futures at
         // once.
+        let max_concurrency = max_concurrency.max(1);
         let results: Vec<Result<Vec<LogRecord>, FragmentFetchError>> =
             futures::stream::iter(pointers.iter().cloned())
                 .map(|pointer| {
