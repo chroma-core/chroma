@@ -35,6 +35,7 @@ from chromadb.test.utils.cross_version import (
 # 0.4.1 is the first version with persistence
 # 0.5.3 is the first version with the new API where the serverapi and client api return types and arguments differ
 BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
+EXCLUDED_VERSIONS = {"1.5.3"}
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
@@ -47,7 +48,9 @@ def versions() -> List[str]:
     data = json.load(request.urlopen(request.Request(url)))
     versions = list(data["releases"].keys())
     # Older versions on pypi contain "devXYZ" suffixes
-    versions = [v for v in versions if version_re.match(v)]
+    versions = [
+        v for v in versions if version_re.match(v) and v not in EXCLUDED_VERSIONS
+    ]
     versions.sort(key=packaging_version.Version)
     return BASELINE_VERSIONS + [versions[-1]]
 
