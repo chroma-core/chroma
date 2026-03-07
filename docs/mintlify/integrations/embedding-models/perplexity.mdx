@@ -48,6 +48,38 @@ const collectionGet = await client.getCollection({
 ```
 
 </Tab>
+
+<Tab title="Go" icon="golang">
+
+```bash
+go get github.com/chroma-core/chroma/clients/go/pkg/embeddings/perplexity
+```
+
+```go Go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/perplexity"
+)
+
+// Create Perplexity embedding function
+ef, err := perplexity.NewPerplexityEmbeddingFunction(
+    perplexity.WithEnvAPIKey(), // reads PERPLEXITY_API_KEY
+    perplexity.WithModel("pplx-embed-v1-4b"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+collection, err = client.GetCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionGet(ef),
+)
+```
+
+</Tab>
 </Tabs>
 
 ## Semantic Search with Chroma
@@ -142,6 +174,48 @@ results.documents[0].forEach((doc, i) => {
 ```
 
 </Tab>
+
+<Tab title="Go" icon="golang">
+
+```go Go
+import (
+    "context"
+    "fmt"
+
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/perplexity"
+)
+
+// Initialize the embedding function
+ef, err := perplexity.NewPerplexityEmbeddingFunction(
+    perplexity.WithEnvAPIKey(), // reads PERPLEXITY_API_KEY
+    perplexity.WithModel("pplx-embed-v1-4b"),
+)
+
+// Create a Chroma client and collection
+client, err := chroma.NewHTTPClient(chroma.WithBaseURL("http://localhost:8000"))
+collection, err := client.CreateCollection(ctx, "my_documents",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+
+// Add documents
+err = collection.Add(ctx,
+    chroma.WithTexts(
+        "Python is a versatile programming language",
+        "Machine learning automates analytical model building",
+        "The Eiffel Tower is located in Paris, France",
+    ),
+    chroma.WithIDs("doc1", "doc2", "doc3"),
+)
+
+// Query for similar documents
+results, err := collection.Query(ctx,
+    chroma.WithQueryTexts("What programming languages are good for data science?"),
+    chroma.WithNResults(2),
+)
+```
+
+</Tab>
 </Tabs>
 
 ## Available Models
@@ -185,6 +259,22 @@ const embedder = new PerplexityEmbeddingFunction({
 
 const embeddings = await embedder.generate(["document1", "document2"]);
 console.log(embeddings[0].length);  // 512
+```
+
+</Tab>
+
+<Tab title="Go" icon="golang">
+
+```go Go
+// Reduce dimensions from 2560 to 512 for the 4b model
+ef, err := perplexity.NewPerplexityEmbeddingFunction(
+    perplexity.WithEnvAPIKey(),
+    perplexity.WithModel("pplx-embed-v1-4b"),
+    perplexity.WithDimensions(512),
+)
+
+embeddings, err := ef.EmbedDocuments(ctx, []string{"document1", "document2"})
+fmt.Println(len(embeddings[0].GetFloat32())) // 512
 ```
 
 </Tab>
