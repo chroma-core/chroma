@@ -20,6 +20,27 @@
         "api_key_env_var": {
             "type": "string",
             "description": "Environment variable name that contains your API key for the Gemini API"
+        },
+        "vertexai": {
+            "type": [
+                "boolean",
+                "null"
+            ],
+            "description": "Whether to use Vertex AI"
+        },
+        "project": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The Google Cloud project ID (required for Vertex AI)"
+        },
+        "location": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "The Google Cloud location/region (required for Vertex AI)"
         }
     },
     "required": [

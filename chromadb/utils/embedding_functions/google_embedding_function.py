@@ -16,6 +16,9 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         task_type: Optional[str] = None,
         dimension: Optional[int] = None,
         api_key_env_var: str = "GEMINI_API_KEY",
+        vertexai: Optional[bool] = None,
+        project: Optional[str] = None,
+        location: Optional[str] = None,
     ):
         """
         Initialize the GoogleGenaiEmbeddingFunction.
@@ -31,6 +34,9 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
                 Supported range: 128–3072. If None, the model's default is used.
             api_key_env_var (str, optional): Environment variable name that contains your API key.
                 Defaults to "GEMINI_API_KEY".
+            vertexai (bool, optional): Whether to use Vertex AI.
+            project (str, optional): The Google Cloud project ID (required for Vertex AI).
+            location (str, optional): The Google Cloud location/region (required for Vertex AI).
         """
         try:
             import google.genai as genai
@@ -43,13 +49,18 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         self.task_type = task_type
         self.dimension = dimension
         self.api_key_env_var = api_key_env_var
+        self.vertexai = vertexai
+        self.project = project
+        self.location = location
         self.api_key = os.getenv(self.api_key_env_var)
         if not self.api_key:
             raise ValueError(
                 f"The {self.api_key_env_var} environment variable is not set."
             )
 
-        self.client = genai.Client(api_key=self.api_key)
+        self.client = genai.Client(
+            api_key=self.api_key, vertexai=vertexai, project=project, location=location
+        )
 
     def __call__(self, input: Documents) -> Embeddings:
         """
@@ -112,6 +123,9 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         task_type = config.get("task_type")
         dimension = config.get("dimension")
         api_key_env_var = config.get("api_key_env_var", "GEMINI_API_KEY")
+        vertexai = config.get("vertexai")
+        project = config.get("project")
+        location = config.get("location")
 
         if model_name is None:
             raise ValueError("The model name is required.")
@@ -121,12 +135,18 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
             task_type=task_type,
             dimension=dimension,
             api_key_env_var=api_key_env_var,
+            vertexai=vertexai,
+            project=project,
+            location=location,
         )
 
     def get_config(self) -> Dict[str, Any]:
         config: Dict[str, Any] = {
             "model_name": self.model_name,
             "api_key_env_var": self.api_key_env_var,
+            "vertexai": self.vertexai,
+            "project": self.project,
+            "location": self.location,
         }
         if self.task_type is not None:
             config["task_type"] = self.task_type
@@ -144,6 +164,18 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         if "dimension" in new_config:
             raise ValueError(
                 "The dimension cannot be changed after the embedding function has been initialized."
+            )
+        if "vertexai" in new_config:
+            raise ValueError(
+                "The vertexai cannot be changed after the embedding function has been initialized."
+            )
+        if "project" in new_config:
+            raise ValueError(
+                "The project cannot be changed after the embedding function has been initialized."
+            )
+        if "location" in new_config:
+            raise ValueError(
+                "The location cannot be changed after the embedding function has been initialized."
             )
 
     @staticmethod
