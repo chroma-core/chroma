@@ -190,8 +190,8 @@ export type DeleteCollectionRecordsPayload = RawWhereFields & {
     limit?: number | null;
 };
 
-export type DeleteCollectionResponse = {
-    [key: string]: unknown;
+export type DeleteCollectionRecordsResponse = {
+    deleted: number;
 };
 
 export type DeleteDatabaseResponse = {
@@ -1337,7 +1337,7 @@ export type DeleteCollectionResponses = {
     200: UpdateCollectionResponse;
 };
 
-export type DeleteCollectionResponse2 = DeleteCollectionResponses[keyof DeleteCollectionResponses];
+export type DeleteCollectionResponse = DeleteCollectionResponses[keyof DeleteCollectionResponses];
 
 export type GetCollectionData = {
     body?: never;
@@ -1608,7 +1608,7 @@ export type CollectionDeleteResponses = {
     /**
      * Records deleted successfully
      */
-    200: DeleteCollectionResponse;
+    200: DeleteCollectionRecordsResponse;
 };
 
 export type CollectionDeleteResponse = CollectionDeleteResponses[keyof CollectionDeleteResponses];

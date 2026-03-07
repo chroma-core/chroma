@@ -286,8 +286,7 @@ impl InMemoryFrontend {
     pub fn delete_collection(
         &mut self,
         request: chroma_types::DeleteCollectionRequest,
-    ) -> Result<chroma_types::DeleteCollectionRecordsResponse, chroma_types::DeleteCollectionError>
-    {
+    ) -> Result<chroma_types::DeleteCollectionResponse, chroma_types::DeleteCollectionError> {
         let inner = &mut self.inner;
         if let Some(pos) = inner.collections.iter().position(|c| {
             c.collection.name == request.collection_name
@@ -295,7 +294,7 @@ impl InMemoryFrontend {
                 && c.collection.database == request.database_name
         }) {
             inner.collections.remove(pos);
-            Ok(chroma_types::DeleteCollectionRecordsResponse { deleted: 0 })
+            Ok(chroma_types::DeleteCollectionResponse {})
         } else {
             Err(chroma_types::DeleteCollectionError::NotFound(
                 request.collection_name,
@@ -475,12 +474,8 @@ impl InMemoryFrontend {
             .map_err(|e| e.boxed())
             .map(|response| response.ids)?
         } else {
-            // IDs-only: truncate raw IDs to limit, matching service_based_frontend behavior.
-            let mut ids = request.ids.unwrap_or_default();
-            if let Some(limit) = request.limit {
-                ids.truncate(limit as usize);
-            }
-            ids
+            // IDs-only: no limit allowed (validated in try_new).
+            request.ids.unwrap_or_default()
         };
 
         let collection = self

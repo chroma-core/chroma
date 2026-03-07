@@ -1833,6 +1833,12 @@ mod tests {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_delete_with_limit").await;
 
+            let mut metadata_a = Metadata::new();
+            metadata_a.insert("category".to_string(), "a".into());
+
+            let mut metadata_b = Metadata::new();
+            metadata_b.insert("category".to_string(), "b".into());
+
             collection
                 .add(
                     vec![
@@ -1851,22 +1857,28 @@ mod tests {
                     ],
                     None,
                     None,
-                    None,
+                    Some(vec![
+                        Some(metadata_a.clone()),
+                        Some(metadata_a.clone()),
+                        Some(metadata_a),
+                        Some(metadata_b.clone()),
+                        Some(metadata_b),
+                    ]),
                 )
                 .await
                 .unwrap();
 
-            // Delete 3 IDs but with limit=2, so only 2 should be deleted.
+            // Where matches 3 records (category == "a"), but limit is 2.
+            let where_clause = Where::Metadata(MetadataExpression {
+                key: "category".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::Equal,
+                    MetadataValue::Str("a".to_string()),
+                ),
+            });
+
             let response = collection
-                .delete(
-                    Some(vec![
-                        "id1".to_string(),
-                        "id2".to_string(),
-                        "id3".to_string(),
-                    ]),
-                    None,
-                    Some(2),
-                )
+                .delete(None, Some(where_clause), Some(2))
                 .await
                 .unwrap();
 

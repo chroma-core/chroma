@@ -1281,9 +1281,6 @@ impl ServiceBasedFrontend {
                 encoding: None,
                 metadata: None,
             }));
-            if let Some(limit) = limit {
-                records.truncate(limit as usize);
-            }
             None
         } else {
             None

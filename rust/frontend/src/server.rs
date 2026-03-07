@@ -2166,7 +2166,7 @@ async fn collection_upsert(
     ),
     request_body = DeleteCollectionRecordsPayload,
     responses(
-        (status = 200, description = "Records deleted successfully", body = DeleteCollectionResponse),
+        (status = 200, description = "Records deleted successfully", body = DeleteCollectionRecordsResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse),

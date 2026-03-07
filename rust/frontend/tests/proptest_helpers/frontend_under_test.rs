@@ -139,11 +139,7 @@ impl StateMachineTest for FrontendUnderTest {
                         }
 
                         if let Some(ids) = &request.ids {
-                            let mut count = ids.len();
-                            if let Some(limit) = request.limit {
-                                count = count.min(limit as usize);
-                            }
-                            STATS.with_borrow_mut(|stats| stats.num_log_operations += count);
+                            STATS.with_borrow_mut(|stats| stats.num_log_operations += ids.len());
                         }
                     }
 

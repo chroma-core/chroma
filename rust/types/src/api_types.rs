@@ -1553,6 +1553,7 @@ impl ChromaError for UpsertCollectionRecordsError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsPayload {
     pub ids: Option<Vec<String>>,
+    #[serde(default)]
     pub limit: Option<u32>,
     #[serde(flatten)]
     pub where_fields: RawWhereFields,
@@ -1584,6 +1585,15 @@ impl DeleteCollectionRecordsRequest {
                 ("ids, where"),
                 ValidationError::new("filter")
                     .with_message("Either ids or where must be specified".into()),
+            )));
+        }
+
+        if limit.is_some() && r#where.is_none() {
+            return Err(ChromaValidationError::from((
+                ("limit, where"),
+                ValidationError::new("limit").with_message(
+                    "limit can only be specified when a where clause is provided".into(),
+                ),
             )));
         }
 
