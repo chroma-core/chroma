@@ -13,6 +13,7 @@ export interface GoogleGeminiConfig {
   api_key_env_var: string;
   model_name: string;
   task_type?: string;
+  dimension?: number;
 }
 
 export interface GoogleGeminiArgs {
@@ -20,6 +21,7 @@ export interface GoogleGeminiArgs {
   apiKeyEnvVar?: string;
   modelName?: string;
   taskType?: string;
+  dimension?: number;
 }
 
 export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
@@ -29,12 +31,14 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
   private readonly apiKeyEnvVar: string;
   private readonly modelName: string;
   private readonly taskType: string | undefined;
+  private readonly dimension: number | undefined;
 
   constructor(args: Partial<GoogleGeminiArgs> = {}) {
     const {
       apiKeyEnvVar = "GEMINI_API_KEY",
-      modelName = "text-embedding-004",
+      modelName = "gemini-embedding-001",
       taskType,
+      dimension,
     } = args;
 
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
@@ -48,6 +52,7 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
     this.modelName = modelName;
     this.apiKeyEnvVar = apiKeyEnvVar;
     this.taskType = taskType;
+    this.dimension = dimension;
     this.client = new GoogleGenAI({ apiKey });
   }
 
@@ -57,7 +62,13 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
       result = await this.client.models.embedContent({
         model: this.modelName,
         contents: texts,
-        config: this.taskType ? { taskType: this.taskType } : undefined,
+        config:
+          this.taskType || this.dimension
+            ? {
+                ...(this.taskType && { taskType: this.taskType }),
+                ...(this.dimension && { outputDimensionality: this.dimension }),
+              }
+            : undefined,
       });
     } catch (e) {
       throw new Error(`Failed to generate Gemini embeddings: ${e}`);
@@ -80,6 +91,7 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
       modelName: config.model_name,
       apiKeyEnvVar: config.api_key_env_var,
       taskType: config.task_type,
+      dimension: config.dimension,
     });
   }
 
@@ -96,12 +108,16 @@ export class GoogleGeminiEmbeddingFunction implements EmbeddingFunction {
       api_key_env_var: this.apiKeyEnvVar,
       model_name: this.modelName,
       task_type: this.taskType,
+      ...(this.dimension && { dimension: this.dimension }),
     };
   }
 
   public validateConfigUpdate(newConfig: Record<string, any>): void {
     if (this.getConfig().model_name !== newConfig.model_name) {
       throw new ChromaValueError("Model name cannot be updated");
+    }
+    if (this.getConfig().dimension !== newConfig.dimension) {
+      throw new ChromaValueError("Dimension cannot be updated");
     }
   }
 

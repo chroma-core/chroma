@@ -275,21 +275,24 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model_name: str = "models/embedding-001",
+        model_name: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
-        api_key_env_var: str = "CHROMA_GOOGLE_GENAI_API_KEY",
+        api_key_env_var: str = "GEMINI_API_KEY",
+        dimension: Optional[int] = None,
     ):
         """
         Initialize the GoogleGenerativeAiEmbeddingFunction.
 
         Args:
             api_key_env_var (str, optional): Environment variable name that contains your API key for the Google Generative AI API.
-                Defaults to "CHROMA_GOOGLE_GENAI_API_KEY".
+                Defaults to "GEMINI_API_KEY".
             model_name (str, optional): The name of the model to use for text embeddings.
-                Defaults to "models/embedding-001".
+                Defaults to "gemini-embedding-001".
             task_type (str, optional): The task type for the embeddings.
                 Use "RETRIEVAL_DOCUMENT" for embedding documents and "RETRIEVAL_QUERY" for embedding queries.
                 Defaults to "RETRIEVAL_DOCUMENT".
+            dimension (int, optional): The output dimensionality for the embeddings.
+                If None, the model's default dimensionality is used.
         """
         try:
             import google.generativeai as genai
@@ -317,6 +320,7 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
         self.model_name = model_name
         self.task_type = task_type
+        self.dimension = dimension
 
         genai.configure(api_key=self.api_key)
         self._genai = genai
@@ -339,11 +343,14 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
 
         embeddings_list: List[npt.NDArray[np.float32]] = []
         for text in input:
-            embedding_result = self._genai.embed_content(
-                model=self.model_name,
-                content=text,
-                task_type=self.task_type,
-            )
+            kwargs: Dict[str, Any] = {
+                "model": self.model_name,
+                "content": text,
+                "task_type": self.task_type,
+            }
+            if self.dimension is not None:
+                kwargs["output_dimensionality"] = self.dimension
+            embedding_result = self._genai.embed_content(**kwargs)
             embeddings_list.append(
                 np.array(embedding_result["embedding"], dtype=np.float32)
             )
@@ -366,20 +373,27 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         api_key_env_var = config.get("api_key_env_var")
         model_name = config.get("model_name")
         task_type = config.get("task_type")
+        dimension = config.get("dimension")
 
         if api_key_env_var is None or model_name is None or task_type is None:
             assert False, "This code should not be reached"
 
         return GoogleGenerativeAiEmbeddingFunction(
-            api_key_env_var=api_key_env_var, model_name=model_name, task_type=task_type
+            api_key_env_var=api_key_env_var,
+            model_name=model_name,
+            task_type=task_type,
+            dimension=dimension,
         )
 
     def get_config(self) -> Dict[str, Any]:
-        return {
+        config: Dict[str, Any] = {
             "api_key_env_var": self.api_key_env_var,
             "model_name": self.model_name,
             "task_type": self.task_type,
         }
+        if self.dimension is not None:
+            config["dimension"] = self.dimension
+        return config
 
     def validate_config_update(
         self, old_config: Dict[str, Any], new_config: Dict[str, Any]
@@ -391,6 +405,10 @@ class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
         if "task_type" in new_config:
             raise ValueError(
                 "The task type cannot be changed after the embedding function has been initialized."
+            )
+        if "dimension" in new_config:
+            raise ValueError(
+                "The dimension cannot be changed after the embedding function has been initialized."
             )
 
     @staticmethod
