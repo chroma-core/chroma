@@ -194,6 +194,10 @@ export type DeleteCollectionRecordsResponse = {
     deleted: number;
 };
 
+export type DeleteCollectionResponse = {
+    [key: string]: unknown;
+};
+
 export type DeleteDatabaseResponse = {
     [key: string]: unknown;
 };
@@ -1334,10 +1338,10 @@ export type DeleteCollectionResponses = {
     /**
      * Collection deleted successfully
      */
-    200: UpdateCollectionResponse;
+    200: DeleteCollectionResponse;
 };
 
-export type DeleteCollectionResponse = DeleteCollectionResponses[keyof DeleteCollectionResponses];
+export type DeleteCollectionResponse2 = DeleteCollectionResponses[keyof DeleteCollectionResponses];
 
 export type GetCollectionData = {
     body?: never;

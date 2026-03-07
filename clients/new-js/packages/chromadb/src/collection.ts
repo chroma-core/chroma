@@ -6,6 +6,7 @@ import {
 import {
   BaseRecordSet,
   CollectionMetadata,
+  DeleteResult,
   GetResult,
   IndexingStatus,
   Metadata,
@@ -209,7 +210,9 @@ export interface Collection {
     where?: Where;
     /** Document content-based filtering for deletion */
     whereDocument?: WhereDocument;
-  }): Promise<void>;
+    /** Maximum number of records to delete. Can only be used with where or whereDocument filters. */
+    limit?: number;
+  }): Promise<DeleteResult>;
   /**
    * Performs hybrid search on the collection using expression builders.
    * @param searches - Single search payload or array of payloads
@@ -750,10 +753,19 @@ export class CollectionImpl implements Collection {
     ids?: string[],
     where?: Where,
     whereDocument?: WhereDocument,
+    limit?: number,
   ) {
     if (ids) validateIDs(ids);
     if (where) validateWhere(where);
     if (whereDocument) validateWhereDocument(whereDocument);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+      throw new Error("limit must be a non-negative integer");
+    }
+    if (limit !== undefined && !where && !whereDocument) {
+      throw new Error(
+        "limit can only be specified when a where or whereDocument clause is provided",
+      );
+    }
   }
 
   public async count(options?: { readLevel?: ReadLevel }): Promise<number> {
@@ -1096,22 +1108,27 @@ export class CollectionImpl implements Collection {
     ids,
     where,
     whereDocument,
+    limit,
   }: {
     ids?: string[];
     where?: Where;
     whereDocument?: WhereDocument;
-  }): Promise<void> {
-    this.validateDelete(ids, where, whereDocument);
+    limit?: number;
+  }): Promise<DeleteResult> {
+    this.validateDelete(ids, where, whereDocument, limit);
 
-    await RecordService.collectionDelete({
+    const { data } = await RecordService.collectionDelete({
       client: this.apiClient,
       path: await this.path(),
       body: {
         ids,
         where,
         where_document: whereDocument,
+        limit,
       },
     });
+
+    return { deleted: data?.deleted ?? 0 };
   }
 
   public async getIndexingStatus(): Promise<IndexingStatus> {

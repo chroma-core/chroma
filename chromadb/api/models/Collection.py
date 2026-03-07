@@ -20,6 +20,7 @@ from chromadb.api.types import (
     ReadLevel,
     WhereDocument,
     SearchResult,
+    DeleteResult,
     maybe_cast_one_to_many,
 )
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
@@ -525,7 +526,8 @@ class Collection(CollectionCommon["ServerAPI"]):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> None:
+        limit: Optional[int] = None,
+    ) -> DeleteResult:
         """Delete records by ID or filters.
 
         All documents that match the `ids` or `where` and `where_document` filters will be deleted.
@@ -534,19 +536,25 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids: Record IDs to delete.
             where: Metadata filter.
             where_document: Document content filter.
+            limit: Maximum number of records to delete. Can only be used with where or where_document filters.
+
+        Returns:
+            DeleteResult: A dict containing the number of records deleted.
 
         Raises:
             ValueError: If no IDs or filters are provided.
+            ValueError: If limit is specified without a where or where_document clause.
         """
         delete_request = self._validate_and_prepare_delete_request(
-            ids, where, where_document
+            ids, where, where_document, limit=limit
         )
 
-        self._client._delete(
+        return self._client._delete(
             collection_id=self.id,
             ids=delete_request["ids"],
             where=delete_request["where"],
             where_document=delete_request["where_document"],
+            limit=delete_request["limit"],
             tenant=self.tenant,
             database=self.database,
         )

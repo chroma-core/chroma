@@ -30,6 +30,7 @@ from chromadb.api.types import (
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     DefaultEmbeddingFunction,
+    DeleteResult,
 )
 from chromadb.auth import UserIdentity
 from chromadb.auth.utils import maybe_set_tenant_and_database
@@ -480,14 +481,16 @@ class Client(SharedSystemClient, ClientAPI):
         ids: Optional[IDs],
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> None:
-        self._server._delete(
+        limit: Optional[int] = None,
+    ) -> DeleteResult:
+        return self._server._delete(
             collection_id=collection_id,
             tenant=self.tenant,
             database=self.database,
             ids=ids,
             where=where,
             where_document=where_document,
+            limit=limit,
         )
 
     @override

@@ -420,12 +420,65 @@ def test_delete(client):
         collection.delete()
 
 
-def test_delete_returns_none(client):
+def test_delete_returns_delete_result(client):
     client.reset()
     collection = client.create_collection("testspace")
     collection.add(**batch_records)
     assert collection.count() == 2
-    assert collection.delete(ids=batch_records["ids"]) is None
+    result = collection.delete(ids=batch_records["ids"])
+    assert isinstance(result, dict)
+    assert "deleted" in result
+    assert result["deleted"] >= 0
+
+
+def test_delete_with_limit(client):
+    client.reset()
+    collection = client.create_collection(
+        "testspace",
+        metadata={"hnsw:space": "l2"},
+    )
+    collection.add(
+        ids=["id1", "id2", "id3", "id4", "id5"],
+        embeddings=[[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [0, 1, 1]],
+        metadatas=[
+            {"category": "a"},
+            {"category": "a"},
+            {"category": "a"},
+            {"category": "b"},
+            {"category": "b"},
+        ],
+    )
+    assert collection.count() == 5
+
+    # Delete at most 2 records matching category=a (there are 3 total)
+    result = collection.delete(where={"category": "a"}, limit=2)
+    assert result["deleted"] == 2
+    assert collection.count() == 3
+
+
+def test_delete_with_limit_zero_is_noop(client):
+    client.reset()
+    collection = client.create_collection(
+        "testspace",
+        metadata={"hnsw:space": "l2"},
+    )
+    collection.add(
+        ids=["id1", "id2"],
+        embeddings=[[1, 0, 0], [0, 1, 0]],
+        metadatas=[{"category": "a"}, {"category": "a"}],
+    )
+    assert collection.count() == 2
+    result = collection.delete(where={"category": "a"}, limit=0)
+    assert result["deleted"] == 0
+    assert collection.count() == 2
+
+
+def test_delete_with_limit_requires_where(client):
+    client.reset()
+    collection = client.create_collection("testspace")
+    collection.add(**batch_records)
+    with pytest.raises(ValueError, match="limit can only be specified"):
+        collection.delete(ids=["id1"], limit=5)
 
 
 def test_delete_with_index(client):
@@ -2551,9 +2604,9 @@ def test_metadata_delete_after_type_change_e2e(client):
     # Record still exists (has "keep" key) but "tags" is gone.
     items = collection.get(ids=["id1"])
     assert len(items["ids"]) == 1
-    assert (
-        "tags" not in items["metadatas"][0]
-    ), f"tags key should be deleted, got {items['metadatas'][0]}"
+    assert "tags" not in items["metadatas"][0], (
+        f"tags key should be deleted, got {items['metadatas'][0]}"
+    )
     assert items["metadatas"][0]["keep"] == "yes"
 
     # Neither scalar nor array queries should match.
