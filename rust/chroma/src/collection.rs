@@ -770,9 +770,10 @@ impl ChromaCollection {
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.delete(
     ///     Some(vec!["doc1".to_string(), "doc2".to_string()]),
-    ///     None
+    ///     None,
+    ///     None,
     /// ).await?;
-    /// println!("Deleted records successfully");
+    /// println!("Deleted {} records", response.deleted);
     /// # Ok(())
     /// # }
     /// ```
@@ -780,6 +781,7 @@ impl ChromaCollection {
         &self,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        limit: Option<u32>,
     ) -> Result<DeleteCollectionRecordsResponse, ChromaHttpClientError> {
         let request = DeleteCollectionRecordsRequest::try_new(
             self.collection.tenant.clone(),
@@ -787,6 +789,7 @@ impl ChromaCollection {
             self.collection.collection_id,
             ids,
             r#where,
+            limit,
         )?;
         let request = request.into_payload()?;
         self.send("delete", "delete", Method::POST, Some(request))
@@ -1771,7 +1774,7 @@ mod tests {
                 .unwrap();
 
             collection
-                .delete(Some(vec!["id1".to_string(), "id3".to_string()]), None)
+                .delete(Some(vec!["id1".to_string(), "id3".to_string()]), None, None)
                 .await
                 .unwrap();
 
@@ -1812,11 +1815,77 @@ mod tests {
                     MetadataValue::Str("a".to_string()),
                 ),
             });
-            collection.delete(None, Some(where_clause)).await.unwrap();
+            collection
+                .delete(None, Some(where_clause), None)
+                .await
+                .unwrap();
 
             let count = collection.count().await.unwrap();
             println!("Count after delete: {}", count);
             assert_eq!(count, 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_k8s_integration_delete_with_limit() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_delete_with_limit").await;
+
+            let mut metadata_a = Metadata::new();
+            metadata_a.insert("category".to_string(), "a".into());
+
+            let mut metadata_b = Metadata::new();
+            metadata_b.insert("category".to_string(), "b".into());
+
+            collection
+                .add(
+                    vec![
+                        "id1".to_string(),
+                        "id2".to_string(),
+                        "id3".to_string(),
+                        "id4".to_string(),
+                        "id5".to_string(),
+                    ],
+                    vec![
+                        vec![1.0, 2.0, 3.0],
+                        vec![4.0, 5.0, 6.0],
+                        vec![7.0, 8.0, 9.0],
+                        vec![10.0, 11.0, 12.0],
+                        vec![13.0, 14.0, 15.0],
+                    ],
+                    None,
+                    None,
+                    Some(vec![
+                        Some(metadata_a.clone()),
+                        Some(metadata_a.clone()),
+                        Some(metadata_a),
+                        Some(metadata_b.clone()),
+                        Some(metadata_b),
+                    ]),
+                )
+                .await
+                .unwrap();
+
+            // Where matches 3 records (category == "a"), but limit is 2.
+            let where_clause = Where::Metadata(MetadataExpression {
+                key: "category".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::Equal,
+                    MetadataValue::Str("a".to_string()),
+                ),
+            });
+
+            let response = collection
+                .delete(None, Some(where_clause), Some(2))
+                .await
+                .unwrap();
+
+            assert_eq!(response.deleted, 2);
+
+            let count = collection.count().await.unwrap();
+            assert_eq!(count, 3);
         })
         .await;
     }

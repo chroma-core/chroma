@@ -20,16 +20,16 @@ use chroma_types::{
     CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
     CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
     DatabaseName, DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse,
-    DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse,
-    ForkCollectionResponse, GetAttachedFunctionResponse, GetCollectionByCrnRequest,
-    GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload,
-    GetResponse, GetTenantRequest, GetTenantResponse, IndexStatusResponse,
-    InternalCollectionConfiguration, InternalUpdateCollectionConfiguration, ListCollectionsRequest,
-    ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse, QueryRequest,
-    QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload, SearchResponse,
-    UpdateCollectionPayload, UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse,
-    UpdateCollectionResponse, UpdateTenantRequest, UpdateTenantResponse,
-    UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
+    DeleteCollectionResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest,
+    DetachFunctionResponse, ForkCollectionResponse, GetAttachedFunctionResponse,
+    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
+    IndexStatusResponse, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    QueryRequest, QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload,
+    SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -1616,7 +1616,7 @@ async fn delete_collection(
     headers: HeaderMap,
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+) -> Result<Json<DeleteCollectionResponse>, ServerError> {
     server.metrics.delete_collection.add(1, &[]);
     tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
@@ -1636,9 +1636,8 @@ async fn delete_collection(
     ])?;
     let request =
         chroma_types::DeleteCollectionRequest::try_new(tenant, database, collection_name)?;
-    server.frontend.delete_collection(request).await?;
 
-    Ok(Json(UpdateCollectionResponse {}))
+    Ok(Json(server.frontend.delete_collection(request).await?))
 }
 
 /// Fork collection
@@ -2274,9 +2273,10 @@ async fn collection_delete(
         collection_id,
         payload.ids,
         r#where,
+        payload.limit,
     )?;
 
-    Box::pin(
+    let response = Box::pin(
         server
             .frontend
             .delete(request)
@@ -2284,7 +2284,7 @@ async fn collection_delete(
     )
     .await?;
 
-    Ok(Json(DeleteCollectionRecordsResponse {}))
+    Ok(Json(response))
 }
 
 #[derive(Deserialize, ToSchema, Debug)]
