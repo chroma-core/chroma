@@ -21,6 +21,7 @@ from chromadb.utils.embedding_functions.sentence_transformer_embedding_function 
 )
 from chromadb.utils.embedding_functions.google_embedding_function import (
     GooglePalmEmbeddingFunction,
+    GoogleGenerativeAiEmbeddingFunction,
     GoogleVertexEmbeddingFunction,
     GoogleGenaiEmbeddingFunction,
 )
@@ -103,6 +104,7 @@ _all_classes: Set[str] = {
     "HuggingFaceEmbeddingServer",
     "SentenceTransformerEmbeddingFunction",
     "GooglePalmEmbeddingFunction",
+    "GoogleGenerativeAiEmbeddingFunction",
     "GoogleVertexEmbeddingFunction",
     "GoogleGenaiEmbeddingFunction",
     "OllamaEmbeddingFunction",
@@ -144,6 +146,7 @@ known_embedding_functions: Dict[str, Type[EmbeddingFunction]] = {  # type: ignor
     "huggingface_server": HuggingFaceEmbeddingServer,
     "sentence_transformer": SentenceTransformerEmbeddingFunction,
     "google_palm": GooglePalmEmbeddingFunction,
+    "google_generative_ai": GoogleGenerativeAiEmbeddingFunction,
     "google_vertex": GoogleVertexEmbeddingFunction,
     "google_genai": GoogleGenaiEmbeddingFunction,
     "ollama": OllamaEmbeddingFunction,
@@ -268,6 +271,7 @@ __all__ = [
     "HuggingFaceEmbeddingServer",
     "SentenceTransformerEmbeddingFunction",
     "GooglePalmEmbeddingFunction",
+    "GoogleGenerativeAiEmbeddingFunction",
     "GoogleVertexEmbeddingFunction",
     "GoogleGenaiEmbeddingFunction",
     "OllamaEmbeddingFunction",

@@ -115,16 +115,16 @@ const EMBEDDING_FUNCTION_CONFIGS: Record<string, any> = {
       model_name: "voyage-2",
     },
   },
-  google_genai: {
+  google_generative_ai: {
     args: {
       googleApiKey: "dummy_key",
-      model: "gemini-embedding-001",
+      model: "embedding-001",
       taskType: "RETRIEVAL_DOCUMENT",
-      apiKeyEnvVar: "GEMINI_API_KEY",
+      apiKeyEnvVar: "GOOGLE_API_KEY",
     },
     config: {
-      api_key_env_var: "GEMINI_API_KEY",
-      model_name: "gemini-embedding-001",
+      api_key_env_var: "GOOGLE_API_KEY",
+      model_name: "embedding-001",
     },
   },
   huggingface_server: {
@@ -145,7 +145,7 @@ const EMBEDDING_FUNCTION_CLASSES: Record<string, any> = {
   ollama: OllamaEmbeddingFunction,
   transformers: TransformersEmbeddingFunction,
   voyageai: VoyageAIEmbeddingFunction,
-  google_genai: GoogleGenerativeAiEmbeddingFunction,
+  google_generative_ai: GoogleGenerativeAiEmbeddingFunction,
   huggingface_server: HuggingFaceEmbeddingServerFunction,
   default: TransformersEmbeddingFunction,
 };

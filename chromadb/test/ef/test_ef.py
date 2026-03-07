@@ -30,6 +30,7 @@ def test_get_builtins_holds() -> None:
         "CloudflareWorkersAIEmbeddingFunction",
         "CohereEmbeddingFunction",
         "VoyageAIEmbeddingFunction",
+        "GoogleGenerativeAiEmbeddingFunction",
         "GooglePalmEmbeddingFunction",
         "GoogleVertexEmbeddingFunction",
         "GoogleGenaiEmbeddingFunction",

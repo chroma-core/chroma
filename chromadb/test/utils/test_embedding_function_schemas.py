@@ -224,6 +224,7 @@ class TestEmbeddingFunctionSchemas:
             "huggingface_server": "CHROMA_HUGGINGFACE_API_KEY",
             "google_palm": "CHROMA_GOOGLE_PALM_API_KEY",
             "google_genai": "GEMINI_API_KEY",
+            "google_generative_ai": "GEMINI_API_KEY",
             "google_vertex": "CHROMA_GOOGLE_VERTEX_API_KEY",
             "jina": "CHROMA_JINA_API_KEY",
             "mistral": "MISTRAL_API_KEY",
