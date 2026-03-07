@@ -772,8 +772,14 @@ class SegmentAPI(ServerAPI):
         else:
             ids_to_delete = ids
 
-        # Apply limit if specified (only valid with where clause, validated upstream)
+        # Apply limit if specified (validated upstream, but enforce defensively)
         if limit is not None:
+            if limit < 0:
+                raise ValueError("limit must be a non-negative integer")
+            if where is None and where_document is None:
+                raise ValueError(
+                    "limit can only be specified when a where or where_document clause is provided"
+                )
             ids_to_delete = ids_to_delete[:limit]
 
         if len(ids_to_delete) == 0:

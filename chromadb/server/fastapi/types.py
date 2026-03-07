@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from chromadb.api.types import (
     CollectionMetadata,
@@ -51,7 +51,7 @@ class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
-    limit: Optional[int] = None
+    limit: Optional[int] = Field(default=None, ge=0)
 
 
 class CreateCollection(BaseModel):
