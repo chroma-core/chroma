@@ -36,6 +36,8 @@ pub struct ArrowUnorderedBlockfileWriter {
     id: Uuid,
     deltas_mutex: Arc<AysncPartitionedMutex<Uuid>>,
     cmek: Option<Cmek>,
+    /// When true, track byte offsets of value buffers for byte-range reads.
+    track_value_buffer_offsets: bool,
 }
 // TODO: method visibility should not be pub(crate)
 
@@ -67,11 +69,18 @@ impl ArrowUnorderedBlockfileWriter {
         root_manager: RootManager,
         max_block_size_bytes: usize,
         cmek: Option<Cmek>,
+        track_value_buffer_offsets: bool,
     ) -> Self {
         let initial_block = block_manager.create::<K, V, UnorderedBlockDelta>();
         let sparse_index = SparseIndexWriter::new(initial_block.id);
+        // Use V1_3 when tracking value buffer offsets, otherwise use current version
+        let version = if track_value_buffer_offsets {
+            Version::V1_3
+        } else {
+            CURRENT_VERSION
+        };
         let root_writer = RootWriter::new(
-            CURRENT_VERSION,
+            version,
             id,
             sparse_index,
             prefix_path.to_string(),
@@ -92,6 +101,7 @@ impl ArrowUnorderedBlockfileWriter {
             id,
             deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
             cmek,
+            track_value_buffer_offsets,
         }
     }
 
@@ -101,6 +111,7 @@ impl ArrowUnorderedBlockfileWriter {
         root_manager: RootManager,
         new_root: RootWriter,
         cmek: Option<Cmek>,
+        track_value_buffer_offsets: bool,
     ) -> Self {
         tracing::debug!("Constructed blockfile writer from existing root {:?}", id);
         let block_deltas = Arc::new(Mutex::new(HashMap::new()));
@@ -113,6 +124,7 @@ impl ArrowUnorderedBlockfileWriter {
             id,
             deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
             cmek,
+            track_value_buffer_offsets,
         }
     }
 
@@ -168,6 +180,7 @@ impl ArrowUnorderedBlockfileWriter {
             self.id,
             count,
             self.cmek,
+            self.track_value_buffer_offsets,
         );
 
         Ok(flusher)
@@ -575,6 +588,57 @@ impl<'me, K: ArrowReadableKey<'me> + Into<KeyWrapper>, V: ArrowReadableValue<'me
             }
             Err(e) => Err(Box::new(e)),
         }
+    }
+
+    /// Fetch raw bytes for a value at a specific key using byte-range reads.
+    ///
+    /// This method uses the sparse index's value buffer offset to perform a
+    /// byte-range read from storage, avoiding loading the entire block.
+    ///
+    /// # Arguments
+    /// * `prefix` - The key prefix (usually empty for record segments)
+    /// * `key` - The key to look up
+    /// * `value_size` - Size of each value in bytes (e.g., embedding_dim * 4 for f32 embeddings)
+    ///
+    /// # Returns
+    /// * `Ok(Some(bytes))` - The raw bytes for the value
+    /// * `Ok(None)` - Value buffer offset not available (older blockfile version)
+    /// * `Err(_)` - Error during lookup or fetch
+    ///
+    /// # Prototype Limitation
+    /// Assumes offset_ids are contiguous (no deletes). The index calculation
+    /// `index = offset_id - start_key` only works without gaps.
+    pub(crate) async fn get_value_bytes(
+        &self,
+        prefix: &str,
+        key: K,
+        value_size: usize,
+    ) -> Result<Option<Arc<Vec<u8>>>, Box<dyn ChromaError>> {
+        let search_key = CompositeKey::new(prefix.to_string(), key);
+
+        let (block_id, value_buffer_offset, index_in_block) = self
+            .root
+            .sparse_index
+            .get_block_and_index_for_key(&search_key)
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+        // If no value buffer offset is stored, this blockfile doesn't support byte-range reads
+        let offset = match value_buffer_offset {
+            Some(offset) => offset,
+            None => return Ok(None),
+        };
+
+        // Compute byte range for the specific value
+        let start = offset + (index_in_block as u64 * value_size as u64);
+        let end = start + value_size as u64;
+
+        let bytes = self
+            .block_manager
+            .get_range(&self.root.prefix_path, &block_id, start, end)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn ChromaError>)?;
+
+        Ok(Some(bytes))
     }
 
     /// Get all key-value pairs for a specific prefix
@@ -2306,6 +2370,7 @@ mod tests {
             id: Uuid::new_v4(),
             deltas_mutex: Arc::new(AysncPartitionedMutex::new(())),
             cmek: None,
+            track_value_buffer_offsets: false,
         };
 
         let n = 2000;

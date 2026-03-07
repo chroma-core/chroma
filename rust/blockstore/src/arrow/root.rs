@@ -7,7 +7,7 @@ use crate::{arrow::sparse_index::SparseIndexDelimiter, key::CompositeKey};
 use arrow::{
     array::{
         Array, BinaryArray, BinaryBuilder, RecordBatch, StringArray, StringBuilder, UInt32Array,
-        UInt32Builder,
+        UInt32Builder, UInt64Array, UInt64Builder,
     },
     datatypes::{DataType, Field, Schema},
 };
@@ -32,6 +32,7 @@ pub(crate) enum Version {
     V1 = 1,
     V1_1 = 2,
     V1_2 = 3,
+    V1_3 = 4,
 }
 
 impl Display for Version {
@@ -40,6 +41,7 @@ impl Display for Version {
             Version::V1 => write!(f, "v1"),
             Version::V1_1 => write!(f, "v1.1"),
             Version::V1_2 => write!(f, "v1.2"),
+            Version::V1_3 => write!(f, "v1.3"),
         }
     }
 }
@@ -63,6 +65,7 @@ impl TryFrom<&str> for Version {
             "v1" => Ok(Version::V1),
             "v1.1" => Ok(Version::V1_1),
             "v1.2" => Ok(Version::V1_2),
+            "v1.3" => Ok(Version::V1_3),
             _ => Err(VersionError::UnknownVersion(s.to_string())),
         }
     }
@@ -137,6 +140,26 @@ impl RootWriter {
         )
     }
 
+    fn value_buffer_offsets_as_arrow(
+        &self,
+        sparse_index_data: &SparseIndexWriterData,
+    ) -> (Arc<dyn Array>, Field) {
+        let mut offset_builder = UInt64Builder::new();
+        // Iterate in the same order as forward to maintain alignment
+        for (key, _) in sparse_index_data.forward.iter() {
+            let offset = sparse_index_data
+                .value_buffer_offsets
+                .get(key)
+                .copied()
+                .unwrap_or(0);
+            offset_builder.append_value(offset);
+        }
+        (
+            Arc::new(offset_builder.finish()),
+            Field::new("value_buffer_offset", DataType::UInt64, false),
+        )
+    }
+
     pub(super) fn to_bytes<K: ArrowWriteableKey>(&self) -> Result<Vec<u8>, Box<dyn ChromaError>> {
         // Serialize the sparse index as an arrow record batch
         // TODO(hammadb): Note that this should ideally use the Block API to serialize the sparse
@@ -189,6 +212,14 @@ impl RootWriter {
             let (built_counts, count_field) = self.counts_as_arrow(&sparse_index_data);
             schema_fields.push(count_field);
             data_arrays.push(built_counts);
+        }
+
+        // MIGRATION(02/04/2026) -> V1.3 and above write value_buffer_offset column for byte-range reads
+        if self.version >= Version::V1_3 {
+            let (built_offsets, offset_field) =
+                self.value_buffer_offsets_as_arrow(&sparse_index_data);
+            schema_fields.push(offset_field);
+            data_arrays.push(built_offsets);
         }
 
         let mut metadata = HashMap::from_iter(vec![
@@ -374,6 +405,17 @@ impl RootReader {
             counts = Some(count_arr);
         }
 
+        // Version 1.3 is the first version to have a value_buffer_offset column
+        let mut value_buffer_offsets = None;
+        if version >= Version::V1_3 {
+            let offset_arr = record_batch
+                .column(4)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("Value buffer offset array to be a UInt64Array");
+            value_buffer_offsets = Some(offset_arr);
+        }
+
         let ids = Self::block_ids_from_record_batch(record_batch, version)?;
 
         let mut forward = BTreeMap::new();
@@ -386,17 +428,19 @@ impl RootReader {
                 None => 0,
             };
 
+            let value_buffer_offset = value_buffer_offsets.map(|arr| arr.value(i));
+
             match prefix {
                 "START" => {
                     forward.insert(
                         SparseIndexDelimiter::Start,
-                        SparseIndexValue::new(*block_id, count),
+                        SparseIndexValue::new(*block_id, count, value_buffer_offset),
                     );
                 }
                 _ => {
                     forward.insert(
                         SparseIndexDelimiter::Key(CompositeKey::new(prefix.to_string(), key)),
-                        SparseIndexValue::new(*block_id, count),
+                        SparseIndexValue::new(*block_id, count, value_buffer_offset),
                     );
                 }
             }

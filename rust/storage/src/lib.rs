@@ -260,6 +260,26 @@ impl Storage {
         }
     }
 
+    /// Fetch a byte range from storage.
+    /// Returns bytes in the range [start, end).
+    pub async fn get_range(
+        &self,
+        key: &str,
+        start: u64,
+        end: u64,
+    ) -> Result<Arc<Vec<u8>>, StorageError> {
+        match self {
+            Storage::S3(s3) => s3.get_range(key, start, end).await,
+            Storage::Object(obj) => obj.get_range(key, start, end).await,
+            Storage::Local(local) => local.get_range(key, start, end).await,
+            Storage::AdmissionControlledS3(admission_controlled_storage) => {
+                admission_controlled_storage
+                    .get_range(key, start, end)
+                    .await
+            }
+        }
+    }
+
     pub async fn fetch<FetchReturn, FetchFn, FetchFut>(
         &self,
         key: &str,
