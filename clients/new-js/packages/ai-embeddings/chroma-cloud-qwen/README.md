@@ -15,13 +15,12 @@ import { ChromaClient } from "chromadb";
 import {
   ChromaCloudQwenEmbeddingFunction,
   ChromaCloudQwenEmbeddingModel,
-  ChromaCloudQwenEmbeddingTask,
 } from "@chroma-core/chroma-cloud-qwen";
 
 // Initialize the embedder
 const embedder = new ChromaCloudQwenEmbeddingFunction({
   model: ChromaCloudQwenEmbeddingModel.QWEN3_EMBEDDING_0p6B,
-  task: ChromaCloudQwenEmbeddingTask.CODE_TO_CODE,
+  task: null,
   apiKeyEnvVar: "CHROMA_API_KEY",
 });
 
