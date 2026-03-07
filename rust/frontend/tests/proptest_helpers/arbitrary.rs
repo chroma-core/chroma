@@ -190,23 +190,36 @@ impl Arbitrary for CollectionRequest {
                 }
             });
 
+        let limit_strategy = prop_oneof![Just::<Option<u32>>(None), (0u32..=100).prop_map(Some)];
+
+        // limit can only be specified when a where clause is present.
         let delete_strategy = prop_oneof![
-            (
-                Just::<Option<TestWhereFilter>>(None),
-                proptest::collection::vec(id_strategy.clone(), 1..=10).prop_map(Some)
-            ),
-            (any::<TestWhereFilter>().prop_map(Some), Just(None)),
+            // IDs-only: no where clause, no limit.
+            proptest::collection::vec(id_strategy.clone(), 1..=10).prop_map(|ids| (
+                None,
+                Some(ids),
+                None
+            )),
+            // Where-only: may have limit.
             (
                 any::<TestWhereFilter>().prop_map(Some),
-                proptest::collection::vec(id_strategy, 1..=10).prop_map(Some)
-            ),
+                limit_strategy.clone()
+            )
+                .prop_map(|(filter, limit)| (filter, None, limit)),
+            // Where + IDs: may have limit.
+            (
+                any::<TestWhereFilter>().prop_map(Some),
+                proptest::collection::vec(id_strategy, 1..=10).prop_map(Some),
+                limit_strategy,
+            )
+                .prop_map(|(filter, ids, limit)| (filter, ids, limit)),
         ]
         .prop_map({
             let tenant = collection.tenant.clone();
             let database = collection.database.clone();
             let collection_id = collection.collection_id;
 
-            move |(filter, ids)| {
+            move |(filter, ids, limit)| {
                 CollectionRequest::Delete(
                     DeleteCollectionRecordsRequest::try_new(
                         tenant.clone(),
@@ -214,6 +227,7 @@ impl Arbitrary for CollectionRequest {
                         collection_id,
                         ids,
                         filter.map(|filter| filter.clause),
+                        limit,
                     )
                     .unwrap(),
                 )

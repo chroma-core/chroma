@@ -187,10 +187,11 @@ export type Database = {
  */
 export type DeleteCollectionRecordsPayload = RawWhereFields & {
     ids?: Array<string> | null;
+    limit?: number | null;
 };
 
 export type DeleteCollectionRecordsResponse = {
-    [key: string]: unknown;
+    deleted: number;
 };
 
 export type DeleteDatabaseResponse = {
