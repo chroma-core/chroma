@@ -9,7 +9,7 @@ use chroma_sysdb::{DatabaseOrTopology, GetCollectionsOptions, SysDb};
 use chroma_types::{CollectionUuid, DatabaseName, JobId, TopologyName};
 use figment::providers::Env;
 use figment::Figment;
-use opentelemetry::metrics::Counter;
+use opentelemetry::metrics::{Counter, Gauge};
 use serde::Deserialize;
 use uuid::Uuid;
 
@@ -19,6 +19,7 @@ use crate::compactor::types::CompactionJob;
 #[derive(Debug, Clone)]
 pub(crate) struct SchedulerMetrics {
     job_failure_count: Counter<u64>,
+    unaddressable_jobs_count: Gauge<u64>,
 }
 
 impl Default for SchedulerMetrics {
@@ -28,14 +29,25 @@ impl Default for SchedulerMetrics {
             .u64_counter("compactor_job_failure_count")
             .with_description("Number of compaction job failures")
             .build();
+        let unaddressable_jobs_count = meter
+            .u64_gauge("compactor_unaddressable_jobs_count")
+            .with_description("Number of jobs skipped due to scheduler capacity limits")
+            .build();
 
-        Self { job_failure_count }
+        Self {
+            job_failure_count,
+            unaddressable_jobs_count,
+        }
     }
 }
 
 impl SchedulerMetrics {
     fn increment_job_failure_count(&self) {
         self.job_failure_count.add(1, &[]);
+    }
+
+    fn set_unaddressable_jobs_count(&self, count: u64) {
+        self.unaddressable_jobs_count.record(count, &[]);
     }
 }
 
@@ -67,7 +79,7 @@ pub(crate) struct Scheduler {
     min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
-    oneoff_collections: HashSet<CollectionUuid>,
+    oneoff_collections: HashMap<CollectionUuid, DatabaseName>,
     disabled_collections: HashSet<CollectionUuid>,
     deleted_collections: HashMap<CollectionUuid, Option<TopologyName>>,
     collections_needing_repair: HashMap<CollectionUuid, (DatabaseName, i64)>,
@@ -106,7 +118,7 @@ impl Scheduler {
             max_concurrent_jobs,
             memberlist: None,
             assignment_policy,
-            oneoff_collections: HashSet::new(),
+            oneoff_collections: HashMap::new(),
             disabled_collections,
             deleted_collections: HashMap::new(),
             collections_needing_repair: HashMap::new(),
@@ -117,12 +129,50 @@ impl Scheduler {
         }
     }
 
-    pub(crate) fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
-        self.oneoff_collections.extend(ids);
+    pub(crate) async fn add_oneoff_collections(&mut self, ids: Vec<CollectionUuid>) {
+        if ids.is_empty() {
+            return;
+        }
+
+        const BATCH_SIZE: usize = 1_000;
+        for batch in ids.chunks(BATCH_SIZE) {
+            let collections = match self
+                .sysdb
+                .get_collections(GetCollectionsOptions {
+                    collection_ids: Some(batch.to_vec()),
+                    database_or_topology: None,
+                    limit: Some(batch.len() as u32),
+                    offset: 0,
+                    include_soft_deleted: false,
+                    collection_id: None,
+                    name: None,
+                    tenant: None,
+                })
+                .await
+            {
+                Ok(collections) => collections,
+                Err(e) => {
+                    tracing::error!("Error fetching one-off collections from sysdb: {:?}", e);
+                    continue;
+                }
+            };
+
+            for collection in collections {
+                let Some(database_name) = DatabaseName::new(collection.database) else {
+                    tracing::warn!(
+                        "Invalid database name for one-off collection {}",
+                        collection.collection_id
+                    );
+                    continue;
+                };
+                self.oneoff_collections
+                    .insert(collection.collection_id, database_name);
+            }
+        }
     }
 
     pub(crate) fn get_oneoff_collections(&self) -> Vec<CollectionUuid> {
-        self.oneoff_collections.iter().cloned().collect()
+        self.oneoff_collections.keys().cloned().collect()
     }
 
     pub(crate) fn drain_deleted_collections(
@@ -155,15 +205,26 @@ impl Scheduler {
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
             .await;
+        let one_off_collections = self
+            .oneoff_collections
+            .iter()
+            .map(|x| CollectionInfo {
+                collection_id: *x.0,
+                topology_name: x.1.topology().and_then(|t| TopologyName::new(t).ok()),
+                first_log_offset: 0,
+                first_log_ts: 0,
+            })
+            .collect::<Vec<_>>();
 
         match collections {
-            Ok(collections) => {
+            Ok(mut collections) => {
                 tracing::info!("Collections with new data: {collections:?}");
+                collections.extend(one_off_collections);
                 collections
             }
             Err(e) => {
                 tracing::error!("Error: {:?}", e);
-                Vec::new()
+                one_off_collections
             }
         }
     }
@@ -320,9 +381,9 @@ impl Scheduler {
 
     pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
         self.job_queue.clear();
-        let mut scheduled_collections = Vec::new();
+        let mut oneoff_collections = Vec::with_capacity(collection_records.len());
+        let mut regular_collections = Vec::with_capacity(collection_records.len());
         for record in collection_records {
-            tracing::info!("Processing collection: {}", record.collection_id);
             let database_name = match DatabaseName::new(record.database_name.clone()) {
                 Some(db_name) => db_name,
                 None => {
@@ -334,52 +395,84 @@ impl Scheduler {
                     continue;
                 }
             };
-
             if self.is_job_in_progress(&record.collection_id).await {
                 tracing::info!(
-                    "Compaction for {} is already in progress, skipping",
-                    record.collection_id
+                    collection_id = record.collection_id.to_string(),
+                    "Compaction is already in progress, skipping",
                 );
-                continue;
-            }
-            if self.oneoff_collections.contains(&record.collection_id) {
-                tracing::info!(
-                    "Creating one-off compaction job for collection: {}",
-                    record.collection_version
-                );
-                self.job_queue.push(CompactionJob {
-                    collection_id: record.collection_id,
-                    database_name,
-                });
-                self.oneoff_collections.remove(&record.collection_id);
-                if self.job_queue.len() == self.max_concurrent_jobs {
-                    return;
-                }
+            } else if let Some(database_name) = self.oneoff_collections.get(&record.collection_id) {
+                oneoff_collections.push((database_name.clone(), record));
             } else {
-                if self.in_progress_jobs.len() >= self.max_concurrent_jobs {
-                    tracing::info!(
-                        "Max concurrent jobs reached, skipping compaction for {}",
-                        record.collection_id
-                    );
-                    return;
-                }
-                scheduled_collections.push(record);
+                regular_collections.push((database_name, record));
             }
         }
-
-        self.job_queue.extend(
-            self.policy
-                .determine(scheduled_collections, self.max_concurrent_jobs as i32),
-        );
-        self.job_queue
-            .truncate(self.max_concurrent_jobs - self.in_progress_jobs.len());
-
+        let mut dropped_jobs_count = 0;
+        let job_queue_at_start = self.job_queue.len();
+        while self
+            .max_concurrent_jobs
+            .saturating_sub(self.in_progress_jobs.len())
+            > 0
+        {
+            let rem_capacity = self
+                .max_concurrent_jobs
+                .saturating_sub(self.in_progress_jobs.len());
+            if !oneoff_collections.is_empty() {
+                dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
+                // Take so we clear the oneoff collections for the next pass.
+                for (database_name, record) in std::mem::take(&mut oneoff_collections)
+                    .into_iter()
+                    .take(rem_capacity)
+                {
+                    tracing::info!(
+                        "Creating one-off compaction job for collection: {}",
+                        record.collection_version
+                    );
+                    self.job_queue.push(CompactionJob {
+                        collection_id: record.collection_id,
+                        database_name: database_name.clone(),
+                    });
+                    self.oneoff_collections.remove(&record.collection_id);
+                }
+            } else if !regular_collections.is_empty() {
+                dropped_jobs_count += regular_collections.len().saturating_sub(rem_capacity);
+                let mut records = Vec::with_capacity(regular_collections.len());
+                // Take so we clear the regular collections for the next pass.
+                for (_, record) in std::mem::take(&mut regular_collections).into_iter() {
+                    records.push(record);
+                }
+                let selected = self.policy.determine(records.clone(), rem_capacity as i32);
+                let seen = selected
+                    .iter()
+                    .map(|r| r.collection_id)
+                    .collect::<HashSet<_>>();
+                for record in records {
+                    if !seen.contains(&record.collection_id) {
+                        tracing::info!(
+                            "Max concurrent jobs reached, skipping compaction for {}",
+                            record.collection_id
+                        );
+                    }
+                }
+                for job in selected.iter() {
+                    tracing::info!(
+                        collection_id = job.collection_id.to_string(),
+                        "Enqueuing compaction job"
+                    );
+                }
+                self.job_queue.extend(selected);
+            } else {
+                break;
+            }
+        }
+        self.metrics
+            .set_unaddressable_jobs_count(dropped_jobs_count as u64);
         // At this point, nobody should modify the job queue and every collection
         // in the job queue will definitely be compacted. It is now safe to add
         // them to the in-progress set.
         let job_ids: Vec<_> = self
             .job_queue
             .iter()
+            .skip(job_queue_at_start)
             .map(|j| (j.collection_id, j.database_name.clone()))
             .collect();
         for (collection_id, database_name) in job_ids {
@@ -908,6 +1001,108 @@ mod tests {
             "offset must be log_position + 1 ({expected_offset}), not first_log_offset ({first_log_offset}); \
              using first_log_offset would rewind compaction and reprocess already-compacted records"
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn oneoff_collection_with_negative_log_position_not_dropped() {
+        SchedulerFixture::clear_env_vars();
+
+        // Set up a collection whose log_position is -1 (never compacted).
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut in_memory_log) => in_memory_log,
+            _ => panic!("Invalid log type"),
+        };
+
+        let tenant = "tenant_1".to_string();
+        let sysdb_log_position: i64 = -1;
+        let collection = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000099")
+                .unwrap(),
+            name: "oneoff_collection".to_string(),
+            dimension: Some(1),
+            tenant: tenant.clone(),
+            database: "database_1".to_string(),
+            log_position: sysdb_log_position,
+            ..Default::default()
+        };
+        let collection_id = collection.collection_id;
+
+        in_memory_log.add_log(
+            collection_id,
+            InternalLogRecord {
+                collection_id,
+                log_offset: 0,
+                log_ts: 1,
+                record: LogRecord {
+                    log_offset: 0,
+                    record: OperationRecord {
+                        id: "embedding_id_1".to_string(),
+                        embedding: None,
+                        encoding: None,
+                        metadata: None,
+                        document: None,
+                        operation: Operation::Add,
+                    },
+                },
+            },
+        );
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.add_collection(collection);
+                test_sysdb.add_tenant_last_compaction_time(tenant, 1);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_member.member_id.clone(),
+            log,
+            sysdb.clone(),
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            3600,
+            3,
+        );
+
+        // Simulate a one-off collection entry with the values that
+        // get_collections_with_new_data produces (first_log_offset=0).
+        let collection_infos = vec![CollectionInfo {
+            collection_id,
+            topology_name: None,
+            first_log_offset: 0,
+            first_log_ts: 0,
+        }];
+
+        let records = scheduler
+            .verify_and_enrich_collections(collection_infos)
+            .await;
+
+        // The collection must not be dropped by the invariant check.
+        // log_position + 1 = -1 + 1 = 0, and first_log_offset = 0,
+        // so the condition (0 < 0) is false and the collection is kept.
+        assert_eq!(
+            records.len(),
+            1,
+            "one-off collection with log_position=-1 must not be dropped; \
+             first_log_offset=0 avoids false positive in the invariant check"
+        );
+        println!("records[0].offset = {}", records[0].offset);
+        println!("records[0].collection_id = {}", records[0].collection_id);
     }
 
     #[tokio::test]
