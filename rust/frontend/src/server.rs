@@ -1582,7 +1582,7 @@ async fn update_collection(
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "Collection deleted successfully", body = UpdateCollectionResponse),
+        (status = 200, description = "Collection deleted successfully", body = DeleteCollectionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)

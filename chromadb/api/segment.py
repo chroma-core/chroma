@@ -774,7 +774,7 @@ class SegmentAPI(ServerAPI):
 
         # Apply limit if specified (validated upstream, but enforce defensively)
         if limit is not None:
-            if limit < 0:
+            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
                 raise ValueError("limit must be a non-negative integer")
             if where is None and where_document is None:
                 raise ValueError(

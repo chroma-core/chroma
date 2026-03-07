@@ -388,7 +388,7 @@ class FastAPI(Server):
             "/api/v2/tenants/{tenant}/databases/{database_name}/collections/{collection_id}/delete",
             self.delete,
             methods=["POST"],
-            response_model=None,
+            response_model=DeleteResult,
             openapi_extra=self.get_openapi_extras_for_body_model(DeleteEmbedding),
         )
         self.router.add_api_route(
@@ -1505,7 +1505,7 @@ class FastAPI(Server):
             "/api/v1/collections/{collection_id}/delete",
             self.delete_v1,
             methods=["POST"],
-            response_model=None,
+            response_model=DeleteResult,
             openapi_extra=self.get_openapi_extras_for_body_model(DeleteEmbedding),
         )
         self.router.add_api_route(

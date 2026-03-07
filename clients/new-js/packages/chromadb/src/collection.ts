@@ -758,7 +758,7 @@ export class CollectionImpl implements Collection {
     if (ids) validateIDs(ids);
     if (where) validateWhere(where);
     if (whereDocument) validateWhereDocument(whereDocument);
-    if (limit !== undefined && limit < 0) {
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
       throw new Error("limit must be a non-negative integer");
     }
     if (limit !== undefined && !where && !whereDocument) {

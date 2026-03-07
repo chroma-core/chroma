@@ -474,8 +474,11 @@ class CollectionCommon(Generic[ClientT]):
                 "At least one of ids, where, or where_document must be provided"
             )
 
-        if limit is not None and limit < 0:
-            raise ValueError("limit must be a non-negative integer")
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                raise TypeError("limit must be a non-negative integer")
+            if limit < 0:
+                raise ValueError("limit must be a non-negative integer")
 
         if limit is not None and where is None and where_document is None:
             raise ValueError(
