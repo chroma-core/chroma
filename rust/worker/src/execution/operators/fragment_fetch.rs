@@ -154,8 +154,12 @@ impl FragmentFetcher {
     ///
     /// Records are filtered to the half-open range [start_offset, limit_offset)
     /// and returned sorted by log_offset. At most `max_concurrency` fragment
+<<<<<<< HEAD
     /// fetches are in flight at any given time.  Futures are constructed lazily
     /// so that no more than `max_concurrency` are alive at once.
+=======
+    /// fetches are in flight at any given time.
+>>>>>>> c910d83c8 ([ENH][worker]  Re-add the fetch_log_concurrency semaphore. (#6574))
     #[tracing::instrument(skip(self, pointers), fields(num_fragments = pointers.len()))]
     pub async fn fetch_records(
         self: &Arc<Self>,
@@ -173,6 +177,7 @@ impl FragmentFetcher {
             }
             return Ok(Vec::new());
         }
+<<<<<<< HEAD
         // NOTE(rescrv): The way this works, it will construct at most max_concurrency futures at
         // once.
         let max_concurrency = max_concurrency.max(1);
@@ -181,6 +186,16 @@ impl FragmentFetcher {
                 let this = Arc::clone(self);
                 async move {
                     this.fetch_fragment(&pointer, start_offset, limit_offset)
+=======
+        let sema = Arc::new(tokio::sync::Semaphore::new(max_concurrency));
+        let futures: Vec<_> = pointers
+            .iter()
+            .map(|pointer| {
+                let sema = Arc::clone(&sema);
+                async move {
+                    let _permit = sema.acquire().await;
+                    self.fetch_fragment(pointer, start_offset, limit_offset)
+>>>>>>> c910d83c8 ([ENH][worker]  Re-add the fetch_log_concurrency semaphore. (#6574))
                         .await
                 }
             })
