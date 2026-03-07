@@ -546,7 +546,7 @@ impl Bindings {
     }
 
     #[pyo3(
-        signature = (collection_id, ids = None, r#where = None, where_document = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
+        signature = (collection_id, ids = None, r#where = None, where_document = None, limit = None, tenant = DEFAULT_TENANT.to_string(), database = DEFAULT_DATABASE.to_string())
     )]
     #[allow(clippy::too_many_arguments)]
     fn delete(
@@ -555,9 +555,10 @@ impl Bindings {
         ids: Option<Vec<String>>,
         r#where: Option<String>,
         where_document: Option<String>,
+        limit: Option<u32>,
         tenant: String,
         database: String,
-    ) -> ChromaPyResult<()> {
+    ) -> ChromaPyResult<u32> {
         let r#where = chroma_types::RawWhereFields::from_json_str(
             r#where.as_deref(),
             where_document.as_deref(),
@@ -574,13 +575,14 @@ impl Bindings {
             collection_id,
             ids,
             r#where,
-            None,
+            limit,
         )?;
 
         let mut frontend_clone = self.frontend.clone();
-        self.runtime
+        let response = self
+            .runtime
             .block_on(async { Box::pin(frontend_clone.delete(request)).await })?;
-        Ok(())
+        Ok(response.deleted)
     }
 
     #[pyo3(

@@ -51,6 +51,7 @@ class DeleteEmbedding(BaseModel):
     ids: Optional[List[str]] = None
     where: Optional[Dict[Any, Any]] = None
     where_document: Optional[Dict[Any, Any]] = None
+    limit: Optional[int] = None
 
 
 class CreateCollection(BaseModel):

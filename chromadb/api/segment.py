@@ -56,6 +56,7 @@ from chromadb.api.types import (
     validate_batch,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
+    DeleteResult,
 )
 from chromadb.telemetry.product.events import (
     CollectionAddEvent,
@@ -716,9 +717,10 @@ class SegmentAPI(ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        limit: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
+    ) -> DeleteResult:
         add_attributes_to_current_span(
             {
                 "collection_id": str(collection_id),
@@ -770,8 +772,12 @@ class SegmentAPI(ServerAPI):
         else:
             ids_to_delete = ids
 
+        # Apply limit if specified (only valid with where clause, validated upstream)
+        if limit is not None:
+            ids_to_delete = ids_to_delete[:limit]
+
         if len(ids_to_delete) == 0:
-            return
+            return DeleteResult(deleted=0)
 
         records_to_submit = list(
             _records(operation=t.Operation.DELETE, ids=ids_to_delete)
@@ -779,11 +785,15 @@ class SegmentAPI(ServerAPI):
         self._validate_embedding_record_set(scan.collection, records_to_submit)
         self._producer.submit_embeddings(collection_id, records_to_submit)
 
+        deleted_count = len(ids_to_delete)
+
         self._product_telemetry_client.capture(
             CollectionDeleteEvent(
-                collection_uuid=str(collection_id), delete_amount=len(ids_to_delete)
+                collection_uuid=str(collection_id), delete_amount=deleted_count
             )
         )
+
+        return DeleteResult(deleted=deleted_count)
 
     @trace_method("SegmentAPI._count", OpenTelemetryGranularity.OPERATION)
     @retry(  # type: ignore[misc]
