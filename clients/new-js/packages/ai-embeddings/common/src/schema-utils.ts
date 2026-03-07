@@ -3,6 +3,7 @@ import baseSchema from "../../../../../../schemas/embedding_functions/base_schem
 import chromaLangchainSchema from "../../../../../../schemas/embedding_functions/chroma_langchain.json";
 import cohereSchema from "../../../../../../schemas/embedding_functions/cohere.json";
 import defaultSchema from "../../../../../../schemas/embedding_functions/default.json";
+import googleGenaiSchema from "../../../../../../schemas/embedding_functions/google_genai.json";
 import googleGenerativeAiSchema from "../../../../../../schemas/embedding_functions/google_generative_ai.json";
 import googlePalmSchema from "../../../../../../schemas/embedding_functions/google_palm.json";
 import googleVertexSchema from "../../../../../../schemas/embedding_functions/google_vertex.json";
@@ -54,6 +55,7 @@ const schemaMap = {
 	"chroma-langchain": chromaLangchainSchema as Schema,
 	cohere: cohereSchema as Schema,
 	default: defaultSchema as Schema,
+	"google-gemini": googleGenaiSchema as Schema,
 	"google-generative-ai": googleGenerativeAiSchema as Schema,
 	"google-palm": googlePalmSchema as Schema,
 	"google-vertex": googleVertexSchema as Schema,
