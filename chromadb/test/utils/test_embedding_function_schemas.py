@@ -223,7 +223,7 @@ class TestEmbeddingFunctionSchemas:
             "huggingface": "CHROMA_HUGGINGFACE_API_KEY",
             "huggingface_server": "CHROMA_HUGGINGFACE_API_KEY",
             "google_palm": "CHROMA_GOOGLE_PALM_API_KEY",
-            "google_generative_ai": "CHROMA_GOOGLE_GENAI_API_KEY",
+            "google_genai": "GEMINI_API_KEY",
             "google_vertex": "CHROMA_GOOGLE_VERTEX_API_KEY",
             "jina": "CHROMA_JINA_API_KEY",
             "mistral": "MISTRAL_API_KEY",
@@ -284,11 +284,13 @@ class TestEmbeddingFunctionSchemas:
         mock_vertexai.language_models = mock_vertexai_lm
         mock_vertexai.init = MagicMock()
 
-        # Mock google.generativeai - need to set up google module first
+        # Mock google.generativeai and google.genai - need to set up google module first
         mock_google = MagicMock()
         mock_google_genai.configure = MagicMock()  # For palm.configure()
         mock_google_genai.GenerativeModel = MagicMock(return_value=MagicMock())
         mock_google.generativeai = mock_google_genai
+        mock_google_genai_new = MagicMock()
+        mock_google.genai = mock_google_genai_new
 
         # Mock jina Client
         mock_jina.Client = MagicMock()
@@ -306,6 +308,8 @@ class TestEmbeddingFunctionSchemas:
             "PIL.Image": mock_pil_image,
             "google": mock_google,
             "google.generativeai": mock_google_genai,
+            "google.genai": mock_google_genai_new,
+            "google.genai.types": MagicMock(),
             "vertexai": mock_vertexai,
             "vertexai.language_models": mock_vertexai_lm,
             "boto3": mock_boto3,

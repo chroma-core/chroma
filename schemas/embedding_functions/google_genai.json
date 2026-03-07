@@ -9,26 +9,17 @@
             "type": "string",
             "description": "The name of the model to use for text embeddings"
         },
-        "vertexai": {
-            "type": [
-                "boolean",
-                "null"
-            ],
-            "description": "Whether to use Vertex AI"
+        "task_type": {
+            "type": "string",
+            "description": "The task type for the embeddings (e.g., RETRIEVAL_DOCUMENT, SEMANTIC_SIMILARITY)"
         },
-        "project": {
-            "type": [
-                "string",
-                "null"
-            ],
-            "description": "The Google Cloud project ID (required for Vertex AI)"
+        "dimension": {
+            "type": "integer",
+            "description": "The output dimensionality for the embeddings. If not specified, the model's default dimensionality is used."
         },
-        "location": {
-            "type": [
-                "string",
-                "null"
-            ],
-            "description": "The Google Cloud location/region (required for Vertex AI)"
+        "api_key_env_var": {
+            "type": "string",
+            "description": "Environment variable name that contains your API key for the Gemini API"
         }
     },
     "required": [

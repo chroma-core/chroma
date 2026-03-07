@@ -12,7 +12,7 @@ interface StoredConfig {
 let googleGenAiApi: any;
 
 export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
-  name = "google_generative_ai";
+  name = "google_genai";
 
   private api_key: string;
   private api_key_env_var: string;
@@ -127,6 +127,6 @@ export class GoogleGenerativeAiEmbeddingFunction implements IEmbeddingFunction {
   }
 
   validateConfig(config: Record<string, any>): void {
-    validateConfigSchema(config, "google_generative_ai");
+    validateConfigSchema(config, "google_genai");
   }
 }

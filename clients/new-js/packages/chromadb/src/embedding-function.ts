@@ -140,7 +140,7 @@ const pythonEmbeddingFunctions: Record<string, string> = {
   default: "default-embed",
   together_ai: "together-ai",
   sentence_transformer: "sentence-transformer",
-  google_generative_ai: "google-generative-ai",
+  google_genai: "google-gemini",
 };
 
 const unsupportedEmbeddingFunctions: Set<string> = new Set([

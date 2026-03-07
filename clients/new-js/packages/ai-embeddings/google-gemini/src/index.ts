@@ -7,7 +7,7 @@ import {
 import { validateConfigSchema } from "@chroma-core/ai-embeddings-common";
 import { GoogleGenAI } from "@google/genai";
 
-const NAME = "google-generative-ai";
+const NAME = "google-gemini";
 
 export interface GoogleGeminiConfig {
   api_key_env_var: string;
