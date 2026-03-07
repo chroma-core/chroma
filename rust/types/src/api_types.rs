@@ -1626,6 +1626,7 @@ impl DeleteCollectionRecordsRequest {
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsResponse {
+    #[serde(default)]
     pub deleted: u32,
 }
 

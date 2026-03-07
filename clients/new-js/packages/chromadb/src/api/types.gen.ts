@@ -191,7 +191,7 @@ export type DeleteCollectionRecordsPayload = RawWhereFields & {
 };
 
 export type DeleteCollectionRecordsResponse = {
-    deleted: number;
+    deleted?: number;
 };
 
 export type DeleteCollectionResponse = {
