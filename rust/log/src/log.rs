@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-use crate::grpc_log::{GrpcLog, GrpcSealLogError, ScoutLogFragmentsResponse};
-=======
-use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError};
->>>>>>> 9d3c6b882 ([ENH] use ResourceExhausted error code for log backpressure (#6527))
+use crate::grpc_log::{GrpcLog, GrpcPushLogsError, GrpcSealLogError, ScoutLogFragmentsResponse};
 use crate::in_memory_log::InMemoryLog;
 use crate::sqlite_log::SqliteLog;
 use crate::types::CollectionInfo;
