@@ -176,20 +176,19 @@ impl FragmentFetcher {
         // NOTE(rescrv): The way this works, it will construct at most max_concurrency futures at
         // once.
         let max_concurrency = max_concurrency.max(1);
-        let results: Vec<Result<Vec<LogRecord>, FragmentFetchError>> =
-            futures::stream::iter(pointers.iter().cloned())
-                .map(|pointer| {
-                    let this = Arc::clone(self);
-                    async move {
-                        this.fetch_fragment(&pointer, start_offset, limit_offset)
-                            .await
-                    }
-                })
-                .buffer_unordered(max_concurrency)
-                .collect()
-                .await;
-        let results: Vec<Vec<LogRecord>> = results.into_iter().collect::<Result<_, _>>()?;
-        let mut all_records: Vec<LogRecord> = results.into_iter().flatten().collect();
+        let mut stream = futures::stream::iter(pointers.iter().cloned())
+            .map(|pointer| {
+                let this = Arc::clone(self);
+                async move {
+                    this.fetch_fragment(&pointer, start_offset, limit_offset)
+                        .await
+                }
+            })
+            .buffer_unordered(max_concurrency);
+        let mut all_records: Vec<LogRecord> = Vec::new();
+        while let Some(result) = stream.next().await {
+            all_records.extend(result?);
+        }
         all_records.sort_by_key(|r| r.log_offset);
         if all_records.is_empty() && start_offset < limit_offset {
             return Err(FragmentFetchError::HoleInLog {
