@@ -1,7 +1,11 @@
+import os
+import random
+from threading import local
+from unittest.mock import patch
+
+import pytest
 from chromadb.config import Component, System, Settings
 from overrides import overrides
-from threading import local
-import random
 
 data = local()  # use thread local just in case tests ever run in parallel
 
@@ -207,3 +211,25 @@ def test_http_client_setting_overrides() -> None:
     assert settings.chroma_http_keepalive_secs == 5.5
     assert settings.chroma_http_max_connections == 123
     assert settings.chroma_http_max_keepalive_connections == 17
+
+
+@patch.dict(os.environ, {"CHROMA_API_IMPL": "my_api_impl"}, clear=True)
+def test_uses_env() -> None:
+    settings = Settings()
+    assert settings.chroma_api_impl == "my_api_impl"
+
+
+@patch.dict(os.environ, {"MY_ENV_VAR": "my_env_var"}, clear=True)
+def test_ignores_extra_env_vars() -> None:
+    settings = Settings()
+    with pytest.raises(AttributeError):
+        _ = settings.my_env_var
+
+
+def test_local_ignores_extra_settings_param() -> None:
+    settings = Settings(extra_param="asdsdsds", tenant_id="test")
+    # Does not error if the extra param is present in settings input.
+    assert settings.tenant_id == "test"
+    # But it should error if the extra param is accessed.
+    with pytest.raises(AttributeError):
+        _ = settings.extra_param
