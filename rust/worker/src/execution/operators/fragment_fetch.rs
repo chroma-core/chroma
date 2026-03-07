@@ -7,7 +7,7 @@ use chroma_storage::admissioncontrolleds3::StorageRequestPriority;
 use chroma_storage::{GetOptions, Storage, StorageError};
 use chroma_types::chroma_proto;
 use chroma_types::{LogRecord, OperationRecord, RecordConversionError};
-use futures::future::try_join_all;
+use futures::stream::StreamExt;
 use prost::Message;
 use thiserror::Error;
 use wal3::LogPosition;
@@ -154,10 +154,11 @@ impl FragmentFetcher {
     ///
     /// Records are filtered to the half-open range [start_offset, limit_offset)
     /// and returned sorted by log_offset. At most `max_concurrency` fragment
-    /// fetches are in flight at any given time.
+    /// fetches are in flight at any given time.  Futures are constructed lazily
+    /// so that no more than `max_concurrency` are alive at once.
     #[tracing::instrument(skip(self, pointers), fields(num_fragments = pointers.len()))]
     pub async fn fetch_records(
-        &self,
+        self: &Arc<Self>,
         pointers: &[FragmentPointer],
         start_offset: u64,
         limit_offset: u64,
@@ -172,19 +173,21 @@ impl FragmentFetcher {
             }
             return Ok(Vec::new());
         }
-        let sema = Arc::new(tokio::sync::Semaphore::new(max_concurrency));
-        let futures: Vec<_> = pointers
-            .iter()
-            .map(|pointer| {
-                let sema = Arc::clone(&sema);
-                async move {
-                    let _permit = sema.acquire().await;
-                    self.fetch_fragment(pointer, start_offset, limit_offset)
-                        .await
-                }
-            })
-            .collect();
-        let results = try_join_all(futures).await?;
+        // NOTE(rescrv): The way this works, it will construct at most max_concurrency futures at
+        // once.
+        let results: Vec<Result<Vec<LogRecord>, FragmentFetchError>> =
+            futures::stream::iter(pointers.iter().cloned())
+                .map(|pointer| {
+                    let this = Arc::clone(self);
+                    async move {
+                        this.fetch_fragment(&pointer, start_offset, limit_offset)
+                            .await
+                    }
+                })
+                .buffer_unordered(max_concurrency)
+                .collect()
+                .await;
+        let results: Vec<Vec<LogRecord>> = results.into_iter().collect::<Result<_, _>>()?;
         let mut all_records: Vec<LogRecord> = results.into_iter().flatten().collect();
         all_records.sort_by_key(|r| r.log_offset);
         if all_records.is_empty() && start_offset < limit_offset {
@@ -240,6 +243,7 @@ impl FragmentFetcher {
         };
         let (parsed_records, _num_bytes, _now_us) =
             wal3::interfaces::s3::parse_parquet_fast(&bytes, starting_position).await?;
+        drop(bytes);
 
         let fragment_capacity = pointer
             .limit_offset
@@ -291,6 +295,8 @@ fn check_contiguous(records: &[LogRecord], start_offset: u64) -> Result<(), Frag
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::{check_contiguous, FragmentFetchError, FragmentFetcher, FragmentPointer};
     use chroma_types::{LogRecord, Operation, OperationRecord};
 
@@ -428,7 +434,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_records_empty_pointers_nonempty_range() {
         let (_tmp, storage) = chroma_storage::test_storage();
-        let fetcher = FragmentFetcher::new_for_test(storage);
+        let fetcher = Arc::new(FragmentFetcher::new_for_test(storage));
         let err = fetcher
             .fetch_records(&[], 5, 10, 10)
             .await
@@ -445,7 +451,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_records_empty_pointers_empty_range() {
         let (_tmp, storage) = chroma_storage::test_storage();
-        let fetcher = FragmentFetcher::new_for_test(storage);
+        let fetcher = Arc::new(FragmentFetcher::new_for_test(storage));
         let records = fetcher
             .fetch_records(&[], 5, 5, 10)
             .await
