@@ -1829,6 +1829,57 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
+    async fn test_k8s_integration_delete_with_limit() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_delete_with_limit").await;
+
+            collection
+                .add(
+                    vec![
+                        "id1".to_string(),
+                        "id2".to_string(),
+                        "id3".to_string(),
+                        "id4".to_string(),
+                        "id5".to_string(),
+                    ],
+                    vec![
+                        vec![1.0, 2.0, 3.0],
+                        vec![4.0, 5.0, 6.0],
+                        vec![7.0, 8.0, 9.0],
+                        vec![10.0, 11.0, 12.0],
+                        vec![13.0, 14.0, 15.0],
+                    ],
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            // Delete 3 IDs but with limit=2, so only 2 should be deleted.
+            let response = collection
+                .delete(
+                    Some(vec![
+                        "id1".to_string(),
+                        "id2".to_string(),
+                        "id3".to_string(),
+                    ]),
+                    None,
+                    Some(2),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.deleted, 2);
+
+            let count = collection.count().await.unwrap();
+            assert_eq!(count, 3);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
     async fn test_k8s_integration_fork_basic() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_fork_source").await;
