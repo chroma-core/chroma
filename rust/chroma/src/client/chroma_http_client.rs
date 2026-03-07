@@ -30,12 +30,12 @@ const USER_AGENT: &str = concat!(
 #[derive(Error, Debug)]
 pub enum ChromaHttpClientError {
     /// Network-level HTTP request failed.
-    #[error("Request error: {0:?}")]
+    #[error("Request error: {0}")]
     RequestError(#[from] reqwest::Error),
     /// Chroma API returned an error status with a structured error message.
     ///
     /// Contains the error message from the server and the HTTP status code that triggered the error.
-    #[error("API error: {0:?} ({1})")]
+    #[error("API error: {0} ({1})")]
     ApiError(String, reqwest::StatusCode),
     /// Client lacks access to a unique database or cannot determine which database to use.
     #[error("Could not resolve database ID: {0}")]
@@ -142,7 +142,6 @@ impl Clone for ChromaHttpClient {
 /// identifier and a user-assigned name. This struct is returned by [`ChromaHttpClient::list_databases`].
 // TODO: remove and replace with actual Database struct
 #[derive(serde::Deserialize, Debug)]
-#[allow(dead_code)]
 pub struct Database {
     /// The unique identifier for this database.
     pub id: String,
