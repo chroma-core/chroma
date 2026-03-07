@@ -44,18 +44,17 @@ describe("get collections", () => {
       embeddings: EMBEDDINGS,
       metadatas: METADATAS,
     });
-    try {
-      await collection.get({
-        where: {
-          //@ts-ignore supposed to fail
-          test: { $contains: "hello" },
-        },
-      });
-    } catch (error: any) {
-      expect(error).toBeDefined();
-      expect(error).toBeInstanceOf(InvalidArgumentError);
-      expect(error.message).toMatchInlineSnapshot(`"Invalid where clause"`);
-    }
+    const invalidWhereQuery = collection.get({
+      where: {
+        //@ts-ignore supposed to fail
+        test: { $contains: "hello" },
+      },
+    });
+
+    await expect(invalidWhereQuery).rejects.toThrow(InvalidArgumentError);
+    await expect(invalidWhereQuery).rejects.toThrowErrorMatchingInlineSnapshot(
+      `"Invalid where clause"`,
+    );
   });
 
   test("it should get embedding with matching documents", async () => {
@@ -105,18 +104,17 @@ describe("get collections", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    await expect(async () => {
-      await collection.get({ ids: IDS });
-    }).rejects.toThrow(ChromaNotFoundError);
+    await expect(collection.get({ ids: IDS })).rejects.toThrow(
+      ChromaNotFoundError,
+    );
   });
 
   test("it should throw an error if the collection does not exist", async () => {
     await expect(
-      async () =>
-        await client.getCollection({
-          name: "test",
-          embeddingFunction: new DefaultEmbeddingFunction(),
-        }),
+      client.getCollection({
+        name: "test",
+        embeddingFunction: new DefaultEmbeddingFunction(),
+      }),
     ).rejects.toThrow(Error);
   });
 });

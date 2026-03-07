@@ -226,9 +226,9 @@ describe("query records", () => {
   test("should error on non existing collection", async () => {
     const collection = await client.createCollection({ name: "test" });
     await client.deleteCollection({ name: "test" });
-    await expect(async () => {
-      await collection.query({ queryEmbeddings: [1, 2, 3] });
-    }).rejects.toThrow(ChromaNotFoundError);
+    await expect(
+      collection.query({ queryEmbeddings: [1, 2, 3] }),
+    ).rejects.toThrow(ChromaNotFoundError);
   });
 
   test("it should query a collection with specific IDs", async () => {
@@ -464,13 +464,13 @@ describe("id filtering", () => {
     }
 
     const deletedId = idsToDelete[0];
-    await expect(async () => {
-      await collection.query({
+    await expect(
+      collection.query({
         queryEmbeddings: queryEmbedding,
         ids: deletedId,
         nResults: 1,
         include: [IncludeEnum.Metadatas],
-      });
-    }).rejects.toThrow();
+      }),
+    ).rejects.toThrow();
   });
 });
