@@ -66,15 +66,30 @@
             "group": "CLI",
             "pages": [
               "docs/cli/install",
-              "docs/cli/browse",
-              "docs/cli/copy",
-              "docs/cli/db",
-              "docs/cli/sample-apps",
-              "docs/cli/login",
-              "docs/cli/profile",
               "docs/cli/run",
-              "docs/cli/update",
-              "docs/cli/vacuum"
+              {
+                "group": "Data Management",
+                "pages": [
+                  "docs/cli/browse",
+                  "docs/cli/copy",
+                  "docs/cli/db",
+                  "docs/cli/vacuum"
+                ]
+              },
+              {
+                "group": "Cloud",
+                "pages": [
+                  "docs/cli/login",
+                  "docs/cli/profile"
+                ]
+              },
+              {
+                "group": "Other",
+                "pages": [
+                  "docs/cli/sample-apps",
+                  "docs/cli/update"
+                ]
+              }
             ]
           },
           {
