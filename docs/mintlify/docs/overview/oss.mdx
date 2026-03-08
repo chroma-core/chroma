@@ -4,7 +4,8 @@ description: "Chroma is the open-source AI application database. Contribute to t
 ---
 import { Callout } from '/snippets/callout.mdx';
 
-**Chroma is the open-source AI application database**. Chroma makes it easy to build LLM apps by making knowledge, facts, and skills pluggable for LLMs.
+Chroma is licensed under [Apache 2.0](https://github.com/chroma-core/chroma/blob/main/LICENSE). Its source code can be
+viewed on [Github](https://github.com/chroma-core/chroma).
 
 ## Contributing
 
@@ -64,51 +65,7 @@ underlying storage systems is a key part of that work.
 
 ## Telemetry
 
-Chroma contains a telemetry feature that collects **anonymous** usage information.
-
-### Why?
-
-We use this information to help us understand how Chroma is used, to help us prioritize work on new features and bug fixes, and to help us improve Chroma's performance and stability.
-
-### Opting out
-
-If you prefer to opt out of telemetry, you can do this in two ways.
-
-#### In Client Code
-
-<Tabs>
-<Tab title="Python" icon="python">
-
-Set `anonymized_telemetry` to `False` in your client's settings:
-
-```python
-from chromadb.config import Settings
-client = chromadb.Client(Settings(anonymized_telemetry=False))
-# or if using PersistentClient
-client = chromadb.PersistentClient(path="/path/to/save/to", settings=Settings(anonymized_telemetry=False))
-```
-
-</Tab>
-
-<Tab title="TypeScript" icon="js">
-
-Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
-
-</Tab>
-
-<Tab title="Rust" icon="rust">
-
-Disable telemetry on your Chroma server (see next section) via environment variables where you run Chroma.
-
-</Tab>
-</Tabs>
-
-#### In Chroma's Backend Server Using Environment Variables
-
-Set `ANONYMIZED_TELEMETRY` to `False` in your shell or server environment.
-
-If you are running Chroma on your local computer with `docker-compose` you can set this value in an `.env` file placed in the same directory as the `docker-compose.yml` file:
-
-```text
-ANONYMIZED_TELEMETRY=False
-```
+As of version 1.5.4, Chroma no longer collects product telemetry. Users can still
+use OpenTelemetry to collect observability data on their own Chroma instances.
+This data is never shared with Chroma. See [Observability](guides/deploy/observability)
+to learn more.
