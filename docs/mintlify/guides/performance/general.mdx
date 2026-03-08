@@ -1,0 +1,64 @@
+---
+title: General
+description: How to improve Chroma performance across single-node and distributed deployments.
+---
+
+## Python Thin Client
+
+
+If you are running Chroma in client-server mode in a Python application, you may not need the full Chroma library. Instead, you can use the lightweight client-only library.
+
+In this case, you can install the `chromadb-client` package **instead** of our `chromadb` package.
+
+The `chromadb-client` package is a lightweight HTTP client for the server with a minimal dependency footprint.
+
+<CodeGroup>
+
+```terminal pip
+pip install chromadb-client
+```
+
+```terminal poetry
+poetry add chromadb-client
+```
+
+```terminal uv
+uv pip install chromadb-client
+```
+
+</CodeGroup>
+
+```python
+# Python
+import chromadb
+# Example setup of the client to connect to your chroma server
+client = chromadb.HttpClient(host='localhost', port=8000)
+
+# Or for async usage:
+async def main():
+    client = await chromadb.AsyncHttpClient(host='localhost', port=8000)
+```
+
+Note that the `chromadb-client` package is a subset of the full Chroma library and does not include all the dependencies. If you want to use the full Chroma library, you can install the `chromadb` package instead.
+
+Most importantly, the thin-client package has no default embedding functions. If you `add()` documents without embeddings, you must have manually specified an embedding function and install the dependencies for it.
+
+
+## Local vs API Embedding Models
+
+Chroma's built-in embedding functions can be locally generated or generated
+via an API, depending on the provider. Some local embedding functions are lightweight (such as BM25), but most are
+heavy and require large libraries and model weights to be downloaded. If you are
+building in a serverless environment, you should use a dedicated service to
+generate the embedding.
+
+This dedicated service can be self-hosted via
+[HuggingFace](/integrations/embedding-models/hugging-face-server), or hosted by
+someone such as the OpenAI, Bedrock, or Chroma Cloud embedding models.
+
+## Warm-up queries
+
+Infrequently used collections are moved to cold storage. The first time a
+collection is queried, it will be slower than average because the system needs
+to cache the data. Chroma users typically send a warm-up query to make the
+collection warm. This helps end users avoid cold-start latency entirely.

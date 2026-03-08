@@ -162,12 +162,19 @@
             "pages": [
               "guides/deploy/client-server-mode",
               "guides/deploy/python-thin-client",
-              "guides/deploy/performance",
               "guides/deploy/observability",
               "guides/deploy/docker",
               "guides/deploy/aws",
               "guides/deploy/azure",
               "guides/deploy/gcp"
+            ]
+          },
+          {
+            "group": "Performance",
+            "pages": [
+              "guides/performance/general",
+              "guides/performance/single-node",
+              "guides/performance/distributed"
             ]
           }
         ]
@@ -538,6 +545,14 @@
     {
       "source": "/reference/typescript/index",
       "destination": "/reference/typescript/client"
+    },
+    {
+      "source": "/guides/deploy/performance",
+      "destination": "/guides/performance/single-node"
+    },
+    {
+      "source": "/guides/performance",
+      "destination": "/guides/performance/general"
     }
   ]
 }
