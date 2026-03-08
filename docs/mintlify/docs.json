@@ -234,6 +234,12 @@
         "pages": [
           "reference/overview",
           {
+            "group": "Self-Hosted Chroma",
+            "pages": [
+              "reference/server-env-vars"
+            ]
+          },
+          {
             "group": "SDKs",
             "pages": [
               {
