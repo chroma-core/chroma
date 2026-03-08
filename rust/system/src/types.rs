@@ -1,10 +1,13 @@
-use super::{scheduler::Scheduler, ChannelError, RequestError, WrappedMessage};
+use super::{scheduler::Scheduler, utils::duration_ms, ChannelError, RequestError, WrappedMessage};
 use async_trait::async_trait;
 use chroma_config::registry::Injectable;
 use chroma_error::ChromaError;
 use core::panic;
 use futures::Stream;
 use parking_lot::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
+use std::time::Instant;
 use std::{fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
@@ -13,13 +16,12 @@ use super::{system::System, ReceiverForMessage};
 pub trait Message: Debug + Send + 'static {}
 impl<M: Debug + Send + 'static> Message for M {}
 
+/// The lifecycle state of a component within the system.
 #[derive(Debug, PartialEq, Clone, Copy)]
-/// The state of a component
-/// A component can be running or stopped
-/// A component is stopped when it is cancelled
-/// A component can be run with a system
-pub(crate) enum ComponentState {
+pub enum ComponentState {
+    /// The component is running and processing messages.
     Running,
+    /// The component has been cancelled and is no longer processing messages.
     Stopped,
 }
 
@@ -161,9 +163,52 @@ pub(crate) struct ComponentSender<C: Component> {
     sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>,
 }
 
+struct ComponentSenderMetrics {
+    send_total: opentelemetry::metrics::Counter<u64>,
+    send_fail_total: opentelemetry::metrics::Counter<u64>,
+    request_total: opentelemetry::metrics::Counter<u64>,
+    request_fail_total: opentelemetry::metrics::Counter<u64>,
+    request_latency_ms: opentelemetry::metrics::Histogram<f64>,
+}
+
+impl ComponentSenderMetrics {
+    fn new() -> Self {
+        let meter = opentelemetry::global::meter("chroma.system");
+        Self {
+            send_total: meter
+                .u64_counter("chroma.system.channel.send_total")
+                .with_description("Total send calls from component senders")
+                .build(),
+            send_fail_total: meter
+                .u64_counter("chroma.system.channel.send_fail_total")
+                .with_description("Failed send calls from component senders")
+                .build(),
+            request_total: meter
+                .u64_counter("chroma.system.channel.request_total")
+                .with_description("Total request calls from component senders")
+                .build(),
+            request_fail_total: meter
+                .u64_counter("chroma.system.channel.request_fail_total")
+                .with_description("Failed request calls from component senders")
+                .build(),
+            request_latency_ms: meter
+                .f64_histogram("chroma.system.channel.request_latency_ms")
+                .with_description("Request latency from send to response in milliseconds")
+                .build(),
+        }
+    }
+}
+
+static COMPONENT_SENDER_METRICS: LazyLock<ComponentSenderMetrics> =
+    LazyLock::new(ComponentSenderMetrics::new);
+
 impl<C: Component> ComponentSender<C> {
     pub(super) fn new(sender: tokio::sync::mpsc::Sender<WrappedMessage<C>>) -> Self {
         ComponentSender { sender }
+    }
+
+    pub(super) fn capacity(&self) -> usize {
+        self.sender.capacity()
     }
 
     pub(super) async fn wrap_and_send<M>(
@@ -175,9 +220,33 @@ impl<C: Component> ComponentSender<C> {
         C: Handler<M>,
         M: Message,
     {
-        self.sender
+        let component_kv = opentelemetry::KeyValue::new("component", C::get_name());
+        COMPONENT_SENDER_METRICS
+            .send_total
+            .add(1, std::slice::from_ref(&component_kv));
+        match self
+            .sender
             .try_send(WrappedMessage::new(message, None, tracing_context))
-            .map_err(|error| ChannelError::SendError(error.to_string()))
+        {
+            Ok(()) => Ok(()),
+            Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                COMPONENT_SENDER_METRICS.send_fail_total.add(
+                    1,
+                    &[component_kv, opentelemetry::KeyValue::new("result", "full")],
+                );
+                Err(ChannelError::SendError("channel full".to_string()))
+            }
+            Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                COMPONENT_SENDER_METRICS.send_fail_total.add(
+                    1,
+                    &[
+                        component_kv,
+                        opentelemetry::KeyValue::new("result", "closed"),
+                    ],
+                );
+                Err(ChannelError::SendError("channel closed".to_string()))
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -190,13 +259,55 @@ impl<C: Component> ComponentSender<C> {
         C: Handler<M>,
         M: Message,
     {
+        let start = Instant::now();
+        let component_kv = opentelemetry::KeyValue::new("component", C::get_name());
+        COMPONENT_SENDER_METRICS
+            .request_total
+            .add(1, std::slice::from_ref(&component_kv));
         let (tx, rx) = tokio::sync::oneshot::channel();
-        self.sender
+        if self
+            .sender
             .send(WrappedMessage::new(message, Some(tx), tracing_context))
             .await
-            .map_err(|_| RequestError::SendError)?;
+            .is_err()
+        {
+            COMPONENT_SENDER_METRICS.request_fail_total.add(
+                1,
+                &[
+                    component_kv.clone(),
+                    opentelemetry::KeyValue::new("result", "send"),
+                ],
+            );
+            COMPONENT_SENDER_METRICS.request_latency_ms.record(
+                duration_ms(start.elapsed()),
+                &[component_kv, opentelemetry::KeyValue::new("result", "send")],
+            );
+            return Err(RequestError::SendError);
+        }
 
-        let result = rx.await.map_err(|_| RequestError::ReceiveError)?;
+        let result = match rx.await {
+            Ok(result) => {
+                COMPONENT_SENDER_METRICS.request_latency_ms.record(
+                    duration_ms(start.elapsed()),
+                    &[component_kv, opentelemetry::KeyValue::new("result", "ok")],
+                );
+                result
+            }
+            Err(_) => {
+                COMPONENT_SENDER_METRICS.request_fail_total.add(
+                    1,
+                    &[
+                        component_kv.clone(),
+                        opentelemetry::KeyValue::new("result", "recv"),
+                    ],
+                );
+                COMPONENT_SENDER_METRICS.request_latency_ms.record(
+                    duration_ms(start.elapsed()),
+                    &[component_kv, opentelemetry::KeyValue::new("result", "recv")],
+                );
+                return Err(RequestError::ReceiveError);
+            }
+        };
 
         Ok(result)
     }
@@ -209,6 +320,51 @@ impl<C: Component> Clone for ComponentSender<C> {
             sender: self.sender.clone(),
         }
     }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct ComponentRuntimeStats {
+    handled_messages: AtomicU64,
+    last_error: Mutex<Option<String>>,
+}
+
+impl ComponentRuntimeStats {
+    pub(crate) fn record_message_handled(&self) {
+        self.handled_messages.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub(crate) fn set_last_error(&self, error: String) {
+        *self.last_error.lock() = Some(error);
+    }
+
+    fn handled_messages(&self) -> u64 {
+        self.handled_messages.load(Ordering::Relaxed)
+    }
+
+    fn last_error(&self) -> Option<String> {
+        self.last_error.lock().clone()
+    }
+}
+
+/// Point-in-time snapshot of a component's runtime statistics.
+#[derive(Debug, Clone)]
+pub struct ComponentStats {
+    /// The component's registered name.
+    pub component: &'static str,
+    /// Whether the component is running or stopped.
+    pub state: ComponentState,
+    /// The runtime the component is executing on.
+    pub runtime: ComponentRuntime,
+    /// Maximum number of messages the component's channel can hold.
+    pub queue_capacity: usize,
+    /// Number of remaining slots in the component's channel.
+    pub queue_available: usize,
+    /// When this component was started.
+    pub started_at: Instant,
+    /// Total number of messages handled since start.
+    pub handled_messages: u64,
+    /// The most recent error string, if any.
+    pub last_error: Option<String>,
 }
 
 /// A component handle is a handle to a component that can be used to stop it.
@@ -224,6 +380,10 @@ pub struct ComponentHandle<C: Component + Debug> {
     state: Arc<Mutex<ComponentState>>,
     join_handle: Option<ConsumableJoinHandle>,
     sender: ComponentSender<C>,
+    runtime: ComponentRuntime,
+    queue_capacity: usize,
+    started_at: Instant,
+    stats: Arc<ComponentRuntimeStats>,
 }
 
 // Blanket implementation for all components of the Injectable trait
@@ -237,6 +397,10 @@ impl<C: Component> Clone for ComponentHandle<C> {
             state: self.state.clone(),
             join_handle: self.join_handle.clone(),
             sender: self.sender.clone(),
+            runtime: self.runtime,
+            queue_capacity: self.queue_capacity,
+            started_at: self.started_at,
+            stats: self.stats.clone(),
         }
     }
 }
@@ -249,12 +413,19 @@ impl<C: Component> ComponentHandle<C> {
         // TODO: implement this
         join_handle: Option<ConsumableJoinHandle>,
         sender: ComponentSender<C>,
+        runtime: ComponentRuntime,
+        queue_capacity: usize,
+        stats: Arc<ComponentRuntimeStats>,
     ) -> Self {
         ComponentHandle {
             cancellation_token,
             state: Arc::new(Mutex::new(ComponentState::Running)),
             join_handle,
             sender,
+            runtime,
+            queue_capacity,
+            started_at: Instant::now(),
+            stats,
         }
     }
 
@@ -308,6 +479,20 @@ impl<C: Component> ComponentHandle<C> {
         M: Message,
     {
         self.sender.wrap_and_request(message, tracing_context).await
+    }
+
+    /// Return a point-in-time snapshot of the component's runtime statistics.
+    pub fn stats(&self) -> ComponentStats {
+        ComponentStats {
+            component: C::get_name(),
+            state: *self.state.lock(),
+            runtime: self.runtime,
+            queue_capacity: self.queue_capacity,
+            queue_available: self.sender.capacity(),
+            started_at: self.started_at,
+            handled_messages: self.stats.handled_messages(),
+            last_error: self.stats.last_error(),
+        }
     }
 }
 

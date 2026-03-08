@@ -45,9 +45,15 @@ def versions() -> List[str]:
     """Returns the pinned minimum version and the latest version of chromadb."""
     url = "https://pypi.org/pypi/chromadb/json"
     data = json.load(request.urlopen(request.Request(url)))
-    versions = list(data["releases"].keys())
+    releases = data["releases"]
+    versions = list(releases.keys())
     # Older versions on pypi contain "devXYZ" suffixes
     versions = [v for v in versions if version_re.match(v)]
+    versions = [
+        v
+        for v in versions
+        if not any(file.get("yanked", False) for file in releases.get(v, []))
+    ]
     versions.sort(key=packaging_version.Version)
     return BASELINE_VERSIONS + [versions[-1]]
 

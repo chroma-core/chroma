@@ -32,6 +32,7 @@ from chromadb.api.types import (
     Schema,
     URIs,
     DefaultEmbeddingFunction,
+    DeleteResult,
 )
 from chromadb.config import DEFAULT_DATABASE, DEFAULT_TENANT, Settings, System
 from chromadb.errors import ChromaError
@@ -425,12 +426,14 @@ class AsyncClient(SharedSystemClient, AsyncClientAPI):
         ids: Optional[IDs],
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> None:
-        await self._server._delete(
+        limit: Optional[int] = None,
+    ) -> DeleteResult:
+        return await self._server._delete(
             collection_id=collection_id,
             ids=ids,
             where=where,
             where_document=where_document,
+            limit=limit,
             tenant=self.tenant,
             database=self.database,
         )

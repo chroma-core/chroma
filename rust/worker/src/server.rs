@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -19,7 +21,7 @@ use chroma_types::{
     },
     operator::{GetResult, Knn, KnnBatch, KnnBatchResult, KnnProjection, QueryVector, Scan},
     plan::{ReadLevel, SearchPayload},
-    CollectionAndSegments, SegmentType,
+    CollectionAndSegments, CollectionUuid, SegmentType,
 };
 use futures::{stream, StreamExt, TryStreamExt};
 use tokio::signal::unix::{signal, SignalKind};
@@ -28,7 +30,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use crate::{
     config::QueryServiceConfig,
     execution::{
-        operators::fetch_log::FetchLogOperator,
+        operators::{fetch_log::FetchLogOperator, fragment_fetch::FragmentFetcher},
         orchestration::{
             count::CountOrchestrator,
             get::GetOrchestrator,
@@ -41,7 +43,18 @@ use crate::{
             sparse_knn::SparseKnnOrchestrator,
         },
     },
+    utils::fragment_fetch::fragment_fetcher_for_collection as resolve_fragment_fetcher_for_collection,
 };
+
+#[derive(Debug, thiserror::Error)]
+#[error("Invalid collection UUID in config: {0}")]
+struct InvalidCollectionUuidError(String);
+
+impl ChromaError for InvalidCollectionUuidError {
+    fn code(&self) -> chroma_error::ErrorCodes {
+        chroma_error::ErrorCodes::InvalidArgument
+    }
+}
 
 #[derive(Clone)]
 pub struct WorkerServer {
@@ -60,6 +73,9 @@ pub struct WorkerServer {
     // config
     fetch_log_batch_size: u32,
     fetch_log_concurrency: usize,
+    use_fragment_fetch: bool,
+    fragment_fetcher: Option<Arc<FragmentFetcher>>,
+    collections_for_fragment_fetch: HashSet<CollectionUuid>,
     shutdown_grace_period: Duration,
 }
 
@@ -99,6 +115,29 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             registry,
         )
         .await?;
+        let mut collections_for_fragment_fetch = HashSet::new();
+        for id_str in &config.collections_for_fragment_fetch {
+            let uuid = uuid::Uuid::parse_str(id_str).map_err(|_| {
+                Box::new(InvalidCollectionUuidError(id_str.clone())) as Box<dyn ChromaError>
+            })?;
+            collections_for_fragment_fetch.insert(CollectionUuid(uuid));
+        }
+        let needs_fragment_fetcher =
+            config.use_fragment_fetch || !collections_for_fragment_fetch.is_empty();
+        let fragment_fetcher = if needs_fragment_fetcher {
+            if let Some(fragment_storage_config) = config.fragment_storage.as_ref() {
+                let fragment_storage =
+                    Storage::try_from_config(fragment_storage_config, registry).await?;
+                Some(Arc::new(
+                    FragmentFetcher::new(fragment_storage, &config.fragment_fetcher_cache).await?,
+                ))
+            } else {
+                tracing::warn!("Fragment fetch is enabled but no fragment_storage is configured; disabling fragment fetch");
+                None
+            }
+        } else {
+            None
+        };
         Ok(WorkerServer {
             dispatcher: None,
             system: system.clone(),
@@ -111,6 +150,9 @@ impl Configurable<(QueryServiceConfig, System)> for WorkerServer {
             jemalloc_pprof_server_port: config.jemalloc_pprof_server_port,
             fetch_log_batch_size: config.fetch_log_batch_size,
             fetch_log_concurrency: config.fetch_log_concurrency,
+            use_fragment_fetch: config.use_fragment_fetch,
+            fragment_fetcher,
+            collections_for_fragment_fetch,
             shutdown_grace_period: config.grpc_shutdown_grace_period,
         })
     }
@@ -206,6 +248,8 @@ impl WorkerServer {
         let database_name =
             chroma_types::DatabaseName::new(collection_and_segments.collection.database.clone())
                 .ok_or_else(|| Status::invalid_argument("Invalid database name"))?;
+        let collection_id = collection_and_segments.collection.collection_id;
+        let fragment_fetcher = self.fragment_fetcher_for_collection(collection_id);
         Ok(FetchLogOperator {
             log_client: self.log.clone(),
             batch_size,
@@ -214,19 +258,36 @@ impl WorkerServer {
             start_log_offset_id: u64::try_from(collection_and_segments.collection.log_position + 1)
                 .unwrap_or_default(),
             maximum_fetch_count: None,
-            collection_uuid: collection_and_segments.collection.collection_id,
+            collection_uuid: collection_id,
             tenant: collection_and_segments.collection.tenant.clone(),
             database_name,
             fetch_log_concurrency: self.fetch_log_concurrency,
+            fragment_fetcher,
         })
+    }
+
+    /// Return the fragment fetcher for the given collection, or `None` if fragment fetch is
+    /// disabled for this collection.  Fragment fetch is enabled when `use_fragment_fetch` is
+    /// true or the collection appears in `collections_for_fragment_fetch`.
+    fn fragment_fetcher_for_collection(
+        &self,
+        collection_id: CollectionUuid,
+    ) -> Option<Arc<FragmentFetcher>> {
+        resolve_fragment_fetcher_for_collection(
+            &self.fragment_fetcher,
+            self.use_fragment_fetch,
+            &self.collections_for_fragment_fetch,
+            collection_id,
+        )
     }
 
     async fn orchestrate_count(
         &self,
         count: Request<chroma_proto::CountPlan>,
     ) -> Result<Response<chroma_proto::CountResult>, Status> {
-        let scan = count
-            .into_inner()
+        let count_plan = count.into_inner();
+        let read_level: ReadLevel = count_plan.read_level().into();
+        let scan = count_plan
             .scan
             .ok_or(Status::invalid_argument("Invalid Scan Operator"))?;
 
@@ -240,6 +301,7 @@ impl WorkerServer {
             1000,
             collection_and_segments,
             fetch_log,
+            read_level,
         );
 
         match count_orchestrator.run(self.system.clone()).await {
@@ -784,6 +846,9 @@ mod tests {
             jemalloc_pprof_server_port: None,
             fetch_log_batch_size: 100,
             fetch_log_concurrency: 10,
+            use_fragment_fetch: false,
+            fragment_fetcher: None,
+            collections_for_fragment_fetch: HashSet::new(),
             shutdown_grace_period: Duration::from_secs(1),
         };
 
@@ -881,12 +946,43 @@ mod tests {
         });
         let request = chroma_proto::CountPlan {
             scan: Some(scan_operator.clone()),
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
         };
 
         // invalid segment uuid
         let response = executor.count(request).await;
         assert!(response.is_err());
         assert_eq!(response.unwrap_err().code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_and_wal() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexAndWal as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
+    }
+
+    #[tokio::test]
+    async fn count_accepts_read_level_index_only() {
+        let mut executor = QueryExecutorClient::connect(run_server().await)
+            .await
+            .unwrap();
+        let scan_operator = scan();
+        let request = chroma_proto::CountPlan {
+            scan: Some(scan_operator),
+            read_level: chroma_proto::ReadLevel::IndexOnly as i32,
+        };
+
+        let response = executor.count(request).await;
+        assert!(response.is_ok());
     }
 
     #[tokio::test]

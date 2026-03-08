@@ -468,10 +468,22 @@ class CollectionCommon(Generic[ClientT]):
         ids: Optional[IDs],
         where: Optional[Where],
         where_document: Optional[WhereDocument],
+        limit: Optional[int] = None,
     ) -> DeleteRequest:
         if ids is None and where is None and where_document is None:
             raise InvalidArgumentError(
                 "At least one of ids, where, or where_document must be provided"
+            )
+
+        if limit is not None:
+            if not isinstance(limit, int) or isinstance(limit, bool):
+                raise TypeError("limit must be a non-negative integer")
+            if limit < 0:
+                raise ValueError("limit must be a non-negative integer")
+
+        if limit is not None and where is None and where_document is None:
+            raise ValueError(
+                "limit can only be specified when a where or where_document clause is provided"
             )
 
         # Unpack
@@ -487,7 +499,7 @@ class CollectionCommon(Generic[ClientT]):
         validate_filter_set(filter_set=filters)
 
         return DeleteRequest(
-            ids=request_ids, where=where, where_document=where_document
+            ids=request_ids, where=where, where_document=where_document, limit=limit
         )
 
     def _transform_peek_response(self, response: GetResult) -> GetResult:

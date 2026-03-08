@@ -13,19 +13,31 @@ You can get an API key by signing up for an account at [Google AI Studio](https:
 This embedding function relies on the `google-genai` python package, which you can install with `pip install google-genai`.
 
 ```python
-# import
 import chromadb.utils.embedding_functions as embedding_functions
 
-# The GoogleGenaiEmbeddingFunction expects the API key in the GOOGLE_API_KEY environment variable.
-google_ef  = embedding_functions.GoogleGenaiEmbeddingFunction(model_name="models/gemini-embedding-001")
-google_ef(["document1","document2"])
+# The GoogleGenaiEmbeddingFunction expects the API key in the GEMINI_API_KEY environment variable.
+google_ef = embedding_functions.GoogleGenaiEmbeddingFunction(
+    model_name="gemini-embedding-001",
+    task_type="RETRIEVAL_DOCUMENT",
+)
+google_ef(["document1", "document2"])
 
 # pass documents to query for .add and .query
 collection = client.create_collection(name="name", embedding_function=google_ef)
 collection = client.get_collection(name="name", embedding_function=google_ef)
 ```
 
-You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and langauge models.
+You can optionally specify the `dimension` parameter to control the output dimensionality of the embeddings (supported range: 128–3072):
+
+```python
+google_ef = embedding_functions.GoogleGenaiEmbeddingFunction(
+    model_name="gemini-embedding-001",
+    task_type="RETRIEVAL_DOCUMENT",
+    dimension=768,
+)
+```
+
+You can view a more [complete example](https://github.com/chroma-core/chroma/tree/main/examples/gemini) chatting over documents with Gemini embedding and language models.
 
 For more info - please visit the [official Google docs](https://ai.google.dev/gemini-api/docs/embeddings).
 

@@ -156,8 +156,51 @@ impl ChromaCollection {
     /// # }
     /// ```
     pub async fn count(&self) -> Result<u32, ChromaHttpClientError> {
-        self.send::<(), u32>("count", "count", Method::GET, None)
-            .await
+        self.count_with_options(ReadLevel::IndexAndWal).await
+    }
+
+    /// Count with custom read level controlling whether to read from the write-ahead log.
+    ///
+    /// By default, counts read from both the compacted index and the write-ahead log (WAL),
+    /// ensuring all committed writes are visible. For higher throughput at the cost of
+    /// potentially missing recent uncommitted writes, use `ReadLevel::IndexOnly` to skip
+    /// the WAL and read only from the compacted index.
+    ///
+    /// # Arguments
+    ///
+    /// * `read_level` - Controls data sources for the query:
+    ///   - [`ReadLevel::IndexAndWal`] - Read from both the compacted index and WAL (default).
+    ///     All committed writes will be visible.
+    ///   - [`ReadLevel::IndexOnly`] - Read only from the compacted index, skipping the WAL.
+    ///     Faster, but recent writes that haven't been compacted may not be visible.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chroma_types::plan::ReadLevel;
+    ///
+    /// # async fn example(collection: &chroma::ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Skip WAL for faster count (may miss recent writes)
+    /// let count = collection.count_with_options(ReadLevel::IndexOnly).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn count_with_options(
+        &self,
+        read_level: ReadLevel,
+    ) -> Result<u32, ChromaHttpClientError> {
+        #[derive(Serialize)]
+        struct CountQueryParams {
+            read_level: ReadLevel,
+        }
+        self.send_with_query::<(), CountQueryParams, u32>(
+            "count",
+            "count",
+            Method::GET,
+            None,
+            Some(CountQueryParams { read_level }),
+        )
+        .await
     }
 
     /// Gets the indexing status of this collection.
@@ -727,9 +770,10 @@ impl ChromaCollection {
     /// # async fn example(collection: ChromaCollection) -> Result<(), Box<dyn std::error::Error>> {
     /// let response = collection.delete(
     ///     Some(vec!["doc1".to_string(), "doc2".to_string()]),
-    ///     None
+    ///     None,
+    ///     None,
     /// ).await?;
-    /// println!("Deleted records successfully");
+    /// println!("Deleted {} records", response.deleted);
     /// # Ok(())
     /// # }
     /// ```
@@ -737,6 +781,7 @@ impl ChromaCollection {
         &self,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        limit: Option<u32>,
     ) -> Result<DeleteCollectionRecordsResponse, ChromaHttpClientError> {
         let request = DeleteCollectionRecordsRequest::try_new(
             self.collection.tenant.clone(),
@@ -744,6 +789,7 @@ impl ChromaCollection {
             self.collection.collection_id,
             ids,
             r#where,
+            limit,
         )?;
         let request = request.into_payload()?;
         self.send("delete", "delete", Method::POST, Some(request))
@@ -798,6 +844,23 @@ impl ChromaCollection {
         method: Method,
         body: Option<Body>,
     ) -> Result<Response, ChromaHttpClientError> {
+        self.send_with_query::<Body, (), Response>(operation, path, method, body, None::<()>)
+            .await
+    }
+
+    /// Internal transport method with query parameter support.
+    async fn send_with_query<
+        Body: Serialize,
+        QueryParams: Serialize,
+        Response: DeserializeOwned,
+    >(
+        &self,
+        operation: &str,
+        path: &str,
+        method: Method,
+        body: Option<Body>,
+        query_params: Option<QueryParams>,
+    ) -> Result<Response, ChromaHttpClientError> {
         let operation_name = format!("collection_{operation}");
         let path = format!(
             "/api/v2/tenants/{}/databases/{}/collections/{}/{}",
@@ -806,7 +869,7 @@ impl ChromaCollection {
         let path = path.trim_end_matches("/");
 
         self.client
-            .send(&operation_name, method, path, body, None::<()>)
+            .send(&operation_name, method, path, body, query_params)
             .await
     }
 }
@@ -1401,6 +1464,44 @@ mod tests {
 
     #[tokio::test]
     #[test_log::test]
+    async fn test_k8s_integration_count_with_read_levels() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_count_read_level").await;
+
+            collection
+                .add(
+                    vec!["id1".to_string(), "id2".to_string(), "id3".to_string()],
+                    vec![
+                        vec![1.0, 2.0, 3.0],
+                        vec![1.1, 2.1, 3.1],
+                        vec![0.9, 1.9, 2.9],
+                    ],
+                    None,
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+
+            // INDEX_AND_WAL should see all committed writes
+            let count = collection
+                .count_with_options(ReadLevel::IndexAndWal)
+                .await
+                .unwrap();
+            assert_eq!(count, 3);
+
+            // INDEX_ONLY may omit recent WAL writes; just ensure the call succeeds
+            let count = collection
+                .count_with_options(ReadLevel::IndexOnly)
+                .await
+                .unwrap();
+            assert!(count <= 3);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
     async fn test_k8s_integration_update_embeddings() {
         with_client(|mut client| async move {
             let collection = client.new_collection("test_update_embeddings").await;
@@ -1673,7 +1774,7 @@ mod tests {
                 .unwrap();
 
             collection
-                .delete(Some(vec!["id1".to_string(), "id3".to_string()]), None)
+                .delete(Some(vec!["id1".to_string(), "id3".to_string()]), None, None)
                 .await
                 .unwrap();
 
@@ -1714,11 +1815,77 @@ mod tests {
                     MetadataValue::Str("a".to_string()),
                 ),
             });
-            collection.delete(None, Some(where_clause)).await.unwrap();
+            collection
+                .delete(None, Some(where_clause), None)
+                .await
+                .unwrap();
 
             let count = collection.count().await.unwrap();
             println!("Count after delete: {}", count);
             assert_eq!(count, 1);
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    #[test_log::test]
+    async fn test_k8s_integration_delete_with_limit() {
+        with_client(|mut client| async move {
+            let collection = client.new_collection("test_delete_with_limit").await;
+
+            let mut metadata_a = Metadata::new();
+            metadata_a.insert("category".to_string(), "a".into());
+
+            let mut metadata_b = Metadata::new();
+            metadata_b.insert("category".to_string(), "b".into());
+
+            collection
+                .add(
+                    vec![
+                        "id1".to_string(),
+                        "id2".to_string(),
+                        "id3".to_string(),
+                        "id4".to_string(),
+                        "id5".to_string(),
+                    ],
+                    vec![
+                        vec![1.0, 2.0, 3.0],
+                        vec![4.0, 5.0, 6.0],
+                        vec![7.0, 8.0, 9.0],
+                        vec![10.0, 11.0, 12.0],
+                        vec![13.0, 14.0, 15.0],
+                    ],
+                    None,
+                    None,
+                    Some(vec![
+                        Some(metadata_a.clone()),
+                        Some(metadata_a.clone()),
+                        Some(metadata_a),
+                        Some(metadata_b.clone()),
+                        Some(metadata_b),
+                    ]),
+                )
+                .await
+                .unwrap();
+
+            // Where matches 3 records (category == "a"), but limit is 2.
+            let where_clause = Where::Metadata(MetadataExpression {
+                key: "category".to_string(),
+                comparison: MetadataComparison::Primitive(
+                    PrimitiveOperator::Equal,
+                    MetadataValue::Str("a".to_string()),
+                ),
+            });
+
+            let response = collection
+                .delete(None, Some(where_clause), Some(2))
+                .await
+                .unwrap();
+
+            assert_eq!(response.deleted, 2);
+
+            let count = collection.count().await.unwrap();
+            assert_eq!(count, 3);
         })
         .await;
     }

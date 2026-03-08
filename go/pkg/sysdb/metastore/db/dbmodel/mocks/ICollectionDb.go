@@ -344,6 +344,36 @@ func (_m *ICollectionDb) IncrementCompactionFailureCount(collectionID string) er
 	return r0
 }
 
+// GetDLQFailureCounts provides a mock function with no fields
+func (_m *ICollectionDb) GetDLQFailureCounts() (map[int32]int64, error) {
+	ret := _m.Called()
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetDLQFailureCounts")
+	}
+
+	var r0 map[int32]int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (map[int32]int64, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() map[int32]int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int32]int64)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // Insert provides a mock function with given fields: in
 func (_m *ICollectionDb) Insert(in *dbmodel.Collection) error {
 	ret := _m.Called(in)

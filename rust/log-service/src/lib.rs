@@ -217,6 +217,7 @@ struct FactoryCreationContext<'a> {
     topology_name: Option<&'a TopologyName>,
     collection_id: CollectionUuid,
     prefix: String,
+    snapshot_cache: Arc<dyn SnapshotCache>,
 }
 
 impl<'a> FactoryCreationContext<'a> {
@@ -224,6 +225,7 @@ impl<'a> FactoryCreationContext<'a> {
         storages: &'a MultiCloudMultiRegionConfiguration<RegionalStorage, TopologicalStorage>,
         topology_name: Option<&'a TopologyName>,
         collection_id: CollectionUuid,
+        snapshot_cache: Arc<dyn SnapshotCache>,
     ) -> Self {
         let prefix = collection_id.storage_prefix_for_log();
         Self {
@@ -231,6 +233,7 @@ impl<'a> FactoryCreationContext<'a> {
             topology_name,
             collection_id,
             prefix,
+            snapshot_cache,
         }
     }
 
@@ -298,7 +301,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.prefix.clone(),
             "log-reader".to_string(),
             Arc::new(()),
-            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
         );
         let fragment_consumer = fragment_factory.make_consumer().await?;
         let manifest_consumer = manifest_factory.make_consumer().await?;
@@ -406,7 +409,7 @@ impl<'a> FactoryCreationContext<'a> {
             self.prefix.clone(),
             "copy".to_string(),
             Arc::new(()),
-            Arc::new(()),
+            Arc::clone(&self.snapshot_cache),
         );
         let fragment_publisher = fragment_factory.make_publisher().await?;
         Ok(wal3::copy(reader, cursor, &fragment_publisher, manifest_factory, cmek).await?)
@@ -1125,9 +1128,67 @@ impl LogServer {
         topology_name: Option<&TopologyName>,
         collection_id: CollectionUuid,
     ) -> Result<Arc<dyn LogReaderTrait>, Error> {
-        let ctx = FactoryCreationContext::new(&self.storages, topology_name, collection_id);
+        let snapshot_cache = self.snapshot_cache_for_collection(collection_id);
+        let ctx = FactoryCreationContext::new(
+            &self.storages,
+            topology_name,
+            collection_id,
+            snapshot_cache,
+        );
         ctx.make_log_reader(&self.config.writer, &self.config.reader)
             .await
+    }
+
+    /// Load a manifest for `collection_id`, using a cached manifest validated by a HEAD request
+    /// when possible.
+    ///
+    /// 1. Check the in-memory cache for a `ManifestAndWitness`.
+    /// 2. If found, issue an S3 HEAD (via `log_reader.verify`) to confirm the ETag still matches.
+    ///    A matching ETag means the cached manifest is identical to what is on storage, so it can
+    ///    be reused without a full GET.
+    /// 3. If the cache misses or the HEAD verification fails, perform a full GET via
+    ///    `log_reader.manifest_and_witness()` and populate the cache with the result.
+    async fn manifest_with_head_check(
+        &self,
+        log_reader: &dyn LogReaderTrait,
+        collection_id: CollectionUuid,
+    ) -> Result<Option<ManifestAndWitness>, wal3::Error> {
+        let cache_key = cache_key_for_manifest_and_etag(collection_id);
+        let mut cached = None;
+        if let Some(cache) = self.cache.as_ref() {
+            if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
+                match serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes) {
+                    Ok(mw) => cached = Some(mw),
+                    Err(err) => {
+                        tracing::warn!(
+                            %collection_id,
+                            %err,
+                            "failed to deserialize cached manifest; falling back to full fetch",
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(ref c) = cached {
+            if !log_reader.verify(c).await.unwrap_or_default() {
+                cached.take();
+            }
+        }
+        if let Some(mw) = cached {
+            return Ok(Some(mw));
+        }
+        match log_reader.manifest_and_witness().await {
+            Ok(Some(mw)) => {
+                if let Some(cache) = self.cache.as_ref() {
+                    if let Ok(json) = serde_json::to_string(&mw) {
+                        cache.insert(cache_key, CachedBytes::new(json.into())).await;
+                    }
+                }
+                Ok(Some(mw))
+            }
+            Ok(None) => Ok(None),
+            Err(err) => Err(err),
+        }
     }
 
     fn set_backpressure(&self, to_pressure: &[CollectionUuid]) {
@@ -2021,63 +2082,26 @@ impl LogServer {
             .make_log_reader(topology_name.as_ref(), collection_id)
             .await
             .map_err(|err| Status::unknown(err.to_string()))?;
-        let cache_key = cache_key_for_manifest_and_etag(collection_id);
-        let mut cached_manifest_and_e_tag = None;
-        if let Some(cache) = self.cache.as_ref() {
-            if let Some(cache_bytes) = cache.get(&cache_key).await.ok().flatten() {
-                let met = serde_json::from_slice::<ManifestAndWitness>(&cache_bytes.bytes).ok();
-                cached_manifest_and_e_tag = met;
-            }
-        }
-        // NOTE(rescrv):  We verify and if verification fails, we take the cached manifest to fall
-        // back to the uncached path.
-        if let Some(cached) = cached_manifest_and_e_tag.as_ref() {
-            // Here's the linearization point.  We have a cached manifest and e_tag.
-            //
-            // If we verify (perform a head), then statistically speaking, the manifest and e_tag
-            // we have in hand is identical (barring md5 collision) to the manifest and e_tag on
-            // storage.  We can use the cached manifest and e_tag in this case because it is the
-            // identical flow whether we read the whole manifest from storage or whether we pretend
-            // to read it/verify it with a HEAD and then read out of cache.
-            if !log_reader.verify(cached).await.unwrap_or_default() {
-                cached_manifest_and_e_tag.take();
-            }
-        }
-        let (start_position, limit_position) = if let Some(manifest_and_e_tag) =
-            cached_manifest_and_e_tag
+        let (start_position, limit_position) = match self
+            .manifest_with_head_check(&*log_reader, collection_id)
+            .await
         {
-            (
-                manifest_and_e_tag.manifest.oldest_timestamp(),
-                manifest_and_e_tag.manifest.next_write_timestamp(),
-            )
-        } else {
-            let (start_position, limit_position) = match log_reader.manifest_and_witness().await {
-                Ok(Some(manifest_and_e_tag)) => {
-                    if let Some(cache) = self.cache.as_ref() {
-                        let json = serde_json::to_string(&manifest_and_e_tag)
-                            .map_err(|err| Status::unknown(err.to_string()))?;
-                        let cached_bytes = CachedBytes::new(json.into());
-                        cache.insert(cache_key, cached_bytes).await;
-                    }
-                    (
-                        manifest_and_e_tag.manifest.oldest_timestamp(),
-                        manifest_and_e_tag.manifest.next_write_timestamp(),
-                    )
-                }
-                Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
-                Err(wal3::Error::UninitializedLog) => {
-                    return Err(Status::not_found(format!(
-                        "collection {collection_id} not found"
-                    )));
-                }
-                Err(err) => {
-                    return Err(Status::new(
-                        err.code().into(),
-                        format!("could not scout logs: {err:?}"),
-                    ));
-                }
-            };
-            (start_position, limit_position)
+            Ok(Some(mw)) => (
+                mw.manifest.oldest_timestamp(),
+                mw.manifest.next_write_timestamp(),
+            ),
+            Ok(None) => (LogPosition::from_offset(1), LogPosition::from_offset(1)),
+            Err(wal3::Error::UninitializedLog) => {
+                return Err(Status::not_found(format!(
+                    "collection {collection_id} not found"
+                )));
+            }
+            Err(err) => {
+                return Err(Status::new(
+                    err.code().into(),
+                    format!("could not scout logs: {err:?}"),
+                ));
+            }
         };
         let start_offset = start_position.offset() as i64;
         let limit_offset = limit_position.offset() as i64;
@@ -2086,6 +2110,98 @@ impl LogServer {
             first_uninserted_record_offset: limit_offset,
             is_sealed: true,
         }))
+    }
+
+    async fn scout_log_fragments(
+        &self,
+        request: Request<chroma_types::chroma_proto::ScoutLogFragmentsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ScoutLogFragmentsResponse>, Status> {
+        let req = request.into_inner();
+        let collection_id = Uuid::parse_str(&req.collection_id)
+            .map(CollectionUuid)
+            .map_err(|_| Status::invalid_argument("Failed to parse collection id"))?;
+        let database_name = DatabaseName::new(&req.database_name)
+            .ok_or_else(|| Status::invalid_argument("Database name invalid"))?;
+        let topology_name = database_name
+            .topology()
+            .map(|t| TopologyName::new(&t))
+            .transpose()
+            .map_err(|_| Status::invalid_argument("Invalid topology in database name"))?;
+        let log_reader = self
+            .make_log_reader(topology_name.as_ref(), collection_id)
+            .instrument(tracing::info_span!("make_log_reader", %collection_id))
+            .await
+            .map_err(|err| Status::unknown(err.to_string()))?;
+        let manifest_and_witness = match self
+            .manifest_with_head_check(&*log_reader, collection_id)
+            .instrument(tracing::info_span!("manifest_with_head_check", %collection_id))
+            .await
+        {
+            Ok(Some(mw)) => mw,
+            Ok(None) => {
+                return Ok(Response::new(
+                    chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                        first_uninserted_record_offset: req.start_from_offset,
+                        fragments: vec![],
+                    },
+                ));
+            }
+            Err(wal3::Error::UninitializedLog) => {
+                return Ok(Response::new(
+                    chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                        first_uninserted_record_offset: req.start_from_offset,
+                        fragments: vec![],
+                    },
+                ));
+            }
+            Err(err) => {
+                return Err(Status::new(
+                    err.code().into(),
+                    format!("could not scout log fragments: {err:?}"),
+                ));
+            }
+        };
+        let limits = Limits {
+            max_files: None,
+            max_bytes: None,
+            max_records: None,
+        };
+        let from = LogPosition::from_offset(req.start_from_offset);
+        let fragments = match scan_from_manifest(&manifest_and_witness.manifest, from, limits) {
+            Some(fragments) => fragments,
+            None => log_reader
+                .scan(from, limits)
+                .instrument(tracing::info_span!("log_reader::scan", %collection_id, start_offset = req.start_from_offset))
+                .await
+                .map_err(|err| {
+                    Status::new(
+                        err.code().into(),
+                        format!("could not scout log fragments: {err:?}"),
+                    )
+                })?,
+        };
+        let storage_prefix = collection_id.storage_prefix_for_log();
+        let absolute_offsets = topology_name.is_none();
+        let proto_fragments = fragments
+            .into_iter()
+            .map(|f| chroma_types::chroma_proto::LogFragmentPointer {
+                path: f.path,
+                start_offset: f.start.offset(),
+                limit_offset: f.limit.offset(),
+                num_bytes: f.num_bytes,
+                storage_prefix: storage_prefix.clone(),
+                absolute_offsets,
+            })
+            .collect();
+        Ok(Response::new(
+            chroma_types::chroma_proto::ScoutLogFragmentsResponse {
+                first_uninserted_record_offset: manifest_and_witness
+                    .manifest
+                    .next_write_timestamp()
+                    .offset(),
+                fragments: proto_fragments,
+            },
+        ))
     }
 
     async fn read_fragments(
@@ -2154,6 +2270,17 @@ impl LogServer {
             if let Some(fragments) = fragments {
                 return Ok(fragments);
             }
+            // Reuse the already-loaded manifest instead of calling scan() which would load
+            // the manifest a second time.
+            let mut short_read = false;
+            return Ok(log_reader
+                .scan_with_cache(
+                    &manifest_and_witness.manifest,
+                    from,
+                    limits,
+                    &mut short_read,
+                )
+                .await?);
         }
         Ok(log_reader.scan(from, limits).await?)
     }
@@ -2304,10 +2431,12 @@ impl LogServer {
         tracing::event!(Level::INFO, offset = ?cursor);
 
         // Use FactoryCreationContext to handle both replicated and S3 targets
+        let snapshot_cache = self.snapshot_cache_for_collection(target_collection_id);
         let target_ctx = FactoryCreationContext::new(
             &self.storages,
             topology_name.as_ref(),
             target_collection_id,
+            snapshot_cache,
         );
         target_ctx
             .fork_to_target(
@@ -2876,6 +3005,13 @@ impl LogService for LogServerWrapper {
         request: Request<PurgeFromCacheRequest>,
     ) -> Result<Response<PurgeFromCacheResponse>, Status> {
         self.log_server.purge_from_cache(request).await
+    }
+
+    async fn scout_log_fragments(
+        &self,
+        request: Request<chroma_types::chroma_proto::ScoutLogFragmentsRequest>,
+    ) -> Result<Response<chroma_types::chroma_proto::ScoutLogFragmentsResponse>, Status> {
+        self.log_server.scout_log_fragments(request).await
     }
 }
 

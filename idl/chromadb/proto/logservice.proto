@@ -195,6 +195,39 @@ message FragmentToEvict {
 message PurgeFromCacheResponse {
 }
 
+// A pointer to a fragment stored in object storage.
+message LogFragmentPointer {
+  // The path of the fragment in object storage, relative to the log prefix.
+  string path = 1;
+  // The first log offset contained in this fragment.
+  uint64 start_offset = 2;
+  // The first log offset >= start_offset NOT contained in this fragment (exclusive upper bound).
+  uint64 limit_offset = 3;
+  // The size of the fragment file in bytes.
+  uint64 num_bytes = 4;
+  // The storage prefix to prepend to fragment paths when reading from object storage.
+  string storage_prefix = 5;
+  // When true the parquet file uses absolute offsets (column "offset").
+  // When false (or absent) the parquet file uses relative offsets
+  // (column "relative_offset") and start_offset must be supplied to
+  // reconstruct absolute positions.
+  bool absolute_offsets = 6;
+}
+
+message ScoutLogFragmentsRequest {
+  string collection_id = 1;
+  string database_name = 5;
+  // The offset to start scouting from.
+  uint64 start_from_offset = 2;
+}
+
+message ScoutLogFragmentsResponse {
+  // The next record to insert will have this offset.
+  uint64 first_uninserted_record_offset = 1;
+  // Fragment pointers covering the requested log window.
+  repeated LogFragmentPointer fragments = 2;
+}
+
 service LogService {
   rpc PushLogs(PushLogsRequest) returns (PushLogsResponse) {}
   rpc ScoutLogs(ScoutLogsRequest) returns (ScoutLogsResponse) {}
@@ -221,4 +254,7 @@ service LogService {
   // Similar to UpdateCollectionLogOffset, but allows the offset to go back in time.
   // Uses the exact same request/response types as UpdateCollectionLogOffset by design.
   rpc RollbackCollectionLogOffset(UpdateCollectionLogOffsetRequest) returns (UpdateCollectionLogOffsetResponse) {}
+  // Returns fragment pointers for the requested log window so that query/compactor
+  // nodes can read fragment data directly from object storage.
+  rpc ScoutLogFragments(ScoutLogFragmentsRequest) returns (ScoutLogFragmentsResponse) {}
 }

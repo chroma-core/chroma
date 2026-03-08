@@ -1553,6 +1553,8 @@ impl ChromaError for UpsertCollectionRecordsError {
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct DeleteCollectionRecordsPayload {
     pub ids: Option<Vec<String>>,
+    #[serde(default)]
+    pub limit: Option<u32>,
     #[serde(flatten)]
     pub where_fields: RawWhereFields,
 }
@@ -1566,6 +1568,7 @@ pub struct DeleteCollectionRecordsRequest {
     pub collection_id: CollectionUuid,
     pub ids: Option<Vec<String>>,
     pub r#where: Option<Where>,
+    pub limit: Option<u32>,
 }
 
 impl DeleteCollectionRecordsRequest {
@@ -1575,6 +1578,7 @@ impl DeleteCollectionRecordsRequest {
         collection_id: CollectionUuid,
         ids: Option<Vec<String>>,
         r#where: Option<Where>,
+        limit: Option<u32>,
     ) -> Result<Self, ChromaValidationError> {
         if ids.as_ref().map(|ids| ids.is_empty()).unwrap_or(false) && r#where.is_none() {
             return Err(ChromaValidationError::from((
@@ -1584,12 +1588,22 @@ impl DeleteCollectionRecordsRequest {
             )));
         }
 
+        if limit.is_some() && r#where.is_none() {
+            return Err(ChromaValidationError::from((
+                ("limit, where"),
+                ValidationError::new("limit").with_message(
+                    "limit can only be specified when a where clause is provided".into(),
+                ),
+            )));
+        }
+
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
             ids,
             r#where,
+            limit,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)
@@ -1603,6 +1617,7 @@ impl DeleteCollectionRecordsRequest {
         };
         Ok(DeleteCollectionRecordsPayload {
             ids: self.ids.clone(),
+            limit: self.limit,
             where_fields,
         })
     }
@@ -1610,7 +1625,10 @@ impl DeleteCollectionRecordsRequest {
 
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
-pub struct DeleteCollectionRecordsResponse {}
+pub struct DeleteCollectionRecordsResponse {
+    #[serde(default)]
+    pub deleted: u32,
+}
 
 #[derive(Error, Debug)]
 pub enum DeleteCollectionRecordsError {
@@ -1735,6 +1753,8 @@ pub struct CountRequest {
     pub tenant_id: String,
     pub database_name: String,
     pub collection_id: CollectionUuid,
+    #[serde(default)]
+    pub read_level: ReadLevel,
 }
 
 impl CountRequest {
@@ -1742,11 +1762,13 @@ impl CountRequest {
         tenant_id: String,
         database_name: String,
         collection_id: CollectionUuid,
+        read_level: ReadLevel,
     ) -> Result<Self, ChromaValidationError> {
         let request = Self {
             tenant_id,
             database_name,
             collection_id,
+            read_level,
         };
         request.validate().map_err(ChromaValidationError::from)?;
         Ok(request)

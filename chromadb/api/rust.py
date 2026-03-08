@@ -36,6 +36,7 @@ from chromadb.telemetry.product.events import (
 )
 
 from chromadb.api.types import (
+    DeleteResult,
     IncludeMetadataDocuments,
     IncludeMetadataDocumentsDistances,
     IncludeMetadataDocumentsEmbeddings,
@@ -361,6 +362,7 @@ class RustBindingsAPI(ServerAPI):
         collection_id: UUID,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
+        read_level: ReadLevel = ReadLevel.INDEX_AND_WAL,
     ) -> int:
         return self.bindings.count(str(collection_id), tenant, database)
 
@@ -577,26 +579,28 @@ class RustBindingsAPI(ServerAPI):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
+        limit: Optional[int] = None,
         tenant: str = DEFAULT_TENANT,
         database: str = DEFAULT_DATABASE,
-    ) -> None:
-        self.product_telemetry_client.capture(
-            CollectionDeleteEvent(
-                # NOTE: the delete amount is not observable from python
-                # TODO: Fix this when posthog is pushed into Rust frontend
-                collection_uuid=str(collection_id),
-                delete_amount=0,
-            )
-        )
-
-        return self.bindings.delete(
+    ) -> DeleteResult:
+        deleted = self.bindings.delete(
             str(collection_id),
             ids,
             json.dumps(where) if where else None,
             json.dumps(where_document) if where_document else None,
+            limit,
             tenant,
             database,
         )
+
+        self.product_telemetry_client.capture(
+            CollectionDeleteEvent(
+                collection_uuid=str(collection_id),
+                delete_amount=deleted,
+            )
+        )
+
+        return DeleteResult(deleted=deleted)
 
     @override
     def reset(self) -> bool:

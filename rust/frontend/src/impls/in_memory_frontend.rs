@@ -286,8 +286,7 @@ impl InMemoryFrontend {
     pub fn delete_collection(
         &mut self,
         request: chroma_types::DeleteCollectionRequest,
-    ) -> Result<chroma_types::DeleteCollectionRecordsResponse, chroma_types::DeleteCollectionError>
-    {
+    ) -> Result<chroma_types::DeleteCollectionResponse, chroma_types::DeleteCollectionError> {
         let inner = &mut self.inner;
         if let Some(pos) = inner.collections.iter().position(|c| {
             c.collection.name == request.collection_name
@@ -295,7 +294,7 @@ impl InMemoryFrontend {
                 && c.collection.database == request.database_name
         }) {
             inner.collections.remove(pos);
-            Ok(chroma_types::DeleteCollectionRecordsResponse {})
+            Ok(chroma_types::DeleteCollectionResponse {})
         } else {
             Err(chroma_types::DeleteCollectionError::NotFound(
                 request.collection_name,
@@ -454,25 +453,30 @@ impl InMemoryFrontend {
         chroma_types::DeleteCollectionRecordsError,
     > {
         if request.ids.is_none() && request.r#where.is_none() {
-            return Ok(chroma_types::DeleteCollectionRecordsResponse {});
+            return Ok(chroma_types::DeleteCollectionRecordsResponse { deleted: 0 });
         }
 
-        let ids_to_delete = self
-            .get(
+        let ids_to_delete = if request.r#where.is_some() {
+            // Where clause present: resolve matching IDs via get(), limit applied there.
+            self.get(
                 chroma_types::GetRequest::try_new(
                     request.tenant_id.clone(),
                     request.database_name.clone(),
                     request.collection_id,
                     request.ids,
                     request.r#where,
-                    None,
+                    request.limit,
                     0,
                     IncludeList::empty(),
                 )
                 .unwrap(),
             )
             .map_err(|e| e.boxed())
-            .map(|response| response.ids)?;
+            .map(|response| response.ids)?
+        } else {
+            // IDs-only: no limit allowed (validated in try_new).
+            request.ids.unwrap_or_default()
+        };
 
         let collection = self
             .inner
@@ -499,11 +503,12 @@ impl InMemoryFrontend {
                 metadata: None,
             })
             .collect::<Vec<_>>();
+        let deleted = records.len() as u32;
         collection
             .reference_impl
             .apply_operation_records(records, collection.metadata_segment.id);
 
-        Ok(chroma_types::DeleteCollectionRecordsResponse {})
+        Ok(chroma_types::DeleteCollectionRecordsResponse { deleted })
     }
 
     #[allow(clippy::result_large_err)]
@@ -536,6 +541,7 @@ impl InMemoryFrontend {
                         record_segment: collection.record_segment.clone(),
                     },
                 },
+                read_level: request.read_level,
             })
             .map_err(|e| e.boxed())?;
 
@@ -693,8 +699,8 @@ impl InMemoryFrontend {
 #[cfg(test)]
 mod tests {
     use chroma_types::{
-        DatabaseName, DocumentExpression, IncludeList, Metadata, MetadataComparison,
-        MetadataExpression, MetadataValue, PrimitiveOperator, Where,
+        plan::ReadLevel, DatabaseName, DocumentExpression, IncludeList, Metadata,
+        MetadataComparison, MetadataExpression, MetadataValue, PrimitiveOperator, Where,
     };
 
     use super::*;
@@ -767,6 +773,7 @@ mod tests {
                     collection.tenant.clone(),
                     collection.database.clone(),
                     collection.collection_id,
+                    ReadLevel::default(),
                 )
                 .unwrap(),
             )
