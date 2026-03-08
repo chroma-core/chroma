@@ -11,6 +11,13 @@ Sparse embeddings are useful for retrieval tasks where you want to match on spec
 <Tabs>
 <Tab title="Python" icon="python">
 
+This embedding function uses [snowballstemmer](https://pypi.org/project/snowballstemmer/)
+to tokenize documents.
+
+```bash
+pip install snowballstemmer
+```
+
 ```python
 from chromadb.utils.embedding_functions import ChromaBm25EmbeddingFunction
 
@@ -51,6 +58,13 @@ const embedder = new ChromaBm25EmbeddingFunction({
 const sparseEmbeddings = await embedder.generate(["document1", "document2"]);
 ```
 
+You can customize the BM25 parameters:
+- `k`: Controls term frequency saturation (default: 1.2)
+- `b`: Controls document length normalization (default: 0.75)
+- `avgDocLength`: Average document length in tokens (default: 256.0)
+- `tokenMaxLength`: Maximum token length (default: 40)
+- `stopwords`: Optional list of stopwords to exclude
+
 </Tab>
 
 <Tab title="Rust" icon="rust">
@@ -65,7 +79,3 @@ let sparse_vector = bm25.encode("document text")?;
 
 </Tab>
 </Tabs>
-
-<Callout>
-BM25 is a classic information retrieval algorithm that works well for keyword-based search. For semantic search, consider using dense embedding functions instead.
-</Callout>
