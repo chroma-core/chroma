@@ -315,6 +315,34 @@ pub struct GetResponse {
 ```
 </CodeGroup>
 
+Here is a concrete example of what these responses look like in practice:
+
+```json
+// Query result
+{
+  "ids": [["doc_1", "doc_7"]],
+  "embeddings": [[[1, 2, 3, 4], [1, 2, 3, 4]]],
+  "documents": [["Chroma stores vectors.", "Embeddings power semantic search."]],
+  "metadatas": [[
+    {"source": "docs", "topic": "intro"},
+    {"source": "blog", "topic": "search"}
+  ]],
+  "distances": [[0.12, 0.21]],
+  "included": ["embeddings", "documents", "metadatas", "distances"]
+}
+// Get result
+{
+  "ids": ["doc_1", "doc_7"],
+  "embeddings": [[1, 2, 3, 4], [1, 2, 3, 4]],
+  "documents": ["Chroma stores vectors.", "Embeddings power semantic search."],
+  "metadatas": [
+    {"source": "docs", "topic": "intro"},
+    {"source": "blog", "topic": "search"}
+  ],
+  "included": ["documents", "metadatas"]
+}
+```
+
 In the results from the Get operation, corresponding elements in each array belong
 to the same document.
 
