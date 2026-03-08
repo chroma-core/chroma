@@ -28,7 +28,6 @@
             "pages": [
               "docs/overview/introduction",
               "docs/overview/getting-started",
-              "docs/overview/architecture",
               "docs/overview/oss",
               "docs/overview/migration",
               "docs/overview/troubleshooting"
@@ -392,6 +391,13 @@
               "reference/search",
               "reference/where-filter"
             ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "reference/architecture/overview",
+              "reference/architecture/distributed"
+            ]
           }
         ]
       }
@@ -487,6 +493,26 @@
     {
       "source": "/reference/chroma-reference",
       "destination": "/reference/overview"
+    },
+    {
+      "source": "/docs/overview/architecture",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/reference/architecture",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/references/architecture",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/references/architecture/overview",
+      "destination": "/reference/architecture/overview"
+    },
+    {
+      "source": "/references/architecture/distributed",
+      "destination": "/reference/architecture/distributed"
     },
     {
       "source": "/reference/js/:slug*",
