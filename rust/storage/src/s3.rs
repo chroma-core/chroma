@@ -348,7 +348,7 @@ impl S3Storage {
         let mut reader = output.body.into_async_read();
 
         reader.read_exact(&mut buf).await.map_err(|e| {
-            tracing::error!("Error reading from S3: {}", e);
+            tracing::error!("Error reading from S3: {:?}", e);
             StorageError::Generic {
                 source: Arc::new(e),
             }

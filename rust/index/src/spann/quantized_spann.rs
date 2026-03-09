@@ -47,6 +47,10 @@ pub const PREFIX_VERSION: &str = "version";
 // Key for singleton values (center, next_cluster_id)
 pub const SINGLETON_KEY: u32 = 0;
 
+/// Maximum recursion depth for balance → split/merge → reassign → balance chains.
+/// Beyond this depth, oversized clusters are deferred to the next top-level insert.
+const MAX_BALANCE_DEPTH: u32 = 4;
+
 /// In-memory staging for a quantized cluster head.
 #[derive(Clone)]
 struct QuantizedDelta {
@@ -139,11 +143,23 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         }
         let rotated = self.rotate(embedding);
         self.embeddings.insert(id, rotated.clone());
-        self.insert(id, rotated).await
+
+        let write_nprobe = self.config.write_nprobe.unwrap_or(default_write_nprobe()) as usize;
+        let candidates = self.navigate(&rotated, write_nprobe)?;
+        let rng_cluster_ids = self.rng_select(&candidates).keys;
+        let version = self.remove(id);
+
+        for cluster_id in self.register(id, rotated, &rng_cluster_ids, version)? {
+            Box::pin(self.balance(cluster_id, 0)).await?;
+        }
+
+        Ok(())
     }
 
-    pub fn remove(&self, id: u32) {
-        self.upgrade_version(id);
+    pub fn remove(&self, id: u32) -> u32 {
+        let mut entry = self.versions.entry(id).or_default();
+        *entry += 1;
+        *entry
     }
 }
 
@@ -159,7 +175,8 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Balance a cluster: scrub then trigger split/merge if needed.
-    async fn balance(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    /// `depth` tracks recursion depth through balance → split/merge → reassign → balance chains.
+    async fn balance(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
         if !self.balancing.insert(cluster_id) {
             return Ok(());
         }
@@ -179,9 +196,9 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .unwrap_or(default_merge_threshold()) as usize;
 
         if len > split_threshold {
-            self.split(cluster_id).await?;
+            self.split(cluster_id, depth).await?;
         } else if len > 0 && len < merge_threshold {
-            self.merge(cluster_id).await?;
+            self.merge(cluster_id, depth).await?;
         }
 
         self.balancing.remove(&cluster_id);
@@ -224,19 +241,6 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         self.load_raw(&ids).await?;
 
         Ok(Some(delta))
-    }
-
-    /// Insert a rotated vector into the index.
-    async fn insert(&self, id: u32, embedding: Arc<[f32]>) -> Result<(), QuantizedSpannError> {
-        let write_nprobe = self.config.write_nprobe.unwrap_or(default_write_nprobe()) as usize;
-        let candidates = self.navigate(&embedding, write_nprobe)?;
-        let rng_cluster_ids = self.rng_select(&candidates).keys;
-
-        for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
-            Box::pin(self.balance(cluster_id)).await?;
-        }
-
-        Ok(())
     }
 
     /// Check if a point is valid (version matches current version).
@@ -317,7 +321,11 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Merge a small cluster into a nearby cluster.
-    async fn merge(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    async fn merge(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
+        if depth > MAX_BALANCE_DEPTH {
+            return Ok(());
+        }
+
         let Some(source_center) = self.centroid(cluster_id) else {
             return Ok(());
         };
@@ -357,10 +365,12 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
                     .append(nearest_cluster_id, *id, *version, code)
                     .is_none()
                 {
-                    self.reassign(cluster_id, *id, *version, embedding).await?;
+                    self.reassign(cluster_id, *id, *version, embedding, depth)
+                        .await?;
                 };
             } else {
-                self.reassign(cluster_id, *id, *version, embedding).await?;
+                self.reassign(cluster_id, *id, *version, embedding, depth)
+                    .await?;
             }
         }
 
@@ -374,13 +384,14 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             .map_err(|e| QuantizedSpannError::CentroidIndex(e.boxed()))
     }
 
-    /// Reassign a vector to new clusters via RNG query
+    /// Reassign a vector to new clusters via RNG query.
     async fn reassign(
         &self,
         from_cluster_id: u32,
         id: u32,
         version: u32,
         embedding: Arc<[f32]>,
+        depth: u32,
     ) -> Result<(), QuantizedSpannError> {
         if !self.is_valid(id, version) {
             return Ok(());
@@ -398,23 +409,33 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             return Ok(());
         }
 
-        for cluster_id in self.register(id, embedding, &rng_cluster_ids)? {
-            Box::pin(self.balance(cluster_id)).await?;
+        // Atomically upgrade version only if it hasn't changed.
+        let new_version = {
+            let mut entry = self.versions.entry(id).or_default();
+            if *entry != version {
+                return Ok(());
+            }
+            *entry += 1;
+            *entry
+        };
+
+        for cluster_id in self.register(id, embedding, &rng_cluster_ids, new_version)? {
+            Box::pin(self.balance(cluster_id, depth + 1)).await?;
         }
 
         Ok(())
     }
 
     /// Register a vector in target clusters.
-    /// Returns the clusters whose lengths exceed split threshold
+    /// Returns the clusters whose lengths exceed split threshold.
+    /// Caller is responsible for version management.
     fn register(
         &self,
         id: u32,
         embedding: Arc<[f32]>,
         target_cluster_ids: &[u32],
+        version: u32,
     ) -> Result<Vec<u32>, QuantizedSpannError> {
-        let version = self.upgrade_version(id);
-
         let mut registered = false;
         let mut staging = Vec::new();
 
@@ -562,7 +583,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
     }
 
     /// Split a large cluster into two smaller clusters using 2-means clustering.
-    async fn split(&self, cluster_id: u32) -> Result<(), QuantizedSpannError> {
+    async fn split(&self, cluster_id: u32, depth: u32) -> Result<(), QuantizedSpannError> {
         let Some(delta) = self.drop(cluster_id).await? else {
             return Ok(());
         };
@@ -623,6 +644,10 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
         };
         let right_cluster_id = self.spawn(right_delta)?;
 
+        if depth > MAX_BALANCE_DEPTH {
+            return Ok(());
+        }
+
         // NPA check for split points
         let evaluated = DashSet::new();
         for (id, version, embedding) in &left_group {
@@ -635,7 +660,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let old_dist = self.distance(embedding, &old_center);
             let new_dist = self.distance(embedding, &left_center);
             if new_dist > old_dist {
-                self.reassign(left_cluster_id, *id, *version, embedding.clone())
+                self.reassign(left_cluster_id, *id, *version, embedding.clone(), depth)
                     .await?;
             }
         }
@@ -649,7 +674,7 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let old_dist = self.distance(embedding, &old_center);
             let new_dist = self.distance(embedding, &right_center);
             if new_dist > old_dist {
-                self.reassign(right_cluster_id, *id, *version, embedding.clone())
+                self.reassign(right_cluster_id, *id, *version, embedding.clone(), depth)
                     .await?;
             }
         }
@@ -790,18 +815,11 @@ impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
             let Some(embedding) = self.embeddings.get(&id).map(|e| e.clone()) else {
                 continue;
             };
-            self.reassign(from_cluster_id, id, version, embedding)
+            self.reassign(from_cluster_id, id, version, embedding, depth)
                 .await?;
         }
 
         Ok(())
-    }
-
-    /// Increment and return the next version for a vector.
-    fn upgrade_version(&self, id: u32) -> u32 {
-        let mut entry = self.versions.entry(id).or_default();
-        *entry += 1;
-        *entry
     }
 }
 
@@ -1603,18 +1621,10 @@ mod tests {
         // Level 0: Pure/Accessor Operations
         // =======================================================================
 
-        // --- upgrade ---
-        let v1 = writer.upgrade_version(1);
-        assert_eq!(v1, 1);
-        assert_eq!(writer.versions.get(&1).map(|v| *v), Some(1));
-
-        let v2 = writer.upgrade_version(1);
-        assert_eq!(v2, 2);
-        assert_eq!(writer.versions.get(&1).map(|v| *v), Some(2));
-
-        let v3 = writer.upgrade_version(2);
-        assert_eq!(v3, 1);
-        assert_eq!(writer.versions.get(&2).map(|v| *v), Some(1));
+        // --- remove (version increment) ---
+        assert_eq!(writer.remove(1), 1);
+        assert_eq!(writer.remove(1), 2);
+        assert_eq!(writer.remove(2), 1);
 
         // --- is_valid ---
         assert!(writer.is_valid(1, 2)); // current version
@@ -1707,7 +1717,7 @@ mod tests {
         // Create a test embedding for point 10 and quantize it relative to center1
         let emb_10 = [1.0f32, 0.1, 0.0, 0.0];
         let code_10: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_10, &center1).as_ref().into();
-        let v10 = writer.upgrade_version(10);
+        let v10 = writer.remove(10);
         let new_len = writer.append(cluster_id_1, 10, v10, code_10.clone());
         assert_eq!(new_len, Some(1));
 
@@ -1721,7 +1731,7 @@ mod tests {
         assert_eq!(delta.length, 1);
 
         // Append to non-existent cluster returns None
-        let v11 = writer.upgrade_version(11);
+        let v11 = writer.remove(11);
         let bad_append = writer.append(999, 11, v11, code_10.clone());
         assert!(bad_append.is_none());
 
@@ -1863,10 +1873,10 @@ mod tests {
         let code_101: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_101, &center).as_ref().into();
         let code_102: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_102, &center).as_ref().into();
 
-        // Get versions via upgrade()
-        let v100 = writer.upgrade_version(100);
-        let v101 = writer.upgrade_version(101);
-        let v102 = writer.upgrade_version(102);
+        // Get versions via remove()
+        let v100 = writer.remove(100);
+        let v101 = writer.remove(101);
+        let v102 = writer.remove(102);
 
         let delta = QuantizedDelta {
             center: center.clone(),
@@ -2006,9 +2016,9 @@ mod tests {
             .as_ref()
             .into();
 
-        // Get versions via upgrade()
-        let v200 = writer.upgrade_version(200);
-        let v201 = writer.upgrade_version(201);
+        // Get versions via remove()
+        let v200 = writer.remove(200);
+        let v201 = writer.remove(201);
 
         let delta2 = QuantizedDelta {
             center: center2,
@@ -2019,8 +2029,8 @@ mod tests {
         };
         let cluster_id_2 = writer.spawn(delta2).expect("spawn failed");
 
-        // Invalidate 201 by upgrading its version
-        writer.upgrade_version(201); // Now version is 2, but cluster has version 1
+        // Invalidate 201 by bumping its version
+        writer.remove(201); // Now version is 2, but cluster has version 1
 
         // Verify embedding 200 not in cache before drop
         assert!(writer.embeddings.get(&200).is_none());
@@ -2060,10 +2070,10 @@ mod tests {
             .as_ref()
             .into();
 
-        // Get versions via upgrade()
-        let v300 = writer.upgrade_version(300);
-        let v301 = writer.upgrade_version(301);
-        let v302 = writer.upgrade_version(302);
+        // Get versions via remove()
+        let v300 = writer.remove(300);
+        let v301 = writer.remove(301);
+        let v302 = writer.remove(302);
 
         let delta3 = QuantizedDelta {
             center: center3,
@@ -2074,8 +2084,8 @@ mod tests {
         };
         let cluster_id_3 = writer.spawn(delta3).expect("spawn failed");
 
-        // Invalidate 301 by upgrading its version
-        writer.upgrade_version(301); // Now version is 2
+        // Invalidate 301 by bumping its version
+        writer.remove(301); // Now version is 2
 
         // Before scrub: all 3 points in delta
         {
@@ -2185,8 +2195,8 @@ mod tests {
         let misplaced_emb_1 = writer.rotate(&[0.9, 0.1, 0.0, 0.0]);
         let misplaced_emb_2 = writer.rotate(&[-0.9, 0.1, 0.0, 0.0]);
 
-        let v100 = writer.upgrade_version(100);
-        let v101 = writer.upgrade_version(101);
+        let v100 = writer.remove(100);
+        let v101 = writer.remove(101);
 
         // Populate embeddings cache
         writer.embeddings.insert(100, misplaced_emb_1.clone());
@@ -2222,7 +2232,7 @@ mod tests {
 
         // Group A: 5 points near [1, 0, 0, 0] - will form one split cluster
         for id in 50..55 {
-            let v = writer.upgrade_version(id);
+            let v = writer.remove(id);
             let emb = writer.rotate(&[1.0, 0.0, 0.0, 0.0]);
             let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
                 .as_ref()
@@ -2235,7 +2245,7 @@ mod tests {
 
         // Group B: 5 points near [-1, 0, 0, 0] - will form another split cluster
         for id in 55..60 {
-            let v = writer.upgrade_version(id);
+            let v = writer.remove(id);
             let emb = writer.rotate(&[-1.0, 0.0, 0.0, 0.0]);
             let code: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb, &mixed_center)
                 .as_ref()
@@ -2260,7 +2270,7 @@ mod tests {
 
         // Trigger balance on the mixed cluster - should split into 2
         writer
-            .balance(mixed_cluster_id)
+            .balance(mixed_cluster_id, 0)
             .await
             .expect("balance failed");
 
@@ -2280,10 +2290,10 @@ mod tests {
         let isolated_center: Arc<[f32]> = writer.rotate(&[0.0, 0.0, 0.0, 1.0]);
 
         // Add 4 points, will invalidate 3 to trigger merge
-        let v200 = writer.upgrade_version(200);
-        let v201 = writer.upgrade_version(201);
-        let v202 = writer.upgrade_version(202);
-        let v203 = writer.upgrade_version(203);
+        let v200 = writer.remove(200);
+        let v201 = writer.remove(201);
+        let v202 = writer.remove(202);
+        let v203 = writer.remove(203);
 
         // Create embeddings and codes for isolated cluster points
         let emb_200 = writer.rotate(&[0.0, 0.0, 0.0, 1.0]);
@@ -2319,13 +2329,13 @@ mod tests {
         let isolated_cluster_id = writer.spawn(isolated_delta).expect("spawn failed");
 
         // Invalidate 3 points, leaving only 1 valid (below merge_threshold of 2)
-        writer.upgrade_version(201);
-        writer.upgrade_version(202);
-        writer.upgrade_version(203);
+        writer.remove(201);
+        writer.remove(202);
+        writer.remove(203);
 
         // Trigger balance - should scrub (remove invalid) then merge (below threshold)
         writer
-            .balance(isolated_cluster_id)
+            .balance(isolated_cluster_id, 0)
             .await
             .expect("balance failed");
 
@@ -2381,9 +2391,9 @@ mod tests {
 
         // --- Cluster A: normal cluster ---
         let center_a: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
-        let v10 = writer.upgrade_version(10);
-        let v11 = writer.upgrade_version(11);
-        let v12 = writer.upgrade_version(12);
+        let v10 = writer.remove(10);
+        let v11 = writer.remove(11);
+        let v12 = writer.remove(12);
         let code_a: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[1.0, 0.0, 0.0, 0.0], &center_a)
             .as_ref()
             .into();
@@ -2398,10 +2408,10 @@ mod tests {
 
         // --- Cluster B: partial invalidation ---
         let center_b: Arc<[f32]> = Arc::from([0.0f32, 1.0, 0.0, 0.0]);
-        let v20 = writer.upgrade_version(20);
-        let v21 = writer.upgrade_version(21);
-        let v22 = writer.upgrade_version(22);
-        let v23 = writer.upgrade_version(23);
+        let v20 = writer.remove(20);
+        let v21 = writer.remove(21);
+        let v22 = writer.remove(22);
+        let v23 = writer.remove(23);
         let code_b: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 1.0, 0.0, 0.0], &center_b)
             .as_ref()
             .into();
@@ -2421,8 +2431,8 @@ mod tests {
 
         // --- Cluster C: full invalidation ---
         let center_c: Arc<[f32]> = Arc::from([0.0f32, 0.0, 1.0, 0.0]);
-        let v30 = writer.upgrade_version(30);
-        let v31 = writer.upgrade_version(31);
+        let v30 = writer.remove(30);
+        let v31 = writer.remove(31);
         let code_c: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 1.0, 0.0], &center_c)
             .as_ref()
             .into();
@@ -2437,8 +2447,8 @@ mod tests {
 
         // --- Cluster D: tombstoned ---
         let center_d: Arc<[f32]> = Arc::from([0.0f32, 0.0, 0.0, 1.0]);
-        let v40 = writer.upgrade_version(40);
-        let v41 = writer.upgrade_version(41);
+        let v40 = writer.remove(40);
+        let v41 = writer.remove(41);
         let code_d: Arc<[u8]> = Code::<Vec<u8>>::quantize(&[0.0, 0.0, 0.0, 1.0], &center_d)
             .as_ref()
             .into();
@@ -2492,20 +2502,20 @@ mod tests {
 
         // --- Cluster A: add more points ---
         writer.load(cluster_a).await.expect("load A failed");
-        let v13 = writer.upgrade_version(13);
-        let v14 = writer.upgrade_version(14);
+        let v13 = writer.remove(13);
+        let v14 = writer.remove(14);
         writer.append(cluster_a, 13, v13, code_a.clone());
         writer.append(cluster_a, 14, v14, code_a.clone());
 
         // --- Cluster B: invalidate points 21 and 23 ---
         writer.load(cluster_b).await.expect("load B failed");
-        writer.upgrade_version(21);
-        writer.upgrade_version(23);
+        writer.remove(21);
+        writer.remove(23);
 
         // --- Cluster C: invalidate all points ---
         writer.load(cluster_c).await.expect("load C failed");
-        writer.upgrade_version(30);
-        writer.upgrade_version(31);
+        writer.remove(30);
+        writer.remove(31);
 
         // --- Cluster D: drop ---
         writer.drop(cluster_d).await.expect("drop D failed");
@@ -2935,5 +2945,79 @@ mod tests {
                 cluster_id
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_stale_register() {
+        // === Setup ===
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let storage = test_storage(&tmp_dir);
+        let usearch_provider = test_usearch_provider(storage);
+
+        let writer = QuantizedSpannIndexWriter::<USearchIndex>::create(
+            TEST_CLUSTER_BLOCK_SIZE,
+            CollectionUuid::new(),
+            test_config(),
+            TEST_DIMENSION,
+            test_distance_function(),
+            None,
+            "".to_string(),
+            &usearch_provider,
+        )
+        .await
+        .expect("Failed to create writer");
+
+        // --- Spawn a target cluster with a filler point ---
+        let center: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
+        let emb_20 = [1.0f32, 0.0, 0.0, 0.0];
+        let code_20: Arc<[u8]> = Code::<Vec<u8>>::quantize(&emb_20, &center).as_ref().into();
+        let v20 = writer.remove(20);
+
+        let delta = QuantizedDelta {
+            center: center.clone(),
+            codes: vec![code_20],
+            ids: vec![20],
+            length: 1,
+            versions: vec![v20],
+        };
+        let cluster_id = writer.spawn(delta).expect("spawn failed");
+
+        // --- Point 10: assign initial version ---
+        let v10 = writer.remove(10);
+        let emb_10 = writer.rotate(&[0.0, 1.0, 0.0, 0.0]);
+        writer.embeddings.insert(10, emb_10.clone());
+
+        // --- Simulate concurrent delete: bump version past v10 ---
+        writer.remove(10);
+        assert_eq!(*writer.versions.get(&10).unwrap(), v10 + 1);
+
+        // --- Call register with stale version ---
+        // This simulates what reassign would do if is_valid passed before the
+        // concurrent remove happened.
+        writer
+            .register(10, emb_10, &[cluster_id], v10)
+            .expect("register failed");
+
+        // --- Global version should NOT have been bumped ---
+        assert_eq!(
+            *writer.versions.get(&10).unwrap(),
+            v10 + 1,
+            "Global version should not change from stale register"
+        );
+
+        // --- Point 10 should NOT be alive ---
+        // Cluster entry has v10, but global is v10+1, so is_valid returns false.
+        let current_version = *writer.versions.get(&10).unwrap();
+        let has_live_copy = writer.cluster_deltas.iter().any(|entry| {
+            entry
+                .ids
+                .iter()
+                .zip(entry.versions.iter())
+                .any(|(id, ver)| *id == 10 && *ver == current_version)
+        });
+        assert!(
+            !has_live_copy,
+            "Stale register should not resurrect a deleted point"
+        );
     }
 }

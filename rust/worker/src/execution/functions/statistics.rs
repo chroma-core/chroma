@@ -1359,7 +1359,9 @@ mod tests {
             collection_id,
             database_name,
             false,
+            std::collections::HashSet::new(),
             50,
+            10,
             1000,
             50,
             log.clone(),
@@ -1369,6 +1371,7 @@ mod tests {
             test_segments.spann_provider.clone(),
             dispatcher_handle.clone(),
             false,
+            None,
             None,
         ))
         .await

@@ -78,16 +78,16 @@ def wrap_all(record_set: RecordSet) -> NormalizedRecordSet:
             "embeddings must be a list of lists, a list of numpy arrays, a list of numbers, or None"
         )
 
-    return {
-        "ids": wrap(record_set["ids"]),
-        "documents": wrap(record_set["documents"])
+    return NormalizedRecordSet(
+        ids=wrap(record_set["ids"]),
+        documents=wrap(record_set["documents"])
         if record_set["documents"] is not None
         else None,
-        "metadatas": wrap(record_set["metadatas"])
+        metadatas=wrap(record_set["metadatas"])
         if record_set["metadatas"] is not None
         else None,
-        "embeddings": embedding_list,
-    }
+        embeddings=embedding_list,
+    )
 
 
 def check_metadata(

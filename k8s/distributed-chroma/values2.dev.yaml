@@ -38,6 +38,7 @@ queryService:
       cpu: 200m
     requests:
       cpu: 200m
+  replicaCount: 1
 
 compactionService:
   env:

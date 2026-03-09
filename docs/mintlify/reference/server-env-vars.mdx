@@ -1,0 +1,50 @@
+---
+title: Chroma Configuration
+description: Environment variables when self-hosting a Chroma server.
+---
+
+Self-hosted Chroma servers have configurations that can be used to change
+telemetry destinations, host and port, and other behaviors.
+
+Chroma can be configured through YAML and environment variables.
+
+## Current Operator-Facing Env Vars
+
+These are the main environment variables for a current self-hosted Chroma server.
+
+| Env var | What it controls | Default or notes |
+| --- | --- | --- |
+| `CHROMA_PERSIST_PATH` | Directory used for persisted data | Default: `./chroma` in the frontend config. Container deployments typically mount `/data`. |
+| `CHROMA_ALLOW_RESET` | Enables destructive reset operations | Default: `false`. |
+| `CHROMA_PORT` | HTTP port for the frontend server | Default: `8000`. |
+| `CHROMA_LISTEN_ADDRESS` | Bind address for the frontend server | Default: `0.0.0.0`. |
+| `CHROMA_MAX_PAYLOAD_SIZE_BYTES` | Maximum request payload size | Default: `41943040` (40 MiB). |
+| `CHROMA_CORS_ALLOW_ORIGINS` | Allowed CORS origins | Current config key accepts a list, for example `["*"]`. |
+| `CHROMA_SQLITEDB__MIGRATION_MODE` | SQLite migration mode | Allowed values: `apply`, `validate`. Default: `apply`. |
+| `CHROMA_SQLITEDB__HASH_TYPE` | SQLite migration hash algorithm | Allowed values: `md5`, `sha256`. Default: `md5`. |
+| `CHROMA_SQLITE_FILENAME` | SQLite file name under the persist path | Default: `chroma.sqlite3`. |
+
+These are specifically for OpenTelemetry:
+
+| Env var | What it controls | Default or notes |
+| --- | --- | --- |
+| `CHROMA_OPEN_TELEMETRY__ENDPOINT` | OpenTelemetry OTLP endpoint | Used for traces in current deploy docs. |
+| `CHROMA_OPEN_TELEMETRY__SERVICE_NAME` | OpenTelemetry service name | Default: `chromadb`. |
+| `OTEL_EXPORTER_OTLP_HEADERS` | OTLP exporter headers | Commonly used for auth headers when sending traces. |
+
+## Legacy Auth Settings
+
+Built-in auth changed significantly before the Rust rewrite, and Chroma `v1.0.0` no
+longer ships built-in authentication implementations. You may still see these variables
+in older examples and migration notes:
+
+- `CHROMA_SERVER_AUTHN_PROVIDER`
+- `CHROMA_SERVER_AUTHN_CREDENTIALS`
+- `CHROMA_SERVER_AUTHN_CREDENTIALS_FILE`
+- `CHROMA_SERVER_AUTHZ_PROVIDER`
+- `CHROMA_SERVER_AUTHZ_CONFIG`
+- `CHROMA_SERVER_AUTHZ_CONFIG_FILE`
+- `CHROMA_AUTH_TOKEN_TRANSPORT_HEADER`
+
+Treat these as historical unless you are intentionally working with older Python-era
+server configurations.

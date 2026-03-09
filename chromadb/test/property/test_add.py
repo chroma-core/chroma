@@ -204,13 +204,13 @@ def create_large_recordset(
     metadatas = [{"some_key": f"{i}"} for i in range(size)]
     documents = [f"Document {i}" for i in range(size)]
     embeddings = [[1, 2, 3] for _ in range(size)]
-    record_set: Dict[str, List[Any]] = {
-        "ids": ids,
-        "embeddings": cast(Embeddings, embeddings),
-        "metadatas": metadatas,
-        "documents": documents,
-    }
-    return cast(strategies.RecordSet, record_set)
+    record_set = strategies.RecordSet(
+        ids=ids,
+        embeddings=cast(Embeddings, embeddings),
+        metadatas=metadatas,
+        documents=documents,
+    )
+    return record_set
 
 
 @given(collection=collection_st, should_compact=st.booleans())

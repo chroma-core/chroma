@@ -26,6 +26,7 @@
           {
             "group": "Overview",
             "pages": [
+              "docs/overview/introduction",
               "docs/overview/getting-started",
               "docs/overview/architecture",
               "docs/overview/oss",
@@ -123,6 +124,7 @@
             "group": "Sync",
             "pages": [
               "cloud/sync/overview",
+              "cloud/sync/s3",
               "cloud/sync/github",
               "cloud/sync/web"
             ]
@@ -186,6 +188,7 @@
               "integrations/embedding-models/nomic",
               "integrations/embedding-models/ollama",
               "integrations/embedding-models/open-clip",
+              "integrations/embedding-models/perplexity",
               "integrations/embedding-models/roboflow",
               "integrations/embedding-models/sentence-transformer",
               "integrations/embedding-models/text2vec",
@@ -209,6 +212,7 @@
             "group": "Frameworks",
             "pages": [
               "integrations/frameworks/anthropic-mcp",
+              "integrations/frameworks/google-adk",
               "integrations/frameworks/braintrust",
               "integrations/frameworks/contextual-ai",
               "integrations/frameworks/deepeval",
@@ -229,6 +233,12 @@
         "icon": "code",
         "pages": [
           "reference/overview",
+          {
+            "group": "Self-Hosted Chroma",
+            "pages": [
+              "reference/server-env-vars"
+            ]
+          },
           {
             "group": "SDKs",
             "pages": [
@@ -270,7 +280,7 @@
               {
                 "group": "Chroma Core API",
                 "openapi": {
-                  "source": "openapi.json",
+                  "source": "https://api.trychroma.com/openapi.json",
                   "directory": "/reference/chroma-api"
                 },
                 "pages": [
@@ -336,7 +346,7 @@
               {
                 "group": "Chroma Cloud API",
                 "openapi": {
-                  "source": "openapi.json",
+                  "source": "https://api.trychroma.com/openapi.json",
                   "directory": "api-reference"
                 },
                 "pages": [
@@ -362,12 +372,24 @@
                   "source": "sync.openapi.json",
                   "directory": "reference/sync-api"
                 }
+              },
+              {
+                "group": "Chroma Cloud Embeddings API",
+                "openapi": {
+                  "source": "https://embed.trychroma.com/openapi.json",
+                  "directory": "reference/embeddings-api"
+                },
+                "pages": [
+                  "POST /embed",
+                  "POST /embed_sparse"
+                ]
               }
             ]
           },
           {
-            "group": "Other",
+            "group": "Dictionary Syntax",
             "pages": [
+              "reference/search",
               "reference/where-filter"
             ]
           }

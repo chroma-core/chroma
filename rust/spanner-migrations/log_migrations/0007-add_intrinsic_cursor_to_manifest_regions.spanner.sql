@@ -1,0 +1,1 @@
+ALTER TABLE manifest_regions ADD COLUMN IF NOT EXISTS intrinsic_cursor INT64 NOT NULL DEFAULT (0);

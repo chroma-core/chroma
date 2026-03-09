@@ -26,12 +26,12 @@ def generate_record_set(N: int, D: int) -> RecordSet:
     embeddings = np.random.rand(N, D).tolist()
 
     # Create a normalized record set to compare against
-    normalized_record_set: RecordSet = {
-        "ids": ids,
-        "embeddings": embeddings,  # type: ignore
-        "metadatas": metadatas,  # type: ignore
-        "documents": documents,
-    }
+    normalized_record_set: RecordSet = RecordSet(
+        ids=ids,
+        embeddings=embeddings,  # type: ignore
+        metadatas=metadatas,  # type: ignore
+        documents=documents,
+    )
 
     return normalized_record_set
 

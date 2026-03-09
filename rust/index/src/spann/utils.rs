@@ -639,14 +639,14 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         let c_0 = picked[0].2.as_ref();
         let c_1 = picked[1].2.as_ref();
 
-        let total_dist: f32 = embeddings
+        let total_dist = embeddings
             .iter()
             .map(|(_, _, e)| {
                 distance_function
                     .distance(e, c_0)
                     .min(distance_function.distance(e, c_1))
             })
-            .sum();
+            .sum::<f32>();
 
         if total_dist < best_total_dist {
             best_total_dist = total_dist;
@@ -659,7 +659,8 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
     let mut c_1 = best_c_1.to_vec();
 
     // 2-means iteration
-    let mut labels = vec![false; n];
+    let mut dists_0 = vec![0.0f32; n];
+    let mut dists_1 = vec![0.0f32; n];
     let mut prev_total_dist = f32::MAX;
     let mut no_improvement = 0;
 
@@ -667,10 +668,9 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         // Assignment
         let mut total_dist = 0.0;
         for (i, (_, _, e)) in embeddings.iter().enumerate() {
-            let dist_0 = distance_function.distance(e, &c_0);
-            let dist_1 = distance_function.distance(e, &c_1);
-            labels[i] = dist_1 < dist_0;
-            total_dist += dist_0.min(dist_1);
+            dists_0[i] = distance_function.distance(e, &c_0);
+            dists_1[i] = distance_function.distance(e, &c_1);
+            total_dist += dists_0[i].min(dists_1[i]);
         }
 
         // Update centers (inline average)
@@ -680,7 +680,7 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         let mut count_1 = 0usize;
 
         for (i, (_, _, e)) in embeddings.iter().enumerate() {
-            if labels[i] {
+            if dists_1[i] < dists_0[i] {
                 for (j, v) in e.iter().enumerate() {
                     new_c_1[j] += v;
                 }
@@ -728,12 +728,66 @@ pub fn split(embeddings: Vec<EmbeddingPoint>, distance_function: &DistanceFuncti
         prev_total_dist = total_dist;
     }
 
-    // Build output groups
-    let count_0 = labels.iter().filter(|&&l| !l).count();
-    let count_1 = n - count_0;
+    // Derive labels from final distances
+    let mut labels = (0..n).map(|i| dists_1[i] < dists_0[i]).collect::<Vec<_>>();
+    let count_1 = labels.iter().filter(|&&l| l).count();
+    let count_0 = n - count_1;
 
-    let mut group_0 = Vec::with_capacity(count_0);
-    let mut group_1 = Vec::with_capacity(count_1);
+    // Enforce minimum partition size: smaller group gets at least N/4 points.
+    // Steal the furthest points from the larger group's own center.
+    let min_partition = n / 4;
+    if count_0.min(count_1) < min_partition {
+        let larger_is_0 = count_0 > count_1;
+        let deficit = min_partition - count_0.min(count_1);
+
+        // Collect indices in the larger group with their own-center distance
+        let mut candidates = (0..n)
+            .filter(|&i| if larger_is_0 { !labels[i] } else { labels[i] })
+            .map(|i| (i, if larger_is_0 { dists_0[i] } else { dists_1[i] }))
+            .collect::<Vec<_>>();
+
+        // Sort descending by own-center distance (furthest first)
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Flip the top `deficit` points to the smaller group
+        for &(i, _) in candidates.iter().take(deficit) {
+            labels[i] = !labels[i];
+        }
+
+        // Recompute centers from updated labels
+        let mut new_c_0 = vec![0.0; dim];
+        let mut new_c_1 = vec![0.0; dim];
+        let mut cnt_0 = 0usize;
+        let mut cnt_1 = 0usize;
+        for (i, (_, _, e)) in embeddings.iter().enumerate() {
+            if labels[i] {
+                for (j, v) in e.iter().enumerate() {
+                    new_c_1[j] += v;
+                }
+                cnt_1 += 1;
+            } else {
+                for (j, v) in e.iter().enumerate() {
+                    new_c_0[j] += v;
+                }
+                cnt_0 += 1;
+            }
+        }
+        if cnt_0 > 0 {
+            new_c_0.iter_mut().for_each(|v| *v /= cnt_0 as f32);
+        }
+        if cnt_1 > 0 {
+            new_c_1.iter_mut().for_each(|v| *v /= cnt_1 as f32);
+        }
+        c_0 = new_c_0;
+        c_1 = new_c_1;
+    }
+
+    // Build output groups
+    let final_count_0 = labels.iter().filter(|&&l| !l).count();
+    let final_count_1 = n - final_count_0;
+
+    let mut group_0 = Vec::with_capacity(final_count_0);
+    let mut group_1 = Vec::with_capacity(final_count_1);
 
     for ((id, version, embedding), label) in embeddings.into_iter().zip(labels) {
         if label {

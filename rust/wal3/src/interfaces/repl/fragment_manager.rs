@@ -11,10 +11,7 @@ use chroma_types::Cmek;
 
 use crate::interfaces::batch_manager::upload_parquet;
 use crate::interfaces::{FragmentConsumer, FragmentUploader, UploadResult};
-use crate::{
-    CursorStore, CursorStoreOptions, Error, Fragment, FragmentIdentifier, FragmentUuid,
-    LogPosition, LogWriterOptions,
-};
+use crate::{Error, Fragment, FragmentIdentifier, FragmentUuid, LogPosition, LogWriterOptions};
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct ReplicatedFragmentOptions {
@@ -574,12 +571,6 @@ impl FragmentConsumer for FragmentReader {
         } else {
             Ok(None)
         }
-    }
-
-    async fn cursors(&self, options: CursorStoreOptions) -> CursorStore {
-        let storage = Arc::new(self.storages[self.preferred].storage.clone());
-        let prefix = self.storages[self.preferred].prefix.clone();
-        CursorStore::new(options, storage, prefix, "fragment_reader".to_string())
     }
 }
 

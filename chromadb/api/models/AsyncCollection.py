@@ -19,6 +19,7 @@ from chromadb.api.types import (
     ReadLevel,
     WhereDocument,
     SearchResult,
+    DeleteResult,
     maybe_cast_one_to_many,
 )
 
@@ -85,17 +86,24 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
             database=self.database,
         )
 
-    async def count(self) -> int:
-        """The total number of embeddings added to the database
+    async def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
+        """Return the number of records in the collection.
+
+        Args:
+            read_level: Controls whether to read from the write-ahead log (WAL):
+                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
+                  All committed writes will be visible.
+                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+                  Faster, but recent writes that haven't been compacted may not be visible.
 
         Returns:
             int: The total number of embeddings added to the database
-
         """
         return await self._client._count(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
+            read_level=read_level,
         )
 
     async def get_indexing_status(self) -> IndexingStatus:
@@ -493,29 +501,33 @@ class AsyncCollection(CollectionCommon["AsyncServerAPI"]):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> None:
+        limit: Optional[int] = None,
+    ) -> DeleteResult:
         """Delete the embeddings based on ids and/or a where filter
 
         Args:
             ids: The ids of the embeddings to delete
             where: A Where type dict used to filter the delection by. E.g. `{"$and": [{"color" : "red"}, {"price": {"$gte": 4.20}}]}`. Optional.
             where_document: A WhereDocument type dict used to filter the deletion by the document content. E.g. `{"$contains": "hello"}`. Optional.
+            limit: Maximum number of records to delete. Can only be used with where or where_document filters.
 
         Returns:
-            None
+            DeleteResult: A dict containing the number of records deleted.
 
         Raises:
             ValueError: If you don't provide either ids, where, or where_document
+            ValueError: If limit is specified without a where or where_document clause.
         """
         delete_request = self._validate_and_prepare_delete_request(
-            ids, where, where_document
+            ids, where, where_document, limit=limit
         )
 
-        await self._client._delete(
+        return await self._client._delete(
             collection_id=self.id,
             ids=delete_request["ids"],
             where=delete_request["where"],
             where_document=delete_request["where_document"],
+            limit=delete_request["limit"],
             tenant=self.tenant,
             database=self.database,
         )

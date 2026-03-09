@@ -21,7 +21,9 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::{Chunk, CollectionUuid, JobId, LogRecord, SegmentType};
+use chroma_types::{
+    Chunk, CollectionUuid, JobId, LogRecord, SegmentFlushInfo, SegmentScope, SegmentType,
+};
 use opentelemetry::trace::TraceContextExt;
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
@@ -296,6 +298,7 @@ impl LogFetchOrchestrator {
         database_name: chroma_types::DatabaseName,
         is_rebuild: bool,
         fetch_log_batch_size: u32,
+        fetch_log_concurrency: usize,
         max_compaction_size: usize,
         max_partition_size: usize,
         log: Log,
@@ -304,10 +307,13 @@ impl LogFetchOrchestrator {
         hnsw_provider: HnswIndexProvider,
         spann_provider: SpannProvider,
         dispatcher: ComponentHandle<Dispatcher>,
+        fragment_fetcher: Option<Arc<crate::execution::operators::fragment_fetch::FragmentFetcher>>,
     ) -> Self {
         let context = CompactionContext::new(
             is_rebuild,
+            std::collections::HashSet::new(),
             fetch_log_batch_size,
+            fetch_log_concurrency,
             max_compaction_size,
             max_partition_size,
             log,
@@ -317,6 +323,7 @@ impl LogFetchOrchestrator {
             spann_provider,
             dispatcher.clone(),
             false, // LogFetchOrchestrator doesn't need is_function_disabled
+            fragment_fetcher,
         );
         LogFetchOrchestrator {
             collection_id,
@@ -485,6 +492,8 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
                     collection_uuid: collection.collection_id,
                     tenant: collection.tenant.clone(),
                     database_name,
+                    fetch_log_concurrency: self.context.fetch_log_concurrency,
+                    fragment_fetcher: self.context.fragment_fetcher.clone(),
                 }),
                 (),
                 ctx.receiver(),
@@ -495,6 +504,23 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             )
         };
 
+        // Store original segment file paths before any clearing, so non-rebuilt
+        // segments can be included in the version file during selective rebuild.
+        let original_segment_flush_infos = vec![
+            SegmentFlushInfo {
+                segment_id: output.metadata_segment.id,
+                file_paths: output.metadata_segment.file_path.clone(),
+            },
+            SegmentFlushInfo {
+                segment_id: output.record_segment.id,
+                file_paths: output.record_segment.file_path.clone(),
+            },
+            SegmentFlushInfo {
+                segment_id: output.vector_segment.id,
+                file_paths: output.vector_segment.file_path.clone(),
+            },
+        ];
+
         let collection_info = CollectionCompactInfo {
             collection_id: collection.collection_id,
             collection: collection.clone(),
@@ -502,6 +528,7 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
             pulled_log_offset: collection.log_position,
             hnsw_index_uuid: None,
             schema: collection.schema.clone(),
+            original_segment_flush_infos,
         };
 
         let result = self.context.collection_info.set(collection_info);
@@ -530,10 +557,17 @@ impl Handler<TaskResult<GetCollectionAndSegmentsOutput, GetCollectionAndSegments
         let mut record_segment = output.record_segment.clone();
         let mut vector_segment = output.vector_segment.clone();
         if self.context.is_rebuild {
-            // Reset the metadata and vector segments by purging the file paths
-            metadata_segment.file_path = Default::default();
-            record_segment.file_path = Default::default();
-            vector_segment.file_path = Default::default();
+            // Only clear file paths for segments that are being rebuilt.
+            // Empty apply_segment_scopes means rebuild all (backward compatible).
+            if self.context.scope_is_active(&SegmentScope::METADATA) {
+                metadata_segment.file_path = Default::default();
+            }
+            if self.context.scope_is_active(&SegmentScope::RECORD) {
+                record_segment.file_path = Default::default();
+            }
+            if self.context.scope_is_active(&SegmentScope::VECTOR) {
+                vector_segment.file_path = Default::default();
+            }
         }
 
         let cmek = collection.schema.as_ref().and_then(|s| s.cmek.clone());

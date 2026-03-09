@@ -7,7 +7,7 @@ runs:
       uses: ./.github/actions/tilt-setup-prebuild
     - name: Start Tilt
       shell: bash
-      run: tilt ci
+      run: tilt ci --timeout 10m
     - name: Forward ports
       shell: bash
       run: |

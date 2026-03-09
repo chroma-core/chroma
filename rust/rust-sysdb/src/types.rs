@@ -21,7 +21,7 @@ use crate::backend::{Assignable, Backend, BackendFactory, Runnable};
 // DatabaseOrTopology enum for rust-sysdb
 // Note: This is intentionally duplicated from chroma-sysdb since these are separate crates
 // TODO: Consider moving shared types to a common location like chroma-types in the future
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum DatabaseOrTopology {
     Database(DatabaseName),
     Topology(TopologyName),

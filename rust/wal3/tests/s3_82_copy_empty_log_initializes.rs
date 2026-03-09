@@ -37,7 +37,12 @@ async fn test_k8s_integration_82_copy_empty_log_initializes() {
         }
         position = log.append_many(batch).await.unwrap() + 10u64;
     }
-    let cursors = log.cursors(CursorStoreOptions::default()).await.unwrap();
+    let cursors = wal3::CursorStore::new(
+        CursorStoreOptions::default(),
+        Arc::clone(&storage),
+        prefix.to_string(),
+        "test".to_string(),
+    );
     cursors
         .init(
             &CursorName::new("writer").unwrap(),

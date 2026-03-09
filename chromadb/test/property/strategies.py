@@ -74,7 +74,19 @@ test_hnsw_config = {
 }
 
 
-class RecordSet(TypedDict):
+class _TruncatedReprDict(dict):  # type: ignore[type-arg]
+    """Dict subclass that truncates its repr to avoid overwhelming output in hypothesis error messages."""
+
+    _REPR_MAX_LEN = 1000
+
+    def __repr__(self) -> str:
+        full = super().__repr__()
+        if len(full) <= self._REPR_MAX_LEN:
+            return full
+        return full[: self._REPR_MAX_LEN] + "...}"
+
+
+class RecordSet(_TruncatedReprDict):
     """
     A generated set of embeddings, ids, metadatas, and documents that
     represent what a user would pass to the API.
@@ -86,7 +98,7 @@ class RecordSet(TypedDict):
     documents: Optional[Union[List[types.Document], types.Document]]
 
 
-class NormalizedRecordSet(TypedDict):
+class NormalizedRecordSet(_TruncatedReprDict):
     """
     A RecordSet, with all fields normalized to lists.
     """
@@ -97,7 +109,7 @@ class NormalizedRecordSet(TypedDict):
     documents: Optional[List[types.Document]]
 
 
-class StateMachineRecordSet(TypedDict):
+class StateMachineRecordSet(_TruncatedReprDict):
     """
     Represents the internal state of a state machine in hypothesis tests.
     """
@@ -913,18 +925,18 @@ def recordsets(
         single_document = (
             documents[0] if documents is not None and draw(st.booleans()) else documents
         )
-        return {
-            "ids": single_id,
-            "embeddings": single_embedding,
-            "metadatas": single_metadata,
-            "documents": single_document,
-        }
-    return {
-        "ids": ids,
-        "embeddings": embeddings,
-        "metadatas": metadatas,
-        "documents": documents,
-    }
+        return RecordSet(
+            ids=single_id,
+            embeddings=single_embedding,
+            metadatas=single_metadata,
+            documents=single_document,
+        )
+    return RecordSet(
+        ids=ids,
+        embeddings=embeddings,
+        metadatas=metadatas,
+        documents=documents,
+    )
 
 
 def opposite_value(value: LiteralValue) -> SearchStrategy[Any]:

@@ -187,9 +187,14 @@ export type Database = {
  */
 export type DeleteCollectionRecordsPayload = RawWhereFields & {
     ids?: Array<string> | null;
+    limit?: number | null;
 };
 
 export type DeleteCollectionRecordsResponse = {
+    deleted?: number;
+};
+
+export type DeleteCollectionResponse = {
     [key: string]: unknown;
 };
 
@@ -1333,10 +1338,10 @@ export type DeleteCollectionResponses = {
     /**
      * Collection deleted successfully
      */
-    200: UpdateCollectionResponse;
+    200: DeleteCollectionResponse;
 };
 
-export type DeleteCollectionResponse = DeleteCollectionResponses[keyof DeleteCollectionResponses];
+export type DeleteCollectionResponse2 = DeleteCollectionResponses[keyof DeleteCollectionResponses];
 
 export type GetCollectionData = {
     body?: never;
@@ -1531,7 +1536,12 @@ export type CollectionCountData = {
          */
         collection_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * Read level for consistency vs performance tradeoffs
+         */
+        read_level?: ReadLevel;
+    };
     url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/count';
 };
 

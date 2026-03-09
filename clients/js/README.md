@@ -4,7 +4,7 @@ Chroma is the open-source embedding database. Chroma makes it easy to build LLM 
 
 This package gives you a JS/TS interface to talk to a backend Chroma DB over REST.
 
-**Note:** JS client version 3._ is only compatible with chromadb v1.0.6 and newer or Chroma Cloud. For prior version compatiblity, please use JS client version 2._.
+**Note:** JS client version 3._ is only compatible with chromadb v1.0.6 and newer or Chroma Cloud. For prior version compatibility, please use JS client version 2._.
 
 [Learn more about Chroma](https://github.com/chroma-core/chroma)
 

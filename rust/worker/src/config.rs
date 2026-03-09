@@ -152,6 +152,10 @@ pub struct QueryServiceConfig {
     #[serde(default = "QueryServiceConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
 
+    /// The maximum number of concurrent log fetch requests.
+    #[serde(default = "QueryServiceConfig::default_fetch_log_concurrency")]
+    pub fetch_log_concurrency: usize,
+
     /// The configuration for managing SPANN indices within the query service.
     /// SPANN is a hierarchical inverted index that is used for approximate nearest neighbor search.
     #[serde(default)]
@@ -160,6 +164,28 @@ pub struct QueryServiceConfig {
     /// If set, a pprof server will be started on this port.
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
+
+    /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
+    /// instead of gRPC PullLogs for log fetching.
+    #[serde(default)]
+    pub use_fragment_fetch: bool,
+
+    /// Per-collection allowlist for fragment fetch. When non-empty, only collections
+    /// whose UUID appears in this list will use pointer-based fragment fetch.
+    #[serde(default)]
+    pub collections_for_fragment_fetch: Vec<String>,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the query pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
 
     /// The grace period for shutting down the gRPC server.
     #[serde(
@@ -192,6 +218,10 @@ impl QueryServiceConfig {
 
     fn default_fetch_log_batch_size() -> u32 {
         100
+    }
+
+    fn default_fetch_log_concurrency() -> usize {
+        10
     }
 
     fn default_grpc_shutdown_grace_period() -> Duration {
@@ -288,6 +318,18 @@ pub struct CompactionServiceConfig {
     /// If set, a pprof server will be started on this port.
     #[serde(default)]
     pub jemalloc_pprof_server_port: Option<u16>,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
+
+    /// Optional separate storage configuration for fragment pulling.
+    ///
+    /// When set, the fragment fetcher uses this storage (with its own admission
+    /// control / rate-limiting) instead of the main `storage` config.  This
+    /// isolates fragment pull I/O from the rest of the compaction pipeline.
+    #[serde(default)]
+    pub fragment_storage: Option<chroma_storage::config::StorageConfig>,
 }
 
 impl CompactionServiceConfig {

@@ -13,23 +13,23 @@ use chroma_metering::{
 use chroma_system::System;
 use chroma_tracing::add_tracing_middleware;
 use chroma_types::{
-    decode_embeddings, maybe_decode_update_embeddings, validate_name, AddCollectionRecordsPayload,
-    AddCollectionRecordsResponse, AttachFunctionRequest, AttachFunctionResponse, ChecklistResponse,
-    Collection, CollectionConfiguration, CollectionMetadataUpdate, CollectionUuid,
-    CountCollectionsRequest, CountCollectionsResponse, CountRequest, CountResponse,
-    CreateCollectionPayload, CreateCollectionRequest, CreateDatabaseRequest,
-    CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse, DatabaseName,
-    DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse, DeleteDatabaseRequest,
-    DeleteDatabaseResponse, DetachFunctionRequest, DetachFunctionResponse, ForkCollectionResponse,
-    GetAttachedFunctionResponse, GetCollectionByCrnRequest, GetCollectionRequest,
-    GetDatabaseRequest, GetDatabaseResponse, GetRequest, GetRequestPayload, GetResponse,
-    GetTenantRequest, GetTenantResponse, IndexStatusResponse, InternalCollectionConfiguration,
-    InternalUpdateCollectionConfiguration, ListCollectionsRequest, ListCollectionsResponse,
-    ListDatabasesRequest, ListDatabasesResponse, QueryRequest, QueryRequestPayload, QueryResponse,
-    SearchRequest, SearchRequestPayload, SearchResponse, UpdateCollectionPayload,
-    UpdateCollectionRecordsPayload, UpdateCollectionRecordsResponse, UpdateCollectionResponse,
-    UpdateTenantRequest, UpdateTenantResponse, UpsertCollectionRecordsPayload,
-    UpsertCollectionRecordsResponse,
+    decode_embeddings, maybe_decode_update_embeddings, plan::ReadLevel, validate_name,
+    AddCollectionRecordsPayload, AddCollectionRecordsResponse, AttachFunctionRequest,
+    AttachFunctionResponse, ChecklistResponse, Collection, CollectionConfiguration,
+    CollectionMetadataUpdate, CollectionUuid, CountCollectionsRequest, CountCollectionsResponse,
+    CountRequest, CountResponse, CreateCollectionPayload, CreateCollectionRequest,
+    CreateDatabaseRequest, CreateDatabaseResponse, CreateTenantRequest, CreateTenantResponse,
+    DatabaseName, DeleteCollectionRecordsPayload, DeleteCollectionRecordsResponse,
+    DeleteCollectionResponse, DeleteDatabaseRequest, DeleteDatabaseResponse, DetachFunctionRequest,
+    DetachFunctionResponse, ForkCollectionResponse, GetAttachedFunctionResponse,
+    GetCollectionByCrnRequest, GetCollectionRequest, GetDatabaseRequest, GetDatabaseResponse,
+    GetRequest, GetRequestPayload, GetResponse, GetTenantRequest, GetTenantResponse,
+    IndexStatusResponse, InternalCollectionConfiguration, InternalUpdateCollectionConfiguration,
+    ListCollectionsRequest, ListCollectionsResponse, ListDatabasesRequest, ListDatabasesResponse,
+    QueryRequest, QueryRequestPayload, QueryResponse, SearchRequest, SearchRequestPayload,
+    SearchResponse, UpdateCollectionPayload, UpdateCollectionRecordsPayload,
+    UpdateCollectionRecordsResponse, UpdateCollectionResponse, UpdateTenantRequest,
+    UpdateTenantResponse, UpsertCollectionRecordsPayload, UpsertCollectionRecordsResponse,
 };
 use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
@@ -1582,7 +1582,7 @@ async fn update_collection(
         ("ApiKeyAuth" = [])
     ),
     responses(
-        (status = 200, description = "Collection deleted successfully", body = UpdateCollectionResponse),
+        (status = 200, description = "Collection deleted successfully", body = DeleteCollectionResponse),
         (status = 401, description = "Unauthorized", body = ErrorResponse),
         (status = 404, description = "Collection not found", body = ErrorResponse),
         (status = 500, description = "Server error", body = ErrorResponse)
@@ -1616,7 +1616,7 @@ async fn delete_collection(
     headers: HeaderMap,
     Path((tenant, database, collection_name)): Path<(String, String, String)>,
     State(mut server): State<FrontendServer>,
-) -> Result<Json<UpdateCollectionResponse>, ServerError> {
+) -> Result<Json<DeleteCollectionResponse>, ServerError> {
     server.metrics.delete_collection.add(1, &[]);
     tracing::info!(name: "delete_collection", tenant_name = %tenant, database_name = %database);
     server
@@ -1636,9 +1636,8 @@ async fn delete_collection(
     ])?;
     let request =
         chroma_types::DeleteCollectionRequest::try_new(tenant, database, collection_name)?;
-    server.frontend.delete_collection(request).await?;
 
-    Ok(Json(UpdateCollectionResponse {}))
+    Ok(Json(server.frontend.delete_collection(request).await?))
 }
 
 /// Fork collection
@@ -2274,9 +2273,10 @@ async fn collection_delete(
         collection_id,
         payload.ids,
         r#where,
+        payload.limit,
     )?;
 
-    Box::pin(
+    let response = Box::pin(
         server
             .frontend
             .delete(request)
@@ -2284,7 +2284,13 @@ async fn collection_delete(
     )
     .await?;
 
-    Ok(Json(DeleteCollectionRecordsResponse {}))
+    Ok(Json(response))
+}
+
+#[derive(Deserialize, ToSchema, Debug)]
+struct CountParams {
+    #[serde(default)]
+    read_level: ReadLevel,
 }
 
 /// Get number of records
@@ -2307,7 +2313,8 @@ async fn collection_delete(
     params(
         ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
         ("database" = String, Path, description = "Database name"),
-        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("read_level" = Option<ReadLevel>, Query, description = "Read level for consistency vs performance tradeoffs")
     ),
     extensions(
         ("x-codeSamples" = json!([
@@ -2332,6 +2339,7 @@ async fn collection_delete(
 async fn collection_count(
     headers: HeaderMap,
     Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    Query(CountParams { read_level }): Query<CountParams>,
     State(mut server): State<FrontendServer>,
 ) -> Result<Json<CountResponse>, ServerError> {
     server.metrics.collection_count.add(1, &[]);
@@ -2388,6 +2396,7 @@ async fn collection_count(
         tenant,
         database,
         CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
+        read_level,
     )?;
 
     Ok(Json(

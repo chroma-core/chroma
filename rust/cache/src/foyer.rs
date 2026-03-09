@@ -17,6 +17,9 @@ use std::time::Duration;
 
 pub const MIB: usize = 1024 * 1024;
 
+// Re-export foyer's Code trait and CodeError for blockstore usage
+pub use foyer::{Code, CodeError};
+
 const fn default_capacity() -> usize {
     1048576
 }

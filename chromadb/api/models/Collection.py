@@ -20,6 +20,7 @@ from chromadb.api.types import (
     ReadLevel,
     WhereDocument,
     SearchResult,
+    DeleteResult,
     maybe_cast_one_to_many,
 )
 from chromadb.api.collection_configuration import UpdateCollectionConfiguration
@@ -39,12 +40,21 @@ if TYPE_CHECKING:
 
 
 class Collection(CollectionCommon["ServerAPI"]):
-    def count(self) -> int:
-        """Return the number of records in the collection."""
+    def count(self, read_level: ReadLevel = ReadLevel.INDEX_AND_WAL) -> int:
+        """Return the number of records in the collection.
+
+        Args:
+            read_level: Controls whether to read from the write-ahead log (WAL):
+                - ReadLevel.INDEX_AND_WAL: Read from both the compacted index and WAL (default).
+                  All committed writes will be visible.
+                - ReadLevel.INDEX_ONLY: Read only from the compacted index, skipping the WAL.
+                  Faster, but recent writes that haven't been compacted may not be visible.
+        """
         return self._client._count(
             collection_id=self.id,
             tenant=self.tenant,
             database=self.database,
+            read_level=read_level,
         )
 
     def get_indexing_status(self) -> IndexingStatus:
@@ -516,7 +526,8 @@ class Collection(CollectionCommon["ServerAPI"]):
         ids: Optional[IDs] = None,
         where: Optional[Where] = None,
         where_document: Optional[WhereDocument] = None,
-    ) -> None:
+        limit: Optional[int] = None,
+    ) -> DeleteResult:
         """Delete records by ID or filters.
 
         All documents that match the `ids` or `where` and `where_document` filters will be deleted.
@@ -525,19 +536,25 @@ class Collection(CollectionCommon["ServerAPI"]):
             ids: Record IDs to delete.
             where: Metadata filter.
             where_document: Document content filter.
+            limit: Maximum number of records to delete. Can only be used with where or where_document filters.
+
+        Returns:
+            DeleteResult: A dict containing the number of records deleted.
 
         Raises:
             ValueError: If no IDs or filters are provided.
+            ValueError: If limit is specified without a where or where_document clause.
         """
         delete_request = self._validate_and_prepare_delete_request(
-            ids, where, where_document
+            ids, where, where_document, limit=limit
         )
 
-        self._client._delete(
+        return self._client._delete(
             collection_id=self.id,
             ids=delete_request["ids"],
             where=delete_request["where"],
             where_document=delete_request["where_document"],
+            limit=delete_request["limit"],
             tenant=self.tenant,
             database=self.database,
         )

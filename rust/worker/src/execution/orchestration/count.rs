@@ -5,7 +5,7 @@ use chroma_system::{
     wrap, ChannelError, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, PanicError, TaskError, TaskMessage, TaskResult,
 };
-use chroma_types::CollectionAndSegments;
+use chroma_types::{plan::ReadLevel, CollectionAndSegments};
 use thiserror::Error;
 use tokio::sync::oneshot::{error::RecvError, Sender};
 use tracing::Span;
@@ -74,6 +74,9 @@ pub struct CountOrchestrator {
     // Fetch logs
     fetch_log: FetchLogOperator,
 
+    // Read level
+    read_level: ReadLevel,
+
     // Fetched log size
     fetch_log_bytes: Option<u64>,
 
@@ -88,6 +91,7 @@ impl CountOrchestrator {
         queue: usize,
         collection_and_segments: CollectionAndSegments,
         fetch_log: FetchLogOperator,
+        read_level: ReadLevel,
     ) -> Self {
         let context = OrchestratorContext::new(dispatcher);
         Self {
@@ -96,6 +100,7 @@ impl CountOrchestrator {
             collection_and_segments,
             queue,
             fetch_log,
+            read_level,
             fetch_log_bytes: None,
             result_channel: None,
         }
@@ -119,15 +124,35 @@ impl Orchestrator for CountOrchestrator {
         &mut self,
         ctx: &ComponentContext<Self>,
     ) -> Vec<(TaskMessage, Option<Span>)> {
-        vec![(
-            wrap(
-                Box::new(self.fetch_log.clone()),
-                (),
-                ctx.receiver(),
-                self.context.task_cancellation_token.clone(),
-            ),
-            Some(Span::current()),
-        )]
+        let mut tasks = Vec::new();
+        match self.read_level {
+            ReadLevel::IndexOnly => {
+                tracing::info!("Skipping log fetch for IndexOnly read level");
+                let empty_logs = FetchLogOutput::new(Vec::new().into());
+                self.fetch_log_bytes.replace(0);
+                let task = wrap(
+                    CountRecordsOperator::new(),
+                    CountRecordsInput::new(
+                        self.collection_and_segments.record_segment.clone(),
+                        self.blockfile_provider.clone(),
+                        empty_logs,
+                    ),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((task, Some(Span::current())));
+            }
+            ReadLevel::IndexAndWal => {
+                let fetch_log_task = wrap(
+                    Box::new(self.fetch_log.clone()),
+                    (),
+                    ctx.receiver(),
+                    self.context.task_cancellation_token.clone(),
+                );
+                tasks.push((fetch_log_task, Some(Span::current())));
+            }
+        }
+        tasks
     }
 
     fn queue_size(&self) -> usize {

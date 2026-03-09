@@ -88,7 +88,7 @@ impl<'de> Deserialize<'de> for RecordBatchWrapper {
 /// A Block holds BlockData via its Inner. Conceptually, the BlockData being loaded into memory is an optimization. The Block interface
 /// could also support out of core operations where the BlockData is loaded from disk on demand. Currently we force operations to be in-core
 /// but could expand to out-of-core in the future.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct Block {
     // The data is stored in an Arrow record batch with the column schema (prefix, key, value).
     // These are stored in sorted order by prefix and key for efficient lookups.
@@ -637,6 +637,34 @@ impl Block {
     }
 }
 
+// Manual Code implementation for Block - this avoids the blanket Code implementation
+// from foyer that requires Serialize/Deserialize
+impl chroma_cache::foyer::Code for Block {
+    fn estimated_size(&self) -> usize {
+        self.get_size()
+    }
+
+    fn encode(
+        &self,
+        writer: &mut impl std::io::Write,
+    ) -> std::result::Result<(), chroma_cache::foyer::CodeError> {
+        // Use bincode directly for serialization, equivalent to what foyer's blanket impl does
+        // CRITICAL: Must match the Block's field order: data first, then id
+        bincode::serialize_into(writer, &(&self.data, &self.id))
+            .map_err(chroma_cache::foyer::CodeError::from)
+    }
+
+    fn decode(
+        reader: &mut impl std::io::Read,
+    ) -> std::result::Result<Self, chroma_cache::foyer::CodeError> {
+        // Deserialize as a tuple to match the Block's field order
+        // CRITICAL: Must match the Block's field order: data first, then id
+        let (data, id): (RecordBatchWrapper, Uuid) =
+            bincode::deserialize_from(reader).map_err(chroma_cache::foyer::CodeError::from)?;
+        Ok(Block { data, id })
+    }
+}
+
 impl chroma_cache::Weighted for Block {
     fn weight(&self) -> usize {
         ((self.get_size() as f32 / MIB as f32).ceil() as usize).max(1)
@@ -894,7 +922,6 @@ fn verify_buffers_layout(bytes: &[u8]) -> Result<(), ArrowLayoutVerificationErro
 
 #[cfg(test)]
 mod tests {
-
     use std::sync::Arc;
 
     use arrow::{
@@ -904,6 +931,76 @@ mod tests {
 
     use super::*;
 
+    // Test wrapper type for migration testing - this simulates the old Block type
+    // that had Serialize/Deserialize derived and would get blanket Code implementation
+    #[cfg(test)]
+    #[derive(Clone, Debug, Serialize, Deserialize)]
+    pub struct OldBlockWrapper {
+        pub data: RecordBatchWrapper,
+        pub id: Uuid,
+    }
+
+    #[cfg(test)]
+    impl From<Block> for OldBlockWrapper {
+        fn from(block: Block) -> Self {
+            Self {
+                data: block.data,
+                id: block.id,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    impl From<OldBlockWrapper> for Block {
+        fn from(wrapper: OldBlockWrapper) -> Self {
+            Block {
+                data: wrapper.data,
+                id: wrapper.id,
+            }
+        }
+    }
+
+    #[cfg(test)]
+    impl chroma_cache::Weighted for OldBlockWrapper {
+        fn weight(&self) -> usize {
+            // Use the same weight calculation as Block
+            let block: Block = self.clone().into();
+            block.weight()
+        }
+    }
+
+    #[test]
+    fn test_block_serialization_order() {
+        // This test specifically validates that the serialization order matches the struct definition
+
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)])),
+            vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5]))],
+        )
+        .unwrap();
+        let block = Block::from_record_batch(Uuid::new_v4(), batch);
+
+        // Serialize using our Code implementation
+        let mut code_bytes = Vec::new();
+        chroma_cache::foyer::Code::encode(&block, &mut code_bytes).unwrap();
+
+        // Serialize manually in struct definition order: data first, then id
+        let mut manual_bytes = Vec::new();
+        bincode::serialize_into(&mut manual_bytes, &(&block.data, &block.id)).unwrap();
+
+        // They must be identical - this validates we're using the correct field order
+        assert_eq!(
+            code_bytes, manual_bytes,
+            "Block serialization must follow struct field order: data, then id"
+        );
+
+        // Also validate we can decode back correctly
+        let mut cursor = std::io::Cursor::new(&code_bytes);
+        let decoded: Block = chroma_cache::foyer::Code::decode(&mut cursor).unwrap();
+        assert_eq!(block.id, decoded.id);
+        assert_eq!(block.data.0, decoded.data.0);
+    }
+
     #[test]
     fn test_block_serde() {
         let batch = RecordBatch::try_new(
@@ -912,9 +1009,152 @@ mod tests {
         )
         .unwrap();
         let b1 = Block::from_record_batch(Uuid::new_v4(), batch.clone());
-        let bytes = bincode::serialize(&b1).unwrap();
-        let b2 = bincode::deserialize::<Block>(&bytes).unwrap();
+
+        let bytes = bincode::serialize(&(&b1.data, &b1.id)).unwrap();
+        let (data, id): (RecordBatchWrapper, Uuid) = bincode::deserialize(&bytes).unwrap();
+        let b2 = Block { data, id };
+
         assert_eq!(b1.id, b2.id);
         assert_eq!(b1.data.0, b2.data.0);
+    }
+
+    #[test]
+    fn test_block_code_trait() {
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)])),
+            vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5]))],
+        )
+        .unwrap();
+        let block = Block::from_record_batch(Uuid::new_v4(), batch);
+
+        // Test estimated_size
+        let estimated_size = chroma_cache::foyer::Code::estimated_size(&block);
+        assert!(estimated_size > 0);
+
+        // Test encode/decode
+        let mut buffer = Vec::new();
+        chroma_cache::foyer::Code::encode(&block, &mut buffer).unwrap();
+
+        let mut cursor = std::io::Cursor::new(&buffer);
+        let decoded_block: Block = chroma_cache::foyer::Code::decode(&mut cursor).unwrap();
+        assert_eq!(block.id, decoded_block.id);
+        assert_eq!(block.data.0, decoded_block.data.0);
+    }
+
+    #[tokio::test]
+    async fn test_cross_cache_compatibility() {
+        // Test that OldBlockWrapper and Block produce identical serialized bytes
+
+        let batch = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)])),
+            vec![Arc::new(Int32Array::from(vec![1, 2, 3, 4, 5]))],
+        )
+        .unwrap();
+        let original_block = Block::from_record_batch(Uuid::new_v4(), batch.clone());
+        let cache_key = original_block.id;
+
+        // Test 1: OldBlockWrapper serialization (simulates old cache format)
+        let old_wrapper = OldBlockWrapper::from(original_block.clone());
+        let mut old_bytes = Vec::new();
+        // OldBlockWrapper uses derived Serialize, which should match our manual Code format
+        bincode::serialize_into(&mut old_bytes, &old_wrapper).unwrap();
+
+        // Test 1.5: Validate the serialization order matches the struct definition order
+        // The Block struct is defined as: data first, then id
+        // So serialization should be: (data, id), not (id, data)
+        let manual_bytes = Vec::new();
+        let mut manual_writer = std::io::Cursor::new(manual_bytes);
+        // Serialize in the correct struct definition order
+        bincode::serialize_into(&mut manual_writer, &(&old_wrapper.data, &old_wrapper.id)).unwrap();
+        let manual_bytes = manual_writer.into_inner();
+
+        assert_eq!(
+            old_bytes, manual_bytes,
+            "Serialization must follow struct field order: data, then id"
+        );
+
+        // Test 2: Block serialization (new cache format)
+        let mut new_bytes = Vec::new();
+        chroma_cache::foyer::Code::encode(&original_block, &mut new_bytes).unwrap();
+
+        // Verify the bytes are identical - this is the key test!
+        assert_eq!(
+            old_bytes, new_bytes,
+            "Old and new serialization formats must be identical"
+        );
+
+        // Test 3: Decode old bytes with new Block Code implementation
+        let mut old_cursor = std::io::Cursor::new(&old_bytes);
+        let decoded_from_old: Block = chroma_cache::foyer::Code::decode(&mut old_cursor).unwrap();
+        assert_eq!(original_block.id, decoded_from_old.id);
+        assert_eq!(original_block.data.0, decoded_from_old.data.0);
+
+        // Test 4: Decode new bytes with OldBlockWrapper (simulates old code reading new data)
+        let decoded_from_new: OldBlockWrapper = bincode::deserialize(&new_bytes).unwrap();
+        let converted_back: Block = decoded_from_new.into();
+        assert_eq!(original_block.id, converted_back.id);
+        assert_eq!(original_block.data.0, converted_back.data.0);
+
+        // Test 5: Test real cache persistence and cross-type interoperability
+        // Key insight: must call close().await to flush in-memory entries to disk
+        // (just like the existing test_foyer_hybrid_cache_can_recover test in cache/src/foyer.rs)
+        let cache_dir = tempfile::tempdir().unwrap();
+        let cache_dir_path = cache_dir.path().to_str().unwrap().to_string();
+
+        let foyer_config = chroma_cache::FoyerCacheConfig {
+            dir: Some(cache_dir_path.clone()),
+            ..Default::default()
+        };
+
+        // Test 5a: Write OldBlockWrapper, close, read as Block
+        let old_cache: Box<dyn chroma_cache::PersistentCache<Uuid, OldBlockWrapper>> =
+            foyer_config.build_hybrid().await.unwrap();
+        old_cache.insert(cache_key, old_wrapper.clone()).await;
+        old_cache.close().await.unwrap();
+        drop(old_cache);
+
+        let new_cache: Box<dyn chroma_cache::PersistentCache<Uuid, Block>> =
+            foyer_config.build_hybrid().await.unwrap();
+        let read_block = new_cache.obtain(cache_key).await.ok().flatten();
+        assert!(
+            read_block.is_some(),
+            "Block cache should read data written by OldBlockWrapper"
+        );
+        let read_block = read_block.unwrap();
+        assert_eq!(original_block.id, read_block.id);
+        assert_eq!(original_block.data.0, read_block.data.0);
+        new_cache.close().await.unwrap();
+        drop(new_cache);
+
+        // Test 5b: Write Block, close, read as OldBlockWrapper
+        let cache_dir2 = tempfile::tempdir().unwrap();
+        let cache_dir2_path = cache_dir2.path().to_str().unwrap().to_string();
+
+        let foyer_config2 = chroma_cache::FoyerCacheConfig {
+            dir: Some(cache_dir2_path.clone()),
+            ..Default::default()
+        };
+
+        let block_cache: Box<dyn chroma_cache::PersistentCache<Uuid, Block>> =
+            foyer_config2.build_hybrid().await.unwrap();
+        block_cache.insert(cache_key, original_block.clone()).await;
+        block_cache.close().await.unwrap();
+        drop(block_cache);
+
+        let old_cache2: Box<dyn chroma_cache::PersistentCache<Uuid, OldBlockWrapper>> =
+            foyer_config2.build_hybrid().await.unwrap();
+        let read_wrapper = old_cache2.obtain(cache_key).await.ok().flatten();
+        assert!(
+            read_wrapper.is_some(),
+            "OldBlockWrapper cache should read data written by Block"
+        );
+        let read_wrapper = read_wrapper.unwrap();
+        let converted: Block = read_wrapper.into();
+        assert_eq!(original_block.id, converted.id);
+        assert_eq!(original_block.data.0, converted.data.0);
+
+        // Keep TempDir guards alive until the end of the test
+        drop(cache_dir);
+        drop(cache_dir2);
     }
 }

@@ -18,6 +18,8 @@ pub struct TaskRunnerConfig {
     pub max_partition_size: usize,
     #[serde(default = "TaskRunnerConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
+    #[serde(default = "TaskRunnerConfig::default_fetch_log_concurrency")]
+    pub fetch_log_concurrency: usize,
     #[serde(default = "TaskRunnerConfig::default_max_failure_count")]
     pub max_failure_count: u8,
 }
@@ -55,6 +57,10 @@ impl TaskRunnerConfig {
         100
     }
 
+    fn default_fetch_log_concurrency() -> usize {
+        10
+    }
+
     fn default_max_failure_count() -> u8 {
         5
     }
@@ -72,6 +78,7 @@ impl Default for TaskRunnerConfig {
             max_compaction_size: TaskRunnerConfig::default_max_compaction_size(),
             max_partition_size: TaskRunnerConfig::default_max_partition_size(),
             fetch_log_batch_size: TaskRunnerConfig::default_fetch_log_batch_size(),
+            fetch_log_concurrency: TaskRunnerConfig::default_fetch_log_concurrency(),
             max_failure_count: TaskRunnerConfig::default_max_failure_count(),
         }
     }
@@ -99,12 +106,26 @@ pub struct CompactorConfig {
     pub disabled_function_collections: Vec<String>,
     #[serde(default = "CompactorConfig::default_fetch_log_batch_size")]
     pub fetch_log_batch_size: u32,
+    #[serde(default = "CompactorConfig::default_fetch_log_concurrency")]
+    pub fetch_log_concurrency: usize,
     #[serde(default = "CompactorConfig::default_purge_dirty_log_timeout_seconds")]
     pub purge_dirty_log_timeout_seconds: u64,
     #[serde(default = "CompactorConfig::default_repair_log_offsets_timeout_seconds")]
     pub repair_log_offsets_timeout_seconds: u64,
     #[serde(default = "CompactorConfig::default_max_failure_count")]
     pub max_failure_count: i32,
+
+    /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
+    /// instead of gRPC PullLogs for log fetching.
+    #[serde(default)]
+    pub use_fragment_fetch: bool,
+
+    #[serde(default)]
+    pub collections_for_fragment_fetch: Vec<String>,
+
+    /// The cache configuration for the fragment fetcher used by pointer-based log fetch.
+    #[serde(default)]
+    pub fragment_fetcher_cache: chroma_cache::CacheConfig,
 }
 
 impl CompactorConfig {
@@ -148,6 +169,10 @@ impl CompactorConfig {
         100
     }
 
+    fn default_fetch_log_concurrency() -> usize {
+        10
+    }
+
     fn default_purge_dirty_log_timeout_seconds() -> u64 {
         60
     }
@@ -158,6 +183,10 @@ impl CompactorConfig {
 
     fn default_max_failure_count() -> i32 {
         5
+    }
+
+    fn default_use_fragment_fetch() -> bool {
+        false
     }
 }
 
@@ -174,11 +203,15 @@ impl Default for CompactorConfig {
             disabled_collections: CompactorConfig::default_disabled_collections(),
             disabled_function_collections: CompactorConfig::default_disabled_function_collections(),
             fetch_log_batch_size: CompactorConfig::default_fetch_log_batch_size(),
+            fetch_log_concurrency: CompactorConfig::default_fetch_log_concurrency(),
             purge_dirty_log_timeout_seconds:
                 CompactorConfig::default_purge_dirty_log_timeout_seconds(),
             repair_log_offsets_timeout_seconds:
                 CompactorConfig::default_repair_log_offsets_timeout_seconds(),
             max_failure_count: CompactorConfig::default_max_failure_count(),
+            use_fragment_fetch: CompactorConfig::default_use_fragment_fetch(),
+            collections_for_fragment_fetch: Vec::new(),
+            fragment_fetcher_cache: chroma_cache::CacheConfig::default(),
         }
     }
 }

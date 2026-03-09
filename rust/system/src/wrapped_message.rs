@@ -35,6 +35,12 @@ where
     tracing_context: Option<tracing::Span>,
 }
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub(crate) enum MessageExecutionOutcome {
+    Ok,
+    Panic,
+}
+
 impl<C: Component> WrappedMessage<C> {
     pub(super) fn new<M>(
         message: M,
@@ -51,8 +57,12 @@ impl<C: Component> WrappedMessage<C> {
         }
     }
 
-    pub(super) async fn handle(&mut self, component: &mut C, ctx: &ComponentContext<C>) {
-        self.boxed_message.handle_and_reply(component, ctx).await;
+    pub(super) async fn handle(
+        &mut self,
+        component: &mut C,
+        ctx: &ComponentContext<C>,
+    ) -> MessageExecutionOutcome {
+        self.boxed_message.handle_and_reply(component, ctx).await
     }
 
     pub(super) fn get_tracing_context(&self) -> Option<tracing::Span> {
@@ -65,7 +75,11 @@ pub(super) trait HandleableMessage<C>: Debug + Send
 where
     C: Component,
 {
-    async fn handle_and_reply(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> ();
+    async fn handle_and_reply(
+        &mut self,
+        component: &mut C,
+        ctx: &ComponentContext<C>,
+    ) -> MessageExecutionOutcome;
 }
 
 #[async_trait]
@@ -74,7 +88,11 @@ where
     C: Component + Handler<M>,
     M: Message,
 {
-    async fn handle_and_reply(&mut self, component: &mut C, ctx: &ComponentContext<C>) -> () {
+    async fn handle_and_reply(
+        &mut self,
+        component: &mut C,
+        ctx: &ComponentContext<C>,
+    ) -> MessageExecutionOutcome {
         if let Some(message) = self.take() {
             let result = AssertUnwindSafe(component.handle(message.message, ctx))
                 .catch_unwind()
@@ -90,12 +108,16 @@ where
                             );
                         }
                     }
+                    MessageExecutionOutcome::Ok
                 }
                 Err(panic_value) => {
                     tracing::error!("Panic occurred while handling message: {:?}", panic_value);
                     component.on_handler_panic(panic_value);
+                    MessageExecutionOutcome::Panic
                 }
-            };
+            }
+        } else {
+            MessageExecutionOutcome::Ok
         }
     }
 }
@@ -147,7 +169,8 @@ mod tests {
         let mut msg = Some(HandleableMessageImpl::new(TestMessage, Some(tx)));
 
         drop(rx); // simulates a receiver disconnecting, nothing left to handle the message
-        msg.handle_and_reply(&mut comp, &ctx).await;
+        let outcome = msg.handle_and_reply(&mut comp, &ctx).await;
+        assert_eq!(outcome, MessageExecutionOutcome::Ok);
 
         // done if doesn't panic
     }
