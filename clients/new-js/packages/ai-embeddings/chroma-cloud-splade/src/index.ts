@@ -102,7 +102,7 @@ export class ChromaCloudSpladeEmbeddingFunction
 
     this.url = "https://embed.trychroma.com/embed_sparse";
     this.headers = {
-      "x-chroma-token": apiKey,
+      "x-chroma-token": apiKey ?? "",
       "x-chroma-embedding-model": model,
       "Content-Type": "application/json",
     };

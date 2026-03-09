@@ -32,7 +32,7 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
   private readonly accountId: string;
   private readonly modelName: string;
   private readonly gatewayId: string | undefined;
-  private readonly apiKey: string;
+  private readonly apiKey: string | undefined;
   private readonly apiKeyEnvVar: string;
   private readonly apiUrl: string;
   private readonly headers: Record<string, any>;
