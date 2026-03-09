@@ -1,5 +1,6 @@
 syntax = "proto3";
 
+// CI path-based trigger test: idl change -> rust, python, js-client
 package chroma;
 
 option go_package = "github.com/chroma-core/chroma/go/pkg/proto/coordinatorpb";
