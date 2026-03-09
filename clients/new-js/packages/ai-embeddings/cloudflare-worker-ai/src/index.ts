@@ -48,8 +48,8 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
 
     if (!apiKey) {
-      throw new Error(
-        `Cloudflare API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `Cloudflare API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 

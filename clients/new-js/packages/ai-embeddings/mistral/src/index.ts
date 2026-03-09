@@ -32,8 +32,8 @@ export class MistralEmbeddingFunction implements EmbeddingFunction {
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
 
     if (!apiKey) {
-      throw new Error(
-        `Mistral API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `Mistral API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 

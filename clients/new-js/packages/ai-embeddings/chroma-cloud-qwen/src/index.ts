@@ -87,8 +87,8 @@ export class ChromaCloudQwenEmbeddingFunction implements EmbeddingFunction {
     }
 
     if (!apiKey) {
-      throw new Error(
-        `Chroma Embedding API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `Chroma Embedding API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 
