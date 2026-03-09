@@ -96,7 +96,7 @@ impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
     }
 }
 
-pub use single_bit::{BatchQueryLuts, QuantizedQuery};
+pub use single_bit::QuantizedQuery;
 
 // ── Shared math helpers ───────────────────────────────────────────────────────
 //

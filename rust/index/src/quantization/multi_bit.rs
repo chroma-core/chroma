@@ -27,6 +27,10 @@ pub(super) struct CodeHeader4Bit {
 // ── Code<4, T> ────────────────────────────────────────────────────────────────
 
 impl<T> Code<4, T> {
+    const BITS: u8 = 4;
+    const CEIL: u8 = 8; // 1 << (BITS - 1)
+    const GRID_OFFSET: f32 = 0.5;
+
     /// Wraps existing bytes as a 4-bit code.
     pub fn new(bytes: T) -> Self {
         Self(bytes)
@@ -41,24 +45,28 @@ impl<T> Code<4, T> {
     pub fn size(dim: usize) -> usize {
         size_of::<CodeHeader4Bit>() + Self::packed_len(dim)
     }
+
+    /// Unpacks 4-bit packed codes to grid values in
+    /// {-7.5, ..., -0.5, +0.5, ..., +7.5}^dim.
+    fn unpack_grid_from(packed: &[u8], dim: usize) -> Vec<f32> {
+        let bitpacker = BitPacker8x::new();
+        let mut codes = vec![0u32; padded_dim_4bit(dim)];
+        for (i, chunk) in codes.chunks_mut(BitPacker8x::BLOCK_LEN).enumerate() {
+            let offset = i * BitPacker8x::compressed_block_size(Self::BITS);
+            bitpacker.decompress(&packed[offset..], chunk, Self::BITS);
+        }
+        let offset = f32::from(Self::CEIL) - Self::GRID_OFFSET;
+        codes[..dim].iter().map(|&c| c as f32 - offset).collect()
+    }
 }
 
 impl<T: AsRef<[u8]>> Code<4, T> {
-    /// Correction factor `⟨g, n⟩`.
-    pub fn correction(&self) -> f32 {
-        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
-    }
-    /// Data residual norm `‖r‖`.
-    pub fn norm(&self) -> f32 {
-        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
-    }
-    /// Radial component `⟨r, c⟩`.
-    pub fn radial(&self) -> f32 {
-        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    fn header(&self) -> &CodeHeader4Bit {
+        bytemuck::from_bytes(&self.0.as_ref()[..size_of::<CodeHeader4Bit>()])
     }
 
     /// Packed quantization codes (excluding the header).
-    pub fn packed(&self) -> &[u8] {
+    fn packed(&self) -> &[u8] {
         &self.0.as_ref()[size_of::<CodeHeader4Bit>()..]
     }
 
@@ -74,13 +82,14 @@ impl<T: AsRef<[u8]>> Code<4, T> {
         c_dot_q: f32,
         q_norm: f32,
     ) -> f32 {
-        let g = self.unpack_grid(r_q.len());
+        let g = Self::unpack_grid_from(self.packed(), r_q.len());
         let g_dot_r_q = f32::dot(&g, r_q).unwrap_or(0.0) as f32;
+        let h = self.header();
         rabitq_distance_query(
             g_dot_r_q,
-            self.correction(),
-            self.norm(),
-            self.radial(),
+            h.correction,
+            h.norm,
+            h.radial,
             c_norm,
             c_dot_q,
             q_norm,
@@ -95,46 +104,27 @@ impl<T: AsRef<[u8]>> Code<4, T> {
         c_norm: f32,
         dim: usize,
     ) -> f32 {
-        let g_a = unpack_grid_4bit(self.packed(), dim);
-        let g_b = unpack_grid_4bit(other.packed(), dim);
+        let g_a = Self::unpack_grid_from(self.packed(), dim);
+        let g_b = Self::unpack_grid_from(other.packed(), dim);
         let g_a_dot_g_b = f32::dot(&g_a, &g_b).unwrap_or(0.0) as f32;
+        let ha = self.header();
+        let hb = other.header();
         rabitq_distance_code(
             g_a_dot_g_b,
-            self.correction(),
-            self.norm(),
-            self.radial(),
-            other.correction(),
-            other.norm(),
-            other.radial(),
+            ha.correction,
+            ha.norm,
+            ha.radial,
+            hb.correction,
+            hb.norm,
+            hb.radial,
             c_norm,
             distance_fn,
         )
     }
 
-    /// Unpacks the grid point from the packed 4-bit codes.
-    fn unpack_grid(&self, dim: usize) -> Vec<f32> {
-        const BITS: u8 = 4;
-        const CEIL: u8 = 8; // 1 << (BITS - 1)
-        const GRID_OFFSET: f32 = 0.5;
-        let packed = self.packed();
-        let bitpacker = BitPacker8x::new();
-        let mut codes = vec![0u32; padded_dim_4bit(dim)];
-
-        for (i, chunk) in codes.chunks_mut(BitPacker8x::BLOCK_LEN).enumerate() {
-            let offset = i * BitPacker8x::compressed_block_size(BITS);
-            bitpacker.decompress(&packed[offset..], chunk, BITS);
-        }
-
-        let offset = f32::from(CEIL) - GRID_OFFSET;
-        codes[..dim].iter().map(|&c| c as f32 - offset).collect()
-    }
 }
 
 impl Code<4, Vec<u8>> {
-    const BITS: u8 = 4;
-    const CEIL: u8 = 8; // 1 << (BITS - 1)
-    const GRID_OFFSET: f32 = 0.5;
-
     /// Quantizes a data vector relative to its cluster centroid (4-bit ray-walk).
     pub fn quantize(embedding: &[f32], centroid: &[f32]) -> Self {
         let r = embedding
@@ -231,21 +221,6 @@ impl Code<4, Vec<u8>> {
     }
 }
 
-/// Unpacks 4-bit packed codes to grid values (for distance_code trait impl).
-// / move up to be static meathod and rm BITS, CEIL, GRID_OFFSET
-fn unpack_grid_4bit(packed: &[u8], dim: usize) -> Vec<f32> {
-    const BITS: u8 = 4;
-    const CEIL: u8 = 8;
-    const GRID_OFFSET: f32 = 0.5;
-    let bitpacker = BitPacker8x::new();
-    let mut codes = vec![0u32; padded_dim_4bit(dim)];
-    for (i, chunk) in codes.chunks_mut(BitPacker8x::BLOCK_LEN).enumerate() {
-        let offset = i * BitPacker8x::compressed_block_size(BITS);
-        bitpacker.decompress(&packed[offset..], chunk, BITS);
-    }
-    let offset = f32::from(CEIL) - GRID_OFFSET;
-    codes[..dim].iter().map(|&c| c as f32 - offset).collect()
-}
 
 /// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
 fn padded_dim_4bit(dim: usize) -> usize {
@@ -268,10 +243,10 @@ mod tests {
 
         let code = Code::<4>::quantize(&embedding, &centroid);
 
-        // Verify accessors return finite values
-        assert!(code.correction().is_finite());
-        assert!(code.norm().is_finite());
-        assert!(code.radial().is_finite());
+        let h = code.header();
+        assert!(h.correction.is_finite());
+        assert!(h.norm.is_finite());
+        assert!(h.radial.is_finite());
 
         // Verify norm is ‖r‖ = ‖embedding - centroid‖
         let r = embedding
@@ -280,11 +255,11 @@ mod tests {
             .map(|(e, c)| e - c)
             .collect::<Vec<_>>();
         let expected_norm = (f32::dot(&r, &r).unwrap_or(0.0) as f32).sqrt();
-        assert!((code.norm() - expected_norm).abs() < f32::EPSILON);
+        assert!((h.norm - expected_norm).abs() < f32::EPSILON);
 
         // Verify radial is ⟨r, c⟩
         let expected_radial = f32::dot(&r, &centroid).unwrap_or(0.0) as f32;
-        assert!((code.radial() - expected_radial).abs() < f32::EPSILON);
+        assert!((h.radial - expected_radial).abs() < f32::EPSILON);
 
         // Verify buffer size
         assert_eq!(code.as_ref().len(), Code::<4>::size(embedding.len()));
@@ -311,14 +286,14 @@ mod tests {
 
         // Exactly zero residual
         let code = Code::<4>::quantize(&embedding, &embedding);
-        assert_eq!(code.correction(), 1.0);
-        assert!(code.norm() < f32::EPSILON);
+        assert_eq!(code.header().correction, 1.0);
+        assert!(code.header().norm < f32::EPSILON);
 
         // Near-zero residual
         let centroid = embedding.iter().map(|x| x + 1e-10).collect::<Vec<_>>();
         let code = Code::<4>::quantize(&embedding, &centroid);
-        assert_eq!(code.correction(), 1.0);
-        assert!(code.norm() < f32::EPSILON);
+        assert_eq!(code.header().correction, 1.0);
+        assert!(code.header().norm < f32::EPSILON);
     }
 
     /// Tests that grid points quantize exactly using distance_query.
