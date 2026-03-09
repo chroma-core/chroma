@@ -257,8 +257,8 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
         let pb = qq.padded_bytes;
         let packed_dot_qu: u32 = {
-            let p0 = &qq.bit_planes[0 * pb..1 * pb];
-            let p1 = &qq.bit_planes[1 * pb..2 * pb];
+            let p0 = &qq.bit_planes[pb..pb];
+            let p1 = &qq.bit_planes[pb..2 * pb];
             let p2 = &qq.bit_planes[2 * pb..3 * pb];
             let p3 = &qq.bit_planes[3 * pb..4 * pb];
             let (mut pop0, mut pop1, mut pop2, mut pop3) = (0u32, 0u32, 0u32, 0u32);
@@ -555,6 +555,7 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
 const fn sign_table_entry(byte: u8) -> [f32; 8] {
     let b = byte as u32;
     [
+        #[allow(clippy::identity_op)]
         f32::from_bits(0x3F800000 | (((b >> 0) & 1) ^ 1) << 31),
         f32::from_bits(0x3F800000 | (((b >> 1) & 1) ^ 1) << 31),
         f32::from_bits(0x3F800000 | (((b >> 2) & 1) ^ 1) << 31),
@@ -683,13 +684,13 @@ impl QuantizedQuery {
             for (bit, &v) in chunk.iter().enumerate() {
                 let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
                 sum_q_u += qu;
-                b0 |= (((qu >> 0) & 1) as u8) << bit;
+                b0 |= (((qu) & 1) as u8) << bit;
                 b1 |= (((qu >> 1) & 1) as u8) << bit;
                 b2 |= (((qu >> 2) & 1) as u8) << bit;
                 b3 |= (((qu >> 3) & 1) as u8) << bit;
             }
-            bit_planes[0 * padded_bytes + byte_idx] = b0;
-            bit_planes[1 * padded_bytes + byte_idx] = b1;
+            bit_planes[byte_idx] = b0;
+            bit_planes[padded_bytes + byte_idx] = b1;
             bit_planes[2 * padded_bytes + byte_idx] = b2;
             bit_planes[3 * padded_bytes + byte_idx] = b3;
         }
@@ -701,13 +702,13 @@ impl QuantizedQuery {
             for (bit, &v) in rem.iter().enumerate() {
                 let qu = (((v - v_l) * inv_delta).round() as u32).min(max_val);
                 sum_q_u += qu;
-                b0 |= (((qu >> 0) & 1) as u8) << bit;
+                b0 |= (((qu) & 1) as u8) << bit;
                 b1 |= (((qu >> 1) & 1) as u8) << bit;
                 b2 |= (((qu >> 2) & 1) as u8) << bit;
                 b3 |= (((qu >> 3) & 1) as u8) << bit;
             }
-            bit_planes[0 * padded_bytes + byte_idx] = b0;
-            bit_planes[1 * padded_bytes + byte_idx] = b1;
+            bit_planes[byte_idx] = b0;
+            bit_planes[padded_bytes + byte_idx] = b1;
             bit_planes[2 * padded_bytes + byte_idx] = b2;
             bit_planes[3 * padded_bytes + byte_idx] = b3;
         }
@@ -796,6 +797,7 @@ impl BatchQueryLuts {
         let sum_q_u: u32 = q_u.iter().sum();
 
         // Number of nibbles (each nibble = 4 bits = 4 dimensions).
+        #[allow(clippy::manual_div_ceil)]
         let padded_dim = (dim + 63) / 64 * 64;
         let n_nibbles = padded_dim / 4;
 

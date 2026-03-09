@@ -110,6 +110,7 @@ pub use single_bit::{BatchQueryLuts, QuantizedQuery};
 /// each code type before calling this helper.
 ///
 /// See module-level documentation for the derivation.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rabitq_distance_query(
     g_dot_r_q: f32,
     correction: f32,
@@ -140,6 +141,7 @@ pub(crate) fn rabitq_distance_query(
 /// each code type before calling this helper.
 ///
 /// See module-level documentation for the derivation.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn rabitq_distance_code(
     g_a_dot_g_b: f32,
     correction_a: f32,
