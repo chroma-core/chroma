@@ -91,3 +91,5 @@ func exec(*cobra.Command, []string) {
 		return grpc.New(conf)
 	})
 }
+
+// hi
