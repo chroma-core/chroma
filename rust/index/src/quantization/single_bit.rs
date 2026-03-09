@@ -257,7 +257,7 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         // ⟨packed, q_u⟩ = Σ_j 2^j · popcount(packed AND q_u^(j))
         let pb = qq.padded_bytes;
         let packed_dot_qu: u32 = {
-            let p0 = &qq.bit_planes[pb..pb];
+            let p0 = &qq.bit_planes[0..pb];
             let p1 = &qq.bit_planes[pb..2 * pb];
             let p2 = &qq.bit_planes[2 * pb..3 * pb];
             let p3 = &qq.bit_planes[3 * pb..4 * pb];
