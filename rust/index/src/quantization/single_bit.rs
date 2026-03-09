@@ -11,8 +11,8 @@ use bytemuck::{Pod, Zeroable};
 use chroma_distance::DistanceFunction;
 use simsimd::{BinarySimilarity, SpatialSimilarity};
 
-use super::{rabitq_distance_code, rabitq_distance_query};
 use super::Code;
+use super::{rabitq_distance_code, rabitq_distance_query};
 
 const B_Q: u8 = 4;
 
@@ -312,8 +312,6 @@ impl<T> Code<1, T> {
         size_of::<CodeHeader1>() + Self::packed_len(dim)
     }
 }
-
-
 
 impl Code<1, Vec<u8>> {
     const GRID_OFFSET: f32 = 0.5;
@@ -655,13 +653,7 @@ impl QuantizedQuery {
     /// decompose into bit planes for AND+popcount inner products.
     ///
     /// `padded_bytes` is the byte length of the packed data codes (for alignment).
-    pub fn new(
-        r_q: &[f32],
-        padded_bytes: usize,
-        c_norm: f32,
-        c_dot_q: f32,
-        q_norm: f32,
-    ) -> Self {
+    pub fn new(r_q: &[f32], padded_bytes: usize, c_norm: f32, c_dot_q: f32, q_norm: f32) -> Self {
         let max_val = (1u32 << B_Q) - 1;
 
         // Two separate folds — each auto-vectorises to a SIMD reduction

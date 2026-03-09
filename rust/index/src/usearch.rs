@@ -19,8 +19,7 @@ use usearch::{IndexOptions, MetricKind, ScalarKind};
 use uuid::Uuid;
 
 use crate::{
-    quantization::Code,
-    IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
+    quantization::Code, IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
 };
 
 /// Buffer for index resizing
@@ -126,7 +125,12 @@ impl USearchIndex {
             let b_i8 = unsafe { std::slice::from_raw_parts(b_ptr, code_len) };
             let a = bytemuck::cast_slice(a_i8);
             let b = bytemuck::cast_slice(b_i8);
-            Code::<4, _>::new(a).distance_code(&Code::<4, _>::new(b), &distance_function, c_norm, dim)
+            Code::<4, _>::new(a).distance_code(
+                &Code::<4, _>::new(b),
+                &distance_function,
+                c_norm,
+                dim,
+            )
         }));
     }
 
@@ -204,11 +208,7 @@ impl USearchIndex {
             usearch::Index::new(&options).map_err(|e| USearchError::Index(e.to_string()))?;
 
         if let Some(center) = &config.quantization_center {
-            Self::apply_quantization_metric(
-                &mut index,
-                center,
-                config.distance_function.clone(),
-            );
+            Self::apply_quantization_metric(&mut index, center, config.distance_function.clone());
         }
 
         Ok(Self {

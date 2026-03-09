@@ -7,12 +7,7 @@ use rand::{seq::IteratorRandom, seq::SliceRandom, thread_rng, Rng};
 use simsimd::SpatialSimilarity;
 use thiserror::Error;
 
-use crate::{
-    hnsw_provider::HnswIndexRef,
-    quantization::Code,
-    SearchResult,
-};
-
+use crate::{hnsw_provider::HnswIndexRef, quantization::Code, SearchResult};
 
 /// A point with its ID, version, and embedding.
 pub type EmbeddingPoint = (u32, u32, Arc<[f32]>);

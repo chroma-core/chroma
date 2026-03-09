@@ -1708,7 +1708,9 @@ mod tests {
         // --- append ---
         // Create a test embedding for point 10 and quantize it relative to center1
         let emb_10 = [1.0f32, 0.1, 0.0, 0.0];
-        let code_10: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&emb_10, &center1).as_ref().into();
+        let code_10: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&emb_10, &center1)
+            .as_ref()
+            .into();
         let v10 = writer.remove(10);
         let new_len = writer.append(cluster_id_1, 10, v10, code_10.clone());
         assert_eq!(new_len, Some(1));
@@ -2948,7 +2950,9 @@ mod tests {
         // --- Spawn a target cluster with a filler point ---
         let center: Arc<[f32]> = Arc::from([1.0f32, 0.0, 0.0, 0.0]);
         let emb_20 = [1.0f32, 0.0, 0.0, 0.0];
-        let code_20: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&emb_20, &center).as_ref().into();
+        let code_20: Arc<[u8]> = Code::<4, Vec<u8>>::quantize(&emb_20, &center)
+            .as_ref()
+            .into();
         let v20 = writer.remove(20);
 
         let delta = QuantizedDelta {

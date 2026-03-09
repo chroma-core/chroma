@@ -12,8 +12,8 @@ use simsimd::SpatialSimilarity;
 
 use bytemuck::{Pod, Zeroable};
 
-use super::{rabitq_distance_code, rabitq_distance_query};
 use super::Code;
+use super::{rabitq_distance_code, rabitq_distance_query};
 
 /// Byte header for 4-bit quantized codes. 12 bytes.
 #[repr(C)]
@@ -129,8 +129,6 @@ impl<T: AsRef<[u8]>> Code<4, T> {
         codes[..dim].iter().map(|&c| c as f32 - offset).collect()
     }
 }
-
-
 
 impl Code<4, Vec<u8>> {
     const BITS: u8 = 4;
