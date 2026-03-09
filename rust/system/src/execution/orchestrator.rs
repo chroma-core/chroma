@@ -473,6 +473,8 @@ mod tests {
             dispatcher_queue_size: 3,
             worker_queue_size: 1,
             active_io_tasks: 10,
+            cpu_affinity_num_cores: None,
+            io_affinity_num_cores: None,
         });
         let dispatcher_handle = system.start_component(dispatcher);
 
