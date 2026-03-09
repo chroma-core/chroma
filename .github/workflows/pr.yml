@@ -32,7 +32,7 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          predicate-quantifier: 'every'
+          predicate-quantifier: "some"
           filters: |
             # documentation changes
             docs:
@@ -53,38 +53,41 @@ jobs:
             # JavaScript client changes
             js-client:
               - 'clients/js/**'
-            # Outside JS client
-            outside-js-client:
-              - '!clients/js/**'
+            # Rust and related - run rust when any of these change
+            rust:
+              - 'rust/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'idl/**'
+            # Python and related
+            python:
+              - 'chromadb/**'
+              - 'requirements.txt'
+              - 'requirements_dev.txt'
+              - 'pyproject.toml'
+              - 'idl/**'
+            # Go
+            go:
+              - 'go/**'
+            # CI/CD and core infra - run all tests when these change
+            ci-infra:
+              - '.github/**'
+              - '**/Dockerfile*'
+              - 'bin/**'
+              - '**/docker-compose*.yml'
+              - 'Makefile'
 
       - name: Determine tests to run
         id: determine-tests
-        run: |
-          # Initialize an empty array
-          TESTS_TO_RUN="[]"
-
-          # If changes are docs-only (changes in docs but not outside docs)
-          if [[ "${{ steps.filter.outputs.docs }}" == "true" && "${{ steps.filter.outputs.outside-docs }}" == "false" ]]; then
-            echo "Only documentation changes detected, skipping all tests"
-            echo "docs-only=true" >> $GITHUB_OUTPUT
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
-          else
-            echo "docs-only=false" >> $GITHUB_OUTPUT
-          fi
-
-          # Check for JS-only changes (changes in JS but not outside JS)
-          if [[ "${{ steps.filter.outputs.js-client }}" == "true" && "${{ steps.filter.outputs.outside-js-client }}" == "false" ]]; then
-            echo "JavaScript-only changes detected"
-            TESTS_TO_RUN='["js-client"]'
-            echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # If we get here, we need to run all tests (core changes)
-          echo "Core changes detected, running all tests"
-          TESTS_TO_RUN='["python", "rust", "js-client", "go"]'
-          echo "tests-to-run=${TESTS_TO_RUN}" >> $GITHUB_OUTPUT
+        env:
+          FILTER_DOCS: ${{ steps.filter.outputs.docs }}
+          FILTER_OUTSIDE_DOCS: ${{ steps.filter.outputs.outside-docs }}
+          FILTER_JS_CLIENT: ${{ steps.filter.outputs.js-client }}
+          FILTER_RUST: ${{ steps.filter.outputs.rust }}
+          FILTER_PYTHON: ${{ steps.filter.outputs.python }}
+          FILTER_GO: ${{ steps.filter.outputs.go }}
+          FILTER_CI_INFRA: ${{ steps.filter.outputs.ci-infra }}
+        run: bin/ci/determine-tests-to-run.sh
 
       - name: Check Helm version change
         id: helm-version
