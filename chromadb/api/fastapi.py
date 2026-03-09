@@ -382,6 +382,21 @@ class FastAPI(BaseHTTPClient, ServerAPI):
         model = CollectionModel.from_json(resp_json)
         return model
 
+    @trace_method("FastAPI._fork_count", OpenTelemetryGranularity.OPERATION)
+    @override
+    def _fork_count(
+        self,
+        collection_id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
+    ) -> int:
+        """Gets the number of forks for a collection"""
+        resp_json = self._make_request(
+            "get",
+            f"/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+        )
+        return int(resp_json["count"])
+
     @trace_method("FastAPI._get_indexing_status", OpenTelemetryGranularity.OPERATION)
     @override
     def _get_indexing_status(

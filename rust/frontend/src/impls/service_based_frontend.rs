@@ -857,6 +857,13 @@ impl ServiceBasedFrontend {
         res
     }
 
+    pub async fn fork_count(
+        &mut self,
+        collection_id: CollectionUuid,
+    ) -> Result<usize, chroma_types::CountForksError> {
+        self.sysdb_client.count_forks(collection_id).await
+    }
+
     pub async fn retryable_push_logs(
         &mut self,
         tenant_id: &str,

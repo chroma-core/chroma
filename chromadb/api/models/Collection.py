@@ -332,6 +332,19 @@ class Collection(CollectionCommon["ServerAPI"]):
             data_loader=self._data_loader,
         )
 
+    def fork_count(self) -> int:
+        """Get the number of forks that exist for this collection.
+        This is an experimental API that only works for Hosted Chroma for now.
+
+        Returns:
+            int: The number of forks for this collection.
+        """
+        return self._client._fork_count(
+            collection_id=self.id,
+            tenant=self.tenant,
+            database=self.database,
+        )
+
     def search(
         self,
         searches: OneOrMany[Search],

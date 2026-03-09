@@ -73,6 +73,13 @@ impl chroma_error::ChromaError for RateLimitError {
     }
 }
 
+/// Response containing the fork count for a collection.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ForkCountResponse {
+    /// The number of forks for this collection.
+    pub count: usize,
+}
+
 async fn graceful_shutdown(system: System) {
     #[cfg(unix)]
     {
@@ -128,6 +135,7 @@ pub struct Metrics {
     update_collection: Counter<u64>,
     delete_collection: Counter<u64>,
     fork_collection: Counter<u64>,
+    fork_count: Counter<u64>,
     collection_add: Counter<u64>,
     collection_update: Counter<u64>,
     collection_upsert: Counter<u64>,
@@ -166,6 +174,7 @@ impl Metrics {
             update_collection: meter.u64_counter("update_collection").build(),
             delete_collection: meter.u64_counter("delete_collection").build(),
             fork_collection: meter.u64_counter("fork_collection").build(),
+            fork_count: meter.u64_counter("fork_count").build(),
             collection_add: meter.u64_counter("collection_add").build(),
             collection_update: meter.u64_counter("collection_update").build(),
             collection_upsert: meter.u64_counter("collection_upsert").build(),
@@ -286,6 +295,10 @@ impl FrontendServer {
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork",
                 post(fork_collection),
+            )
+            .route(
+                "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+                get(fork_count),
             )
             .route(
                 "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/add",
@@ -1750,6 +1763,75 @@ async fn fork_collection(
             .meter(metering_context_container)
             .await?,
     ))
+}
+
+/// Get fork count
+/// Returns the number of forks for a collection.
+#[utoipa::path(
+    get,
+    path = "/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count",
+    summary = "Get fork count",
+    description = "Returns the number of forks for a collection.",
+    tag = "Collection",
+    security(
+        ("ApiKeyAuth" = [])
+    ),
+    responses(
+        (status = 200, description = "Fork count retrieved successfully", body = ForkCountResponse),
+        (status = 401, description = "Unauthorized", body = ErrorResponse),
+        (status = 404, description = "Collection not found", body = ErrorResponse),
+        (status = 500, description = "Server error", body = ErrorResponse)
+    ),
+    params(
+        ("tenant" = String, Path, description = "Tenant UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254"),
+        ("database" = String, Path, description = "Database name"),
+        ("collection_id" = String, Path, description = "Collection UUID", example = "1e30d217-3d78-4f8c-b244-79381dc6a254")
+    ),
+    extensions(
+        ("x-codeSamples" = json!([
+            {
+                "lang": "typescript",
+                "label": "Get fork count",
+                "source": "const count = await collection.forkCount();"
+            },
+            {
+                "lang": "python",
+                "label": "Get fork count",
+                "source": "count = collection.fork_count()"
+            }
+        ]))
+    )
+)]
+async fn fork_count(
+    headers: HeaderMap,
+    Path((tenant, database, collection_id)): Path<(String, String, String)>,
+    State(mut server): State<FrontendServer>,
+) -> Result<Json<ForkCountResponse>, ServerError> {
+    server.metrics.fork_count.add(1, &[]);
+    tracing::info!(name: "fork_count", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
+    server
+        .authenticate_and_authorize(
+            &headers,
+            AuthzAction::CountForks,
+            AuthzResource {
+                tenant: Some(tenant.clone()),
+                database: Some(database.clone()),
+                collection: Some(collection_id.clone()),
+            },
+        )
+        .await?;
+    let _guard = server.scorecard_request(&[
+        "op:fork_count",
+        format!("tenant:{}", tenant).as_str(),
+        format!("collection:{}", collection_id).as_str(),
+    ])?;
+
+    let collection_id =
+        CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?;
+
+    let count = server.frontend.fork_count(collection_id).await?;
+
+    Ok(Json(ForkCountResponse { count }))
 }
 
 /// Add records
@@ -3266,6 +3348,7 @@ impl Modify for ChromaTokenSecurityAddon {
         update_collection,
         delete_collection,
         fork_collection,
+        fork_count,
         collection_add,
         collection_update,
         collection_upsert,
