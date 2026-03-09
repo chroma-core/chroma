@@ -90,6 +90,12 @@ use chroma_distance::DistanceFunction;
 
 pub struct Code<const BITS: u8, T = Vec<u8>>(T);
 
+impl<const BITS: u8, T> Code<BITS, T> {
+    pub fn into_inner(self) -> T {
+        self.0
+    }
+}
+
 impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
@@ -97,6 +103,37 @@ impl<const BITS: u8, T: AsRef<[u8]>> AsRef<[u8]> for Code<BITS, T> {
 }
 
 pub use single_bit::QuantizedQuery;
+
+// ── Runtime bit-width dispatch ────────────────────────────────────────────────
+
+pub fn code_size(bits: u8, dim: usize) -> usize {
+    match bits {
+        1 => Code::<1>::size(dim),
+        _ => Code::<4>::size(dim),
+    }
+}
+
+pub fn quantize(bits: u8, embedding: &[f32], centroid: &[f32]) -> Arc<[u8]> {
+    match bits {
+        1 => Code::<1>::quantize(embedding, centroid).as_ref().into(),
+        _ => Code::<4>::quantize(embedding, centroid).as_ref().into(),
+    }
+}
+
+pub fn distance_query(
+    bits: u8,
+    code: &[u8],
+    distance_fn: &DistanceFunction,
+    r_q: &[f32],
+    c_norm: f32,
+    c_dot_q: f32,
+    q_norm: f32,
+) -> f32 {
+    match bits {
+        1 => Code::<1, _>::new(code).distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm),
+        _ => Code::<4, _>::new(code).distance_query(distance_fn, r_q, c_norm, c_dot_q, q_norm),
+    }
+}
 
 // ── Shared math helpers ───────────────────────────────────────────────────────
 //

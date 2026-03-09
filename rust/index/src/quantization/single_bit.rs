@@ -38,6 +38,11 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         bytemuck::pod_read_unaligned(&self.0.as_ref()[..size_of::<CodeHeader1Bit>()])
     }
 
+    /// Returns the stored norm of the original (unquantized) residual vector.
+    pub fn norm(&self) -> f32 {
+        self.header().norm
+    }
+
     /// Packed quantization codes (excluding the header).
     fn packed(&self) -> &[u8] {
         &self.0.as_ref()[size_of::<CodeHeader1Bit>()..]
@@ -249,6 +254,25 @@ impl<T: AsRef<[u8]>> Code<1, T> {
             qq.q_norm,
             distance_fn,
         )
+    }
+
+    /// Convenience wrapper: quantizes `r_q` into a [`QuantizedQuery`] on the fly
+    /// and calls [`distance_quantized_query`](Self::distance_quantized_query).
+    ///
+    /// Use this for one-off queries. For batch scoring against many codes with
+    /// the same query, build a [`QuantizedQuery`] once and call
+    /// `distance_quantized_query` directly.
+    pub fn distance_query(
+        &self,
+        distance_fn: &DistanceFunction,
+        r_q: &[f32],
+        c_norm: f32,
+        c_dot_q: f32,
+        q_norm: f32,
+    ) -> f32 {
+        let padded_bytes = self.packed().len();
+        let qq = QuantizedQuery::new(r_q, padded_bytes, c_norm, c_dot_q, q_norm);
+        self.distance_quantized_query(distance_fn, &qq)
     }
 }
 

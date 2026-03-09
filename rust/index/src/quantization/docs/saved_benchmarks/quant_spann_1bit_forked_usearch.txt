@@ -1,0 +1,198 @@
+# 16 threads
+nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 16 --data-bits 1 --centroid-bits 1 > quantized_spann_1bit_wikipedia.txt 2>&1 &
+[1] 288794
+ubuntu@ip-172-31-75-166:~/chroma$ tail -f quantized_spann_1bit_wikipedia.txt
+nohup: ignoring input
+   Compiling usearch v2.24.0 (/home/ubuntu/USearch)
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 38.85s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-58fb40072c5db3ac)
+Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 5 | Threads: 16 | Data bits: 1 | Centroid bits: 1
+Total vectors to index: 5.00M
+
+Checkpoint 1: 1.00M vec | load 11.56s | raw 11.48s | index 1.5m | commit 1.69s | 11471 vec/s
+  Recall: np16=0.83/0.69 np32=0.88/0.74 np64=0.92/0.78 np128=0.94/0.80 np256=0.96/0.81
+Checkpoint 2: 1.00M vec | load 8.51s | raw 10.42s | index 1.7m | commit 3.37s | 9535 vec/s
+  Recall: np16=0.80/0.68 np32=0.86/0.73 np64=0.91/0.77 np128=0.94/0.79 np256=0.96/0.80
+Checkpoint 3: 1.00M vec | load 8.56s | raw 10.46s | index 1.8m | commit 4.97s | 9205 vec/s
+  Recall: np16=0.75/0.62 np32=0.82/0.69 np64=0.87/0.73 np128=0.90/0.75 np256=0.93/0.77
+Checkpoint 4: 1.00M vec | load 8.58s | raw 10.47s | index 2.0m | commit 6.30s | 8476 vec/s
+  Recall: np16=0.79/0.65 np32=0.86/0.71 np64=0.90/0.74 np128=0.93/0.76 np256=0.96/0.78
+Checkpoint 5: 1.00M vec | load 8.61s | raw 10.50s | index 2.1m | commit 7.68s | 7900 vec/s
+  Recall: np16=0.70/0.58 np32=0.78/0.65 np64=0.85/0.70 np128=0.88/0.73 np256=0.92/0.75
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.7K |     4 |   512 |    382 |   489 |   510 |  365.8 |  104.1 |
+|  2 |     11.2K |     5 |   512 |    385 |   489 |   511 |  370.2 |  100.0 |
+|  3 |     16.7K |     2 |   512 |    388 |   489 |   511 |  373.2 |   97.8 |
+|  4 |     22.3K |     2 |   512 |    385 |   487 |   511 |  371.6 |   97.9 |
+|  5 |     27.7K |     1 |   512 |    386 |   488 |   511 |  372.0 |   98.1 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    4.04M |        0 |    11.4K |   199.5K |     5.7K |        0 |    3.11M |     5.7K |   199.5K |    11.4K |    7.63M |        0 |    11.4K |     5.7K |    11.4K |     5.7K |
+|  2 |    1.00M |    4.09M |        0 |    11.3K |   196.7K |     5.7K |        0 |    3.10M |     5.7K |   196.7K |    11.2K |    7.53M |        0 |    11.3K |     5.7K |    11.3K |     5.7K |
+|  3 |    1.00M |    4.02M |        0 |    11.0K |   191.6K |     5.6K |        0 |    3.03M |     5.6K |   191.6K |    11.0K |    7.37M |        0 |    11.0K |     5.6K |    11.0K |     5.6K |
+|  4 |    1.00M |    4.12M |        0 |    11.3K |   196.6K |     5.7K |       15 |    3.12M |     5.7K |   196.6K |    11.3K |    7.50M |        0 |    11.3K |     5.7K |    11.3K |     5.7K |
+|  5 |    1.00M |    4.01M |        0 |    11.0K |   191.8K |     5.6K |       12 |    3.01M |     5.6K |   191.8K |    11.0K |    7.33M |        0 |    11.0K |     5.6K |    11.0K |     5.6K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |    total |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|----------|
+|  1 | 1200.12s |  246.82s |      0ns |    6.30s |    7.83s | 1364.79s |      0ns |  581.06s | 189.04ms |   4.99ms |   1.28ms |   12.43s |      0ns |    4.65s |  42.43ms |    1.64s |  37.65ms |       0 |       - |  111.90s |
+|  2 | 1499.22s |  314.28s |      0ns |   10.09s |   11.34s | 1711.70s |      0ns |  701.25s |   82.82s | 524.74ms |  140.96s |   13.27s |      0ns |    7.85s | 113.20ms |    2.23s | 104.71ms |  892.5K | 157.9µs |  127.17s |
+|  3 | 1624.27s |  336.04s |      0ns |   11.68s |   12.30s | 1837.59s |      0ns |  720.56s |  146.10s | 816.98ms |  250.23s |   13.23s |      0ns |    9.29s |  81.24ms |    2.38s |  75.55ms |   1.61M | 155.9µs |  132.62s |
+|  4 | 1742.03s |  357.09s |      0ns |   12.85s |   13.38s | 2050.12s | 174.80ms |  829.57s |  189.27s |    1.18s |  325.55s |   13.55s |      0ns |   10.30s |  57.89ms |    2.54s |  50.69ms |   2.22M | 146.7µs |  143.34s |
+|  5 | 1806.45s |  363.32s |      0ns |   13.56s |   13.83s | 2044.78s |    2.01s |  773.86s |  223.88s |    1.55s |  388.69s |   13.22s |      0ns |   10.92s |  46.72ms |    2.62s |  43.77ms |   2.52M | 154.3µs |  153.38s |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |   1.20ms |   61.1µs |        - |  553.9µs |   39.2µs | 239.86ms |        - |  186.8µs |   33.2µs |     25ns |    112ns |    1.6µs |        - |  409.2µs |    7.5µs |  143.9µs |    6.6µs |
+|  2 |   1.50ms |   76.8µs |        - |  896.6µs |   57.6µs | 300.93ms |        - |  226.0µs |  14.56ms |    2.7µs |  12.53ms |    1.8µs |        - |  697.7µs |   19.9µs |  198.0µs |   18.4µs |
+|  3 |   1.62ms |   83.5µs |        - |   1.06ms |   64.2µs | 330.68ms |        - |  237.7µs |  26.29ms |    4.3µs |  22.77ms |    1.8µs |        - |  845.3µs |   14.6µs |  216.3µs |   13.6µs |
+|  4 |   1.74ms |   86.7µs |        - |   1.14ms |   68.1µs | 361.57ms |  11.65ms |  265.6µs |  33.29ms |    6.0µs |  28.92ms |    1.8µs |        - |  915.2µs |   10.2µs |  226.0µs |    8.9µs |
+|  5 |   1.81ms |   90.7µs |        - |   1.23ms |   72.1µs | 367.96ms | 167.16ms |  257.3µs |  40.20ms |    8.1µs |  35.25ms |    1.8µs |        - |  991.4µs |    8.4µs |  238.0µs |    7.9µs |
+
+=== Legend ===
+Write path:
+  add       - top-level add(id, embedding): navigate + register + balance
+  navigate  - query centroid HNSW index for nearest clusters
+  register  - quantize vector and append to target cluster(s)
+  spawn     - create a new cluster and insert centroid into HNSW indexes
+Balance path:
+  scrub     - load cluster from reader, remove tombstoned entries
+  split     - split an oversized cluster via 2-means into two new clusters
+  merge     - merge an undersized cluster into its nearest neighbor
+  reassign  - re-add a displaced vector after split/merge
+  drop      - remove a cluster from centroid indexes and load its raw embeddings
+I/O:
+  load      - load quantized cluster data from blockfile reader into memory
+  load_raw  - load raw f32 embeddings from blockfile reader into cache
+Quantization:
+  quantize  - encode a vector into a RaBitQ code relative to its centroid
+Search:
+  search    - full query: centroid navigate + cluster scan + rerank
+Derived:
+  raw_pts   - number of raw embedding points loaded during load_raw
+  raw/pt    - average time per raw embedding point (load_raw total / raw_pts)
+  total     - wall-clock time for the checkpoint (load + raw_write + index + commit)
+
+
+=== Indexing Summary ===
+Total vectors: 5.00M
+Total time: 11.7m
+Overall throughput: 7094 vec/s
+
+=== Recall Summary ===
+|  CP |  Vectors |    Index |   Commit | Queries |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |          |          |          |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|----------|----------|----------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    1.00M |     1.5m |    1.69s |     100 |  0.83  0.69   32ms |  0.88  0.74   55ms |  0.92  0.78  103ms |  0.94  0.80  191ms |  0.96  0.81  359ms |
+|   2 |    2.00M |     1.7m |    3.37s |     100 |  0.80  0.68   35ms |  0.86  0.73   59ms |  0.91  0.77  111ms |  0.94  0.79  208ms |  0.96  0.80  392ms |
+|   3 |    3.00M |     1.8m |    4.97s |     100 |  0.75  0.62   37ms |  0.82  0.69   61ms |  0.87  0.73  112ms |  0.90  0.75  207ms |  0.93  0.77  395ms |
+|   4 |    4.00M |     2.0m |    6.30s |     100 |  0.79  0.65   37ms |  0.86  0.71   61ms |  0.90  0.74  114ms |  0.93  0.76  216ms |  0.96  0.78  409ms |
+|   5 |    5.00M |     2.1m |    7.68s |     100 |  0.70  0.58   38ms |  0.78  0.65   62ms |  0.85  0.70  115ms |  0.88  0.73  216ms |  0.92  0.75  414ms |
+
+
+
+# 32 threads
+cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 32 --data-bits 1 --centroid-bits 1
+  Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 5 | Threads: 32 | Data bits: 1 | Centroid bits: 1
+Total vectors to index: 5.00M
+
+Checkpoint 1: 1.00M vec | load 11.57s | raw 11.52s | index 48.39s | commit 1.66s | 20668 vec/s
+  Recall: np16=0.82/0.69 np32=0.88/0.74 np64=0.91/0.77 np128=0.95/0.79 np256=0.97/0.80
+Checkpoint 2: 1.00M vec | load 8.55s | raw 10.47s | index 58.55s | commit 3.48s | 17080 vec/s
+  Recall: np16=0.79/0.68 np32=0.84/0.73 np64=0.89/0.76 np128=0.93/0.78 np256=0.95/0.79
+Checkpoint 3: 1.00M vec | load 8.60s | raw 10.53s | index 1.1m | commit 5.01s | 15156 vec/s
+  Recall: np16=0.73/0.61 np32=0.79/0.66 np64=0.85/0.70 np128=0.89/0.73 np256=0.92/0.75
+Checkpoint 4: 1.00M vec | load 8.68s | raw 10.53s | index 1.2m | commit 6.40s | 13803 vec/s
+  Recall: np16=0.79/0.65 np32=0.84/0.70 np64=0.90/0.75 np128=0.93/0.77 np256=0.96/0.78
+Checkpoint 5: 1.00M vec | load 8.64s | raw 10.54s | index 1.2m | commit 7.63s | 13607 vec/s
+  Recall: np16=0.74/0.61 np32=0.81/0.67 np64=0.87/0.72 np128=0.90/0.74 np256=0.93/0.76
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.7K |     8 |   512 |    383 |   488 |   510 |  364.9 |  105.5 |
+|  2 |     11.3K |     8 |   512 |    384 |   488 |   510 |  370.1 |   99.1 |
+|  3 |     16.7K |     3 |   512 |    386 |   489 |   511 |  373.2 |   96.4 |
+|  4 |     22.2K |     2 |   512 |    387 |   489 |   511 |  372.9 |   97.6 |
+|  5 |     27.6K |     0 |   512 |    387 |   488 |   511 |  374.0 |   96.6 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    4.02M |        0 |    11.4K |   200.4K |     5.7K |        0 |    3.17M |     5.7K |   200.4K |    11.4K |    7.65M |        0 |    11.4K |     5.7K |    11.4K |     5.7K |
+|  2 |    1.00M |    4.09M |        0 |    11.4K |   196.2K |     5.8K |        0 |    3.11M |     5.8K |   196.2K |    11.4K |    7.53M |        0 |    11.4K |     5.8K |    11.4K |     5.8K |
+|  3 |    1.00M |    4.04M |        0 |    11.2K |   193.2K |     5.7K |        5 |    3.04M |     5.7K |   193.2K |    11.2K |    7.39M |        0 |    11.2K |     5.7K |    11.2K |     5.7K |
+|  4 |    1.00M |    4.08M |        0 |    11.2K |   192.8K |     5.7K |       17 |    3.09M |     5.7K |   192.8K |    11.2K |    7.40M |        0 |    11.2K |     5.7K |    11.2K |     5.7K |
+|  5 |    1.00M |    4.03M |        0 |    11.1K |   191.3K |     5.6K |       23 |    3.03M |     5.6K |   191.3K |    11.1K |    7.33M |        0 |    11.1K |     5.6K |    11.1K |     5.6K |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm | raw_pts |  raw/pt |    total |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|----------|
+|  1 | 1283.86s |  265.82s |      0ns |    7.21s |    9.04s | 1459.43s |      0ns |  636.73s | 221.87ms |   5.37ms |   1.33ms |   13.01s |      0ns |    5.35s |  48.16ms |    1.85s |  43.11ms |       0 |       - |   73.13s |
+|  2 | 1644.37s |  356.11s |      0ns |   12.10s |   13.04s | 1856.10s |      0ns |  770.53s |  107.06s | 603.74ms |  177.61s |   13.96s |      0ns |    9.40s | 120.55ms |    2.69s | 113.18ms |  895.0K | 198.4µs |   81.05s |
+|  3 | 1814.20s |  376.18s |      0ns |   14.21s |   14.27s | 2047.44s |  70.77ms |  816.21s |  184.87s | 999.72ms |  311.21s |   14.01s |      0ns |   11.33s |  95.55ms |    2.87s |  88.59ms |   1.61M | 192.9µs |   90.13s |
+|  4 | 1976.71s |  399.39s |      0ns |   15.54s |   15.70s | 2239.54s |    1.28s |  876.98s |  254.11s |    1.42s |  433.52s |   14.22s |      0ns |   12.47s |  58.05ms |    3.05s |  52.80ms |   2.20M | 196.6µs |   98.06s |
+|  5 | 2052.32s |  413.56s |      0ns |   16.66s |   16.70s | 2332.63s |    2.15s |  906.26s |  286.68s |    1.89s |  496.26s |   14.12s |      0ns |   13.42s |  47.40ms |    3.23s |  41.84ms |   2.54M | 195.3µs |  100.30s |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |  raw_add |   raw_rm |    q_add |     q_rm |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |   1.28ms |   66.1µs |        - |  631.6µs |   45.1µs | 255.37ms |        - |  201.0µs |   38.8µs |     26ns |    116ns |    1.7µs |        - |  468.3µs |    8.4µs |  162.2µs |    7.5µs |
+|  2 |   1.64ms |   87.1µs |        - |   1.06ms |   66.5µs | 318.15ms |        - |  248.1µs |  18.35ms |    3.1µs |  15.61ms |    1.9µs |        - |  825.3µs |   20.7µs |  236.6µs |   19.4µs |
+|  3 |   1.81ms |   93.2µs |        - |   1.27ms |   73.9µs | 357.88ms |  14.15ms |  268.1µs |  32.29ms |    5.2µs |  27.81ms |    1.9µs |        - |   1.01ms |   16.7µs |  256.2µs |   15.5µs |
+|  4 |   1.98ms |   97.9µs |        - |   1.39ms |   81.4µs | 393.52ms |  75.25ms |  284.2µs |  44.52ms |    7.4µs |  38.80ms |    1.9µs |        - |   1.12ms |   10.2µs |  273.8µs |    9.2µs |
+|  5 |   2.05ms |  102.7µs |        - |   1.51ms |   87.3µs | 414.91ms |  93.48ms |  298.9µs |  50.79ms |    9.9µs |  44.78ms |    1.9µs |        - |   1.21ms |    8.4µs |  291.7µs |    7.4µs |
+
+=== Legend ===
+Write path:
+  add       - top-level add(id, embedding): navigate + register + balance
+  navigate  - query centroid HNSW index for nearest clusters
+  register  - quantize vector and append to target cluster(s)
+  spawn     - create a new cluster and insert centroid into HNSW indexes
+Balance path:
+  scrub     - load cluster from reader, remove tombstoned entries
+  split     - split an oversized cluster via 2-means into two new clusters
+  merge     - merge an undersized cluster into its nearest neighbor
+  reassign  - re-add a displaced vector after split/merge
+  drop      - remove a cluster from centroid indexes and load its raw embeddings
+I/O:
+  load      - load quantized cluster data from blockfile reader into memory
+  load_raw  - load raw f32 embeddings from blockfile reader into cache
+Quantization:
+  quantize  - encode a vector into a RaBitQ code relative to its centroid
+Search:
+  search    - full query: centroid navigate + cluster scan + rerank
+Derived:
+  raw_pts   - number of raw embedding points loaded during load_raw
+  raw/pt    - average time per raw embedding point (load_raw total / raw_pts)
+  total     - wall-clock time for the checkpoint (load + raw_write + index + commit)
+
+
+=== Indexing Summary ===
+Total vectors: 5.00M
+Total time: 7.8m
+Overall throughput: 10712 vec/s
+
+=== Recall Summary ===
+|  CP |  Vectors |    Index |   Commit | Queries |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |          |          |          |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|----------|----------|----------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    1.00M |   48.39s |    1.66s |     100 |  0.82  0.69   34ms |  0.88  0.74   57ms |  0.91  0.77  105ms |  0.95  0.79  193ms |  0.97  0.80  361ms |
+|   2 |    2.00M |   58.55s |    3.48s |     100 |  0.79  0.68   36ms |  0.84  0.73   60ms |  0.89  0.76  112ms |  0.93  0.78  210ms |  0.95  0.79  395ms |
+|   3 |    3.00M |     1.1m |    5.01s |     100 |  0.73  0.61   38ms |  0.79  0.66   59ms |  0.85  0.70  110ms |  0.89  0.73  208ms |  0.92  0.75  396ms |
+|   4 |    4.00M |     1.2m |    6.40s |     100 |  0.79  0.65   39ms |  0.84  0.70   63ms |  0.90  0.75  116ms |  0.93  0.77  220ms |  0.96  0.78  415ms |
+|   5 |    5.00M |     1.2m |    7.63s |     100 |  0.74  0.61   39ms |  0.81  0.67   64ms |  0.87  0.72  118ms |  0.90  0.74  221ms |  0.93  0.76  421ms |

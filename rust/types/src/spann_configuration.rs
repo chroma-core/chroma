@@ -72,6 +72,10 @@ pub fn default_center_drift_threshold() -> f32 {
     0.125
 }
 
+pub fn default_centroid_rerank_factor() -> u32 {
+    1
+}
+
 fn default_space_spann() -> Space {
     Space::L2
 }

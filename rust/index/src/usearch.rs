@@ -173,6 +173,19 @@ impl USearchIndex {
         .map_err(|e| USearchError::Index(e.to_string()))?
     }
 
+    /// Create a new empty index for benchmarking (no storage/cache layer).
+    pub fn new_for_benchmark(config: USearchIndexConfig) -> Result<Self, USearchError> {
+        Self::new(config, IndexUuid(Uuid::new_v4()))
+    }
+
+    pub async fn save_for_benchmark(&self) -> Result<Vec<u8>, USearchError> {
+        self.save().await
+    }
+
+    pub async fn load_for_benchmark(&self, data: Arc<Vec<u8>>) -> Result<(), USearchError> {
+        self.load(data).await
+    }
+
     /// Create a new empty index.
     fn new(config: USearchIndexConfig, id: IndexUuid) -> Result<Self, USearchError> {
         let (scalar, index_dimensions) = match &config.quantization_center {
@@ -237,17 +250,27 @@ impl VectorIndex for USearchIndex {
             .as_ref()
             .map(|center| Code::<4>::quantize(vector, center));
 
-        let index = self.index.write();
-        if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
-            >= index.capacity()
+        // Check capacity with shared lock; resize under exclusive lock only if needed.
         {
-            index
-                .reserve(index.capacity().max(RESERVE_BUFFER) * 2)
-                .map_err(|e| USearchError::Index(e.to_string()))?
+            let index = self.index.read();
+            if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
+                >= index.capacity()
+            {
+                drop(index);
+                let index = self.index.write();
+                if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
+                    >= index.capacity()
+                {
+                    index
+                        .reserve(index.capacity().max(RESERVE_BUFFER) * 2)
+                        .map_err(|e| USearchError::Index(e.to_string()))?;
+                }
+            }
         }
 
-        if let Some(code) = code {
-            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
+        let index = self.index.read();
+        if let Some(ref code) = code {
+            let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_slice());
             index.add(key as u64, i8_slice)
         } else {
             index.add(key as u64, vector)
@@ -281,7 +304,7 @@ impl VectorIndex for USearchIndex {
     fn remove(&self, key: u32) -> Result<(), Self::Error> {
         self.tombstones.fetch_add(1, Ordering::Relaxed);
         self.index
-            .write()
+            .read()
             .remove(key as u64)
             .map_err(|e| USearchError::Index(e.to_string()))?;
         Ok(())
@@ -303,8 +326,11 @@ impl VectorIndex for USearchIndex {
         }
 
         let matches = if let Some(center) = &self.config.quantization_center {
-            let code = Code::<4>::quantize(query, center);
-            let i8_slice = bytemuck::cast_slice::<_, i8>(code.as_ref());
+            let code = match self.config.centroid_quantization_bits {
+                1 => Code::<1>::quantize(query, center).into_inner(),
+                _ => Code::<4>::quantize(query, center).into_inner(),
+            };
+            let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_slice());
             self.index.read().search(i8_slice, count)
         } else {
             self.index.read().search(query, count)
@@ -487,6 +513,7 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: Some(center),
+            centroid_quantization_bits: 4,
         };
 
         // Generate test vectors
@@ -549,6 +576,7 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: None,
+            centroid_quantization_bits: 4,
         };
 
         // Generate all test vectors upfront
@@ -641,6 +669,7 @@ mod tests {
             expansion_add: 128,
             expansion_search: 64,
             quantization_center: None,
+            centroid_quantization_bits: 4,
         };
 
         // Generate 128 random vectors
