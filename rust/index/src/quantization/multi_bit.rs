@@ -61,8 +61,8 @@ impl<T> Code<4, T> {
 }
 
 impl<T: AsRef<[u8]>> Code<4, T> {
-    fn header(&self) -> &CodeHeader4Bit {
-        bytemuck::from_bytes(&self.0.as_ref()[..size_of::<CodeHeader4Bit>()])
+    fn header(&self) -> CodeHeader4Bit {
+        bytemuck::pod_read_unaligned(&self.0.as_ref()[..size_of::<CodeHeader4Bit>()])
     }
 
     /// Packed quantization codes (excluding the header).

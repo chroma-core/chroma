@@ -34,8 +34,8 @@ struct CodeHeader1Bit {
 // ── Code<1, T> ────────────────────────────────────────────────────────────────
 
 impl<T: AsRef<[u8]>> Code<1, T> {
-    fn header(&self) -> &CodeHeader1Bit {
-        bytemuck::from_bytes(&self.0.as_ref()[..size_of::<CodeHeader1Bit>()])
+    fn header(&self) -> CodeHeader1Bit {
+        bytemuck::pod_read_unaligned(&self.0.as_ref()[..size_of::<CodeHeader1Bit>()])
     }
 
     /// Packed quantization codes (excluding the header).
