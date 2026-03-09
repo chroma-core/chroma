@@ -194,7 +194,11 @@ func TestEmbeddingFunctionPersistence_Mistral(t *testing.T) {
 func TestEmbeddingFunctionPersistence_Gemini(t *testing.T) {
 	t.Setenv("GEMINI_API_KEY", "test-key-123")
 
-	ef, err := gemini.NewGeminiEmbeddingFunction(gemini.WithEnvAPIKey())
+	ef, err := gemini.NewGeminiEmbeddingFunction(
+		gemini.WithEnvAPIKey(),
+		gemini.WithTaskType(gemini.TaskTypeRetrievalDocument),
+		gemini.WithDimension(768),
+	)
 	require.NoError(t, err)
 
 	name := ef.Name()
@@ -203,6 +207,8 @@ func TestEmbeddingFunctionPersistence_Gemini(t *testing.T) {
 	assert.Equal(t, "google_genai", name)
 	assert.NotEmpty(t, config["api_key_env_var"])
 	assert.NotEmpty(t, config["model_name"])
+	assert.Equal(t, "RETRIEVAL_DOCUMENT", config["task_type"])
+	assert.Equal(t, 768, config["dimension"])
 
 	// Verify registry has this EF
 	assert.True(t, embeddings.HasDense(name), "google_genai should be registered")
@@ -214,6 +220,10 @@ func TestEmbeddingFunctionPersistence_Gemini(t *testing.T) {
 
 	// Verify rebuilt EF matches
 	assert.Equal(t, name, rebuilt.Name())
+	rebuiltConfig := rebuilt.GetConfig()
+	assert.Equal(t, config, rebuiltConfig)
+	assert.Equal(t, config["task_type"], rebuiltConfig["task_type"])
+	assert.Equal(t, config["dimension"], rebuiltConfig["dimension"])
 }
 
 func TestEmbeddingFunctionPersistence_Voyage(t *testing.T) {

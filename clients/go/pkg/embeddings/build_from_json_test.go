@@ -150,7 +150,9 @@ func TestBuildDenseFromJSON(t *testing.T) {
 			efName: "google_genai",
 			jsonConfig: `{
 				"api_key_env_var": "GEMINI_API_KEY",
-				"model_name": "text-embedding-004"
+				"model_name": "gemini-embedding-001",
+				"task_type": "RETRIEVAL_DOCUMENT",
+				"dimension": 768
 			}`,
 			requiresAPIKey: true,
 			envVar:         "GEMINI_API_KEY",
@@ -204,6 +206,11 @@ func TestBuildDenseFromJSON(t *testing.T) {
 				require.NoError(t, err, "Should succeed with API key set")
 				require.NotNil(t, ef)
 				assert.Equal(t, tc.efName, ef.Name())
+				if tc.efName == "google_genai" {
+					efCfg := ef.GetConfig()
+					assert.Equal(t, "RETRIEVAL_DOCUMENT", efCfg["task_type"])
+					assert.Equal(t, 768, efCfg["dimension"])
+				}
 
 				// Restore original env var value
 				if originalValue != "" {
@@ -217,6 +224,67 @@ func TestBuildDenseFromJSON(t *testing.T) {
 				require.NoError(t, err, "Should succeed without API key")
 				require.NotNil(t, ef)
 				assert.Equal(t, tc.efName, ef.Name())
+			}
+		})
+	}
+}
+
+func TestBuildDenseFromJSON_GeminiPartialConfigRoundTrip(t *testing.T) {
+	t.Setenv("GEMINI_API_KEY", "test-api-key-dummy")
+
+	testCases := []struct {
+		name       string
+		jsonConfig string
+		present    map[string]any
+		absent     []string
+	}{
+		{
+			name: "task_type_only",
+			jsonConfig: `{
+				"api_key_env_var": "GEMINI_API_KEY",
+				"model_name": "gemini-embedding-001",
+				"task_type": "RETRIEVAL_QUERY"
+			}`,
+			present: map[string]any{
+				"api_key_env_var": "GEMINI_API_KEY",
+				"model_name":      "gemini-embedding-001",
+				"task_type":       "RETRIEVAL_QUERY",
+			},
+			absent: []string{"dimension"},
+		},
+		{
+			name: "dimension_only",
+			jsonConfig: `{
+				"api_key_env_var": "GEMINI_API_KEY",
+				"model_name": "gemini-embedding-001",
+				"dimension": 384
+			}`,
+			present: map[string]any{
+				"api_key_env_var": "GEMINI_API_KEY",
+				"model_name":      "gemini-embedding-001",
+				"dimension":       384,
+			},
+			absent: []string{"task_type"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var cfg embeddings.EmbeddingFunctionConfig
+			err := json.Unmarshal([]byte(tc.jsonConfig), &cfg)
+			require.NoError(t, err)
+
+			ef, err := embeddings.BuildDense("google_genai", cfg)
+			require.NoError(t, err)
+			require.NotNil(t, ef)
+
+			got := ef.GetConfig()
+			for k, v := range tc.present {
+				assert.Equal(t, v, got[k])
+			}
+			for _, k := range tc.absent {
+				_, exists := got[k]
+				assert.False(t, exists, "%s should be absent", k)
 			}
 		})
 	}

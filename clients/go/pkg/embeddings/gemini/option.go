@@ -22,6 +22,32 @@ func WithDefaultModel(model embeddings.EmbeddingModel) Option {
 	}
 }
 
+// WithTaskType sets the task type for embeddings (for example TaskTypeRetrievalDocument, TaskTypeRetrievalQuery).
+func WithTaskType(taskType TaskType) Option {
+	return func(p *Client) error {
+		if taskType == "" {
+			return errors.New("task type cannot be empty")
+		}
+		if !taskType.IsValid() {
+			return errors.Errorf("invalid task type: %q", taskType)
+		}
+		p.DefaultTaskType = taskType
+		return nil
+	}
+}
+
+// WithDimension sets the output dimensionality for embeddings.
+func WithDimension(dimension int) Option {
+	return func(p *Client) error {
+		dim32, err := intToInt32Ptr(dimension)
+		if err != nil {
+			return err
+		}
+		p.DefaultDimension = dim32
+		return nil
+	}
+}
+
 // WithAPIKey sets the API key for the client
 func WithAPIKey(apiKey string) Option {
 	return func(p *Client) error {

@@ -84,15 +84,29 @@ You can install the Go embedding package with:
 go get github.com/chroma-core/chroma/clients/go/pkg/embeddings/gemini
 ```
 
+Supported Embedding Function Options:
+
+- `WithAPIKey` - Provide Gemini API key directly.
+- `WithEnvAPIKey` - Load API key from `GEMINI_API_KEY`.
+- `WithAPIKeyFromEnvVar` - Load API key from a custom environment variable.
+- `WithDefaultModel` - Set the Gemini model to use. Default is `gemini-embedding-001`.
+- `WithTaskType` - Set the embedding task type using constants (for example `TaskTypeRetrievalDocument`, `TaskTypeRetrievalQuery`).
+- `WithDimension` - Set reduced output dimensionality.
+- `WithMaxBatchSize` - Set an upper bound on documents per embedding call.
+- `WithClient` - Provide a preconfigured `google.golang.org/genai` client.
+
 ```go
 import (
     chroma "github.com/chroma-core/chroma/clients/go"
-    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/gemini"
+    g "github.com/chroma-core/chroma/clients/go/pkg/embeddings/gemini"
 )
 
 // Create Gemini embedding function
-ef, err := gemini.NewGeminiEmbeddingFunction(
-    os.Getenv("GOOGLE_API_KEY"),
+ef, err := g.NewGeminiEmbeddingFunction(
+    g.WithEnvAPIKey(),
+    g.WithDefaultModel("gemini-embedding-001"),
+    g.WithTaskType(g.TaskTypeRetrievalDocument),
+    g.WithDimension(768),
 )
 
 // Use directly

@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"context"
+	"math"
 
 	"github.com/pkg/errors"
 	"google.golang.org/genai"
@@ -11,10 +12,25 @@ import (
 
 type contextKey struct{ name string }
 
-var modelContextKey = contextKey{"model"}
+var (
+	modelContextKey     = contextKey{"model"}
+	taskTypeContextKey  = contextKey{"task_type"}
+	dimensionContextKey = contextKey{"dimension"}
+)
 
+// ContextWithModel sets a model override in context.
 func ContextWithModel(ctx context.Context, model string) context.Context {
 	return context.WithValue(ctx, modelContextKey, model)
+}
+
+// ContextWithTaskType sets a task type override in context.
+func ContextWithTaskType(ctx context.Context, taskType TaskType) context.Context {
+	return context.WithValue(ctx, taskTypeContextKey, taskType)
+}
+
+// ContextWithDimension sets an output dimensionality override in context.
+func ContextWithDimension(ctx context.Context, dimension int) context.Context {
+	return context.WithValue(ctx, dimensionContextKey, dimension)
 }
 
 const (
@@ -23,12 +39,14 @@ const (
 )
 
 type Client struct {
-	APIKey         embeddings.Secret `json:"-" validate:"required"`
-	APIKeyEnvVar   string
-	DefaultModel   embeddings.EmbeddingModel
-	Client         *genai.Client
-	DefaultContext *context.Context
-	MaxBatchSize   int
+	APIKey           embeddings.Secret `json:"-" validate:"required"`
+	APIKeyEnvVar     string
+	DefaultModel     embeddings.EmbeddingModel
+	DefaultTaskType  TaskType
+	DefaultDimension *int32
+	Client           *genai.Client
+	DefaultContext   *context.Context
+	MaxBatchSize     int
 }
 
 func applyDefaults(c *Client) (err error) {
@@ -77,15 +95,23 @@ func NewGeminiClient(opts ...Option) (*Client, error) {
 }
 
 func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embeddings.Embedding, error) {
-	model := string(c.DefaultModel)
-	if m, ok := ctx.Value(modelContextKey).(string); ok {
-		model = m
+	model, err := modelFromContext(ctx, string(c.DefaultModel))
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid model override")
+	}
+	taskType, err := taskTypeFromContext(ctx, c.DefaultTaskType)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid task_type override")
+	}
+	outputDimensionality, err := outputDimensionalityFromContext(ctx, c.DefaultDimension)
+	if err != nil {
+		return nil, errors.Wrap(err, "invalid dimension override")
 	}
 	contents := make([]*genai.Content, len(req))
 	for i, t := range req {
 		contents[i] = genai.NewContentFromText(t, genai.RoleUser)
 	}
-	res, err := c.Client.Models.EmbedContent(ctx, model, contents, nil)
+	res, err := c.Client.Models.EmbedContent(ctx, model, contents, buildEmbedContentConfig(taskType, outputDimensionality))
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to embed contents")
 	}
@@ -100,7 +126,90 @@ func (c *Client) CreateEmbedding(ctx context.Context, req []string) ([]embedding
 	return embeddings.NewEmbeddingsFromFloat32(embs)
 }
 
-// Close is a no-op for the new genai SDK client which doesn't require cleanup.
+func buildEmbedContentConfig(taskType TaskType, outputDimensionality *int32) *genai.EmbedContentConfig {
+	if taskType == "" && outputDimensionality == nil {
+		return nil
+	}
+	return &genai.EmbedContentConfig{
+		TaskType:             string(taskType),
+		OutputDimensionality: outputDimensionality,
+	}
+}
+
+func cloneInt32Ptr(v *int32) *int32 {
+	if v == nil {
+		return nil
+	}
+	clone := *v
+	return &clone
+}
+
+func intToInt32Ptr(v int) (*int32, error) {
+	if v <= 0 {
+		return nil, errors.New("dimension must be greater than 0")
+	}
+	if v > math.MaxInt32 {
+		return nil, errors.Errorf("dimension must be <= %d", math.MaxInt32)
+	}
+	conv := int32(v)
+	return &conv, nil
+}
+
+func outputDimensionalityFromContext(ctx context.Context, fallback *int32) (*int32, error) {
+	val := ctx.Value(dimensionContextKey)
+	if val == nil {
+		return cloneInt32Ptr(fallback), nil
+	}
+	d, ok := val.(int)
+	if !ok {
+		return nil, errors.Errorf("dimension context value must be int, got %T", val)
+	}
+	return intToInt32Ptr(d)
+}
+
+func taskTypeFromContext(ctx context.Context, fallback TaskType) (TaskType, error) {
+	val := ctx.Value(taskTypeContextKey)
+	if val == nil {
+		if fallback == "" {
+			return "", nil
+		}
+		if !fallback.IsValid() {
+			return "", errors.Errorf("invalid task type: %q", fallback)
+		}
+		return fallback, nil
+	}
+	taskType, ok := val.(TaskType)
+	if !ok {
+		return "", errors.Errorf("task_type context value must be TaskType, got %T", val)
+	}
+	if taskType == "" {
+		return "", errors.New("task type cannot be empty")
+	}
+	if !taskType.IsValid() {
+		return "", errors.Errorf("invalid task type: %q", taskType)
+	}
+	return taskType, nil
+}
+
+func modelFromContext(ctx context.Context, fallback string) (string, error) {
+	val := ctx.Value(modelContextKey)
+	if val == nil {
+		if fallback == "" {
+			return "", errors.New("model cannot be empty")
+		}
+		return fallback, nil
+	}
+	model, ok := val.(string)
+	if !ok {
+		return "", errors.Errorf("model context value must be string, got %T", val)
+	}
+	if model == "" {
+		return "", errors.New("model cannot be empty")
+	}
+	return model, nil
+}
+
+// Close is a no-op for the genai SDK client, which doesn't require cleanup.
 func (c *Client) Close() error {
 	return nil
 }
@@ -121,7 +230,7 @@ func NewGeminiEmbeddingFunction(opts ...Option) (*GeminiEmbeddingFunction, error
 	return &GeminiEmbeddingFunction{apiClient: client}, nil
 }
 
-// Close closes the underlying client and implements the Closeable interface.
+// Close implements the Closeable interface; currently this is a no-op.
 func (e *GeminiEmbeddingFunction) Close() error {
 	return e.apiClient.Close()
 }
@@ -161,10 +270,17 @@ func (e *GeminiEmbeddingFunction) GetConfig() embeddings.EmbeddingFunctionConfig
 	if envVar == "" {
 		envVar = APIKeyEnvVar
 	}
-	return embeddings.EmbeddingFunctionConfig{
+	cfg := embeddings.EmbeddingFunctionConfig{
 		"model_name":      string(e.apiClient.DefaultModel),
 		"api_key_env_var": envVar,
 	}
+	if e.apiClient.DefaultTaskType != "" {
+		cfg["task_type"] = string(e.apiClient.DefaultTaskType)
+	}
+	if e.apiClient.DefaultDimension != nil {
+		cfg["dimension"] = int(*e.apiClient.DefaultDimension)
+	}
+	return cfg
 }
 
 func (e *GeminiEmbeddingFunction) DefaultSpace() embeddings.DistanceMetric {
@@ -176,7 +292,7 @@ func (e *GeminiEmbeddingFunction) SupportedSpaces() []embeddings.DistanceMetric 
 }
 
 // NewGeminiEmbeddingFunctionFromConfig creates a Gemini embedding function from a config map.
-// Uses schema-compliant field names: api_key_env_var, model_name.
+// Uses schema-compliant field names: api_key_env_var, model_name, task_type, dimension.
 func NewGeminiEmbeddingFunctionFromConfig(cfg embeddings.EmbeddingFunctionConfig) (*GeminiEmbeddingFunction, error) {
 	envVar, ok := cfg["api_key_env_var"].(string)
 	if !ok || envVar == "" {
@@ -185,6 +301,20 @@ func NewGeminiEmbeddingFunctionFromConfig(cfg embeddings.EmbeddingFunctionConfig
 	opts := []Option{WithAPIKeyFromEnvVar(envVar)}
 	if model, ok := cfg["model_name"].(string); ok && model != "" {
 		opts = append(opts, WithDefaultModel(embeddings.EmbeddingModel(model)))
+	}
+	if taskTypeRaw, exists := cfg["task_type"]; exists && taskTypeRaw != nil {
+		taskType, ok := taskTypeRaw.(string)
+		if !ok {
+			return nil, errors.New("task_type must be a string")
+		}
+		opts = append(opts, WithTaskType(TaskType(taskType)))
+	}
+	if dimRaw, exists := cfg["dimension"]; exists && dimRaw != nil {
+		dim, ok := embeddings.ConfigInt(cfg, "dimension")
+		if !ok {
+			return nil, errors.New("dimension must be an integer")
+		}
+		opts = append(opts, WithDimension(dim))
 	}
 	return NewGeminiEmbeddingFunction(opts...)
 }
