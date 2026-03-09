@@ -1,3 +1,4 @@
+# CI path-based trigger test: .github/** -> all tests (ci-infra)
 name: PR checks
 on:
   pull_request:
