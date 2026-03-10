@@ -7,7 +7,7 @@ from chromadb.utils.embedding_functions.schemas import validate_config_schema
 import warnings
 
 
-class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
+class GoogleGeminiEmbeddingFunction(EmbeddingFunction[Documents]):
     """To use this EmbeddingFunction, you must have the google-genai Python package installed and have a Gemini API key."""
 
     def __init__(
@@ -21,7 +21,7 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         location: Optional[str] = None,
     ):
         """
-        Initialize the GoogleGenaiEmbeddingFunction.
+        Initialize the GoogleGeminiEmbeddingFunction.
 
         Args:
             model_name (str, optional): The name of the model to use for text embeddings.
@@ -109,7 +109,7 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
 
     @staticmethod
     def name() -> str:
-        return "google_genai"
+        return "google_gemini"
 
     def default_space(self) -> Space:
         return "cosine"
@@ -130,7 +130,7 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         if model_name is None:
             raise ValueError("The model name is required.")
 
-        return GoogleGenaiEmbeddingFunction(
+        return GoogleGeminiEmbeddingFunction(
             model_name=model_name,
             task_type=task_type,
             dimension=dimension,
@@ -189,7 +189,11 @@ class GoogleGenaiEmbeddingFunction(EmbeddingFunction[Documents]):
         Raises:
             ValidationError: If the configuration does not match the schema
         """
-        validate_config_schema(config, "google_genai")
+        validate_config_schema(config, "google_gemini")
+
+
+# Backward compatibility alias
+GoogleGenaiEmbeddingFunction = GoogleGeminiEmbeddingFunction
 
 
 class GoogleGenerativeAiEmbeddingFunction(EmbeddingFunction[Documents]):
