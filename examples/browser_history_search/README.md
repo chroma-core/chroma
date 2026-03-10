@@ -76,18 +76,18 @@ The script automatically looks for history in default locations:
 - **Linux**: `~/.mozilla/firefox/*/places.sqlite`
 - **Windows**: `%APPDATA%\Mozilla\Firefox\Profiles\*\places.sqlite`
 
-## Browser Extension (WASM)
+## Browser Extension (Chroma WASM)
 
-There's also a Chrome browser extension that runs entirely in-browser using WebAssembly. See the [`extension/`](./extension/) directory.
+There's also a Chrome browser extension that runs Chroma compiled to WebAssembly. See the [`extension/`](./extension/) directory.
 
 Features:
-- **No server required** - everything runs in-browser via WASM
+- **Chroma in WASM** - the Rust vector store runs natively in your browser
 - Uses ONNX Runtime WASM for embedding generation (all-MiniLM-L6-v2 model)
 - Automatically indexes your history in the background
-- Semantic search via a popup UI
-- All data stays in your browser's IndexedDB
+- Full Chroma API: `add()`, `query()`, `delete()`, `save()`, `load()`
+- All data stays local in your browser
 
-See [`extension/README.md`](./extension/README.md) for setup instructions.
+The WASM module is built from [`rust/wasm/`](../../rust/wasm/) using `wasm-pack`. See [`extension/README.md`](./extension/README.md) for build and setup instructions.
 
 ## Notes
 

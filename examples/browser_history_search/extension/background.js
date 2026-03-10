@@ -144,6 +144,8 @@ async function indexHistory(fullReindex = false) {
       await store.addBatch(batch);
     }
 
+    // Persist the Chroma collection to IndexedDB
+    await store.persist();
     await store.setMeta("lastIndexedTime", Date.now());
     const totalCount = await store.count();
     console.log(`[Chroma] Indexing complete. Total entries: ${totalCount}`);
