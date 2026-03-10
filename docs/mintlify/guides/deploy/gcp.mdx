@@ -20,7 +20,7 @@ deploying Chroma to Google Compute Engine.
 
 <Danger>
 
-Chroma and its underlying database [need at least 2GB of RAM](./performance#results-summary),
+Chroma and its underlying database [need at least 2GB of RAM](/guides/performance/single-node#results-summary),
 which means it won't fit on the instances provided as part of the
 GCP "always free" tier. This template uses an [`e2-small`](https://cloud.google.com/compute/docs/general-purpose-machines#e2_machine_types) instance, which
 costs about two cents an hour, or $15 for a full month, and gives you 2GiB of memory. If you follow these

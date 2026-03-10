@@ -20,7 +20,7 @@ deploying Chroma to EC2 on AWS.
 
 <Danger>
 
-Chroma and its underlying database [need at least 2GB of RAM](./performance#results-summary),
+Chroma and its underlying database [need at least 2GB of RAM](/guides/performance/single-node#results-summary),
 which means it won't fit on the 1gb instances provided as part of the
 AWS Free Tier. This template uses a [`t3.small`](https://aws.amazon.com/ec2/instance-types/t3/#Product%20Details) EC2 instance, which
 costs about two cents an hour, or $15 for a full month, and gives you 2GiB of memory. If you follow these
