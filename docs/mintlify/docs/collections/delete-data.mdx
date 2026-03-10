@@ -32,19 +32,17 @@ collection.delete(
 ```
 </CodeGroup>
 
-`.delete` also supports the `where` filter. If no `ids` are supplied, it will delete all items in the collection that match the `where` filter.
+`.delete` also supports the `where` filter. It will delete all items in the collection that match the `where` filter.
 
 <CodeGroup>
 ```python Python
 collection.delete(
-    ids=["id1", "id2", "id3",...],
 	where={"chapter": "20"}
 )
 ```
 
 ```typescript TypeScript
 await collection.delete({
-    ids: ["id1", "id2", "id3",...], //ids
     where: {"chapter": "20"} //where
 })
 ```
@@ -61,7 +59,7 @@ let where_clause = Where::Metadata(MetadataExpression {
 });
 
 collection.delete(
-    Some(vec!["id1".to_string(), "id2".to_string(), "id3".to_string()]),
+    None,
     Some(where_clause),
 ).await?;
 ```
