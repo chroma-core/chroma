@@ -32,7 +32,7 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
   private readonly accountId: string;
   private readonly modelName: string;
   private readonly gatewayId: string | undefined;
-  private readonly apiKey: string;
+  private readonly apiKey: string | undefined;
   private readonly apiKeyEnvVar: string;
   private readonly apiUrl: string;
   private readonly headers: Record<string, any>;
@@ -48,8 +48,8 @@ export class CloudflareWorkerAIEmbeddingFunction implements EmbeddingFunction {
     const apiKey = args.apiKey || process.env[apiKeyEnvVar];
 
     if (!apiKey) {
-      throw new Error(
-        `Cloudflare API key is required. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
+      console.warn(
+        `Cloudflare API key is not set. Please provide it in the constructor or set the environment variable ${apiKeyEnvVar}.`,
       );
     }
 
