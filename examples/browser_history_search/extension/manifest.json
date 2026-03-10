@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Chroma History Search",
+  "version": "1.0.0",
+  "description": "Semantically search your browser history using natural language. Powered by Chroma and WASM-based embeddings.",
+  "permissions": [
+    "history",
+    "storage",
+    "alarms",
+    "offscreen"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

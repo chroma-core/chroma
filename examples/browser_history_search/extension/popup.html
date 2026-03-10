@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chroma History Search</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="logo">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+          <path d="M8 12l3 3 5-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <h1>Chroma History Search</h1>
+      </div>
+      <div id="status" class="status">Loading...</div>
+    </header>
+
+    <div class="search-box">
+      <input
+        type="text"
+        id="search-input"
+        placeholder="Search your history... (e.g., 'machine learning tutorial')"
+        autofocus
+      />
+      <div class="search-options">
+        <input
+          type="text"
+          id="domain-filter"
+          placeholder="Filter by domain (optional)"
+          class="domain-input"
+        />
+        <button id="search-btn" class="btn-search">Search</button>
+      </div>
+    </div>
+
+    <div id="results" class="results">
+      <div class="empty-state">
+        <p>Search your browser history using natural language.</p>
+        <p class="hint">Try: "that article about React hooks" or "python documentation"</p>
+      </div>
+    </div>
+
+    <footer>
+      <button id="reindex-btn" class="btn-link">Re-index History</button>
+      <span class="separator">|</span>
+      <span id="entry-count">0 entries indexed</span>
+    </footer>
+  </div>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

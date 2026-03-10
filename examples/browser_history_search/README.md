@@ -76,9 +76,22 @@ The script automatically looks for history in default locations:
 - **Linux**: `~/.mozilla/firefox/*/places.sqlite`
 - **Windows**: `%APPDATA%\Mozilla\Firefox\Profiles\*\places.sqlite`
 
+## Browser Extension (WASM)
+
+There's also a Chrome browser extension that runs entirely in-browser using WebAssembly. See the [`extension/`](./extension/) directory.
+
+Features:
+- **No server required** - everything runs in-browser via WASM
+- Uses ONNX Runtime WASM for embedding generation (all-MiniLM-L6-v2 model)
+- Automatically indexes your history in the background
+- Semantic search via a popup UI
+- All data stays in your browser's IndexedDB
+
+See [`extension/README.md`](./extension/README.md) for setup instructions.
+
 ## Notes
 
-- The script copies your history database before reading (browser locks prevent direct access while running)
+- The Python script copies your history database before reading (browser locks prevent direct access while running)
 - Your data stays local - no external APIs required for basic functionality
 - For larger histories, initial loading may take a few minutes
 

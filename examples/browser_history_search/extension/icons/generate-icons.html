@@ -1,0 +1,50 @@
+<!--
+  Open this file in a browser to generate the extension icons.
+  Right-click each canvas and "Save Image As" to save as PNG.
+-->
+<!DOCTYPE html>
+<html>
+<body>
+  <h2>Extension Icons - Right-click to save</h2>
+  <p>icon16.png:</p>
+  <canvas id="c16" width="16" height="16"></canvas>
+  <p>icon48.png:</p>
+  <canvas id="c48" width="48" height="48"></canvas>
+  <p>icon128.png:</p>
+  <canvas id="c128" width="128" height="128"></canvas>
+
+  <script>
+    function drawIcon(canvas) {
+      const ctx = canvas.getContext('2d');
+      const s = canvas.width;
+      const r = s * 0.4;
+
+      // Background circle
+      ctx.beginPath();
+      ctx.arc(s/2, s/2, s/2 - 1, 0, Math.PI * 2);
+      ctx.fillStyle = '#ff6b35';
+      ctx.fill();
+
+      // Search magnifying glass
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = s * 0.08;
+      ctx.lineCap = 'round';
+
+      // Circle part
+      ctx.beginPath();
+      ctx.arc(s * 0.42, s * 0.42, s * 0.2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Handle
+      ctx.beginPath();
+      ctx.moveTo(s * 0.56, s * 0.56);
+      ctx.lineTo(s * 0.72, s * 0.72);
+      ctx.stroke();
+    }
+
+    drawIcon(document.getElementById('c16'));
+    drawIcon(document.getElementById('c48'));
+    drawIcon(document.getElementById('c128'));
+  </script>
+</body>
+</html>
