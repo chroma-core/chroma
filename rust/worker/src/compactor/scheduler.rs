@@ -263,7 +263,7 @@ impl Scheduler {
                         collection_id: collection.collection_id,
                         tenant_id: collection.tenant.clone(),
                         database_name: collection.database.clone(),
-                        last_compaction_time: Default::default(),
+                        last_compaction_time: collection.last_compaction_time_secs as i64,
                         first_record_time: info.first_log_ts,
                         offset: collection.log_position + 1,
                         collection_version: collection.version,
@@ -1196,6 +1196,107 @@ mod tests {
             f.scheduler.get_jobs().count(),
             0,
             "collection_1 is in-progress, collection_2 is disabled"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn least_recently_compacted_uses_collection_compaction_time() {
+        SchedulerFixture::clear_env_vars();
+
+        let mut log = Log::InMemory(InMemoryLog::new());
+        let in_memory_log = match log {
+            Log::InMemory(ref mut l) => l,
+            _ => panic!("Invalid log type"),
+        };
+
+        let collection_1 = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000001")
+                .unwrap(),
+            name: "collection_1".to_string(),
+            dimension: Some(1),
+            tenant: "tenant_1".to_string(),
+            database: "database_1".to_string(),
+            last_compaction_time_secs: 100,
+            ..Default::default()
+        };
+        let collection_2 = Collection {
+            collection_id: CollectionUuid::from_str("00000000-0000-0000-0000-000000000002")
+                .unwrap(),
+            name: "collection_2".to_string(),
+            dimension: Some(1),
+            tenant: "tenant_1".to_string(),
+            database: "database_1".to_string(),
+            last_compaction_time_secs: 50,
+            ..Default::default()
+        };
+        let uuid_1 = collection_1.collection_id;
+        let uuid_2 = collection_2.collection_id;
+
+        for (uuid, ts) in [(uuid_1, 1), (uuid_2, 2)] {
+            in_memory_log.add_log(
+                uuid,
+                InternalLogRecord {
+                    collection_id: uuid,
+                    log_offset: 0,
+                    log_ts: ts,
+                    record: LogRecord {
+                        log_offset: 0,
+                        record: OperationRecord {
+                            id: "embedding".to_string(),
+                            embedding: None,
+                            encoding: None,
+                            metadata: None,
+                            document: None,
+                            operation: Operation::Add,
+                        },
+                    },
+                },
+            );
+        }
+
+        let mut sysdb = SysDb::Test(TestSysDb::new());
+        match sysdb {
+            SysDb::Test(ref mut test) => {
+                test.add_collection(collection_1);
+                test.add_collection(collection_2);
+                test.add_tenant_last_compaction_time("tenant_1".to_string(), 0);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        let my_member = Member {
+            member_id: "member_1".to_string(),
+            member_ip: "10.0.0.1".to_string(),
+            member_node_name: "node_1".to_string(),
+        };
+        let mut assignment_policy = Box::new(RendezvousHashingAssignmentPolicy::default());
+        assignment_policy.set_members(vec![my_member.member_id.clone()]);
+
+        let mut scheduler = Scheduler::new(
+            my_member.member_id.clone(),
+            log,
+            sysdb,
+            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            1000,
+            1,
+            assignment_policy,
+            HashSet::new(),
+            3600,
+            3,
+        );
+        scheduler.set_memberlist(vec![my_member]);
+        scheduler.schedule().await;
+
+        let jobs: Vec<&CompactionJob> = scheduler.get_jobs().collect();
+        assert_eq!(jobs.len(), 2);
+        assert_eq!(
+            jobs[0].collection_id, uuid_2,
+            "collection_2 (compacted at 50) should be scheduled first"
+        );
+        assert_eq!(
+            jobs[1].collection_id, uuid_1,
+            "collection_1 (compacted at 100) should be scheduled second"
         );
     }
 }
