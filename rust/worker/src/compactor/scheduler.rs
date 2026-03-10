@@ -423,8 +423,8 @@ impl Scheduler {
         dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
         for (database_name, record) in oneoff_collections.into_iter().take(rem_capacity) {
             tracing::info!(
-                "Creating one-off compaction job for collection: {}",
-                record.collection_version
+                collection_version = record.collection_version,
+                "Creating one-off compaction job for collection"
             );
             self.job_queue.push(CompactionJob {
                 collection_id: record.collection_id,
