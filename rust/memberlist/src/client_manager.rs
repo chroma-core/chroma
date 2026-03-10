@@ -7,8 +7,8 @@ use chroma_error::ChromaError;
 use chroma_system::{Component, ComponentContext, Handler};
 use chroma_tracing::GrpcClientTraceService;
 use chroma_types::chroma_proto::{
-    heap_tender_service_client::HeapTenderServiceClient, log_service_client::LogServiceClient,
-    query_executor_client::QueryExecutorClient,
+    compactor_client::CompactorClient, heap_tender_service_client::HeapTenderServiceClient,
+    log_service_client::LogServiceClient, query_executor_client::QueryExecutorClient,
 };
 use parking_lot::RwLock;
 use std::{
@@ -497,6 +497,17 @@ impl ClientFactory
 {
     fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
         HeapTenderServiceClient::new(channel)
+    }
+    fn max_decoding_message_size(self, max_size: usize) -> Self {
+        self.max_decoding_message_size(max_size)
+    }
+}
+
+impl ClientFactory
+    for CompactorClient<chroma_tracing::GrpcClientTraceService<tonic::transport::Channel>>
+{
+    fn new_from_channel(channel: GrpcClientTraceService<Channel>) -> Self {
+        CompactorClient::new(channel)
     }
     fn max_decoding_message_size(self, max_size: usize) -> Self {
         self.max_decoding_message_size(max_size)
