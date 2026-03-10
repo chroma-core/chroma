@@ -397,9 +397,9 @@ impl Scheduler {
                 Some(db_name) => db_name,
                 None => {
                     tracing::warn!(
-                        "Invalid database name for collection {}: {}",
-                        record.collection_id,
-                        record.database_name
+                        collection_id = %record.collection_id,
+                        database_name = %record.database_name,
+                        "Invalid database name for collection",
                     );
                     continue;
                 }
@@ -417,62 +417,44 @@ impl Scheduler {
         }
         let mut dropped_jobs_count = 0;
         let job_queue_at_start = self.job_queue.len();
-        while self
+        let mut rem_capacity = self
             .max_concurrent_jobs
-            .saturating_sub(self.in_progress_jobs.len())
-            > 0
-        {
-            let rem_capacity = self
-                .max_concurrent_jobs
-                .saturating_sub(self.in_progress_jobs.len());
-            if !oneoff_collections.is_empty() {
-                dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
-                // Take so we clear the oneoff collections for the next pass.
-                for (database_name, record) in std::mem::take(&mut oneoff_collections)
-                    .into_iter()
-                    .take(rem_capacity)
-                {
-                    tracing::info!(
-                        "Creating one-off compaction job for collection: {}",
-                        record.collection_version
-                    );
-                    self.job_queue.push(CompactionJob {
-                        collection_id: record.collection_id,
-                        database_name: database_name.clone(),
-                    });
-                    self.oneoff_collections.remove(&record.collection_id);
-                }
-            } else if !regular_collections.is_empty() {
-                dropped_jobs_count += regular_collections.len().saturating_sub(rem_capacity);
-                let mut records = Vec::with_capacity(regular_collections.len());
-                // Take so we clear the regular collections for the next pass.
-                for (_, record) in std::mem::take(&mut regular_collections).into_iter() {
-                    records.push(record);
-                }
-                let selected = self.policy.determine(records.clone(), rem_capacity as i32);
-                let seen = selected
-                    .iter()
-                    .map(|r| r.collection_id)
-                    .collect::<HashSet<_>>();
-                for record in records {
-                    if !seen.contains(&record.collection_id) {
-                        tracing::info!(
-                            "Max concurrent jobs reached, skipping compaction for {}",
-                            record.collection_id
-                        );
-                    }
-                }
-                for job in selected.iter() {
-                    tracing::info!(
-                        collection_id = job.collection_id.to_string(),
-                        "Enqueuing compaction job"
-                    );
-                }
-                self.job_queue.extend(selected);
-            } else {
-                break;
+            .saturating_sub(self.in_progress_jobs.len());
+        dropped_jobs_count += oneoff_collections.len().saturating_sub(rem_capacity);
+        for (database_name, record) in oneoff_collections.into_iter().take(rem_capacity) {
+            tracing::info!(
+                "Creating one-off compaction job for collection: {}",
+                record.collection_version
+            );
+            self.job_queue.push(CompactionJob {
+                collection_id: record.collection_id,
+                database_name: database_name.clone(),
+            });
+            self.oneoff_collections.remove(&record.collection_id);
+            rem_capacity -= 1;
+        }
+        dropped_jobs_count += regular_collections.len().saturating_sub(rem_capacity);
+        let records: Vec<CollectionRecord> = regular_collections
+            .into_iter()
+            .map(|(_, record)| record)
+            .collect();
+        let selected = self.policy.determine(records.clone(), rem_capacity as i32);
+        let seen: HashSet<CollectionUuid> = selected.iter().map(|r| r.collection_id).collect();
+        for record in &records {
+            if !seen.contains(&record.collection_id) {
+                tracing::info!(
+                    collection_id = %record.collection_id,
+                    "Max concurrent jobs reached, skipping compaction"
+                );
             }
         }
+        for job in &selected {
+            tracing::info!(
+                collection_id = %job.collection_id,
+                "Enqueuing compaction job"
+            );
+        }
+        self.job_queue.extend(selected);
         self.metrics
             .set_unaddressable_jobs_count(dropped_jobs_count as u64);
         // At this point, nobody should modify the job queue and every collection
