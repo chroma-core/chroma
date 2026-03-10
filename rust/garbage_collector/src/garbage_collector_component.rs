@@ -1150,6 +1150,7 @@ mod tests {
             collection_soft_delete_grace_period: Duration::from_secs(1),
             attached_function_soft_delete_grace_period: Duration::from_secs(1),
             max_collections_to_gc: 100,
+            max_attached_functions_to_gc_per_run: 100,
             min_versions_to_keep: 2,
             filter_min_versions_if_alive: None,
             gc_interval_mins: 10,
