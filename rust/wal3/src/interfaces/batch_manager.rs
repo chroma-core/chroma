@@ -343,7 +343,8 @@ impl<FP: FragmentPointer, U: FragmentUploader<FP>> FragmentPublisher for BatchMa
                 .await
             {
                 Ok(e_tag) => return Ok(e_tag),
-                Err(StorageError::Precondition { path: _, source: _ }) => {
+                Err(StorageError::AlreadyExists { path: _, source: _ })
+                | Err(StorageError::Precondition { path: _, source: _ }) => {
                     return Err(Error::LogContentionFailure);
                 }
                 Err(e) => {
@@ -410,7 +411,8 @@ pub async fn upload_parquet(
             Err(err @ StorageError::PermissionDenied { .. }) => {
                 return Err(Error::StorageError(Arc::new(err)));
             }
-            Err(StorageError::Precondition { path: _, source: _ }) => {
+            Err(StorageError::AlreadyExists { path: _, source: _ })
+            | Err(StorageError::Precondition { path: _, source: _ }) => {
                 return Err(Error::LogContentionFailure);
             }
             Err(err) => {
