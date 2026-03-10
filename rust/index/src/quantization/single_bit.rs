@@ -506,8 +506,8 @@ fn hamming_distance(a: &[u8], b: &[u8]) -> u32 {
     }
 }
 
-/// Precomputed sign expansion: for each byte value 0..256, the 8 f32 signs
-/// (+1.0 or −1.0) for bits 0..7. Bit j = 1 → +1.0, bit j = 0 → −1.0.
+// Precomputed sign expansion: for each byte value 0..256, the 8 f32 signs
+// (+1.0 or −1.0) for bits 0..7. Bit j = 1 → +1.0, bit j = 0 → −1.0.
 // ── Bitwise distance estimation (paper Section 3.3) ──────────────────────────
 //
 // The paper's efficient estimator quantizes the query residual r_q into B_q-bit
