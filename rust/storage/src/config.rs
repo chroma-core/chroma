@@ -88,6 +88,8 @@ pub struct S3StorageConfig {
     pub credentials: S3CredentialsConfig,
     #[serde(default = "S3StorageConfig::default_connect_timeout_ms")]
     pub connect_timeout_ms: u64,
+    #[serde(default = "S3StorageConfig::default_read_timeout_ms")]
+    pub read_timeout_ms: u64,
     #[serde(default = "S3StorageConfig::default_request_timeout_ms")]
     pub request_timeout_ms: u64,
     #[serde(default = "S3StorageConfig::default_request_retry_count")]
@@ -109,6 +111,10 @@ impl S3StorageConfig {
         5000
     }
 
+    fn default_read_timeout_ms() -> u64 {
+        2000
+    }
+
     fn default_request_timeout_ms() -> u64 {
         60000
     }
@@ -118,7 +124,7 @@ impl S3StorageConfig {
     }
 
     fn default_stall_protection_ms() -> u64 {
-        15000
+        5000
     }
 
     fn default_upload_part_size_bytes() -> usize {
@@ -136,6 +142,7 @@ impl Default for S3StorageConfig {
             bucket: S3StorageConfig::default_bucket(),
             credentials: S3CredentialsConfig::default(),
             connect_timeout_ms: S3StorageConfig::default_connect_timeout_ms(),
+            read_timeout_ms: S3StorageConfig::default_read_timeout_ms(),
             request_timeout_ms: S3StorageConfig::default_request_timeout_ms(),
             request_retry_count: S3StorageConfig::default_request_retry_count(),
             stall_protection_ms: S3StorageConfig::default_stall_protection_ms(),
