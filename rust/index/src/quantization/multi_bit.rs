@@ -121,7 +121,6 @@ impl<T: AsRef<[u8]>> Code<4, T> {
             distance_fn,
         )
     }
-
 }
 
 impl Code<4, Vec<u8>> {
@@ -220,7 +219,6 @@ impl Code<4, Vec<u8>> {
         Self(bytes)
     }
 }
-
 
 /// Padded dimension for 4-bit codes (multiple of BitPacker8x::BLOCK_LEN = 256).
 fn padded_dim_4bit(dim: usize) -> usize {

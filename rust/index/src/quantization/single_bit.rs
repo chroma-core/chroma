@@ -89,7 +89,6 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         )
     }
 
-
     // ── Bitwise query path ───────────────────────────────
 
     /// Estimates distance from a stored data code to a quantized query.
@@ -203,7 +202,11 @@ impl<T: AsRef<[u8]>> Code<1, T> {
     /// `[j*pb .. (j+1)*pb]`) rather than `Vec<Vec<u8>>`, so all four plane
     /// slices are contiguous and extracted with cheap slice indexing before
     /// the loop.
-    pub fn distance_quantized_query(&self, distance_fn: &DistanceFunction, qq: &QuantizedQuery) -> f32 {
+    pub fn distance_quantized_query(
+        &self,
+        distance_fn: &DistanceFunction,
+        qq: &QuantizedQuery,
+    ) -> f32 {
         let packed = self.packed();
 
         // Compute ⟨packed, q_u⟩ (the binary versions of g and r_q) via bit planes.
@@ -862,8 +865,7 @@ mod tests {
                     let r_q: Vec<f32> = centroid.iter().zip(q).map(|(c, q)| q - c).collect();
                     let qq = QuantizedQuery::new(&r_q, padded_bytes, c_norm, c_dot_q, q_norm);
                     let code_ref = Code::<1, _>::new(codes[i].as_ref());
-                    let estimated_query =
-                        code_ref.distance_quantized_query(&distance_fn, &qq);
+                    let estimated_query = code_ref.distance_quantized_query(&distance_fn, &qq);
                     rel_errors_query
                         .push((exact - estimated_query).abs() / exact.abs().max(f32::EPSILON));
                 }
