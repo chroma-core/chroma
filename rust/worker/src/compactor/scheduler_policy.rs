@@ -1,5 +1,7 @@
 use chroma_log::CollectionRecord;
 use chroma_types::DatabaseName;
+use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
 
 use crate::compactor::types::CompactionJob;
 
@@ -62,6 +64,61 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
             });
         }
         tasks
+    }
+}
+
+#[derive(Clone)]
+pub(crate) struct RandomSchedulerPolicy {}
+
+impl SchedulerPolicy for RandomSchedulerPolicy {
+    fn determine(
+        &self,
+        collections: Vec<CollectionRecord>,
+        number_jobs: i32,
+    ) -> Vec<CompactionJob> {
+        let mut collections = collections;
+        let mut rng = rand::thread_rng();
+        collections.shuffle(&mut rng);
+
+        let number_tasks = number_jobs.min(collections.len() as i32) as usize;
+        let mut tasks = Vec::new();
+        for collection in &collections[..number_tasks] {
+            let database_name = match DatabaseName::new(collection.database_name.clone()) {
+                Some(db_name) => db_name,
+                None => {
+                    tracing::warn!(
+                        "Invalid database name for collection {}: {}",
+                        collection.collection_id,
+                        collection.database_name
+                    );
+                    continue;
+                }
+            };
+            tasks.push(CompactionJob {
+                collection_id: collection.collection_id,
+                database_name,
+            });
+        }
+        tasks
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SchedulerPolicyConfig {
+    LeastRecentlyCompacted,
+    #[default]
+    Random,
+}
+
+impl From<&SchedulerPolicyConfig> for Box<dyn SchedulerPolicy> {
+    fn from(config: &SchedulerPolicyConfig) -> Self {
+        match config {
+            SchedulerPolicyConfig::LeastRecentlyCompacted => {
+                Box::new(LasCompactionTimeSchedulerPolicy {})
+            }
+            SchedulerPolicyConfig::Random => Box::new(RandomSchedulerPolicy {}),
+        }
     }
 }
 

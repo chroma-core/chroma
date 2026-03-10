@@ -1,5 +1,6 @@
 use super::scheduler::Scheduler;
-use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+#[cfg(test)]
+use super::scheduler_policy::SchedulerPolicyConfig;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::{
@@ -497,7 +498,8 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         };
 
         let my_ip = config.my_member_id.clone();
-        let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
+        let policy: Box<dyn super::scheduler_policy::SchedulerPolicy> =
+            (&config.compactor.scheduler_policy).into();
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
@@ -1149,7 +1151,7 @@ mod tests {
             my_member.member_id.clone(),
             log.clone(),
             sysdb.clone(),
-            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            (&SchedulerPolicyConfig::default()).into(),
             max_concurrent_jobs,
             min_compaction_size,
             assignment_policy,
