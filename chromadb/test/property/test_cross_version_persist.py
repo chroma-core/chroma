@@ -38,7 +38,7 @@ BASELINE_VERSIONS = ["0.4.1", "0.5.3"]
 version_re = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
 
 # Some modules do not work across versions, since we upgrade our support for them, and should be explicitly reimported in the subprocess
-VERSIONED_MODULES = ["pydantic", "numpy", "tokenizers"]
+VERSIONED_MODULES = ["pydantic", "pydantic_settings", "numpy", "tokenizers"]
 
 
 def versions() -> List[str]:

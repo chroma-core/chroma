@@ -186,20 +186,7 @@ impl Scheduler {
             entry.push(collection_info);
         }
         let mut collection_records = Vec::new();
-        for (topology, mut collection_infos) in by_topology {
-            for collection_info in std::mem::take(&mut collection_infos).into_iter() {
-                if self
-                    .disabled_collections
-                    .contains(&collection_info.collection_id)
-                {
-                    tracing::info!(
-                        "Ignoring collection: {:?} because it is disabled for compaction",
-                        collection_info.collection_id
-                    );
-                    continue;
-                }
-                collection_infos.push(collection_info);
-            }
+        for (topology, collection_infos) in by_topology {
             const BATCH_SIZE: usize = 1_000;
             let ids: Vec<CollectionUuid> =
                 collection_infos.iter().map(|c| c.collection_id).collect();
@@ -288,7 +275,10 @@ impl Scheduler {
         collection_records
     }
 
-    fn filter_collections(&mut self, collections: Vec<CollectionInfo>) -> Vec<CollectionInfo> {
+    async fn filter_collections(
+        &mut self,
+        collections: Vec<CollectionInfo>,
+    ) -> Vec<CollectionInfo> {
         let mut filtered_collections = Vec::new();
         let members = self.memberlist.as_ref().unwrap();
         let members_as_string = members
@@ -298,6 +288,25 @@ impl Scheduler {
         self.assignment_policy.set_members(members_as_string);
 
         for collection in collections {
+            if self
+                .disabled_collections
+                .contains(&collection.collection_id)
+            {
+                tracing::info!(
+                    "Ignoring collection: {:?} because it is disabled for compaction",
+                    collection.collection_id
+                );
+                continue;
+            }
+
+            if self.is_job_in_progress(&collection.collection_id).await {
+                tracing::info!(
+                    "Compaction for {} is already in progress, skipping",
+                    collection.collection_id
+                );
+                continue;
+            }
+
             let result = self
                 .assignment_policy
                 // NOTE(rescrv):  Need to use the untyped uuid here.
@@ -318,7 +327,7 @@ impl Scheduler {
         filtered_collections
     }
 
-    pub(crate) async fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
+    pub(crate) fn schedule_internal(&mut self, collection_records: Vec<CollectionRecord>) {
         self.job_queue.clear();
         let mut scheduled_collections = Vec::new();
         for record in collection_records {
@@ -335,13 +344,6 @@ impl Scheduler {
                 }
             };
 
-            if self.is_job_in_progress(&record.collection_id).await {
-                tracing::info!(
-                    "Compaction for {} is already in progress, skipping",
-                    record.collection_id
-                );
-                continue;
-            }
             if self.oneoff_collections.contains(&record.collection_id) {
                 tracing::info!(
                     "Creating one-off compaction job for collection: {}",
@@ -496,11 +498,11 @@ impl Scheduler {
         if collections.is_empty() {
             return;
         }
-        let filtered_collections = self.filter_collections(collections);
+        let filtered_collections = self.filter_collections(collections).await;
         let collection_records = self
             .verify_and_enrich_collections(filtered_collections)
             .await;
-        self.schedule_internal(collection_records).await;
+        self.schedule_internal(collection_records);
     }
 
     pub(crate) fn get_jobs(&self) -> impl Iterator<Item = &CompactionJob> {
@@ -1103,6 +1105,97 @@ mod tests {
             jobs.is_empty(),
             "Expected no jobs when log offset precedes sysdb position, but got {} jobs",
             jobs.len()
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn in_progress_collections_are_skipped_by_filter() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.get_jobs().count(), 2);
+
+        f.scheduler.schedule().await;
+        assert_eq!(
+            f.scheduler.get_jobs().count(),
+            0,
+            "in-progress collections should be filtered out"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn only_in_progress_collection_is_skipped() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.get_jobs().count(), 2);
+
+        f.scheduler.succeed_job(f.collection_uuid_1.into());
+
+        f.scheduler.schedule().await;
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(
+            jobs[0].collection_id, f.collection_uuid_1,
+            "only the completed collection should be re-scheduled"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn filter_collections_removes_disabled_collections() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        f.scheduler.disabled_collections.insert(f.collection_uuid_1);
+
+        let input = vec![
+            CollectionInfo {
+                collection_id: f.collection_uuid_1,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 1,
+            },
+            CollectionInfo {
+                collection_id: f.collection_uuid_2,
+                topology_name: None,
+                first_log_offset: 0,
+                first_log_ts: 2,
+            },
+        ];
+
+        let filtered = f.scheduler.filter_collections(input).await;
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].collection_id, f.collection_uuid_2);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn disabled_and_in_progress_both_filtered() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+
+        f.scheduler.schedule().await;
+        assert_eq!(f.scheduler.get_jobs().count(), 2);
+
+        // Complete collection_2, leave collection_1 in-progress.
+        f.scheduler.succeed_job(f.collection_uuid_2.into());
+        // Disable collection_2.
+        f.scheduler.disabled_collections.insert(f.collection_uuid_2);
+
+        f.scheduler.schedule().await;
+        assert_eq!(
+            f.scheduler.get_jobs().count(),
+            0,
+            "collection_1 is in-progress, collection_2 is disabled"
         );
     }
 }
