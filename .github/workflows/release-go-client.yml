@@ -1,0 +1,128 @@
+name: 📦 Release Go Client
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_name:
+        description: "Release name (e.g., go-1.2.3)"
+        required: false
+  push:
+    tags:
+      - 'go_release_[0-9]*.[0-9]*.[0-9]*'
+
+jobs:
+  test:
+    name: Run Go client tests
+    uses: ./.github/workflows/_go-client-tests.yml
+    secrets: inherit
+
+  release:
+    name: Create GitHub Release
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [test]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Determine release info
+        id: release_info
+        run: |
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            TAG=${GITHUB_REF#refs/tags/}
+            VERSION=${TAG#go_release_}
+            echo "release_name=go-${VERSION}" >> $GITHUB_OUTPUT
+            echo "tag_name=${TAG}" >> $GITHUB_OUTPUT
+          else
+            if [ -z "${{ github.event.inputs.release_name }}" ]; then
+              echo "::error::Manual dispatch requires a release_name input."
+              exit 1
+            fi
+            echo "release_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
+            echo "tag_name=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get previous Go release tag
+        id: prev_tag
+        run: |
+          CURRENT_TAG=${{ steps.release_info.outputs.tag_name }}
+          PREV_TAG=$(git tag -l 'go_release_*' --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -1)
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+          fi
+          echo "prev_tag=${PREV_TAG}" >> $GITHUB_OUTPUT
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          PREV_TAG=${{ steps.prev_tag.outputs.prev_tag }}
+
+          {
+            echo "notes<<EOF"
+            echo "## Changes"
+            echo ""
+            COMMITS=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD" -- clients/go/)
+            if [ -n "$COMMITS" ]; then
+              printf '%s\n' "$COMMITS"
+            else
+              echo "No changes to clients/go/ since last release."
+            fi
+            echo ""
+            echo "## Installation"
+            echo ""
+            echo '```bash'
+            echo "go get github.com/chroma-core/chroma/go@${{ steps.release_info.outputs.release_name }}"
+            echo '```'
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Get current date
+        id: builddate
+        run: echo "builddate=$(date +'%Y-%m-%dT%H:%M')" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1.14.0
+        with:
+          tag: ${{ steps.release_info.outputs.tag_name }}
+          name: ${{ steps.release_info.outputs.release_name }}
+          body: |
+            ${{ steps.release_notes.outputs.notes }}
+
+            ---
+            Build Date: `${{ steps.builddate.outputs.builddate }}`
+            Git ref: `${{ github.ref }}`
+          prerelease: false
+          makeLatest: false
+
+  notify-slack-on-failure:
+    name: Notify Slack on failure
+    if: failure()
+    needs: [test, release]
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    steps:
+      - name: Resolve tag
+        id: tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+          else
+            echo "tag=${{ github.event.inputs.release_name }}" >> $GITHUB_OUTPUT
+          fi
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          method: chat.postMessage
+          payload: |
+            channel: ${{ secrets.SLACK_CHANNEL_ID }}
+            text: |
+              :x: *Go client release failure!*
+              *Workflow:* ${{ github.workflow }}
+              *Run:* <https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}|View run>
+              *Ref:* <https://github.com/${{ github.repository }}/releases/tag/${{ steps.tag.outputs.tag }}|${{ steps.tag.outputs.tag }}>
+              *Author:* ${{ github.actor }}

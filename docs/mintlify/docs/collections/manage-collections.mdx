@@ -32,6 +32,10 @@ let collection = client
     .create_collection("my_collection", None, None)
     .await?;
 ```
+
+```go Go
+collection, err := client.CreateCollection(ctx, "my_collection")
+```
 </CodeGroup>
 
 Note that collection names must be **unique** inside a Chroma database. If you try to create a collection with a name of an existing one, you will see an exception.
@@ -156,6 +160,41 @@ collection.add(
 ```
 
 </Tab>
+
+<Tab title="Go" icon="golang">
+
+The Go client supports embedding functions through the `embeddings` package. For example, you can use the OpenAI embedding function:
+
+```bash
+go get github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai
+```
+
+Create your collection with the OpenAI embedding function:
+
+```go Go
+import (
+    "os"
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/openai"
+)
+
+ef, err := openai.NewOpenAIEmbeddingFunction(
+    os.Getenv("OPENAI_API_KEY"),
+    openai.WithModel(openai.TextEmbedding3Small),
+)
+
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+Instead of having Chroma embed documents, you can also provide embeddings directly when [adding data](./add-data) to a collection. In this case, your collection will not have an embedding function set, and you will be responsible for providing embeddings directly when adding data and querying.
+
+```go Go
+collection, err := client.CreateCollection(ctx, "my_collection")
+```
+
+</Tab>
 </Tabs>
 
 ### Collection Metadata
@@ -197,6 +236,17 @@ metadata.insert("created".to_string(), "2024-01-01T00:00:00Z".into());
 let collection = client
     .create_collection("my_collection", None, Some(metadata))
     .await?;
+```
+
+```go Go
+collection, err := client.CreateCollection(ctx, "my_collection",
+    chroma.WithCollectionMetadataCreate(
+        chroma.NewMetadata(
+            chroma.NewStringAttribute("description", "my first Chroma collection"),
+            chroma.NewStringAttribute("created", time.Now().String()),
+        ),
+    ),
+)
 ```
 </CodeGroup>
 
@@ -322,6 +372,42 @@ let collections = client.list_collections(100, Some(0)).await?;
 ```
 
 </Tab>
+
+<Tab title="Go" icon="golang">
+
+There are several ways to get a collection after it was created.
+
+The `GetCollection` function will get a collection from Chroma by name:
+
+```go Go
+collection, err := client.GetCollection(ctx, "my-collection")
+```
+
+The `GetOrCreateCollection` function behaves similarly, but will create the collection if it doesn't exist:
+
+```go Go
+collection, err := client.GetOrCreateCollection(ctx, "my-collection",
+    chroma.WithCollectionMetadataCreate(
+        chroma.NewMetadata(chroma.NewStringAttribute("description", "...")),
+    ),
+)
+```
+
+The `ListCollections` function returns the collections you have in your Chroma database:
+
+```go Go
+collections, err := client.ListCollections(ctx)
+```
+
+By default, `ListCollections` returns up to 100 collections. You can use `limit` and `offset` options:
+
+```go Go
+firstBatch, err := client.ListCollections(ctx, chroma.ListWithLimit(100))
+secondBatch, err := client.ListCollections(ctx, chroma.ListWithLimit(100), chroma.ListWithOffset(100))
+subset, err := client.ListCollections(ctx, chroma.ListWithLimit(20), chroma.ListWithOffset(50))
+```
+
+</Tab>
 </Tabs>
 
 ## Modifying Collections
@@ -342,6 +428,19 @@ await collection.modify({
   metadata: { description: "new description" },
 });
 ```
+
+```go Go
+err = collection.ModifyName(ctx, "new-name")
+err = collection.ModifyMetadata(ctx, chroma.NewMetadata(
+    chroma.NewStringAttribute("description", "new description"),
+))
+
+// Modify mutable index configuration
+cfg := chroma.NewUpdateCollectionConfiguration(
+    chroma.WithHNSWEfSearchModify(200),
+)
+err = collection.ModifyConfiguration(ctx, cfg)
+```
 </CodeGroup>
 
 ## Deleting Collections
@@ -359,6 +458,10 @@ client.delete_collection(name="my-collection")
 
 ```typescript TypeScript
 await client.deleteCollection({ name: "my-collection" });
+```
+
+```go Go
+err = client.DeleteCollection(ctx, "my-collection")
 ```
 </CodeGroup>
 
@@ -378,5 +481,10 @@ collection.peek()
 ```typescript TypeScript
 await collection.count();
 await collection.peek();
+```
+
+```go Go
+count, err := collection.Count(ctx)
+results, err := collection.Get(ctx, chroma.WithLimit(10)) // peek equivalent
 ```
 </CodeGroup>

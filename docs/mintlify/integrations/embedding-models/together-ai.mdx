@@ -4,7 +4,8 @@ title: Together AI
 
 Chroma provides a wrapper around [Together AI](https://www.together.ai/) embedding models. This embedding function runs remotely against the Together AI servers, and will require an API key and a Together AI account. You can find more information in the [Together AI Embeddings Docs](https://docs.together.ai/docs/embeddings-overview), and [supported models](https://docs.together.ai/docs/serverless-models#embedding-models).
 
-<CodeGroup>
+<Tabs>
+<Tab title="Python" icon="python">
 
 ```python Python
 from chromadb.utils.embedding_functions import TogetherAIEmbeddingFunction
@@ -16,6 +17,10 @@ ef = TogetherAIEmbeddingFunction(
 )
 ef(input=["This is my first text to embed", "This is my second document"])
 ```
+
+</Tab>
+
+<Tab title="TypeScript" icon="js">
 
 ```typescript TypeScript
 // npm install @chroma-core/together-ai
@@ -32,6 +37,36 @@ const embedder = new TogetherAIEmbeddingFunction({
 embedder.generate(['This is my first text to embed', 'This is my second document']);
 ```
 
-</CodeGroup>
+</Tab>
+
+<Tab title="Go" icon="golang">
+
+```go Go
+import (
+    chroma "github.com/chroma-core/chroma/clients/go"
+    "github.com/chroma-core/chroma/clients/go/pkg/embeddings/together"
+)
+
+// Create Together AI embedding function
+ef, err := together.NewTogetherEmbeddingFunction(
+    os.Getenv("TOGETHER_AI_API_KEY"),
+    together.WithModel("togethercomputer/m2-bert-80M-32k-retrieval"),
+)
+
+// Use directly
+embeddings, err := ef.EmbedDocuments(ctx, []string{
+    "This is my first text to embed",
+    "This is my second document",
+})
+
+// Use with collection
+collection, err := client.CreateCollection(ctx, "name",
+    chroma.WithEmbeddingFunctionCreate(ef),
+)
+```
+
+</Tab>
+
+</Tabs>
 
 You must pass in a `model_name` to the embedding function. It is recommended to set the `CHROMA_TOGETHER_AI_API_KEY` environment variable for the API key, but the embedding function also optionally takes in an `api_key` parameter directly.

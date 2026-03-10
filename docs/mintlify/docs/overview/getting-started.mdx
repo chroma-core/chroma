@@ -416,6 +416,178 @@ summary.
 - Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
 
 </Tab>
+<Tab title="Go" icon="golang">
+
+<Callout>
+For production, Chroma offers [Chroma Cloud](https://trychroma.com/signup?utm_source=docs-getting-started) - a fast, scalable, and serverless database-as-a-service. Get started in 30 seconds - $5 in free credits included.
+</Callout>
+
+## Install Manually
+
+<Steps titleSize="h3">
+  <Step title="Install">
+    ```bash
+    go get github.com/chroma-core/chroma/clients/go
+    ```
+  </Step>
+
+  <Step title="Create a Chroma Client">
+    Run the Chroma backend:
+
+    <CodeGroup>
+    ```bash CLI
+    chroma run --path ./getting-started
+    ```
+    ```bash Docker
+    docker pull chromadb/chroma
+    docker run -p 8000:8000 chromadb/chroma
+    ```
+    </CodeGroup>
+
+    Then create a client which connects to it:
+
+    ```go Go
+    package main
+
+    import (
+        "context"
+
+        chroma "github.com/chroma-core/chroma/clients/go"
+    )
+
+    func main() {
+        ctx := context.Background()
+        client, err := chroma.NewHTTPClient(ctx, chroma.WithHost("localhost"), chroma.WithPort(8000))
+        if err != nil {
+            panic(err)
+        }
+        defer client.Close()
+    }
+    ```
+  </Step>
+
+  <Step title="Create a collection">
+    Collections are where you'll store your embeddings, documents, and any additional metadata. Collections index your embeddings and documents, and enable efficient retrieval and filtering. You can create a collection with a name:
+
+    ```go Go
+    collection, err := client.CreateCollection(ctx, "my_collection")
+    if err != nil {
+        panic(err)
+    }
+    ```
+  </Step>
+
+  <Step title="Add some text documents to the collection">
+    Chroma will store your text and handle embedding and indexing automatically. You can also customize the embedding model. You must provide unique string IDs for your documents.
+
+    ```go Go
+    err = collection.Add(ctx,
+        chroma.WithIDs("id1", "id2"),
+        chroma.WithTexts(
+            "This is a document about pineapple",
+            "This is a document about oranges",
+        ),
+    )
+    if err != nil {
+        panic(err)
+    }
+    ```
+  </Step>
+
+  <Step title="Query the collection">
+    You can query the collection with a list of query texts, and Chroma will return the n most similar results. It's that easy!
+
+    ```go Go
+    results, err := collection.Query(ctx,
+        chroma.WithQueryTexts("This is a query document about hawaii"), // Chroma will embed this for you
+        chroma.WithNResults(2), // how many results to return
+    )
+    if err != nil {
+        panic(err)
+    }
+    fmt.Printf("%+v\n", results)
+    ```
+
+    If n\_results is not provided, Chroma will return 10 results by default. Here we only added 2 documents, so we set n\_results=2.
+  </Step>
+
+  <Step title="Inspect Results">
+    From the above - you can see that our query about hawaii is semantically most similar to the document about pineapple.
+
+    ```go Go
+    // Access results using the QueryResult interface methods
+    ids := results.GetIDGroups()         // [][]DocumentID
+    docs := results.GetDocumentsGroups() // [][]string
+    distances := results.GetDistancesGroups() // [][]float32
+
+    // First query group results:
+    // ids[0] = ["id1", "id2"]
+    // docs[0] = ["This is a document about pineapple", "This is a document about oranges"]
+    // distances[0] = [1.0404009819030762, 1.243080496788025]
+    ```
+  </Step>
+
+  <Step title="Try it out yourself">
+    What if we tried querying with "This is a document about florida"? Here is a full example.
+
+    ```go Go expandable
+    package main
+
+    import (
+        "context"
+        "fmt"
+
+        chroma "github.com/chroma-core/chroma/clients/go"
+    )
+
+    func main() {
+        ctx := context.Background()
+        client, err := chroma.NewHTTPClient(ctx, chroma.WithHost("localhost"), chroma.WithPort(8000))
+        if err != nil {
+            panic(err)
+        }
+        defer client.Close()
+
+        // switch `CreateCollection` to `GetOrCreateCollection` to avoid creating a new collection every time
+        collection, err := client.GetOrCreateCollection(ctx, "my_collection")
+        if err != nil {
+            panic(err)
+        }
+
+        // switch `Add` to `Upsert` to avoid adding the same documents every time
+        err = collection.Upsert(ctx,
+            chroma.WithIDs("id1", "id2"),
+            chroma.WithTexts(
+                "This is a document about pineapple",
+                "This is a document about oranges",
+            ),
+        )
+        if err != nil {
+            panic(err)
+        }
+
+        results, err := collection.Query(ctx,
+            chroma.WithQueryTexts("This is a query document about florida"), // Chroma will embed this for you
+            chroma.WithNResults(2), // how many results to return
+        )
+        if err != nil {
+            panic(err)
+        }
+
+        fmt.Printf("%+v\n", results)
+    }
+    ```
+  </Step>
+</Steps>
+
+## Next steps
+
+- Check out the [Go client reference](/reference/go/client) for the full API documentation
+- Learn how to [Deploy Chroma](/guides/deploy/client-server-mode) to a server
+- Join Chroma's [Discord Community](https://discord.com/invite/MMeYNTmh3x) to ask questions and get help
+- Follow Chroma on [X (@trychroma)](https://twitter.com/trychroma) for updates
+
+</Tab>
 <Tab title="Rust" icon="rust">
 
 Our Rust docs are hosted on [docs.rs](https://docs.rs/chroma/latest/chroma/)!
