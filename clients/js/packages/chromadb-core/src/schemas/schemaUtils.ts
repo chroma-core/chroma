@@ -4,6 +4,7 @@ import baseSchema from "../../../../../../schemas/embedding_functions/base_schem
 import chromaLangchainSchema from "../../../../../../schemas/embedding_functions/chroma_langchain.json";
 import cohereSchema from "../../../../../../schemas/embedding_functions/cohere.json";
 import defaultSchema from "../../../../../../schemas/embedding_functions/default.json";
+import googleGeminiSchema from "../../../../../../schemas/embedding_functions/google_gemini.json";
 import googleGenaiSchema from "../../../../../../schemas/embedding_functions/google_genai.json";
 import googleGenerativeAiSchema from "../../../../../../schemas/embedding_functions/google_generative_ai.json";
 import googlePalmSchema from "../../../../../../schemas/embedding_functions/google_palm.json";
@@ -50,7 +51,8 @@ const schemaMap = {
   chroma_langchain: chromaLangchainSchema as Schema,
   cohere: cohereSchema as Schema,
   default: defaultSchema as Schema,
-  google_genai: googleGenaiSchema as Schema,
+  google_gemini: googleGeminiSchema as Schema,
+  google_genai: googleGenaiSchema as Schema, // Backward compatibility alias
   google_generative_ai: googleGenerativeAiSchema as Schema,
   google_palm: googlePalmSchema as Schema,
   google_vertex: googleVertexSchema as Schema,

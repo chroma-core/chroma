@@ -15,8 +15,8 @@ This embedding function relies on the `google-genai` python package, which you c
 ```python
 import chromadb.utils.embedding_functions as embedding_functions
 
-# The GoogleGenaiEmbeddingFunction expects the API key in the GEMINI_API_KEY environment variable.
-google_ef = embedding_functions.GoogleGenaiEmbeddingFunction(
+# The GoogleGeminiEmbeddingFunction expects the API key in the GEMINI_API_KEY environment variable.
+google_ef = embedding_functions.GoogleGeminiEmbeddingFunction(
     model_name="gemini-embedding-001",
     task_type="RETRIEVAL_DOCUMENT",
 )
@@ -30,7 +30,7 @@ collection = client.get_collection(name="name", embedding_function=google_ef)
 You can optionally specify the `dimension` parameter to control the output dimensionality of the embeddings (supported range: 128–3072):
 
 ```python
-google_ef = embedding_functions.GoogleGenaiEmbeddingFunction(
+google_ef = embedding_functions.GoogleGeminiEmbeddingFunction(
     model_name="gemini-embedding-001",
     task_type="RETRIEVAL_DOCUMENT",
     dimension=768,
