@@ -116,7 +116,7 @@ impl S3StorageConfig {
     }
 
     fn default_request_timeout_ms() -> u64 {
-        30000
+        60000
     }
 
     fn default_request_retry_count() -> u32 {
