@@ -207,7 +207,6 @@ export const processUpdateCollectionConfig = async ({
   const embeddingFunction =
     currentEmbeddingFunction ||
     (await getEmbeddingFunction({
-      collectionName: collectionName,
       client,
       efConfig: currentConfiguration.embeddingFunction ?? undefined,
     }));

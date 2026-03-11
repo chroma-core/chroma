@@ -1285,7 +1285,6 @@ export class Schema {
     });
 
     config.embeddingFunction = await getEmbeddingFunction({
-      collectionName: "schema deserialization",
       client,
       efConfig: json.embedding_function as EmbeddingFunctionConfiguration,
     });
@@ -1307,7 +1306,6 @@ export class Schema {
 
     const embeddingFunction =
       (await getSparseEmbeddingFunction(
-        "schema deserialization",
         client,
         json.embedding_function as EmbeddingFunctionConfiguration,
       )) ??

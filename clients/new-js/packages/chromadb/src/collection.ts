@@ -45,7 +45,7 @@ import {
   processUpdateCollectionConfig,
   UpdateCollectionConfiguration,
 } from "./collection-configuration";
-import { SearchLike, SearchResult, toSearch } from "./execution/expression";
+import { SearchLike, SearchResult, toSearch } from "./execution";
 import { isPlainObject } from "./execution/expression/common";
 import { Schema, EMBEDDING_KEY, DOCUMENT_KEY } from "./schema";
 import type { SparseVectorIndexConfig } from "./schema";
@@ -216,6 +216,7 @@ export interface Collection {
   /**
    * Performs hybrid search on the collection using expression builders.
    * @param searches - Single search payload or array of payloads
+   * @param options
    * @returns Promise resolving to column-major search results
    */
   search(
@@ -366,7 +367,9 @@ export class CollectionImpl implements Collection {
 
     if (!embeddingFunction) {
       throw new ChromaValueError(
-        "Embedding function must be defined for operations requiring embeddings.",
+        `No embedding function found for collection '${this._name}'. ` +
+          "You can either provide embeddings directly, or ensure the appropriate " +
+          "embedding function package (e.g. @chroma-core/default-embed) is installed.",
       );
     }
 
@@ -459,10 +462,8 @@ export class CollectionImpl implements Collection {
           // Get document at this position
           if (index < documentsList.length) {
             const doc = documentsList[index];
-            if (typeof doc === "string") {
-              inputs.push(doc);
-              positions.push(index);
-            }
+            inputs.push(doc);
+            positions.push(index);
           }
         });
 
