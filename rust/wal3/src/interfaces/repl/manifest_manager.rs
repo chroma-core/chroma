@@ -866,7 +866,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         }
         let mut stmt1 = Statement::new(
             "
-            SELECT setsum, position_limit
+            SELECT setsum, position_limit, fragments.ident AS ident
             FROM fragments
                 INNER JOIN fragment_regions
                 ON fragments.log_id = fragment_regions.log_id
@@ -913,6 +913,21 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         );
         stmt2.add_param("log_id", &self.log_id.to_string());
         stmt2.add_param("threshold", &(first_to_keep.offset() as i64));
+        let mut stmt3 = Statement::new(
+            "
+            SELECT MIN(fragments.ident) AS min_ident
+            FROM fragments
+                INNER JOIN fragment_regions
+                ON fragments.log_id = fragment_regions.log_id
+                    AND fragments.ident = fragment_regions.ident
+            WHERE fragments.log_id = @log_id
+                AND fragments.position_limit > @threshold
+                AND fragment_regions.region = @local_region
+            ",
+        );
+        stmt3.add_param("log_id", &self.log_id.to_string());
+        stmt3.add_param("threshold", &(first_to_keep.offset() as i64));
+        stmt3.add_param("local_region", &self.local_region);
         let mut iter = tx.query(stmt2).await?;
         let first_to_keep = if let Some(row) = iter.next().await? {
             let mut min_position_start = row.column::<i64>(0)?;
@@ -926,6 +941,24 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             }
             LogPosition::from_offset(first_to_keep.offset().min(max_log_position as u64))
         };
+        let mut iter = tx.query(stmt3).await?;
+        let min_remaining_uuid = if let Some(row) = iter.next().await? {
+            let min_ident = row.column_by_name::<Option<String>>("min_ident")?;
+            min_ident
+                .map(|ident| {
+                    ident
+                        .parse::<Uuid>()
+                        .map(FragmentUuid::from_uuid)
+                        .map_err(|e| {
+                            Error::CorruptGarbage(format!(
+                                "invalid UUID fragment identifier in fragments.ident: {ident}: {e}"
+                            ))
+                        })
+                })
+                .transpose()?
+        } else {
+            None
+        };
         if acc != Setsum::default() {
             Ok(Some(Garbage {
                 snapshots_to_drop: vec![],
@@ -933,6 +966,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 snapshot_for_root: None,
                 fragments_to_drop_start: FragmentSeqNo::ZERO,
                 fragments_to_drop_limit: FragmentSeqNo::ZERO,
+                fragments_to_drop_uuid_limit: min_remaining_uuid,
                 setsum_to_discard: acc,
                 fragments_are_uuids: true,
                 first_to_keep,

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use arrow::array::{ArrayRef, BinaryArray, RecordBatch, UInt64Array};
-use chroma_storage::StorageError;
+use chroma_storage::{GetOptions, StorageError};
 use chroma_types::Cmek;
 use opentelemetry::trace::TraceContextExt;
 use parquet::arrow::ArrowWriter;
@@ -21,9 +21,9 @@ use crate::interfaces::{
     ManifestPublisher,
 };
 use crate::{
-    BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff, Fragment,
-    FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader, LogReaderOptions,
-    LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
+    parse_fragment_path, BatchManager, CursorStore, CursorStoreOptions, Error, ExponentialBackoff,
+    Fragment, FragmentSeqNo, Garbage, GarbageCollectionOptions, LogPosition, LogReader,
+    LogReaderOptions, LogWriterOptions, Manifest, ManifestAndWitness, ManifestManager,
 };
 
 /// The epoch writer is a counting writer.  Every epoch exists.  An epoch goes
@@ -917,6 +917,36 @@ impl<P: FragmentPointer, FP: FragmentPublisher<FragmentPointer = P>, MP: Manifes
             if batch.len() >= 100 {
                 let batch = std::mem::take(&mut batch);
                 delete_batch(batch, exp_backoff.clone()).await?;
+            }
+        }
+        if garbage.fragments_are_uuids {
+            if let Some(limit_uuid) = garbage.fragments_to_drop_uuid_limit {
+                let fragment_root = format!("{}/log/", prefix);
+                let possible_fragments = storage
+                    .list_prefix(&fragment_root, GetOptions::default())
+                    .await
+                    .map_err(Arc::new)?;
+                for full_path in possible_fragments {
+                    let Some(unprefixed_path) = full_path.strip_prefix(&prefix) else {
+                        return Err(Error::GarbageCollection(format!(
+                            "got a fragment I don't trust: {full_path}"
+                        )));
+                    };
+                    let candidate = unprefixed_path.trim_start_matches('/');
+                    let Some(fragment_id) = parse_fragment_path(candidate) else {
+                        continue;
+                    };
+                    let Some(uuid) = fragment_id.as_uuid() else {
+                        continue;
+                    };
+                    if uuid < limit_uuid {
+                        batch.push(full_path);
+                        if batch.len() >= 100 {
+                            let batch = std::mem::take(&mut batch);
+                            delete_batch(batch, exp_backoff.clone()).await?;
+                        }
+                    }
+                }
             }
         }
         if !batch.is_empty() {
