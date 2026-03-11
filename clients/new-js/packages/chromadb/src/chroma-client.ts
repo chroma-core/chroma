@@ -259,7 +259,6 @@ export class ChromaClient {
         const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
         const resolvedEmbeddingFunction =
           (await getEmbeddingFunction({
-            collectionName: collection.name,
             client: this,
             efConfig:
               collection.configuration_json.embedding_function ?? undefined,
@@ -346,7 +345,6 @@ export class ChromaClient {
     const resolvedEmbeddingFunction =
       embeddingFunction ??
       (await getEmbeddingFunction({
-        collectionName: data.name,
         client: this,
         efConfig: data.configuration_json.embedding_function ?? undefined,
       })) ??
@@ -391,7 +389,6 @@ export class ChromaClient {
     const resolvedEmbeddingFunction =
       embeddingFunction ??
       (await getEmbeddingFunction({
-        collectionName: data.name,
         client: this,
         efConfig: data.configuration_json.embedding_function ?? undefined,
       })) ??
@@ -426,7 +423,6 @@ export class ChromaClient {
     const schemaEmbeddingFunction = resolveSchemaEmbeddingFunction(schema);
     const resolvedEmbeddingFunction =
       (await getEmbeddingFunction({
-        collectionName: data.name,
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ?? schemaEmbeddingFunction;
@@ -523,7 +519,6 @@ export class ChromaClient {
     const resolvedEmbeddingFunction =
       embeddingFunction ??
       (await getEmbeddingFunction({
-        collectionName: name,
         efConfig: data.configuration_json.embedding_function ?? undefined,
         client: this,
       })) ??
