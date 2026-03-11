@@ -94,6 +94,7 @@ impl Component for WorkerThread {
             let total_cores = std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1);
+            let affinity_count = affinity_count.max(1);
             if let Some(core) = cpu_core_for_worker(self.worker_id, affinity_count, total_cores) {
                 if !pin_current_thread(core) {
                     tracing::warn!(
