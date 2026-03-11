@@ -120,24 +120,38 @@ impl ManifestManager {
                 ));
             }
         }
-        spanner
-            .read_write_transaction(|tx| {
-                let mutations = mutations.clone();
-                Box::pin(async move {
-                    tx.buffer_write(mutations);
-                    Ok::<_, google_cloud_spanner::session::SessionError>(())
+        let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        for _ in 0..3 {
+            let res = spanner
+                .read_write_transaction(|tx| {
+                    let mutations = mutations.clone();
+                    Box::pin(async move {
+                        tx.buffer_write(mutations);
+                        Ok::<_, google_cloud_spanner::session::SessionError>(())
+                    })
                 })
-            })
-            .await
-            .map_err(|err| match err {
-                google_cloud_spanner::session::SessionError::GRPC(status)
+                .await;
+            match res {
+                Ok(_) => return Ok(()),
+                Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
                     if status.code() == Code::AlreadyExists =>
                 {
-                    Error::LogContentionRetry
+                    return Err(Error::LogContentionRetry);
                 }
-                err => err.into(),
-            })?;
-        Ok(())
+                Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
+                    if status.code() == Code::Aborted =>
+                {
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(10) {
+                        backoff = Duration::from_secs(10);
+                    }
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(Error::Backoff)
     }
 
     /// Manifest storers and accessors
@@ -476,17 +490,34 @@ impl ManifestManager {
                 )
             })
             .collect();
-        spanner
-            .read_write_transaction(move |tx| {
-                let mutations = mutations.clone();
-                Box::pin(async move {
-                    tx.buffer_write(mutations);
-                    Ok::<_, google_cloud_spanner::session::SessionError>(())
+        let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        for _ in 0..3 {
+            let mutations_clone = mutations.clone();
+            let res = spanner
+                .read_write_transaction(move |tx| {
+                    let mutations = mutations_clone.clone();
+                    Box::pin(async move {
+                        tx.buffer_write(mutations);
+                        Ok::<_, google_cloud_spanner::session::SessionError>(())
+                    })
                 })
-            })
-            .await
-            .map_err(|err| -> Error { err.into() })?;
-        Ok(())
+                .await;
+            match res {
+                Ok(_) => return Ok(()),
+                Err(google_cloud_spanner::session::SessionError::GRPC(ref status))
+                    if status.code() == Code::Aborted =>
+                {
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(10) {
+                        backoff = Duration::from_secs(10);
+                    }
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(Error::Backoff)
     }
 }
 
@@ -735,12 +766,14 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
     /// Apply a garbage file to the manifest.
     async fn apply_garbage(&self, garbage: Garbage) -> Result<(), Error> {
         garbage.check_invariants_for_repl()?;
-        let mut acc = Setsum::default();
-        let _cr = self
-            .spanner
-            .read_write_transaction(|tx| {
-                let mut stmt1 = Statement::new(
-                    "
+        let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        for _ in 0..3 {
+            let mut acc = Setsum::default();
+            let res = self
+                .spanner
+                .read_write_transaction(|tx| {
+                    let mut stmt1 = Statement::new(
+                        "
                     SELECT fragments.ident, setsum, position_limit
                     FROM fragments
                         INNER JOIN fragment_regions
@@ -750,24 +783,24 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                         AND fragments.position_limit <= @threshold
                         AND fragment_regions.region = @local_region
                 ",
-                );
-                let log_id = self.log_id.to_string();
-                stmt1.add_param("log_id", &log_id);
-                stmt1.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
-                stmt1.add_param("local_region", &self.local_region);
-                let mut stmt2 = Statement::new(
-                    "
+                    );
+                    let log_id = self.log_id.to_string();
+                    stmt1.add_param("log_id", &log_id);
+                    stmt1.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
+                    stmt1.add_param("local_region", &self.local_region);
+                    let mut stmt2 = Statement::new(
+                        "
                     SELECT collected
                     FROM manifest_regions
                     WHERE manifest_regions.log_id = @log_id
                         AND manifest_regions.region = @local_region
                     LIMIT 1
                 ",
-                );
-                stmt2.add_param("log_id", &log_id);
-                stmt2.add_param("local_region", &self.local_region);
-                let mut stmt3 = Statement::new(
-                    "
+                    );
+                    stmt2.add_param("log_id", &log_id);
+                    stmt2.add_param("local_region", &self.local_region);
+                    let mut stmt3 = Statement::new(
+                        "
                     SELECT fragments.ident, fragments.path, count(fragment_regions.region) as c
                     FROM fragments
                         INNER JOIN fragment_regions
@@ -778,67 +811,81 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                     GROUP BY fragments.ident, fragments.path
                     HAVING c <= 1
                 ",
-                );
-                stmt3.add_param("log_id", &log_id);
-                stmt3.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
-                stmt3.add_param("local_region", &self.local_region);
-                let local_region = self.local_region.clone();
-                let new_initial_offset = garbage.first_to_keep.offset() as i64;
-                Box::pin(async move {
-                    let mut query = tx.query(stmt2).await?;
-                    let Some(row) = query.next().await? else {
-                        return Err(Error::UninitializedLog);
-                    };
-                    let collected = row.column_by_name::<String>("collected")?;
-                    let collected = Setsum::from_hexdigest(&collected).ok_or_else(|| {
-                        Error::CorruptGarbage(format!("invalid setsum hexdigest: {collected}"))
-                    })?;
-                    let mut iter = tx.query(stmt1).await?;
-                    let mut mutations = vec![];
-                    let mut selected: HashSet<String> = HashSet::default();
-                    while let Some(row) = iter.next().await? {
-                        let cur = row.column_by_name::<String>("setsum")?;
-                        let cur = Setsum::from_hexdigest(&cur).ok_or_else(|| {
-                            Error::CorruptGarbage(format!("invalid setsum hexdigest: {cur}"))
+                    );
+                    stmt3.add_param("log_id", &log_id);
+                    stmt3.add_param("threshold", &(garbage.first_to_keep.offset() as i64));
+                    stmt3.add_param("local_region", &self.local_region);
+                    let local_region = self.local_region.clone();
+                    let new_initial_offset = garbage.first_to_keep.offset() as i64;
+                    Box::pin(async move {
+                        let mut query = tx.query(stmt2).await?;
+                        let Some(row) = query.next().await? else {
+                            return Err(Error::UninitializedLog);
+                        };
+                        let collected = row.column_by_name::<String>("collected")?;
+                        let collected = Setsum::from_hexdigest(&collected).ok_or_else(|| {
+                            Error::CorruptGarbage(format!("invalid setsum hexdigest: {collected}"))
                         })?;
-                        acc += cur;
-                        let ident = row.column_by_name::<String>("ident")?;
-                        mutations.push(delete(
-                            "fragment_regions",
-                            Key::composite(&[&log_id, &ident, &local_region]),
-                        ));
-                        selected.insert(ident);
-                    }
-                    let collected = collected + acc;
-                    mutations.push(update(
-                        "manifest_regions",
-                        &["log_id", "region", "collected", "initial_offset"],
-                        &[
-                            &log_id,
-                            &local_region,
-                            &collected.hexdigest(),
-                            &new_initial_offset,
-                        ],
-                    ));
-                    let mut query = tx.query(stmt3).await?;
-                    while let Some(row) = query.next().await? {
-                        let ident = row.column_by_name::<String>("ident")?;
-                        if selected.contains(&ident) {
-                            mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
+                        let mut iter = tx.query(stmt1).await?;
+                        let mut mutations = vec![];
+                        let mut selected: HashSet<String> = HashSet::default();
+                        while let Some(row) = iter.next().await? {
+                            let cur = row.column_by_name::<String>("setsum")?;
+                            let cur = Setsum::from_hexdigest(&cur).ok_or_else(|| {
+                                Error::CorruptGarbage(format!("invalid setsum hexdigest: {cur}"))
+                            })?;
+                            acc += cur;
+                            let ident = row.column_by_name::<String>("ident")?;
+                            mutations.push(delete(
+                                "fragment_regions",
+                                Key::composite(&[&log_id, &ident, &local_region]),
+                            ));
+                            selected.insert(ident);
                         }
-                    }
-                    if acc == garbage.setsum_to_discard {
-                        tx.buffer_write(mutations);
-                        Ok::<_, Error>(())
-                    } else {
-                        Err(Error::GarbageCollection(
-                            "setsum to discard does not match available fragments".to_string(),
-                        ))
-                    }
+                        let collected = collected + acc;
+                        mutations.push(update(
+                            "manifest_regions",
+                            &["log_id", "region", "collected", "initial_offset"],
+                            &[
+                                &log_id,
+                                &local_region,
+                                &collected.hexdigest(),
+                                &new_initial_offset,
+                            ],
+                        ));
+                        let mut query = tx.query(stmt3).await?;
+                        while let Some(row) = query.next().await? {
+                            let ident = row.column_by_name::<String>("ident")?;
+                            if selected.contains(&ident) {
+                                mutations
+                                    .push(delete("fragments", Key::composite(&[&log_id, &ident])));
+                            }
+                        }
+                        if acc == garbage.setsum_to_discard {
+                            tx.buffer_write(mutations);
+                            Ok::<_, Error>(())
+                        } else {
+                            Err(Error::GarbageCollection(
+                                "setsum to discard does not match available fragments".to_string(),
+                            ))
+                        }
+                    })
                 })
-            })
-            .await?;
-        Ok(())
+                .await;
+            match res {
+                Ok(_) => return Ok(()),
+                Err(Error::TonicError(ref status)) if status.code() == Code::Aborted => {
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(10) {
+                        backoff = Duration::from_secs(10);
+                    }
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+        Err(Error::Backoff)
     }
 
     /// Compute the garbage assuming at least log position will be kept.
@@ -1007,59 +1054,77 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
 
     async fn destroy(&self) -> Result<(), Error> {
         let log_id = self.log_id.to_string();
-        self.spanner
-            .read_write_transaction(|tx| {
-                let log_id = log_id.clone();
-                Box::pin(async move {
-                    // First, query all fragment idents and regions to delete from fragment_regions.
-                    let mut stmt1 = Statement::new(
-                        "SELECT ident, region FROM fragment_regions WHERE log_id = @log_id",
-                    );
-                    stmt1.add_param("log_id", &log_id);
-                    let mut iter = tx.query(stmt1).await?;
-                    let mut mutations = vec![];
-                    while let Some(row) = iter.next().await? {
-                        let ident = row.column_by_name::<String>("ident")?;
-                        let region = row.column_by_name::<String>("region")?;
-                        mutations.push(delete(
-                            "fragment_regions",
-                            Key::composite(&[&log_id, &ident, &region]),
-                        ));
-                    }
+        let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        for _ in 0..3 {
+            let res = self
+                .spanner
+                .read_write_transaction(|tx| {
+                    let log_id = log_id.clone();
+                    Box::pin(async move {
+                        // First, query all fragment idents and regions to delete from fragment_regions.
+                        let mut stmt1 = Statement::new(
+                            "SELECT ident, region FROM fragment_regions WHERE log_id = @log_id",
+                        );
+                        stmt1.add_param("log_id", &log_id);
+                        let mut iter = tx.query(stmt1).await?;
+                        let mut mutations = vec![];
+                        while let Some(row) = iter.next().await? {
+                            let ident = row.column_by_name::<String>("ident")?;
+                            let region = row.column_by_name::<String>("region")?;
+                            mutations.push(delete(
+                                "fragment_regions",
+                                Key::composite(&[&log_id, &ident, &region]),
+                            ));
+                        }
 
-                    // Query all fragment idents to delete from fragments.
-                    let mut stmt2 =
-                        Statement::new("SELECT ident FROM fragments WHERE log_id = @log_id");
-                    stmt2.add_param("log_id", &log_id);
-                    let mut iter = tx.query(stmt2).await?;
-                    while let Some(row) = iter.next().await? {
-                        let ident = row.column_by_name::<String>("ident")?;
-                        mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
-                    }
+                        // Query all fragment idents to delete from fragments.
+                        let mut stmt2 =
+                            Statement::new("SELECT ident FROM fragments WHERE log_id = @log_id");
+                        stmt2.add_param("log_id", &log_id);
+                        let mut iter = tx.query(stmt2).await?;
+                        while let Some(row) = iter.next().await? {
+                            let ident = row.column_by_name::<String>("ident")?;
+                            mutations.push(delete("fragments", Key::composite(&[&log_id, &ident])));
+                        }
 
-                    // Query all regions to delete from manifest_regions.
-                    let mut stmt3 = Statement::new(
-                        "SELECT region FROM manifest_regions WHERE log_id = @log_id",
-                    );
-                    stmt3.add_param("log_id", &log_id);
-                    let mut iter = tx.query(stmt3).await?;
-                    while let Some(row) = iter.next().await? {
-                        let region = row.column_by_name::<String>("region")?;
-                        mutations.push(delete(
-                            "manifest_regions",
-                            Key::composite(&[&log_id, &region]),
-                        ));
-                    }
+                        // Query all regions to delete from manifest_regions.
+                        let mut stmt3 = Statement::new(
+                            "SELECT region FROM manifest_regions WHERE log_id = @log_id",
+                        );
+                        stmt3.add_param("log_id", &log_id);
+                        let mut iter = tx.query(stmt3).await?;
+                        while let Some(row) = iter.next().await? {
+                            let region = row.column_by_name::<String>("region")?;
+                            mutations.push(delete(
+                                "manifest_regions",
+                                Key::composite(&[&log_id, &region]),
+                            ));
+                        }
 
-                    // Delete from manifests.
-                    mutations.push(delete("manifests", Key::new(&log_id)));
+                        // Delete from manifests.
+                        mutations.push(delete("manifests", Key::new(&log_id)));
 
-                    tx.buffer_write(mutations);
-                    Ok::<_, google_cloud_spanner::client::Error>(())
+                        tx.buffer_write(mutations);
+                        Ok::<_, google_cloud_spanner::client::Error>(())
+                    })
                 })
-            })
-            .await?;
-        Ok(())
+                .await;
+            match res {
+                Ok(_) => return Ok(()),
+                Err(google_cloud_spanner::client::Error::GRPC(ref status))
+                    if status.code() == Code::Aborted =>
+                {
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(10) {
+                        backoff = Duration::from_secs(10);
+                    }
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(Error::Backoff)
     }
 
     /// Shutdown the manifest manager.  Must be called between prepare and finish of
@@ -1116,51 +1181,71 @@ impl ManifestConsumer<FragmentUuid> for ManifestManager {
         let local_region = self.local_region.clone();
         let new_offset = position.offset() as i64;
         let writer = writer.to_string();
-        let (_, result) = self
-            .spanner
-            .read_write_transaction(|tx| {
-                let log_id = log_id.clone();
-                let local_region = local_region.clone();
-                let writer = writer.clone();
-                Box::pin(async move {
-                    let mut stmt = Statement::new(
-                        "SELECT intrinsic_cursor FROM manifest_regions \
-                         WHERE log_id = @log_id AND region = @region",
-                    );
-                    stmt.add_param("log_id", &log_id);
-                    stmt.add_param("region", &local_region);
-                    let mut reader = tx.query(stmt).await?;
-                    let current = if let Some(row) = reader.next().await? {
-                        row.column_by_name::<i64>("intrinsic_cursor")?
-                    } else {
-                        return Ok::<
+        let exp_backoff = ExponentialBackoff::new(2_000.0, 1_500.0);
+        for _ in 0..3 {
+            let res = self
+                .spanner
+                .read_write_transaction(|tx| {
+                    let log_id = log_id.clone();
+                    let local_region = local_region.clone();
+                    let writer = writer.clone();
+                    Box::pin(async move {
+                        let mut stmt = Statement::new(
+                            "SELECT intrinsic_cursor FROM manifest_regions \
+                             WHERE log_id = @log_id AND region = @region",
+                        );
+                        stmt.add_param("log_id", &log_id);
+                        stmt.add_param("region", &local_region);
+                        let mut reader = tx.query(stmt).await?;
+                        let current = if let Some(row) = reader.next().await? {
+                            row.column_by_name::<i64>("intrinsic_cursor")?
+                        } else {
+                            return Ok::<
+                                Result<Option<CursorWitness>, Error>,
+                                google_cloud_spanner::client::Error,
+                            >(Err(Error::UninitializedLog));
+                        };
+                        if !allow_rollback && current > new_offset {
+                            return Ok::<
+                                Result<Option<CursorWitness>, Error>,
+                                google_cloud_spanner::client::Error,
+                            >(Ok(None));
+                        }
+                        tx.buffer_write(vec![update(
+                            "manifest_regions",
+                            &["log_id", "region", "intrinsic_cursor"],
+                            &[&log_id, &local_region, &new_offset],
+                        )]);
+                        let cursor = Cursor {
+                            position: LogPosition::from_offset(new_offset as u64),
+                            epoch_us,
+                            writer,
+                        };
+                        Ok::<
                             Result<Option<CursorWitness>, Error>,
                             google_cloud_spanner::client::Error,
-                        >(Err(Error::UninitializedLog));
-                    };
-                    if !allow_rollback && current > new_offset {
-                        return Ok::<
-                            Result<Option<CursorWitness>, Error>,
-                            google_cloud_spanner::client::Error,
-                        >(Ok(None));
-                    }
-                    tx.buffer_write(vec![update(
-                        "manifest_regions",
-                        &["log_id", "region", "intrinsic_cursor"],
-                        &[&log_id, &local_region, &new_offset],
-                    )]);
-                    let cursor = Cursor {
-                        position: LogPosition::from_offset(new_offset as u64),
-                        epoch_us,
-                        writer,
-                    };
-                    Ok::<Result<Option<CursorWitness>, Error>, google_cloud_spanner::client::Error>(
-                        Ok(Some(CursorWitness::default_etag_with_cursor(cursor))),
-                    )
+                        >(Ok(Some(
+                            CursorWitness::default_etag_with_cursor(cursor),
+                        )))
+                    })
                 })
-            })
-            .await?;
-        result
+                .await;
+            match res {
+                Ok((_, result)) => return result,
+                Err(google_cloud_spanner::client::Error::GRPC(ref status))
+                    if status.code() == Code::Aborted =>
+                {
+                    let mut backoff = exp_backoff.next();
+                    if backoff > Duration::from_secs(10) {
+                        backoff = Duration::from_secs(10);
+                    }
+                    tokio::time::sleep(backoff).await;
+                    continue;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        }
+        Err(Error::Backoff)
     }
 
     async fn load_intrinsic_cursor(&self) -> Result<Option<LogPosition>, Error> {
