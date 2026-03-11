@@ -71,7 +71,8 @@ use crate::types::{
     CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, UpdateCollectionRequest, UpdateCollectionResponse,
+    GetTenantsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse,
+    UpdateCollectionRequest, UpdateCollectionResponse,
 };
 use chroma_config::{registry::Registry, Configurable};
 use chroma_error::ChromaError;
@@ -358,6 +359,16 @@ impl Backend {
     ) -> Result<FlushCompactionResponse, SysDbError> {
         match self {
             Backend::Spanner(s) => s.flush_collection_compaction(req).await,
+        }
+    }
+
+    /// List collections that need garbage collection.
+    pub async fn list_collections_to_gc(
+        &self,
+        req: ListCollectionsToGcRequest,
+    ) -> Result<ListCollectionsToGcResponse, SysDbError> {
+        match self {
+            Backend::Spanner(s) => s.list_collections_to_gc(req).await,
         }
     }
 

@@ -37,6 +37,7 @@ type CollectionToGc struct {
 	Name            string
 	VersionFilePath string
 	LineageFilePath *string
+	DatabaseName    string
 }
 
 type CreateCollection struct {

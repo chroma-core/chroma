@@ -57,13 +57,14 @@ use crate::types::{
     CreateTenantResponse, FlushCompactionRequest, FlushCompactionResponse,
     GetCollectionWithSegmentsRequest, GetCollectionWithSegmentsResponse, GetCollectionsRequest,
     GetCollectionsResponse, GetDatabaseRequest, GetDatabaseResponse, GetTenantsRequest,
-    GetTenantsResponse, SpannerRow, SpannerRowRef, SpannerRows, SysDbError,
-    UpdateCollectionRequest, UpdateCollectionResponse, UpdateSegmentRequest, UpdateTenantRequest,
+    GetTenantsResponse, ListCollectionsToGcRequest, ListCollectionsToGcResponse, SpannerRow,
+    SpannerRowRef, SpannerRows, SysDbError, UpdateCollectionRequest, UpdateCollectionResponse,
+    UpdateSegmentRequest, UpdateTenantRequest,
 };
 
 use chroma_types::{
-    Collection, Database, InternalCollectionConfiguration, RegionName, Segment, Tenant,
-    TopologyName,
+    chroma_proto, Collection, Database, InternalCollectionConfiguration, RegionName, Segment,
+    Tenant, TopologyName,
 };
 
 #[derive(Error, Debug)]
@@ -1496,6 +1497,125 @@ impl SpannerBackend {
         }
     }
 
+    /// List collections that need garbage collection.
+    ///
+    /// This is the Spanner equivalent of the Go ListCollectionsToGc query.
+    /// Key differences from Go (Postgres):
+    /// - No fork tree grouping (root_collection_id doesn't exist in Spanner)
+    /// - No lineage_file_name column in Spanner
+    /// - version_file_name and num_versions live in collection_compaction_cursors (per-region)
+    /// - Uses last_compaction_time_secs for cutoff time filtering
+    pub async fn list_collections_to_gc(
+        &self,
+        req: ListCollectionsToGcRequest,
+    ) -> Result<ListCollectionsToGcResponse, SysDbError> {
+        let region = self.local_region();
+
+        // TODO(tanujnay112): This is due to the garbage collector being unable
+        // to handle collections with no version files. Until that is fixed, we
+        // must have this filter.
+        let mut where_clauses: Vec<String> = vec![
+            "ccc.version_file_name IS NOT NULL".to_string(),
+            "ccc.version_file_name != ''".to_string(),
+        ];
+
+        if req.tenant_id.is_some() {
+            where_clauses.push("c.tenant_id = @tenant_id".to_string());
+        }
+
+        if req.cutoff_time.is_some() {
+            where_clauses.push(
+                "COALESCE(ccc.last_compaction_time_secs, TIMESTAMP_SECONDS(0)) < TIMESTAMP_SECONDS(@cutoff_time_secs)".to_string(),
+            );
+        }
+
+        if req.min_versions_if_alive.is_some() {
+            where_clauses.push(
+                "(COALESCE(ccc.num_versions, 0) >= @min_versions OR c.is_deleted = TRUE)"
+                    .to_string(),
+            );
+        }
+
+        let where_clause = where_clauses.join(" AND ");
+
+        let limit_clause = if req.limit.is_some() {
+            "LIMIT @limit".to_string()
+        } else {
+            String::new()
+        };
+
+        let query = format!(
+            r#"
+            SELECT
+                c.collection_id,
+                c.name,
+                ccc.version_file_name,
+                c.tenant_id,
+                c.database_name
+            FROM collections c
+            JOIN collection_compaction_cursors ccc
+                ON ccc.collection_id = c.collection_id AND ccc.region = @region
+            WHERE {where_clause}
+            ORDER BY ccc.num_versions DESC
+            {limit_clause}
+            "#,
+        );
+
+        let mut stmt = Statement::new(&query);
+        stmt.add_param("region", &region.to_string());
+
+        if let Some(ref tenant_id) = req.tenant_id {
+            stmt.add_param("tenant_id", tenant_id);
+        }
+
+        if let Some(ref cutoff_time) = req.cutoff_time {
+            stmt.add_param("cutoff_time_secs", &cutoff_time.seconds);
+        }
+
+        if let Some(min_versions) = req.min_versions_if_alive {
+            stmt.add_param("min_versions", &(min_versions as i64));
+        }
+
+        if let Some(limit) = req.limit {
+            stmt.add_param("limit", &(limit as i64));
+        }
+
+        let mut tx = self.client.single().await?;
+        let mut result_set = tx
+            .query(stmt)
+            .instrument(tracing::info_span!("list_collections_to_gc", query = %query))
+            .await?;
+
+        let mut collections = Vec::new();
+        while let Some(row) = result_set.next().await? {
+            let collection_id: String = row
+                .column_by_name("collection_id")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            let name: String = row
+                .column_by_name("name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            let version_file_name: String = row
+                .column_by_name("version_file_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            let tenant_id: String = row
+                .column_by_name("tenant_id")
+                .map_err(SysDbError::FailedToReadColumn)?;
+            let database_name: Option<String> = row
+                .column_by_name("database_name")
+                .map_err(SysDbError::FailedToReadColumn)?;
+
+            collections.push(chroma_proto::CollectionToGcInfo {
+                id: collection_id,
+                name,
+                version_file_path: version_file_name,
+                tenant_id,
+                lineage_file_path: None, // Not available in Spanner schema
+                database_name,
+            });
+        }
+
+        Ok(ListCollectionsToGcResponse { collections })
+    }
     /// Flush collection compaction results to the database.
     /// This mimics the logic in go/pkg/sysdb/coordinator/table_catalog.go::FlushCollectionCompactionForVersionedCollection
     #[instrument(skip(self, req))]
@@ -8691,5 +8811,101 @@ pub mod tests {
         let collection = fetch_collection(&backend, collection_id, &tenant_id, &db_name).await;
         assert_eq!(collection.compaction_failure_count, 0);
         assert_eq!(collection.dimension, Some(256));
+    }
+
+    #[tokio::test]
+    async fn test_k8s_mcmr_integration_list_collections_to_gc() {
+        let Some(backend) = setup_test_backend().await else {
+            panic!("Skipping test: Spanner emulator not reachable. Is Tilt running?");
+        };
+
+        let (tenant_id, db_name) = setup_tenant_and_database(&backend).await;
+
+        // Create a collection
+        let collection_id = CollectionUuid(Uuid::new_v4());
+        let collection_name = format!(
+            "test_gc_collection_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+
+        let create_req = CreateCollectionRequest {
+            id: collection_id,
+            name: collection_name.clone(),
+            dimension: Some(128),
+            index_schema: Schema::default(),
+            segments: create_test_segments(collection_id),
+            metadata: None,
+            get_or_create: false,
+            tenant_id: tenant_id.clone(),
+            database_name: db_name.clone(),
+        };
+
+        let result = backend.create_collection(create_req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to create collection: {:?}",
+            result.err()
+        );
+
+        // Manually insert a compaction cursor to make the collection eligible for GC
+        // (list_collections_to_gc only returns collections with version_file_name set)
+        let version_file_name = format!("test_version_{}.bin", collection_id);
+        let region = backend.local_region().to_string();
+        backend
+            .client
+            .read_write_transaction::<(), SysDbError, _>(|tx| {
+                Box::pin({
+                    let region = region.clone();
+                    let version_file_name = version_file_name.clone();
+                    async move {
+                        let mut stmt = Statement::new(
+                            "UPDATE collection_compaction_cursors SET version_file_name = @version_file_name, last_compaction_time_secs = TIMESTAMP_SECONDS(@last_compaction_time_secs), num_versions = @num_versions WHERE collection_id = @collection_id AND region = @region"
+                        );
+                        stmt.add_param("collection_id", &collection_id.to_string());
+                        stmt.add_param("region", &region);
+                        stmt.add_param("version_file_name", &version_file_name);
+                        stmt.add_param("last_compaction_time_secs", &0i64);
+                        stmt.add_param("num_versions", &1i64);
+
+                        tx.update(stmt).await?;
+                        Ok(())
+                    }
+                })
+            })
+            .await
+            .expect("Failed to insert compaction cursor");
+
+        // Test list_collections_to_gc
+        let req = ListCollectionsToGcRequest {
+            cutoff_time: None,
+            limit: None,
+            tenant_id: Some(tenant_id.clone()),
+            min_versions_if_alive: None,
+        };
+
+        let result = backend.list_collections_to_gc(req).await;
+        assert!(
+            result.is_ok(),
+            "Failed to list collections to GC: {:?}",
+            result.err()
+        );
+
+        let response = result.unwrap();
+        assert_eq!(
+            response.collections.len(),
+            1,
+            "Should return exactly 1 collection"
+        );
+
+        let gc_collection = &response.collections[0];
+        assert_eq!(gc_collection.id, collection_id.to_string());
+        assert_eq!(gc_collection.name, collection_name);
+        assert_eq!(gc_collection.tenant_id, tenant_id);
+        assert_eq!(gc_collection.version_file_path, version_file_name);
+        assert_eq!(gc_collection.database_name, Some(db_name.into_string()));
+        assert_eq!(gc_collection.lineage_file_path, None); // Not set in Spanner schema
     }
 }
