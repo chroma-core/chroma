@@ -80,6 +80,7 @@ pub(crate) struct Scheduler {
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     oneoff_collections: HashMap<CollectionUuid, DatabaseName>,
+    pending_oneoff_ids: Vec<CollectionUuid>,
     disabled_collections: HashSet<CollectionUuid>,
     deleted_collections: HashMap<CollectionUuid, Option<TopologyName>>,
     collections_needing_repair: HashMap<CollectionUuid, (DatabaseName, i64)>,
@@ -119,6 +120,7 @@ impl Scheduler {
             memberlist: None,
             assignment_policy,
             oneoff_collections: HashMap::new(),
+            pending_oneoff_ids: Vec::new(),
             disabled_collections,
             deleted_collections: HashMap::new(),
             collections_needing_repair: HashMap::new(),
@@ -153,6 +155,7 @@ impl Scheduler {
                 Ok(collections) => collections,
                 Err(e) => {
                     tracing::error!("Error fetching one-off collections from sysdb: {:?}", e);
+                    self.pending_oneoff_ids.extend(batch.iter().copied());
                     continue;
                 }
             };
@@ -572,6 +575,12 @@ impl Scheduler {
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
             tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
+        }
+
+        // Retry any one-off collection IDs whose sysdb lookup failed previously.
+        if !self.pending_oneoff_ids.is_empty() {
+            let pending = std::mem::take(&mut self.pending_oneoff_ids);
+            self.add_oneoff_collections(pending).await;
         }
 
         // Recompute disabled list.
@@ -1384,6 +1393,65 @@ mod tests {
             f.scheduler.get_jobs().count(),
             0,
             "collection_1 is in-progress, collection_2 is disabled"
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn sysdb_error_preserves_oneoff_ids_for_retry() {
+        SchedulerFixture::clear_env_vars();
+        let mut f = SchedulerFixture::new();
+
+        // Enable error injection so add_oneoff_collections fails.
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.set_get_collections_error(true);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        f.scheduler
+            .add_oneoff_collections(vec![f.collection_uuid_1])
+            .await;
+
+        // The collection must not have been resolved into oneoff_collections.
+        assert!(
+            f.scheduler.oneoff_collections.is_empty(),
+            "sysdb error should prevent insertion into oneoff_collections"
+        );
+        // The ID must be retained in pending_oneoff_ids for retry.
+        assert_eq!(
+            f.scheduler.pending_oneoff_ids.len(),
+            1,
+            "failed IDs must be preserved in pending_oneoff_ids"
+        );
+        assert_eq!(f.scheduler.pending_oneoff_ids[0], f.collection_uuid_1);
+
+        // Clear the error so the retry in schedule() succeeds.
+        match f.scheduler.sysdb {
+            SysDb::Test(ref mut test_sysdb) => {
+                test_sysdb.set_get_collections_error(false);
+            }
+            _ => panic!("Invalid sysdb type"),
+        }
+
+        f.scheduler.set_memberlist(vec![f.my_member.clone()]);
+        f.scheduler.schedule().await;
+
+        // After schedule(), pending_oneoff_ids should have been drained and
+        // the collection resolved into oneoff_collections (and then scheduled).
+        assert!(
+            f.scheduler.pending_oneoff_ids.is_empty(),
+            "pending_oneoff_ids must be empty after successful retry"
+        );
+
+        // The one-off collection should have been scheduled as a job.
+        let jobs: Vec<&CompactionJob> = f.scheduler.get_jobs().collect();
+        let has_oneoff = jobs.iter().any(|j| j.collection_id == f.collection_uuid_1);
+        assert!(
+            has_oneoff,
+            "one-off collection should appear in the job queue after retry; jobs: {:?}",
+            jobs.iter().map(|j| j.collection_id).collect::<Vec<_>>()
         );
     }
 }

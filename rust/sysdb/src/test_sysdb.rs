@@ -61,6 +61,7 @@ struct Inner {
     #[derivative(Debug = "ignore")]
     storage: Option<chroma_storage::Storage>,
     mock_time: u64,
+    get_collections_error: bool,
 }
 
 impl TestSysDb {
@@ -77,6 +78,7 @@ impl TestSysDb {
                 tasks: HashMap::new(),
                 storage: None,
                 mock_time: 0,
+                get_collections_error: false,
             })),
         }
     }
@@ -84,6 +86,12 @@ impl TestSysDb {
     pub fn set_mock_time(&mut self, mock_time: u64) {
         let mut inner = self.inner.lock();
         inner.mock_time = mock_time;
+    }
+
+    /// When set, `get_collections` will return an error.
+    pub fn set_get_collections_error(&mut self, should_error: bool) {
+        let mut inner = self.inner.lock();
+        inner.get_collections_error = should_error;
     }
 
     pub fn add_collection(&mut self, collection: Collection) {
@@ -187,6 +195,15 @@ impl TestSysDb {
         &mut self,
         options: GetCollectionsOptions,
     ) -> Result<Vec<Collection>, GetCollectionsError> {
+        {
+            let inner = self.inner.lock();
+            if inner.get_collections_error {
+                return Err(GetCollectionsError::Internal(Box::new(
+                    McmrNotSupportedError("injected error".to_string()),
+                )));
+            }
+        }
+
         let GetCollectionsOptions {
             collection_id,
             collection_ids,
