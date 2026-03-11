@@ -768,7 +768,9 @@ mod tests {
         assert!(is_known_runtime_drop_join_error(
             "Cannot drop a runtime in a context where blocking is not allowed"
         ));
-        assert!(!is_known_runtime_drop_join_error("panic: dispatcher task failed"));
+        assert!(!is_known_runtime_drop_join_error(
+            "panic: dispatcher task failed"
+        ));
     }
 
     async fn wait_for_new_version(
