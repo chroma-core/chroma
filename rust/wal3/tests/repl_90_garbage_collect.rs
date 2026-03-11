@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use chroma_storage::{GetOptions, s3_client_for_test_with_new_bucket};
+use chroma_storage::{s3_client_for_test_with_new_bucket, GetOptions};
 use uuid::Uuid;
 
 use wal3::{

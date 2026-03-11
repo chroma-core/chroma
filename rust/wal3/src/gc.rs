@@ -255,7 +255,8 @@ impl Garbage {
                         )))
                     })?;
                 } else {
-                    self.fragments_to_drop_start = std::cmp::min(self.fragments_to_drop_start, seq_no);
+                    self.fragments_to_drop_start =
+                        std::cmp::min(self.fragments_to_drop_start, seq_no);
                     self.fragments_to_drop_limit = std::cmp::max(
                         self.fragments_to_drop_limit,
                         seq_no.successor().ok_or_else(|| {
