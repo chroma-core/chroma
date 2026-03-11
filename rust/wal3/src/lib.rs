@@ -661,6 +661,16 @@ impl FragmentUuid {
     pub fn as_u128_le(&self) -> u128 {
         self.0.to_u128_le()
     }
+
+    /// Returns the successor of this FragmentUuid, or None if this is the maximum.
+    pub fn successor(&self) -> Option<Self> {
+        let val = self.0.as_u128();
+        if val == u128::MAX {
+            None
+        } else {
+            Some(FragmentUuid(Uuid::from_u128(val + 1)))
+        }
+    }
 }
 
 impl std::fmt::Display for FragmentUuid {

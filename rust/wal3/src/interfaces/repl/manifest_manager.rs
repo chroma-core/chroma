@@ -886,6 +886,7 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
         let mut iter = tx.query(stmt1).await?;
         let mut acc = Setsum::default();
         let mut max_log_position = first_to_keep.offset() as i64;
+        let mut max_dropped_uuid: Option<FragmentUuid> = None;
         while let Some(row) = iter.next().await? {
             let cur = row.column_by_name::<String>("setsum")?;
             let cur = Setsum::from_hexdigest(&cur)
@@ -893,6 +894,15 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
             acc += cur;
             let position_limit = row.column_by_name::<i64>("position_limit")?;
             max_log_position = std::cmp::max(max_log_position, position_limit);
+            let ident = row.column_by_name::<String>("ident")?;
+            if let Ok(uuid) = ident.parse::<Uuid>() {
+                let fragment_uuid = FragmentUuid::from_uuid(uuid);
+                max_dropped_uuid = Some(
+                    max_dropped_uuid
+                        .map(|existing| std::cmp::max(existing, fragment_uuid))
+                        .unwrap_or(fragment_uuid),
+                );
+            }
         }
         if max_log_position as u64 > first_to_keep.offset() {
             return Err(Error::GarbageCollection(format!(
@@ -966,7 +976,8 @@ impl ManifestPublisher<FragmentUuid> for ManifestManager {
                 snapshot_for_root: None,
                 fragments_to_drop_start: FragmentSeqNo::ZERO,
                 fragments_to_drop_limit: FragmentSeqNo::ZERO,
-                fragments_to_drop_uuid_limit: min_remaining_uuid,
+                fragments_to_drop_uuid_limit: min_remaining_uuid
+                    .or_else(|| max_dropped_uuid.and_then(|max_dropped| max_dropped.successor())),
                 setsum_to_discard: acc,
                 fragments_are_uuids: true,
                 first_to_keep,

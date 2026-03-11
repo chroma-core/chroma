@@ -31,7 +31,9 @@ pub struct Garbage {
     pub fragments_to_drop_limit: FragmentSeqNo,
     /// Exclusive upper bound of the UUID range to drop.  Any fragment in storage with a UUID
     /// less than this limit will be deleted, including orphaned fragments from clients that
-    /// replicated but could not write to Spanner.  None if no UUID fragments are being dropped.
+    /// replicated but could not write to Spanner.  When all UUID fragments in the manifest are
+    /// collected, this is set to max_dropped_uuid + 1.  None if no UUID fragments are being
+    /// dropped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fragments_to_drop_uuid_limit: Option<FragmentUuid>,
     #[serde(default)]
@@ -154,7 +156,10 @@ impl Garbage {
                 .filter(|frag| frag.limit > first_to_keep)
                 .filter_map(|frag| frag.seq_no.as_uuid())
                 .min();
-            ret.fragments_to_drop_uuid_limit = min_remaining_uuid;
+            ret.fragments_to_drop_uuid_limit = min_remaining_uuid.or_else(|| {
+                ret.fragments_to_drop_uuid_limit
+                    .and_then(|max_dropped| max_dropped.successor())
+            });
         }
         ret.first_to_keep = first_to_keep;
         if !first {
@@ -270,7 +275,7 @@ impl Garbage {
             FragmentIdentifier::Uuid(uuid) => {
                 self.fragments_to_drop_uuid_limit = Some(
                     self.fragments_to_drop_uuid_limit
-                        .map(|existing| std::cmp::min(existing, uuid))
+                        .map(|existing| std::cmp::max(existing, uuid))
                         .unwrap_or(uuid),
                 );
             }
@@ -740,7 +745,7 @@ mod tests {
         garbage
             .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
             .unwrap();
-        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid1));
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2));
         println!(
             "drop_fragment_tracks_uuid_range: limit={:?}",
             garbage.fragments_to_drop_uuid_limit
@@ -785,6 +790,57 @@ mod tests {
             "drop_fragment_tracks_uuid_range_independent_of_order: limit={:?}",
             garbage.fragments_to_drop_uuid_limit
         );
-        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid1));
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2));
+    }
+
+    #[test]
+    fn all_uuid_fragments_dropped_yields_successor_limit() {
+        let uuid1 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea101").unwrap(),
+        );
+        let uuid2 = FragmentUuid::from_uuid(
+            Uuid::parse_str("018f0f72-7a4f-7b2e-b836-a49e4f8ea102").unwrap(),
+        );
+        let uuid2_successor = uuid2.successor().expect("uuid2 should have a successor");
+        let mut garbage = Garbage::empty();
+        garbage.fragments_are_uuids = true;
+        let mut first = true;
+        let mut first_to_keep = LogPosition::from_offset(1);
+        let fragment1 = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea101.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid1),
+            start: LogPosition::from_offset(1),
+            limit: LogPosition::from_offset(2),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        let fragment2 = Fragment {
+            path: "log/Uuid=018f0f72-7a4f-7b2e-b836-a49e4f8ea102.parquet".to_string(),
+            seq_no: FragmentIdentifier::Uuid(uuid2),
+            start: LogPosition::from_offset(2),
+            limit: LogPosition::from_offset(3),
+            num_bytes: 1,
+            setsum: Setsum::default(),
+        };
+        garbage
+            .drop_fragment(&fragment1, &mut first, &mut first_to_keep)
+            .unwrap();
+        garbage
+            .drop_fragment(&fragment2, &mut first, &mut first_to_keep)
+            .unwrap();
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2));
+        // Simulate what Garbage::new does when no remaining UUID fragments exist:
+        // min_remaining_uuid is None, so the fallback uses max_dropped.successor().
+        let min_remaining_uuid: Option<FragmentUuid> = None;
+        garbage.fragments_to_drop_uuid_limit = min_remaining_uuid.or_else(|| {
+            garbage
+                .fragments_to_drop_uuid_limit
+                .and_then(|max_dropped| max_dropped.successor())
+        });
+        assert_eq!(garbage.fragments_to_drop_uuid_limit, Some(uuid2_successor));
+        println!(
+            "all_uuid_fragments_dropped_yields_successor_limit: limit={:?}",
+            garbage.fragments_to_drop_uuid_limit
+        );
     }
 }
