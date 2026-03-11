@@ -1548,7 +1548,8 @@ impl LogServer {
             .record((s3_count + repl_count) as u64, &[]);
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self), name = "roll_dirty_log_s3")]
+    #[allow(clippy::type_complexity)]
     async fn roll_dirty_log_s3(
         &self,
     ) -> Result<
@@ -1577,7 +1578,8 @@ impl LogServer {
         self.save_dirty_log(rollup, &**dirty_log).await
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self), name = "roll_dirty_log_repl")]
+    #[allow(clippy::type_complexity)]
     async fn roll_dirty_log_repl(
         &self,
         topology: &Topology<TopologicalStorage>,
