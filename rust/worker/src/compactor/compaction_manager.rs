@@ -4,7 +4,7 @@ use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::{
     GetCollectionAssignmentMessage, GetCollectionAssignmentResponse, InProgressJobEntry,
-    ListDeadJobsMessage, ListInProgressJobsMessage, ScheduledCompactMessage,
+    ListInProgressJobsMessage, ScheduledCompactMessage,
 };
 use crate::config::CompactionServiceConfig;
 use crate::execution::operators::fragment_fetch::FragmentFetcher;
@@ -866,24 +866,6 @@ impl Handler<RegisterOnReadySignal> for CompactionManager {
             }
         } else {
             self.on_next_memberlist_signal = Some(message.on_ready_tx);
-        }
-    }
-}
-
-#[async_trait]
-impl Handler<ListDeadJobsMessage> for CompactionManager {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        message: ListDeadJobsMessage,
-        _ctx: &ComponentContext<CompactionManager>,
-    ) {
-        // Dead jobs are now tracked in sysdb via compaction_failure_count, not in memory
-        // Return empty list as this endpoint is deprecated
-        // TODO(tanujnay112): remove this endpoint
-        if let Err(e) = message.response_tx.send(Vec::new()) {
-            tracing::warn!("Failed to send dead jobs response: {:?}", e);
         }
     }
 }

@@ -3,9 +3,9 @@ use chroma_jemalloc_pprof_server::spawn_pprof_server;
 use chroma_system::ComponentHandle;
 use chroma_types::chroma_proto::{
     compactor_server::{Compactor, CompactorServer},
-    CollectionIds, CompactRequest, CompactResponse, GetCollectionAssignmentRequest,
-    GetCollectionAssignmentResponse, InProgressJobInfo, ListDeadJobsRequest, ListDeadJobsResponse,
-    ListInProgressJobsRequest, ListInProgressJobsResponse, RebuildRequest, RebuildResponse,
+    CompactRequest, CompactResponse, GetCollectionAssignmentRequest,
+    GetCollectionAssignmentResponse, InProgressJobInfo, ListInProgressJobsRequest,
+    ListInProgressJobsResponse, RebuildRequest, RebuildResponse,
 };
 use std::str::FromStr;
 use tokio::{
@@ -16,8 +16,8 @@ use tonic::{transport::Server, Request, Response, Status};
 use tracing::trace_span;
 
 use crate::compactor::{
-    GetCollectionAssignmentMessage, ListDeadJobsMessage, ListInProgressJobsMessage,
-    OneOffCompactMessage, RegisterOnReadySignal,
+    GetCollectionAssignmentMessage, ListInProgressJobsMessage, OneOffCompactMessage,
+    RegisterOnReadySignal,
 };
 
 use super::{CompactionManager, RebuildMessage};
@@ -121,29 +121,6 @@ impl Compactor for CompactionServer {
             .map_err(|e| Status::internal(e.to_string()))?;
 
         Ok(Response::new(RebuildResponse {}))
-    }
-
-    async fn list_dead_jobs(
-        &self,
-        _request: Request<ListDeadJobsRequest>,
-    ) -> Result<Response<ListDeadJobsResponse>, Status> {
-        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
-
-        self.manager
-            .receiver()
-            .send(ListDeadJobsMessage { response_tx }, None)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
-
-        let dead_jobs = response_rx
-            .await
-            .map_err(|e| Status::internal(format!("Failed to receive response: {}", e)))?;
-
-        Ok(Response::new(ListDeadJobsResponse {
-            ids: Some(CollectionIds {
-                ids: dead_jobs.iter().map(ToString::to_string).collect(),
-            }),
-        }))
     }
 
     async fn list_in_progress_jobs(
