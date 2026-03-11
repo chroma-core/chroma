@@ -27,15 +27,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use biometrics::Sensor;
+use biometrics::{Collector, Counter};
 use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaCollection;
 use chroma::ChromaHttpClient;
-use biometrics::{Collector, Counter};
-use utf8path::Path;
 use clap::Parser;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
+use utf8path::Path;
 
 /// Default embedding dimension for the GMM.
 const EMBEDDING_DIM: usize = 1536;
@@ -190,22 +191,26 @@ fn collection_name() -> String {
 
 /// Maximum number of retry attempts for collection creation.
 const MAX_COLLECTION_RETRIES: u32 = 3;
-static LOAD_POINTED_UPSERT_ATTEMPTS: Counter = Counter::new("load_generator.pointed.upsert_attempts");
-static LOAD_POINTED_UPSERT_SUCCESS: Counter = Counter::new("load_generator.pointed.upsert_successes");
-static LOAD_POINTED_UPSERT_FAILURES: Counter = Counter::new("load_generator.pointed.upsert_failures");
+static LOAD_POINTED_UPSERT_ATTEMPTS: Counter =
+    Counter::new("load_generator.pointed.upsert_attempts");
+static LOAD_POINTED_UPSERT_SUCCESS: Counter =
+    Counter::new("load_generator.pointed.upsert_successes");
+static LOAD_POINTED_UPSERT_FAILURES: Counter =
+    Counter::new("load_generator.pointed.upsert_failures");
 
 static LOAD_POINTED_UPSERT_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
     sig_fig_histogram::LockFreeHistogram::new(2);
-static LOAD_POINTED_UPSERT_LATENCY_SENSOR: biometrics::Histogram =
-    biometrics::Histogram::new("load_generator.pointed.upsert_latency_ms", &LOAD_POINTED_UPSERT_LATENCY);
+static LOAD_POINTED_UPSERT_LATENCY_SENSOR: biometrics::Histogram = biometrics::Histogram::new(
+    "load_generator.pointed.upsert_latency_ms",
+    &LOAD_POINTED_UPSERT_LATENCY,
+);
 
 static LOAD_POINTED_SUCCESS_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
     sig_fig_histogram::LockFreeHistogram::new(2);
-static LOAD_POINTED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram =
-    biometrics::Histogram::new(
-        "load_generator.pointed.upsert_success_latency_ms",
-        &LOAD_POINTED_SUCCESS_LATENCY,
-    );
+static LOAD_POINTED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram = biometrics::Histogram::new(
+    "load_generator.pointed.upsert_success_latency_ms",
+    &LOAD_POINTED_SUCCESS_LATENCY,
+);
 
 fn spawn_metrics_emitter() -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
     let collector = Collector::new();

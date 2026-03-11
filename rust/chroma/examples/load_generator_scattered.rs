@@ -28,17 +28,19 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
+use biometrics::Sensor;
+
+use biometrics::{Collector, Counter};
 use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaCollection;
 use chroma::ChromaHttpClient;
-use biometrics::{Collector, Counter};
-use utf8path::Path as Utf8Path;
 use clap::Parser;
 use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
+use utf8path::Path as Utf8Path;
 
 /// Default embedding dimension for the GMM.
 const EMBEDDING_DIM: usize = 1536;
@@ -292,7 +294,8 @@ async fn create_collections_with_progress(
 
         while let Some(()) = progress_rx.recv().await {
             completed += 1;
-            if completed % WARMUP_PROGRESS_INTERVAL == 0 || completed == total_collections {
+            if completed.is_multiple_of(WARMUP_PROGRESS_INTERVAL) || completed == total_collections
+            {
                 let pct = if total_collections == 0 {
                     100.0
                 } else {
@@ -361,25 +364,26 @@ async fn save_collections_to_cache(
 
 /// Maximum number of retry attempts for collection creation.
 const MAX_COLLECTION_RETRIES: u32 = 3;
-static LOAD_SCATTERED_UPSERT_ATTEMPTS: Counter = Counter::new("load_generator.scattered.upsert_attempts");
-static LOAD_SCATTERED_UPSERT_SUCCESS: Counter = Counter::new("load_generator.scattered.upsert_successes");
-static LOAD_SCATTERED_UPSERT_FAILURES: Counter = Counter::new("load_generator.scattered.upsert_failures");
+static LOAD_SCATTERED_UPSERT_ATTEMPTS: Counter =
+    Counter::new("load_generator.scattered.upsert_attempts");
+static LOAD_SCATTERED_UPSERT_SUCCESS: Counter =
+    Counter::new("load_generator.scattered.upsert_successes");
+static LOAD_SCATTERED_UPSERT_FAILURES: Counter =
+    Counter::new("load_generator.scattered.upsert_failures");
 
 static LOAD_SCATTERED_UPSERT_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
     sig_fig_histogram::LockFreeHistogram::new(2);
-static LOAD_SCATTERED_UPSERT_LATENCY_SENSOR: biometrics::Histogram =
-    biometrics::Histogram::new(
-        "load_generator.scattered.upsert_latency_ms",
-        &LOAD_SCATTERED_UPSERT_LATENCY,
-    );
+static LOAD_SCATTERED_UPSERT_LATENCY_SENSOR: biometrics::Histogram = biometrics::Histogram::new(
+    "load_generator.scattered.upsert_latency_ms",
+    &LOAD_SCATTERED_UPSERT_LATENCY,
+);
 
 static LOAD_SCATTERED_SUCCESS_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
     sig_fig_histogram::LockFreeHistogram::new(2);
-static LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram =
-    biometrics::Histogram::new(
-        "load_generator.scattered.upsert_success_latency_ms",
-        &LOAD_SCATTERED_SUCCESS_LATENCY,
-    );
+static LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram = biometrics::Histogram::new(
+    "load_generator.scattered.upsert_success_latency_ms",
+    &LOAD_SCATTERED_SUCCESS_LATENCY,
+);
 
 fn spawn_metrics_emitter() -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
     let collector = Collector::new();
