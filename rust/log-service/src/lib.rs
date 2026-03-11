@@ -1548,6 +1548,7 @@ impl LogServer {
             .record((s3_count + repl_count) as u64, &[]);
     }
 
+    #[tracing::instrument]
     async fn roll_dirty_log_s3(
         &self,
     ) -> Result<
@@ -1576,6 +1577,7 @@ impl LogServer {
         self.save_dirty_log(rollup, &**dirty_log).await
     }
 
+    #[tracing::instrument]
     async fn roll_dirty_log_repl(
         &self,
         topology: &Topology<TopologicalStorage>,
@@ -1587,10 +1589,12 @@ impl LogServer {
         ),
         Error,
     > {
+        let get_dirty_logs_span = tracing::info_span!("get_dirty_logs");
         let dirty_logs = ReplManifestManager::get_dirty_logs(
             &topology.config.spanner,
             self.storages.preferred.as_str(),
         )
+        .instrument(get_dirty_logs_span.clone())
         .await?;
         if dirty_logs.is_empty() {
             return Ok((
@@ -1620,6 +1624,8 @@ impl LogServer {
                 backpressure.push(*collection_id);
             }
         }
+        get_dirty_logs_span.record("backpressure", backpressure.len());
+        get_dirty_logs_span.record("rollups", rollups.len());
         Ok((Some(topology.name.clone()), backpressure, rollups))
     }
 
