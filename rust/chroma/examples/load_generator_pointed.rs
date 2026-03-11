@@ -25,15 +25,17 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaCollection;
 use chroma::ChromaHttpClient;
+use biometrics::{Collector, Counter};
+use utf8path::Path;
 use clap::Parser;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 
 /// Default embedding dimension for the GMM.
 const EMBEDDING_DIM: usize = 1536;
@@ -188,6 +190,67 @@ fn collection_name() -> String {
 
 /// Maximum number of retry attempts for collection creation.
 const MAX_COLLECTION_RETRIES: u32 = 3;
+static LOAD_POINTED_UPSERT_ATTEMPTS: Counter = Counter::new("load_generator.pointed.upsert_attempts");
+static LOAD_POINTED_UPSERT_SUCCESS: Counter = Counter::new("load_generator.pointed.upsert_successes");
+static LOAD_POINTED_UPSERT_FAILURES: Counter = Counter::new("load_generator.pointed.upsert_failures");
+
+static LOAD_POINTED_UPSERT_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static LOAD_POINTED_UPSERT_LATENCY_SENSOR: biometrics::Histogram =
+    biometrics::Histogram::new("load_generator.pointed.upsert_latency_ms", &LOAD_POINTED_UPSERT_LATENCY);
+
+static LOAD_POINTED_SUCCESS_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static LOAD_POINTED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram =
+    biometrics::Histogram::new(
+        "load_generator.pointed.upsert_success_latency_ms",
+        &LOAD_POINTED_SUCCESS_LATENCY,
+    );
+
+fn spawn_metrics_emitter() -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
+    let collector = Collector::new();
+    collector.register_counter(&LOAD_POINTED_UPSERT_ATTEMPTS);
+    collector.register_counter(&LOAD_POINTED_UPSERT_SUCCESS);
+    collector.register_counter(&LOAD_POINTED_UPSERT_FAILURES);
+    collector.register_histogram(&LOAD_POINTED_UPSERT_LATENCY_SENSOR);
+    collector.register_histogram(&LOAD_POINTED_SUCCESS_LATENCY_SENSOR);
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+
+    let handle = tokio::spawn(async move {
+        let mut emitter = biometrics_prometheus::Emitter::new(biometrics_prometheus::Options {
+            segment_size: 64 * 1024 * 1024 * 1024,
+            flush_interval: Duration::from_secs(3600),
+            prefix: Path::new("load_generator_pointed."),
+        });
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("system clock moved backward")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp exceeds supported range");
+                    let _ = collector.emit(&mut emitter, now);
+                }
+                _ = &mut stop_rx => {
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("system clock moved backward")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp exceeds supported range");
+                    let _ = collector.emit(&mut emitter, now);
+                    break;
+                }
+            }
+        }
+    });
+
+    (handle, stop_tx)
+}
 
 /// Creates or gets a collection with retry logic.
 async fn get_or_create_collection_with_retry(
@@ -263,11 +326,18 @@ async fn run_worker(
             .collect();
 
         // Perform upsert
+        let op_start = Instant::now();
+        LOAD_POINTED_UPSERT_ATTEMPTS.click();
         match collection.upsert(ids, embeddings, None, None, None).await {
             Ok(_) => {
+                let latency_ms = op_start.elapsed().as_secs_f64() * 1000.;
+                LOAD_POINTED_UPSERT_SUCCESS.click();
+                LOAD_POINTED_UPSERT_LATENCY_SENSOR.observe(latency_ms);
+                LOAD_POINTED_SUCCESS_LATENCY_SENSOR.observe(latency_ms);
                 ctx.stats.record_upsert(ctx.batch_size as u64);
             }
             Err(e) => {
+                LOAD_POINTED_UPSERT_FAILURES.click();
                 eprintln!("[{}] Upsert error: {}", id_prefix, e);
             }
         }
@@ -300,8 +370,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Creating/getting collection on both endpoints...",);
 
     // Load the collections for both endpoints.
-    let collection_us = get_or_create_collection_with_retry(&client_us, collection_name()).await?;
-    let collection_eu = get_or_create_collection_with_retry(&client_eu, collection_name()).await?;
+    println!("  Warmup progress: 0/2 collections");
+    let warmup_completed = Arc::new(AtomicU64::new(0));
+
+    let us_progress = Arc::clone(&warmup_completed);
+    let us_future = async move {
+        let result = get_or_create_collection_with_retry(&client_us, collection_name()).await;
+        let completed = us_progress.fetch_add(1, Ordering::SeqCst) + 1;
+        println!(
+            "  Warmup progress: {}/2 collections (US endpoint)",
+            completed
+        );
+        result
+    };
+
+    let eu_progress = Arc::clone(&warmup_completed);
+    let eu_future = async move {
+        let result = get_or_create_collection_with_retry(&client_eu, collection_name()).await;
+        let completed = eu_progress.fetch_add(1, Ordering::SeqCst) + 1;
+        println!(
+            "  Warmup progress: {}/2 collections (EU endpoint)",
+            completed
+        );
+        result
+    };
+
+    let (collection_us, collection_eu) = tokio::join!(us_future, eu_future);
+    let collection_us = collection_us?;
+    let collection_eu = collection_eu?;
     println!("Collections ready. Starting load generation...\n");
 
     // Create per-collection semaphores to limit outstanding operations
@@ -324,6 +420,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
+    let (metrics_handle, stop_metrics) = spawn_metrics_emitter();
 
     let pacing_handle = tokio::spawn(async move {
         let mut interval = tokio::time::interval(ticket_interval);
@@ -437,6 +534,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for handle in handles {
         let _ = handle.await;
     }
+    let _ = stop_metrics.send(());
+    let _ = metrics_handle.await;
     report_handle.abort();
     pacing_handle.abort();
 
@@ -476,6 +575,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Average rate: {:.1} upserts/s, {:.1} records/s",
         (us_upserts + eu_upserts) as f64 / elapsed_secs,
         (us_records + eu_records) as f64 / elapsed_secs
+    );
+    println!(
+        "  Upsert attempts/success/failures: {}/{}/{}",
+        LOAD_POINTED_UPSERT_ATTEMPTS.read(),
+        LOAD_POINTED_UPSERT_SUCCESS.read(),
+        LOAD_POINTED_UPSERT_FAILURES.read(),
     );
 
     Ok(())

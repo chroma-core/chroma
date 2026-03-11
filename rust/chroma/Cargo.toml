@@ -34,6 +34,10 @@ ollama = []
 clap.workspace = true
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
+biometrics = { path = "../../../blue/biometrics" }
+biometrics_prometheus = { path = "../../../blue/biometrics_prometheus" }
+sig_fig_histogram = { path = "../../../blue/sig_fig_histogram" }
+utf8path = { path = "../../../blue/utf8path" }
 rand.workspace = true
 test-log = { version = "0.2.18", features = ["trace"] }
 tokio.workspace = true

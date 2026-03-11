@@ -26,23 +26,28 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use chroma::client::ChromaHttpClientOptions;
 use chroma::ChromaCollection;
 use chroma::ChromaHttpClient;
+use biometrics::{Collector, Counter};
+use utf8path::Path as Utf8Path;
 use clap::Parser;
 use futures_util::future::join_all;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
-use tokio::sync::{mpsc, Mutex, Semaphore};
+use tokio::sync::{mpsc, oneshot, Mutex, Semaphore};
 
 /// Default embedding dimension for the GMM.
 const EMBEDDING_DIM: usize = 1536;
 
 /// Number of clusters in the Gaussian Mixture Model.
 const NUM_CLUSTERS: usize = 1000;
+
+/// Print warmup progress every N completed collections.
+const WARMUP_PROGRESS_INTERVAL: usize = 10;
 
 /// Gaussian Mixture Model for generating realistic embeddings.
 ///
@@ -271,6 +276,60 @@ async fn load_collections_from_cache(
     Some((us_collections, eu_collections))
 }
 
+/// Creates collections on a client concurrently and logs warmup progress as they complete.
+async fn create_collections_with_progress(
+    client: &ChromaHttpClient,
+    collection_names: Vec<String>,
+    max_outstanding_ops: usize,
+    label: &'static str,
+) -> Result<Vec<ChromaCollection>, chroma::client::ChromaHttpClientError> {
+    let total_collections = collection_names.len();
+    let limiter = Arc::new(Semaphore::new(max_outstanding_ops));
+    let (progress_tx, mut progress_rx) = mpsc::channel::<()>(max_outstanding_ops.max(1));
+
+    let progress_handle = tokio::spawn(async move {
+        let mut completed = 0usize;
+
+        while let Some(()) = progress_rx.recv().await {
+            completed += 1;
+            if completed % WARMUP_PROGRESS_INTERVAL == 0 || completed == total_collections {
+                let pct = if total_collections == 0 {
+                    100.0
+                } else {
+                    (completed as f64 / total_collections as f64) * 100.0
+                };
+                println!(
+                    "{} warmup progress: {}/{} collections ({:.0}%)",
+                    label, completed, total_collections, pct
+                );
+            }
+        }
+    });
+
+    let mut futures = Vec::with_capacity(total_collections);
+    for name in collection_names {
+        let client = client.clone();
+        let limiter = Arc::clone(&limiter);
+        let tx = progress_tx.clone();
+        futures.push(async move {
+            let _permit = limiter.acquire().await.unwrap();
+            let result = get_or_create_collection_with_retry(&client, name).await;
+            let _ = tx.send(()).await;
+            result
+        });
+    }
+    drop(progress_tx);
+
+    let results: Vec<Result<ChromaCollection, chroma::client::ChromaHttpClientError>> =
+        join_all(futures).await;
+    let collections = results.into_iter().collect();
+    progress_handle
+        .await
+        .expect("warmup progress reporter should not panic");
+
+    collections
+}
+
 /// Saves collections to the cache file.
 async fn save_collections_to_cache(
     us_collections: &[ChromaCollection],
@@ -302,6 +361,70 @@ async fn save_collections_to_cache(
 
 /// Maximum number of retry attempts for collection creation.
 const MAX_COLLECTION_RETRIES: u32 = 3;
+static LOAD_SCATTERED_UPSERT_ATTEMPTS: Counter = Counter::new("load_generator.scattered.upsert_attempts");
+static LOAD_SCATTERED_UPSERT_SUCCESS: Counter = Counter::new("load_generator.scattered.upsert_successes");
+static LOAD_SCATTERED_UPSERT_FAILURES: Counter = Counter::new("load_generator.scattered.upsert_failures");
+
+static LOAD_SCATTERED_UPSERT_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static LOAD_SCATTERED_UPSERT_LATENCY_SENSOR: biometrics::Histogram =
+    biometrics::Histogram::new(
+        "load_generator.scattered.upsert_latency_ms",
+        &LOAD_SCATTERED_UPSERT_LATENCY,
+    );
+
+static LOAD_SCATTERED_SUCCESS_LATENCY: sig_fig_histogram::LockFreeHistogram<450> =
+    sig_fig_histogram::LockFreeHistogram::new(2);
+static LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR: biometrics::Histogram =
+    biometrics::Histogram::new(
+        "load_generator.scattered.upsert_success_latency_ms",
+        &LOAD_SCATTERED_SUCCESS_LATENCY,
+    );
+
+fn spawn_metrics_emitter() -> (tokio::task::JoinHandle<()>, oneshot::Sender<()>) {
+    let collector = Collector::new();
+    collector.register_counter(&LOAD_SCATTERED_UPSERT_ATTEMPTS);
+    collector.register_counter(&LOAD_SCATTERED_UPSERT_SUCCESS);
+    collector.register_counter(&LOAD_SCATTERED_UPSERT_FAILURES);
+    collector.register_histogram(&LOAD_SCATTERED_UPSERT_LATENCY_SENSOR);
+    collector.register_histogram(&LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR);
+    let (stop_tx, mut stop_rx) = oneshot::channel::<()>();
+
+    let handle = tokio::spawn(async move {
+        let mut emitter = biometrics_prometheus::Emitter::new(biometrics_prometheus::Options {
+            segment_size: 64 * 1024 * 1024 * 1024,
+            flush_interval: Duration::from_secs(3600),
+            prefix: Utf8Path::new("load_generator_scattered."),
+        });
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        interval.tick().await;
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("system clock moved backward")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp exceeds supported range");
+                    let _ = collector.emit(&mut emitter, now);
+                }
+                _ = &mut stop_rx => {
+                    let now = SystemTime::now()
+                        .duration_since(SystemTime::UNIX_EPOCH)
+                        .expect("system clock moved backward")
+                        .as_millis()
+                        .try_into()
+                        .expect("timestamp exceeds supported range");
+                    let _ = collector.emit(&mut emitter, now);
+                    break;
+                }
+            }
+        }
+    });
+
+    (handle, stop_tx)
+}
 
 /// Creates or gets a collection with retry logic.
 async fn get_or_create_collection_with_retry(
@@ -377,11 +500,18 @@ async fn run_worker(
             .collect();
 
         // Perform upsert
+        let op_start = Instant::now();
+        LOAD_SCATTERED_UPSERT_ATTEMPTS.click();
         match collection.upsert(ids, embeddings, None, None, None).await {
             Ok(_) => {
+                let latency_ms = op_start.elapsed().as_secs_f64() * 1000.;
+                LOAD_SCATTERED_UPSERT_SUCCESS.click();
+                LOAD_SCATTERED_UPSERT_LATENCY_SENSOR.observe(latency_ms);
+                LOAD_SCATTERED_SUCCESS_LATENCY_SENSOR.observe(latency_ms);
                 ctx.stats.record_upsert(ctx.batch_size as u64);
             }
             Err(e) => {
+                LOAD_SCATTERED_UPSERT_FAILURES.click();
                 eprintln!("[{}] Upsert error: {}", id_prefix, e);
             }
         }
@@ -429,40 +559,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         // Create or get collections on both endpoints concurrently with retry logic
         let collection_names: Vec<String> = (0..args.collections).map(collection_name).collect();
-        let semaphores_warmup: Arc<Semaphore> = Arc::new(Semaphore::new(args.max_outstanding_ops));
-
-        let us_futures: Vec<_> = collection_names
-            .iter()
-            .map(|name| {
-                let name = name.clone();
-                let semaphores_warmup = Arc::clone(&semaphores_warmup);
-                let client_us = client_us.clone();
-                async move {
-                    let _permit = semaphores_warmup.acquire().await.unwrap();
-                    get_or_create_collection_with_retry(&client_us, name).await
-                }
-            })
-            .collect();
-        let eu_futures: Vec<_> = collection_names
-            .iter()
-            .map(|name| {
-                let name = name.clone();
-                let semaphores_warmup = Arc::clone(&semaphores_warmup);
-                let client_eu = client_eu.clone();
-                async move {
-                    let _permit = semaphores_warmup.acquire().await.unwrap();
-                    get_or_create_collection_with_retry(&client_eu, name).await
-                }
-            })
-            .collect();
-
-        let us_results = join_all(us_futures).await;
-        let eu_results = join_all(eu_futures).await;
-
-        let collections_us: Vec<ChromaCollection> =
-            us_results.into_iter().collect::<Result<_, _>>()?;
-        let collections_eu: Vec<ChromaCollection> =
-            eu_results.into_iter().collect::<Result<_, _>>()?;
+        let (collections_us, collections_eu) = tokio::join!(
+            create_collections_with_progress(
+                &client_us,
+                collection_names.clone(),
+                args.max_outstanding_ops,
+                "US",
+            ),
+            create_collections_with_progress(
+                &client_eu,
+                collection_names,
+                args.max_outstanding_ops,
+                "EU",
+            )
+        );
+        let collections_us = collections_us?;
+        let collections_eu = collections_eu?;
 
         println!(
             "  Created {} US collections and {} EU collections",
@@ -502,6 +614,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (ticket_tx, ticket_rx) = mpsc::channel::<()>(1024);
     let pacing_rx = Arc::new(Mutex::new(ticket_rx));
+    let (metrics_handle, stop_metrics) = spawn_metrics_emitter();
 
     let pacing_handle = {
         tokio::spawn(async move {
@@ -617,6 +730,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for handle in handles {
         let _ = handle.await;
     }
+    let _ = stop_metrics.send(());
+    let _ = metrics_handle.await;
     report_handle.abort();
     pacing_handle.abort();
 
@@ -656,6 +771,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  Average rate: {:.1} upserts/s, {:.1} records/s",
         (us_upserts + eu_upserts) as f64 / elapsed_secs,
         (us_records + eu_records) as f64 / elapsed_secs
+    );
+    println!(
+        "  Upsert attempts/success/failures: {}/{}/{}",
+        LOAD_SCATTERED_UPSERT_ATTEMPTS.read(),
+        LOAD_SCATTERED_UPSERT_SUCCESS.read(),
+        LOAD_SCATTERED_UPSERT_FAILURES.read(),
     );
 
     Ok(())
