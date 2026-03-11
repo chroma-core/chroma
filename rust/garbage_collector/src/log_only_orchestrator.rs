@@ -10,7 +10,7 @@ use chroma_system::{
     wrap, ComponentContext, ComponentHandle, Dispatcher, Handler, Orchestrator,
     OrchestratorContext, TaskResult,
 };
-use chroma_types::CollectionUuid;
+use chroma_types::{CollectionUuid, DatabaseName};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::oneshot::Sender;
 use tracing::{Level, Span};
@@ -22,6 +22,7 @@ pub struct HardDeleteLogOnlyGarbageCollectorOrchestrator {
     logs: Log,
     result_channel: Option<Sender<Result<GarbageCollectorResponse, GarbageCollectorError>>>,
     collection_to_destroy: CollectionUuid,
+    database_name: Option<DatabaseName>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -31,6 +32,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
         storage: Storage,
         logs: Log,
         collection_to_destroy: CollectionUuid,
+        database_name: Option<DatabaseName>,
     ) -> Self {
         Self {
             context: OrchestratorContext::new(dispatcher),
@@ -38,6 +40,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
             logs,
             result_channel: None,
             collection_to_destroy,
+            database_name,
         }
     }
 }
@@ -100,6 +103,7 @@ impl HardDeleteLogOnlyGarbageCollectorOrchestrator {
             DeleteUnusedLogsInput {
                 collections_to_destroy,
                 collections_to_garbage_collect,
+                database_name: self.database_name.clone(),
             },
             ctx.receiver(),
             self.context.task_cancellation_token.clone(),
@@ -199,6 +203,7 @@ mod tests {
             storage.clone(),
             logs.clone(),
             collection_to_destroy,
+            None,
         );
 
         // Verify the orchestrator is properly initialized
@@ -241,6 +246,7 @@ mod tests {
             storage.clone(),
             logs.clone(),
             collection_to_destroy,
+            None,
         );
 
         // Verify the orchestrator stores correct collection UUID for destruction
