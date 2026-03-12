@@ -184,12 +184,10 @@ impl<'me> SparseReader<'me> {
             };
 
             let mut block_iterator = self.get_block_maxes(encoded_dimension_id).await?;
-            let Some((block_next_offset, block_max)) = block_iterator
+            let (block_next_offset, block_max) = block_iterator
                 .by_ref()
                 .find(|&(block_next_offset, _)| offset < block_next_offset)
-            else {
-                continue;
-            };
+                .unwrap_or((offset + 1, *dimension_max));
             let body = CursorBody {
                 block_iterator,
                 block_next_offset,
@@ -299,16 +297,16 @@ impl<'me> SparseReader<'me> {
                 head.offset = offset;
 
                 if body.block_next_offset <= offset {
-                    let Some((block_next_offset, block_max)) = body
+                    let (block_next_offset, block_upper_bound) = body
                         .block_iterator
                         .by_ref()
                         .find(|&(block_next_offset, _)| offset < block_next_offset)
-                    else {
-                        heads.remove(head_index);
-                        continue;
-                    };
+                        .map(|(block_next_offset, block_max)| {
+                            (block_next_offset, body.query * block_max)
+                        })
+                        .unwrap_or((offset + 1, body.dimension_upper_bound));
                     body.block_next_offset = block_next_offset;
-                    body.block_upper_bound = body.query * block_max;
+                    body.block_upper_bound = block_upper_bound;
                 }
                 body.value = value;
 
