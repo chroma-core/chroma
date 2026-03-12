@@ -96,23 +96,6 @@ impl<'me> SparseWriter<'me> {
     }
 
     pub async fn commit(self) -> Result<SparseFlusher, SparseWriterError> {
-        // Sort dimension by encoding so that we process them in order
-        let mut encoded_dimensions = self
-            .delta
-            .iter()
-            .map(|entry| {
-                let dimension_id = *entry.key();
-                (encode_u32(dimension_id), dimension_id)
-            })
-            .collect::<Vec<_>>();
-        encoded_dimensions.push((DIMENSION_PREFIX.to_string(), u32::MAX));
-        encoded_dimensions.sort_unstable();
-        tracing::trace!(
-            num_dimensions = encoded_dimensions.len(),
-            "Collected and sorted delta dimensions"
-        );
-
-        let mut block_maxes = HashMap::with_capacity(encoded_dimensions.len());
         let mut dimension_maxes = async {
             match self.old_reader.as_ref() {
                 Some(reader) => reader.get_dimension_max().await,
@@ -121,6 +104,27 @@ impl<'me> SparseWriter<'me> {
         }
         .instrument(tracing::trace_span!("Load old dimension maxes"))
         .await?;
+        let mut block_maxes = HashMap::with_capacity(dimension_maxes.len());
+
+        // Sort dimension by encoding so that we process them in order
+        let mut all_dimension_ids = self
+            .delta
+            .iter()
+            .map(|entry| *entry.key())
+            .chain(dimension_maxes.keys().cloned())
+            .collect::<Vec<_>>();
+        all_dimension_ids.sort_unstable();
+        all_dimension_ids.dedup();
+        let mut encoded_dimensions = all_dimension_ids
+            .into_iter()
+            .map(|dimension_id| (encode_u32(dimension_id), dimension_id))
+            .collect::<Vec<_>>();
+        encoded_dimensions.push((DIMENSION_PREFIX.to_string(), u32::MAX));
+        encoded_dimensions.sort_unstable();
+        tracing::trace!(
+            num_dimensions = encoded_dimensions.len(),
+            "Collected and sorted all dimensions"
+        );
 
         async {
             for (encoded_dimension, dimension_id) in &encoded_dimensions {
@@ -128,8 +132,24 @@ impl<'me> SparseWriter<'me> {
                     continue;
                 }
 
-                let Some((_, offset_updates)) = self.delta.remove(dimension_id) else {
-                    continue;
+                let offset_updates = match self.delta.remove(dimension_id) {
+                    Some((_, updates)) => updates,
+                    None => match self.old_reader.as_ref() {
+                        Some(reader) => {
+                            let block_max = reader
+                                .get_block_maxes(encoded_dimension)
+                                .await?
+                                .collect::<Vec<_>>();
+                            if block_max.is_empty() {
+                                // Rebuild block max without update
+                                DashMap::new()
+                            } else {
+                                block_maxes.insert(*dimension_id, block_max);
+                                continue;
+                            }
+                        }
+                        None => continue,
+                    },
                 };
                 let mut offset_update_vec = offset_updates.into_iter().collect::<Vec<_>>();
                 offset_update_vec.sort_unstable_by_key(|(offset, _)| *offset);
@@ -493,6 +513,171 @@ mod tests {
             final_max_reader.get(DIMENSION_PREFIX, 50).await.unwrap(),
             Some(5.0),
             "Dimension 50 max should reflect all offsets including old"
+        );
+    }
+
+    /// Regression test: incremental commits must preserve block-max entries for
+    /// dimensions not modified in the current batch. Before the fix, the fresh
+    /// (non-forked) max_writer would only contain block-max entries for dimensions
+    /// in the delta, causing WAND to skip all other dimensions and return 0 results.
+    #[tokio::test]
+    async fn test_incremental_commit_preserves_block_maxes() {
+        use chroma_types::SignedRoaringBitmap;
+
+        let (_temp_dir, provider) = test_arrow_blockfile_provider(8 * 1024 * 1024);
+
+        // =====================================================================
+        // Batch 1: Write vectors touching dimensions {1, 2, 3}
+        // =====================================================================
+        let max_writer = provider
+            .write::<u32, f32>(BlockfileWriterOptions::new("".to_string()).ordered_mutations())
+            .await
+            .unwrap();
+        let offset_value_writer = provider
+            .write::<u32, f32>(BlockfileWriterOptions::new("".to_string()).ordered_mutations())
+            .await
+            .unwrap();
+
+        let writer = SparseWriter::new(128, max_writer, offset_value_writer, None);
+        writer.set(0, vec![(1, 0.5), (2, 0.8), (3, 0.3)]).await;
+        writer.set(1, vec![(1, 0.9), (2, 0.4), (3, 0.7)]).await;
+
+        let flusher = Box::pin(writer.commit()).await.unwrap();
+        let max_id_1 = flusher.max_id();
+        let ov_id_1 = flusher.offset_value_id();
+        Box::pin(flusher.flush()).await.unwrap();
+
+        // Sanity check: all 3 dimensions have block-max entries after batch 1
+        let max_r1 = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(max_id_1, "".to_string()))
+            .await
+            .unwrap();
+        for dim in [1u32, 2, 3] {
+            let encoded = encode_u32(dim);
+            let bm: Vec<_> = max_r1
+                .get_prefix(&encoded)
+                .await
+                .unwrap()
+                .collect::<Vec<_>>();
+            assert!(
+                !bm.is_empty(),
+                "Dimension {} should have block-max entries after batch 1",
+                dim
+            );
+        }
+
+        // =====================================================================
+        // Batch 2: Write vectors touching ONLY dimension {4} (disjoint)
+        // =====================================================================
+        let max_writer2 = provider
+            .write::<u32, f32>(BlockfileWriterOptions::new("".to_string()).ordered_mutations())
+            .await
+            .unwrap();
+        let offset_value_writer2 = provider
+            .write::<u32, f32>(
+                BlockfileWriterOptions::new("".to_string())
+                    .ordered_mutations()
+                    .fork(ov_id_1),
+            )
+            .await
+            .unwrap();
+
+        let max_r = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(max_id_1, "".to_string()))
+            .await
+            .unwrap();
+        let ov_r = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(ov_id_1, "".to_string()))
+            .await
+            .unwrap();
+        let old_reader = SparseReader::new(max_r, ov_r);
+
+        let writer2 = SparseWriter::new(128, max_writer2, offset_value_writer2, Some(old_reader));
+        writer2.set(2, vec![(4, 1.0)]).await;
+
+        let flusher2 = Box::pin(writer2.commit()).await.unwrap();
+        let max_id_2 = flusher2.max_id();
+        let ov_id_2 = flusher2.offset_value_id();
+        Box::pin(flusher2.flush()).await.unwrap();
+
+        // =====================================================================
+        // Verify: block-max entries must exist for ALL 4 dimensions
+        // =====================================================================
+        let final_max = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(max_id_2, "".to_string()))
+            .await
+            .unwrap();
+        let final_ov = provider
+            .read::<u32, f32>(BlockfileReaderOptions::new(ov_id_2, "".to_string()))
+            .await
+            .unwrap();
+
+        // Check DIM entries exist for all 4 dimensions
+        for dim in [1u32, 2, 3, 4] {
+            assert!(
+                final_max
+                    .get(DIMENSION_PREFIX, dim)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "DIM entry should exist for dimension {}",
+                dim
+            );
+        }
+
+        // Check block-max entries exist for all 4 dimensions.
+        // Before the fix, dimensions 1, 2, 3 would have NO block-max entries
+        // because they weren't in batch 2's delta and the max_writer is fresh.
+        for dim in [1u32, 2, 3, 4] {
+            let encoded = encode_u32(dim);
+            let block_maxes: Vec<_> = final_max
+                .get_prefix(&encoded)
+                .await
+                .unwrap()
+                .collect::<Vec<_>>();
+            assert!(
+                !block_maxes.is_empty(),
+                "Dimension {} must have block-max entries after incremental commit",
+                dim
+            );
+        }
+
+        // =====================================================================
+        // Verify: WAND query using only batch-1 dimensions returns results
+        // =====================================================================
+        let reader = SparseReader::new(final_max, final_ov);
+
+        // Query with dimensions from batch 1 only
+        let results = reader
+            .wand(
+                vec![(1, 1.0), (2, 1.0), (3, 1.0)],
+                10,
+                SignedRoaringBitmap::full(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            !results.is_empty(),
+            "WAND with batch-1 dimensions must return results"
+        );
+        // offset 0 has (1,0.5)+(2,0.8)+(3,0.3)=1.6, offset 1 has (1,0.9)+(2,0.4)+(3,0.7)=2.0
+        assert_eq!(results[0].offset, 1, "Offset 1 should be top result");
+
+        // Query spanning both batches
+        let results_mixed = reader
+            .wand(vec![(1, 1.0), (4, 1.0)], 10, SignedRoaringBitmap::full())
+            .await
+            .unwrap();
+        assert!(
+            !results_mixed.is_empty(),
+            "WAND with mixed batch dimensions must return results"
+        );
+        // offset 2 has (4,1.0)=1.0, offset 1 has (1,0.9)=0.9, offset 0 has (1,0.5)=0.5
+        // All 3 should appear
+        assert_eq!(
+            results_mixed.len(),
+            3,
+            "Should have 3 results from mixed query"
         );
     }
 }
