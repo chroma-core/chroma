@@ -96,7 +96,6 @@ impl<'me> SparseWriter<'me> {
     }
 
     pub async fn commit(self) -> Result<SparseFlusher, SparseWriterError> {
-        let mut block_maxes = HashMap::with_capacity(self.delta.len());
         let mut dimension_maxes = async {
             match self.old_reader.as_ref() {
                 Some(reader) => reader.get_dimension_max().await,
@@ -105,6 +104,7 @@ impl<'me> SparseWriter<'me> {
         }
         .instrument(tracing::trace_span!("Load old dimension maxes"))
         .await?;
+        let mut block_maxes = HashMap::with_capacity(dimension_maxes.len());
 
         // Sort dimension by encoding so that we process them in order
         let mut all_dimension_ids = self
@@ -132,8 +132,24 @@ impl<'me> SparseWriter<'me> {
                     continue;
                 }
 
-                let Some((_, offset_updates)) = self.delta.remove(dimension_id) else {
-                    continue;
+                let offset_updates = match self.delta.remove(dimension_id) {
+                    Some((_, updates)) => updates,
+                    None => match self.old_reader.as_ref() {
+                        Some(reader) => {
+                            let block_max = reader
+                                .get_block_maxes(encoded_dimension)
+                                .await?
+                                .collect::<Vec<_>>();
+                            if block_max.is_empty() {
+                                // Rebuild block max without update
+                                DashMap::new()
+                            } else {
+                                block_maxes.insert(*dimension_id, block_max);
+                                continue;
+                            }
+                        }
+                        None => continue,
+                    },
                 };
                 let mut offset_update_vec = offset_updates.into_iter().collect::<Vec<_>>();
                 offset_update_vec.sort_unstable_by_key(|(offset, _)| *offset);
@@ -204,12 +220,8 @@ impl<'me> SparseWriter<'me> {
                     continue;
                 }
 
-                let block_max = match block_maxes.remove(&dimension_id) {
-                    Some(new_block_max) => new_block_max,
-                    None => match self.old_reader.as_ref() {
-                        Some(reader) => reader.get_block_maxes(&encoded_dimension).await?.collect(),
-                        None => continue,
-                    },
+                let Some(block_max) = block_maxes.remove(&dimension_id) else {
+                    continue;
                 };
                 for (offset, value) in block_max {
                     self.max_writer
