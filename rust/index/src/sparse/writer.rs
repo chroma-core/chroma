@@ -96,23 +96,7 @@ impl<'me> SparseWriter<'me> {
     }
 
     pub async fn commit(self) -> Result<SparseFlusher, SparseWriterError> {
-        // Sort dimension by encoding so that we process them in order
-        let mut encoded_dimensions = self
-            .delta
-            .iter()
-            .map(|entry| {
-                let dimension_id = *entry.key();
-                (encode_u32(dimension_id), dimension_id)
-            })
-            .collect::<Vec<_>>();
-        encoded_dimensions.push((DIMENSION_PREFIX.to_string(), u32::MAX));
-        encoded_dimensions.sort_unstable();
-        tracing::trace!(
-            num_dimensions = encoded_dimensions.len(),
-            "Collected and sorted delta dimensions"
-        );
-
-        let mut block_maxes = HashMap::with_capacity(encoded_dimensions.len());
+        let mut block_maxes = HashMap::with_capacity(self.delta.len());
         let mut dimension_maxes = async {
             match self.old_reader.as_ref() {
                 Some(reader) => reader.get_dimension_max().await,
@@ -121,6 +105,26 @@ impl<'me> SparseWriter<'me> {
         }
         .instrument(tracing::trace_span!("Load old dimension maxes"))
         .await?;
+
+        // Sort dimension by encoding so that we process them in order
+        let mut all_dimension_ids = self
+            .delta
+            .iter()
+            .map(|entry| *entry.key())
+            .chain(dimension_maxes.keys().cloned())
+            .collect::<Vec<_>>();
+        all_dimension_ids.sort_unstable();
+        all_dimension_ids.dedup();
+        let mut encoded_dimensions = all_dimension_ids
+            .into_iter()
+            .map(|dimension_id| (encode_u32(dimension_id), dimension_id))
+            .collect::<Vec<_>>();
+        encoded_dimensions.push((DIMENSION_PREFIX.to_string(), u32::MAX));
+        encoded_dimensions.sort_unstable();
+        tracing::trace!(
+            num_dimensions = encoded_dimensions.len(),
+            "Collected and sorted all dimensions"
+        );
 
         async {
             for (encoded_dimension, dimension_id) in &encoded_dimensions {
@@ -200,8 +204,12 @@ impl<'me> SparseWriter<'me> {
                     continue;
                 }
 
-                let Some(block_max) = block_maxes.remove(&dimension_id) else {
-                    continue;
+                let block_max = match block_maxes.remove(&dimension_id) {
+                    Some(new_block_max) => new_block_max,
+                    None => match self.old_reader.as_ref() {
+                        Some(reader) => reader.get_block_maxes(&encoded_dimension).await?.collect(),
+                        None => continue,
+                    },
                 };
                 for (offset, value) in block_max {
                     self.max_writer
