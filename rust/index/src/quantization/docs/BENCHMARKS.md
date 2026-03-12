@@ -773,6 +773,9 @@ Full details in [usearch_concurrency.md](usearch_concurrency.md)
 
 
 ### USearch only benchmark
+
+Operates only on the USearch index, not the SPANN index.
+
 Navigate latency at 32 threads dropped from 568us to 211.8us (2.68x improvement), recovering the single-thread baseline. Recall improved slightly (+2.3pp @10, +4.9pp @100).
 
 `cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000000`
@@ -793,6 +796,8 @@ Spawn/drop slowdown is expected: before, `add()`/`remove()` held an exclusive Rw
 [usearch_forked_1bit.txt](saved_benchmarks/usearch_forked_1bit.txt)
 
 ### Quantized SPANN benchmark
+
+Creates a real SPANN index with 5M data vectors
 
 [quant_spann_1bit_forked_usearch.txt](saved_benchmarks/quant_spann_1bit_forked_usearch.txt)
 vs
@@ -833,31 +838,20 @@ Original needs to be updated - task counts don't match so Total Time is not comp
 
 ## Flat / Brute Force
 
-navigate latency = 1M * distance code latency
-                 = 1M * 13.745 µs
-                 = 13.745 ms
+benchmark code: [../../../benches/flat_centroid_profile.rs](../../../benches/flat_centroid_profile.rs)
+results: [flat_1bit.txt](saved_benchmarks/flat_1bit.txt)
 
-```
-distance_query/dc-1bit/scan
-time:   [13.745 µs 13.773 µs 13.805 µs]
-thrpt:  [19.896 GiB/s 19.942 GiB/s 19.982 GiB/s]
-```
-[performance_r6i.8xlarge.txt](performance_r6i.8xlarge.txt)
+**tl;dr:** Not competitve with USearch navigate latency, even at 10k centroid scale. The advantage of flat scan is zero graph maintenance, lock-free reads, and simpler code.
 
-Potential improvements:
-- Batching/SIMD
-- Sharding (across 32 threads)
+**Flat vs USearch HNSW (forked) -- 1-bit code-to-code, wikipedia-en dim=1024:**
 
-Why Flat Scan Breaks at High Dimensions
-The bottleneck shifts from compute to memory bandwidth.
-r6id-32xlarge memory bandwidth: ~380 GB/s (Ice Lake, 8-channel DDR4)
-
-1M centroids @ 1024 dims @ float32 = 4 GB → 4GB / 380 GB/s = ~10ms
-1M centroids @ 4096 dims @ float32 = 16 GB → 16GB / 380 GB/s = ~42ms
-
-int8 quantized:
-1M @ 1024 dims = 1 GB → ~2.6ms
-1M @ 4096 dims = 4 GB → ~10ms
-Memory bandwidth is not parallelizable across cores — it's a shared bus. Sharding across 64 cores doesn't help; you're scanning the same physical memory. Flat scan is ruled out at your dimension range for the centroid index.
+| Metric               | Flat (1M, 32t)  | HNSW (1M, 32t)     | Flat (10K, 32t) | HNSW (5.7K, 8t)    |
+| -------------------- | --------------- | ------------------- | --------------- | ------------------- |
+| Navigate avg         | 94.06ms         | 210.5us             | 593.5us         | 81.6us              |
+| Recall@10 (1x)       | 89.60%          | 98.50%              | 93.50%          | 99.80%              |
+| Recall@100 (1x)      | 49.53%          | 64.96%              | 55.60%          | 78.78%              |
+| Recall@10 (4x)       | 97.50%          | 99.10%              | 99.20%          | 100.00%             |
+| Recall@100 (4x)      | 80.01%          | 89.25%              | 88.44%          | 99.60%              |
+| Total lat (4x)       | 236.3ms         | 1.23ms              | 3.88ms          | 496.0us             |
 
 ## Hierarchical SPANN

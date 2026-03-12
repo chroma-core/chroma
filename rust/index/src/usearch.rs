@@ -250,8 +250,10 @@ impl VectorIndex for USearchIndex {
             .as_ref()
             .map(|center| Code::<4>::quantize(vector, center));
 
-        // Check capacity with shared lock; resize under exclusive lock only if needed.
-        {
+        // The add must happen under the same read lock that verified capacity.
+        // Releasing and re-acquiring between check and add is a TOCTOU race:
+        // other threads can consume all remaining capacity in the gap.
+        loop {
             let index = self.index.read();
             if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
                 >= index.capacity()
@@ -265,17 +267,17 @@ impl VectorIndex for USearchIndex {
                         .reserve(index.capacity().max(RESERVE_BUFFER) * 2)
                         .map_err(|e| USearchError::Index(e.to_string()))?;
                 }
+                continue;
             }
-        }
 
-        let index = self.index.read();
-        if let Some(ref code) = code {
-            let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_slice());
-            index.add(key as u64, i8_slice)
-        } else {
-            index.add(key as u64, vector)
+            return if let Some(ref code) = code {
+                let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_slice());
+                index.add(key as u64, i8_slice)
+            } else {
+                index.add(key as u64, vector)
+            }
+            .map_err(|e| USearchError::Index(e.to_string()));
         }
-        .map_err(|e| USearchError::Index(e.to_string()))
     }
 
     fn capacity(&self) -> Result<usize, Self::Error> {
@@ -482,6 +484,7 @@ impl VectorIndexProvider for USearchIndexProvider {
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
+    use std::sync::Barrier;
 
     use chroma_cache::new_non_persistent_cache_for_test;
     use chroma_storage::test_storage;
@@ -493,6 +496,231 @@ mod tests {
 
     fn random_vector(rng: &mut impl Rng, dim: usize) -> Vec<f32> {
         (0..dim).map(|_| rng.gen_range(-4.0_f32..4.0)).collect()
+    }
+
+    fn make_index(dim: usize) -> USearchIndex {
+        let config = USearchIndexConfig {
+            collection_id: CollectionUuid(Uuid::new_v4()),
+            cmek: None,
+            prefix_path: String::new(),
+            dimensions: dim,
+            distance_function: DistanceFunction::Euclidean,
+            connectivity: 16,
+            expansion_add: 128,
+            expansion_search: 64,
+            quantization_center: None,
+            centroid_quantization_bits: 4,
+        };
+        USearchIndex::new_for_benchmark(config).unwrap()
+    }
+
+    /// Problem 1: nodes_ reallocation use-after-free.
+    ///
+    /// Start with minimal capacity so reserve() fires frequently. Concurrent
+    /// add() and search() threads race against the reallocation.
+    ///
+    /// The Rust-level TOCTOU race (capacity check / add under different locks)
+    /// is fixed: add() now runs under the same read lock that verified capacity.
+    /// However, USearch has its own internal races (e.g. entry_slot_ / max_level_
+    /// torn reads in search vs add) that can still SIGSEGV. These require C++
+    /// fixes and are not addressable from the Rust wrapper.
+    #[test]
+    #[ignore]
+    fn test_concurrent_add_search_during_resize() {
+        const DIM: usize = 32;
+        const N_WRITERS: usize = 3;
+        const N_READERS: usize = 3;
+        const VECTORS_PER_WRITER: usize = 500;
+
+        let index = Arc::new(make_index(DIM));
+
+        let mut rng = StdRng::seed_from_u64(42);
+        let all_vectors: Vec<Vec<f32>> = (0..N_WRITERS * VECTORS_PER_WRITER)
+            .map(|_| random_vector(&mut rng, DIM))
+            .collect();
+        let all_vectors = Arc::new(all_vectors);
+        let query = Arc::new(random_vector(&mut rng, DIM));
+
+        let barrier = Arc::new(Barrier::new(N_WRITERS + N_READERS));
+        let mut handles = Vec::new();
+
+        for writer_id in 0..N_WRITERS {
+            let idx = index.clone();
+            let vecs = all_vectors.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                let start = writer_id * VECTORS_PER_WRITER;
+                for i in 0..VECTORS_PER_WRITER {
+                    let key = (start + i) as u32;
+                    idx.add(key, &vecs[start + i]).unwrap();
+                }
+            }));
+        }
+
+        for _ in 0..N_READERS {
+            let idx = index.clone();
+            let q = query.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                for _ in 0..VECTORS_PER_WRITER * 2 {
+                    let _ = idx.search(&q, 10);
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().expect("thread panicked -- possible use-after-free");
+        }
+
+        let size = index.len().unwrap();
+        assert_eq!(
+            size,
+            N_WRITERS * VECTORS_PER_WRITER,
+            "expected {} vectors, got {}",
+            N_WRITERS * VECTORS_PER_WRITER,
+            size
+        );
+    }
+
+    /// Problem 2: HNSW entry point torn reads.
+    ///
+    /// Hammer concurrent add() calls so that some nodes land on higher levels
+    /// (probabilistic, controlled by HNSW's mL). Meanwhile concurrent search()
+    /// calls traverse the graph. Without atomic entry point updates, a search
+    /// could read max_level_ from one add and entry_slot_ from another,
+    /// starting traversal from a node that doesn't exist at the expected level
+    /// (crash or wrong results).
+    ///
+    /// Capacity is pre-reserved to isolate the entry point race from resize
+    /// races. Thread count stays within USearch's thread pool.
+    ///
+    /// NOTE: Nondeterministic -- may SIGSEGV, hang, or pass depending on
+    /// thread scheduling. Run with `--ignored` to reproduce.
+    #[test]
+    #[ignore]
+    fn test_concurrent_add_entry_point_race() {
+        const DIM: usize = 32;
+        const N_THREADS: usize = 4;
+        const VECTORS_PER_THREAD: usize = 500;
+        const TOTAL: usize = N_THREADS * VECTORS_PER_THREAD;
+
+        let index = Arc::new(make_index(DIM));
+        index.reserve(TOTAL + 1).unwrap();
+
+        let mut rng = StdRng::seed_from_u64(99);
+        let all_vectors: Vec<Vec<f32>> =
+            (0..TOTAL).map(|_| random_vector(&mut rng, DIM)).collect();
+        let all_vectors = Arc::new(all_vectors);
+        let query = Arc::new(random_vector(&mut rng, DIM));
+
+        let barrier = Arc::new(Barrier::new(N_THREADS * 2));
+        let mut handles = Vec::new();
+
+        for thread_id in 0..N_THREADS {
+            let idx = index.clone();
+            let vecs = all_vectors.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                let start = thread_id * VECTORS_PER_THREAD;
+                for i in 0..VECTORS_PER_THREAD {
+                    idx.add((start + i) as u32, &vecs[start + i]).unwrap();
+                }
+            }));
+        }
+
+        for _ in 0..N_THREADS {
+            let idx = index.clone();
+            let q = query.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                for _ in 0..VECTORS_PER_THREAD {
+                    let result = idx.search(&q, 10);
+                    assert!(
+                        result.is_ok(),
+                        "search failed (possible torn entry point read): {:?}",
+                        result.err()
+                    );
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().expect("thread panicked -- possible torn entry point read");
+        }
+
+        assert_eq!(index.len().unwrap(), TOTAL);
+    }
+
+    /// Combined: concurrent add + remove + search.
+    ///
+    /// Exercises both bugs simultaneously. Removes trigger the free_keys
+    /// recycling path in USearch and interact with the entry point when the
+    /// removed node was the entry. Adds may trigger resizes. Searches must
+    /// not observe inconsistent state.
+    ///
+    /// NOTE: Nondeterministic -- may SIGSEGV, hang, or pass depending on
+    /// thread scheduling. Run with `--ignored` to reproduce.
+    #[test]
+    #[ignore]
+    fn test_concurrent_add_remove_search() {
+        const DIM: usize = 32;
+        const N: usize = 2000;
+
+        let index = Arc::new(make_index(DIM));
+
+        let mut rng = StdRng::seed_from_u64(77);
+        let vectors: Vec<Vec<f32>> = (0..N).map(|_| random_vector(&mut rng, DIM)).collect();
+
+        for (i, v) in vectors.iter().enumerate().take(N / 2) {
+            index.add(i as u32, v).unwrap();
+        }
+
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = Vec::new();
+
+        {
+            let idx = index.clone();
+            let vecs = vectors.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                for i in N / 2..N {
+                    idx.add(i as u32, &vecs[i]).unwrap();
+                }
+            }));
+        }
+
+        {
+            let idx = index.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                for i in 0..N / 4 {
+                    let _ = idx.remove(i as u32);
+                }
+            }));
+        }
+
+        {
+            let idx = index.clone();
+            let q = vectors[0].clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                for _ in 0..N {
+                    let result = idx.search(&q, 10);
+                    assert!(result.is_ok(), "search failed during concurrent add+remove");
+                }
+            }));
+        }
+
+        for h in handles {
+            h.join().expect("thread panicked during concurrent add+remove+search");
+        }
     }
 
     #[tokio::test]

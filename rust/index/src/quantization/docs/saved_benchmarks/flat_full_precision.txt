@@ -1,0 +1,47 @@
+cargo bench -p chroma-index --bench flat_centroid_profile -- --dataset db-pedia --initial-centroids 5700 --data-vectors 1000 --threads 32
+   Compiling usearch v2.24.0 (/home/ubuntu/USearch)
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 1m 24s
+     Running benches/flat_centroid_profile.rs (target/release/deps/flat_centroid_profile-3b4b58e13cda851a)
+Loading DBPedia from HuggingFace Hub...
+Loading 6.9K vectors from dbpedia (dim=1536)...
+
+=== Flat Centroid Index Profile ===
+Dim: 1536 | Metric: L2 | Centroid bits: f32 | Threads: 32
+Initial centroids: 5.7K | Data vectors: 1.0K | Queries: 200
+Scan footprint: 33.4 MB (full precision)
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Loading cached flat index from target/flat_cache/flat_DbPedia_5700_f32_L2.bin ---
+Loaded 5.7K centroids in 61.06ms
+Index size: 5700
+
+--- Phase 2: SPANN workload (1.0K data vectors, 32 threads) ---
+Completed in 657.77ms | Index size: 5703
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.1K |         10 |          7 |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|     18.73s |    80.87ms |    47.17ms |   657.77ms |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|     6.13ms |     8.09ms |     6.74ms |
+
+--- Phase 3: Recall (200 queries, k=64) ---
+
+=== Recall Summary (full precision) ===
+Corpus size: 5.7K | Queries: 200 | k: 64
+Recall@10: 100.00% | Recall@64: 100.00% | Avg latency: 11.05ms
+
+=== Legend ===
+navigate - flat scan the centroid index (nprobe=64, rerank=1x)
+spawn    - append a new centroid to the flat index (from cluster split)
+drop     - tombstone a centroid in the flat index (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase

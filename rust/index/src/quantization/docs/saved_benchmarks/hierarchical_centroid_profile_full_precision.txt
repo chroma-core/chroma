@@ -1,0 +1,58 @@
+
+cargo bench -p chroma-index --bench hierarchical_centroid_profile --   --dataset wikipedia-en --initial-centroids 1000000 --threads 32   --data-vectors 1000000 --num-queries 100 --branching-factor 100 --beam-width 10
+   Compiling usearch v2.24.0 (/home/ubuntu/USearch)
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 32.13s
+     Running benches/hierarchical_centroid_profile.rs (target/release/deps/hierarchical_centroid_profile-2055b2299e19383e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 1.01M vectors from wikipedia-en (dim=1024)...
+
+=== Hierarchical Centroid Tree Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: f32 | Threads: 32
+Initial centroids: 1.00M | Data vectors: 1.00M | Queries: 100
+Branching factor: 100 | Beam width: 10
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Build tree (1.00M centroids) ---
+^[[ABuilt tree with 1.00M centroids in 1.1m (depth=4, 15729 vec/s)
+Cached tree to target/hierarchical_cache/tree_WikipediaEn_1000000_bf100_L2_f32.bin (5597 MB)
+Tree size: 1000000
+
+--- Phase 2: SPANN workload (1.00M data vectors, 32 threads) ---
+Completed in 1.1m | Index size: 1005897
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|      3.05M |      11.5K |       5.6K |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|      32.7m |    28.67ms |     5.36ms |       1.1m |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|    644.1µs |      2.5µs |      956ns |
+
+--- Phase 3: Recall (100 queries, k=100) ---
+
+=== Recall Summary ===
+Corpus size: 1.01M | Queries: 100 | k: 100
+Recall@10: 14.30% | Recall@100: 20.09% | Avg latency: 686.5µs
+
+--- Phase 3b: Beam width sweep (100 queries) ---
+|  Beam |   Recall@10 |  Recall@100 |    Avg lat |
+|-------|-------------|-------------|------------|
+|     5 |      10.70% |      14.08% |    253.3µs |
+|    10 |      14.30% |      20.09% |    463.2µs |
+|    20 |      17.40% |      26.01% |    910.6µs |
+|    50 |      19.20% |      34.23% |     2.36ms |
+|   100 |      19.90% |      40.65% |     5.42ms |
+
+=== Legend ===
+navigate - beam search the centroid tree (beam=10, nprobe=64)
+spawn    - append to overflow buffer (from cluster split)
+drop     - add to tombstone set (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase

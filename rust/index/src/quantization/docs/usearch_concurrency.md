@@ -28,31 +28,34 @@ reallocated and freed during reserve.
 Every `add()`, `remove()`, `search()`, `save()`, and `load()` took a **write** (exclusive)
 lock, fully serializing all operations.
 
-**Current fix:** Double-checked locking pattern. `add()` takes a **read** (shared) lock for
-the actual HNSW insertion. Before that, it checks capacity under a read lock; only if a
-resize is actually needed does it drop the read lock, acquire a **write** (exclusive) lock,
-re-check, and call `reserve()`. `remove()` and `search()` always use read locks. This
-means concurrent adds/searches/removes proceed in parallel, and only the rare resize event
-serializes.
+**Previous fix (had TOCTOU bug):** Double-checked locking, but the capacity check and the
+`add()` call used separate read lock acquisitions. Between dropping the lock after the check
+and re-acquiring it for the add, other threads could consume all remaining capacity --
+USearch doesn't bounds-check internally and would write past the allocated `nodes_` array
+(SIGSEGV). See `test_concurrent_add_search_during_resize` in `usearch.rs`.
+
+**Current fix:** The `add()` call happens under the *same* read lock that verified capacity.
+The lock is only released for a resize (which requires a write lock), after which we loop
+back and re-check before proceeding. The worst-case capacity overflow is bounded by the
+number of concurrent threads, which `RESERVE_BUFFER` (128) is sized to absorb.
+`remove()` and `search()` always use read locks.
 
 ```rust
-// Check capacity with shared lock; resize under exclusive lock only if needed.
-{
+loop {
     let index = self.index.read();
     if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
         >= index.capacity()
     {
         drop(index);
         let index = self.index.write();
-        if index.size() + self.tombstones.load(Ordering::Relaxed) + RESERVE_BUFFER
-            >= index.capacity()
-        {
+        if ... >= index.capacity() {
             index.reserve(index.capacity().max(RESERVE_BUFFER) * 2)...;
         }
+        continue; // re-check with fresh read lock
     }
+    // Still holding the read lock that verified capacity
+    return index.add(key as u64, vector)...;
 }
-let index = self.index.read();
-index.add(key as u64, vector)...;
 ```
 
 **Alternative approach (benchmarked):** Remove the RwLock entirely by pre-allocating enough

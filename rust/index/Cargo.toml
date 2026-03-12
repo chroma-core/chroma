@@ -114,3 +114,11 @@ harness = false
 [[bench]]
 name = "usearch_rerank"
 harness = false
+
+[[bench]]
+name = "hierarchical_centroid_profile"
+harness = false
+
+[[bench]]
+name = "flat_centroid_profile"
+harness = false

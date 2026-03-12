@@ -1,6 +1,8 @@
-ubuntu@ip-172-31-75-166:~/chroma$ cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000000 --num-queries 100
-    Finished `bench` profile [optimized + debuginfo] target(s) in 0.35s
-     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-8ef1ed0857ef29a3)
+cargo bench -p chroma-index --bench usearch_spann_profile -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000 --threads 32 --data-vectors 1000000 --num-queries 100
+   Compiling usearch v2.24.0 (/home/ubuntu/USearch)
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 31.96s
+     Running benches/usearch_spann_profile.rs (target/release/deps/usearch_spann_profile-b8c5648ff2346f3b)
 Loading Wikipedia EN from HuggingFace Hub...
 Loading 1.01M vectors from wikipedia-en (dim=1024)...
 
@@ -13,7 +15,7 @@ Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
 Loaded 1000000 centroids from cache
 
 --- Phase 2: SPANN workload (1.00M data vectors, 32 threads) ---
-Completed in 25.58s | Index size: 1005857
+Completed in 25.32s | Index size: 1005834
 
 === Phase 2: Task Counts ===
 |   navigate |      spawn |       drop |
@@ -23,27 +25,33 @@ Completed in 25.58s | Index size: 1005857
 === Phase 2: Task Total Time ===
 |   navigate |      spawn |       drop |       wall |
 |------------|------------|------------|------------|
-|      10.8m |       1.5m |       1.1m |     25.58s |
+|      10.7m |       1.5m |       1.0m |     25.32s |
 
 === Phase 2: Task Avg Time ===
 |   navigate |      spawn |       drop |
 |------------|------------|------------|
-|    211.8µs |     7.82ms |    11.31ms |
+|    210.5µs |     7.59ms |    10.71ms |
 
 --- Phase 3: Recall (100 queries, k=100) ---
 
 === Recall Summary (no rerank) ===
 Corpus size: 1.01M | Queries: 100 | k: 100
-Recall@10: 95.10% | Recall@100: 64.58% | Avg latency: 549.5µs
+Recall@10: 98.50% | Recall@100: 64.96% | Avg latency: 545.2µs
 
 --- Phase 3b: Rerank sweep (100 queries) ---
 |  Rerank |      Fetch |   Recall@10 |  Recall@100 |    Avg lat |
 |---------|------------|-------------|-------------|------------|
-|     1x |        100 |      95.10% |      64.58% |    549.5µs |
-|     2x |        200 |      95.60% |      79.06% |    656.3µs |
-|     4x |        400 |      96.80% |      88.78% |     1.22ms |
-|     8x |        800 |      97.20% |      94.29% |     2.58ms |
-|    16x |       1600 |      97.40% |      97.11% |     5.27ms |
+|     1x |        100 |      98.50% |      64.96% |    545.2µs |
+|     2x |        200 |      99.10% |      79.33% |    653.8µs |
+|     4x |        400 |      99.10% |      89.25% |     1.23ms |
+|     8x |        800 |      99.50% |      94.95% |     2.58ms |
+|    16x |       1600 |      99.70% |      97.82% |     5.26ms |
+
+=== Legend ===
+navigate - search() the centroid HNSW index (nprobe=64)
+spawn    - add() a new centroid to the HNSW index (from cluster split)
+drop     - remove() a centroid from the HNSW index (from cluster split/merge)
+wall     - wall-clock time for the full SPANN simulation phase
 
 
 
