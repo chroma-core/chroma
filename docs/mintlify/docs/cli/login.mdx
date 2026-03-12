@@ -24,3 +24,9 @@ Back in the CLI, you will be prompted to select the team you want to authenticat
 Upon your first login, the first created profile will be automatically set as your "active" profile.
 
 On subsequent logins, the CLI will instruct you how to switch to a new profile you added (using the `chroma profile use` command).
+
+In order to login without a browser (for example, in a headless environment), you first need to create an API key in the Chroma Cloud dashboard and then run
+
+```bash
+chroma login --profile my_profile_name --api-key ck-...
+```
