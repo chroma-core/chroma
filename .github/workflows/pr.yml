@@ -21,6 +21,10 @@ jobs:
       tests-to-run: ${{ steps.determine-tests.outputs.tests-to-run }}
       # Helm version check
       helm-version-changed: ${{ steps.helm-version.outputs.version_changed }}
+
+      # Shared-cluster (vcluster) flags
+      shared-cluster-enabled: ${{ steps.shared-cluster-flags.outputs.shared-cluster-enabled }}
+      shared-cluster-needed: ${{ steps.shared-cluster-flags.outputs.shared-cluster-needed }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -92,6 +96,32 @@ jobs:
           FILTER_GO: ${{ steps.filter.outputs.go }}
           FILTER_CI_INFRA: ${{ steps.filter.outputs.ci-infra }}
         run: bin/ci/determine-tests-to-run.sh
+
+      - name: Compute shared-cluster flags
+        id: shared-cluster-flags
+        run: |
+          ALLOWLIST='${{ vars.SHARED_CLUSTER_ALLOWLIST }}'
+          ACTOR='${{ github.actor }}'
+          SHARED_CLUSTER_ENABLED=false
+          SHARED_CLUSTER_NEEDED=false
+
+          TESTS_TO_RUN='${{ steps.determine-tests.outputs.tests-to-run }}'
+
+          case ",$ALLOWLIST," in
+            *,"$ACTOR",*)
+              SHARED_CLUSTER_ENABLED=true
+              ;;
+          esac
+
+
+          if [[ "$TESTS_TO_RUN" == *"rust"* || \
+                "$TESTS_TO_RUN" == *"go"* || \
+                "$TESTS_TO_RUN" == *"python"* ]]; then
+            SHARED_CLUSTER_NEEDED=true
+          fi
+
+          echo "shared-cluster-enabled=$SHARED_CLUSTER_ENABLED" >> $GITHUB_OUTPUT
+          echo "shared-cluster-needed=$SHARED_CLUSTER_NEEDED" >> $GITHUB_OUTPUT
 
       - name: Check Helm version change
         id: helm-version
@@ -179,6 +209,50 @@ jobs:
     if: contains(fromJson(needs.change-detection.outputs.tests-to-run), 'rust')
     uses: ./.github/workflows/_rust-tests.yml
     secrets: inherit
+
+  vcluster-create-teardown:
+    name: vcluster (create + teardown)
+    needs: change-detection
+    if: >
+      needs.change-detection.outputs.shared-cluster-enabled == 'true' &&
+      needs.change-detection.outputs.shared-cluster-needed == 'true'
+    runs-on: ubuntu-slim
+    steps:
+      - name: Install vCluster CLI
+        uses: loft-sh/setup-vcluster@v0.0.1
+
+      - name: Login to vCluster Platform
+        env:
+          PLATFORM_URL: ${{ vars.VCLUSTER_PLATFORM_URL }}
+          ACCESS_KEY: ${{ secrets.VCLUSTER_ACCESS_KEY }}
+        run: vcluster platform login $PLATFORM_URL --access-key $ACCESS_KEY
+
+      - name: Create PR vcluster
+        id: create
+        env:
+          VCLUSTER_NAME: "repo-${{ github.event.repository.name }}-pr-${{ github.event.pull_request.number }}"
+        run: |
+          echo "Creating vcluster: $VCLUSTER_NAME"
+
+          vcluster create $VCLUSTER_NAME \
+            --project default \
+            --driver platform \
+            --template vcluster-pro-template
+
+          echo "name=$VCLUSTER_NAME" >> $GITHUB_OUTPUT
+
+      - name: Verify vcluster (kubectl get nodes)
+        run: kubectl get nodes
+
+      - name: Delete PR vcluster
+        if: always()
+        env:
+          VCLUSTER_NAME: ${{ steps.create.outputs.name }}
+        run: |
+          if [ -n "$VCLUSTER_NAME" ]; then
+            echo "Deleting vcluster: $VCLUSTER_NAME"
+            vcluster delete $VCLUSTER_NAME --project default --driver platform
+          fi
 
   rust-feature-tests:
     name: Rust feature tests
