@@ -180,11 +180,14 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
         self,
         name: str,
         tenant: str = DEFAULT_TENANT,
-    ) -> None:
-        await self._make_request(
+    ) -> Database:
+        response = await self._make_request(
             "post",
             f"/tenants/{tenant}/databases",
             json={"name": name},
+        )
+        return Database(
+            id=response["id"], name=response["name"], tenant=response["tenant"]
         )
 
     @trace_method("AsyncFastAPI.get_database", OpenTelemetryGranularity.OPERATION)
@@ -242,12 +245,13 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
 
     @trace_method("AsyncFastAPI.create_tenant", OpenTelemetryGranularity.OPERATION)
     @override
-    async def create_tenant(self, name: str) -> None:
-        await self._make_request(
+    async def create_tenant(self, name: str) -> Tenant:
+        resp_json = await self._make_request(
             "post",
             "/tenants",
             json={"name": name},
         )
+        return Tenant(name=resp_json["name"])
 
     @trace_method("AsyncFastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
     @override

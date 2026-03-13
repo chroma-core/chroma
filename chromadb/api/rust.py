@@ -133,8 +133,14 @@ class RustBindingsAPI(ServerAPI):
     # ////////////////////////////// Admin API //////////////////////////////
 
     @override
-    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
-        return self.bindings.create_database(name, tenant)
+    def create_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
+        self.bindings.create_database(name, tenant)
+        database = self.bindings.get_database(name, tenant)
+        return {
+            "id": database.id,
+            "name": database.name,
+            "tenant": database.tenant,
+        }
 
     @override
     def get_database(self, name: str, tenant: str = DEFAULT_TENANT) -> Database:
@@ -167,8 +173,9 @@ class RustBindingsAPI(ServerAPI):
         ]
 
     @override
-    def create_tenant(self, name: str) -> None:
-        return self.bindings.create_tenant(name)
+    def create_tenant(self, name: str) -> Tenant:
+        self.bindings.create_tenant(name)
+        return Tenant(name=name)
 
     @override
     def get_tenant(self, name: str) -> Tenant:
