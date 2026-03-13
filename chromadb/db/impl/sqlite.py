@@ -20,7 +20,7 @@ from typing_extensions import Literal
 from types import TracebackType
 import os
 from uuid import UUID
-from threading import local
+from threading import local, Thread
 from importlib_resources import files
 from importlib_resources.abc import Traversable
 
@@ -111,7 +111,10 @@ class SqliteDB(MigratableDB, SqlEmbeddingsQueue, SqlSysDB):
         with self.tx() as cur:
             cur.execute("PRAGMA case_sensitive_like = ON")
         self.initialize_migrations()
-        self._check_foreign_key_integrity()
+        # Run FK integrity check in background to avoid blocking startup
+        # on large databases (PRAGMA foreign_key_check does a full table scan).
+        t = Thread(target=self._check_foreign_key_integrity, daemon=True)
+        t.start()
 
         if (
             # (don't attempt to access .config if migrations haven't been run)
