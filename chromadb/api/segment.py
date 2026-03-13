@@ -242,6 +242,12 @@ class SegmentAPI(ServerAPI):
             metadata=metadata,
         )
 
+        # Validate tenant and database exist before attempting to create collection.
+        # Without this, a non-existent tenant/database causes a misleading
+        # UniqueConstraintError from the DB layer. See #2882.
+        self._sysdb.get_tenant(name=tenant)
+        self._sysdb.get_database(name=database, tenant=tenant)
+
         id = uuid4()
 
         model = CollectionModel(
