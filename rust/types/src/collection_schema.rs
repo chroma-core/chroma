@@ -1060,7 +1060,7 @@ impl Schema {
                     quantize: variant,
                     ..*spann_config
                 },
-                Quantization::FourBitRabitQWithUSearch => SpannIndexConfig {
+                Quantization::FourBitRabitQWithUSearch | Quantization::OneBitRabitQWithUSearch => SpannIndexConfig {
                     search_nprobe: Some(64),
                     nreplica_count: Some(2),
                     write_rng_factor: Some(4.0),
@@ -2838,6 +2838,17 @@ pub enum Quantization {
     #[default]
     None,
     FourBitRabitQWithUSearch,
+    OneBitRabitQWithUSearch,
+}
+
+impl Quantization {
+    pub fn data_bits(&self) -> Option<u8> {
+        match self {
+            Quantization::None => Option::None,
+            Quantization::FourBitRabitQWithUSearch => Some(4),
+            Quantization::OneBitRabitQWithUSearch => Some(1),
+        }
+    }
 }
 
 fn is_default_quantization(v: &Quantization) -> bool {
@@ -3559,6 +3570,7 @@ mod tests {
                         max_neighbors: Some(20),
                         center_drift_threshold: None,
                         quantize: Quantization::None,
+                        ..Default::default()
                     });
                 }
             }
@@ -3737,6 +3749,7 @@ mod tests {
             max_neighbors: Some(16),
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let user_spann = SpannIndexConfig {
@@ -3758,6 +3771,7 @@ mod tests {
             max_neighbors: None,
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann), Some(&user_spann))
@@ -3797,6 +3811,7 @@ mod tests {
             max_neighbors: Some(16),
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let user_spann_with_quantize = SpannIndexConfig {
@@ -3818,6 +3833,7 @@ mod tests {
             max_neighbors: None,
             center_drift_threshold: None,
             quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
+            ..Default::default()
         };
 
         // Should reject user schema with quantize: true
@@ -3851,6 +3867,7 @@ mod tests {
             max_neighbors: Some(16),
             center_drift_threshold: None,
             quantize: Quantization::FourBitRabitQWithUSearch, // This should be rejected
+            ..Default::default()
         };
 
         let result = Schema::merge_spann_configs(Some(&default_spann_with_quantize), None);
@@ -3894,6 +3911,7 @@ mod tests {
             max_neighbors: Some(32),
             center_drift_threshold: None,
             quantize: Quantization::None,
+            ..Default::default()
         };
 
         let with_space: InternalSpannConfiguration = (Some(&Space::Cosine), &config).into();
@@ -4010,6 +4028,7 @@ mod tests {
                 max_neighbors: None,
                 center_drift_threshold: None,
                 quantize: Quantization::None,
+                ..Default::default()
             }), // Add SPANN config
         };
 
@@ -6720,6 +6739,7 @@ mod tests {
                         max_neighbors: Some(spann_config.max_neighbors),
                         center_drift_threshold: None,
                         quantize: Quantization::None,
+                        ..Default::default()
                     }),
                 },
             }

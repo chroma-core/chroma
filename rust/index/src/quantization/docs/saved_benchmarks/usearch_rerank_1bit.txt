@@ -5,8 +5,7 @@ Loading Wikipedia EN from HuggingFace Hub...
 Loading 1.00M vectors from wikipedia-en (dim=1024)...
 
 === Centroid Rerank Sweep ===
-Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128
-Centroids: 1.00M | Queries: 200
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Centroids: 1.00M | Queries: 200
 
 --- Loading cached index from target/usearch_cache/bootstrap_WikipediaEn_1000000_L2_1.bin ---
 Loaded 1000000 centroids from cache
@@ -21,6 +20,11 @@ Loading cached ground truth from target/usearch_cache/gt_WikipediaEn_1000000_L2_
 |     4x |        400 |      95.70% |      81.98% |     1.25ms |     1.00ms |     39.1µs |    209.8µs |
 |     8x |        800 |      98.20% |      91.25% |     2.39ms |     1.90ms |     71.3µs |    418.1µs |
 |    16x |       1600 |      99.20% |      96.07% |     4.82ms |     3.80ms |    139.1µs |    880.5µs |
+
+
+
+
+
 
 
 cargo bench -p chroma-index --bench centroid_rerank_sweep -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 10000

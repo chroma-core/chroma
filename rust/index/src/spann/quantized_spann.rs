@@ -31,7 +31,7 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::{
-    quantization::Code,
+    quantization::{self, Code},
     spann::utils,
     usearch::{USearchIndex, USearchIndexConfig, USearchIndexProvider},
     IndexUuid, OpenMode, SearchResult, VectorIndex, VectorIndexProvider,
@@ -573,6 +573,9 @@ pub struct QuantizedSpannIndexWriter<I: VectorIndex> {
     // This contains the set of cluster ids in the balance (scrub/split/merge) routine.
     // It is used to prevent concurrent balancing attempts on the same clusters.
     balancing: Arc<DashSet<u32>>,
+
+    // === Stats ===
+    stats: Arc<QuantizedSpannStats>,
 }
 
 impl<I: VectorIndex> QuantizedSpannIndexWriter<I> {
@@ -1586,6 +1589,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            centroid_quantization_bits: config.centroid_bits(),
         };
 
         // Create centroid indexes
@@ -1632,6 +1636,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             raw_embedding_reader: None,
             // === Dedup Sets ===
             balancing: DashSet::new().into(),
+            // === Stats ===
+            stats: Arc::new(Default::default()),
         })
     }
 
@@ -1759,6 +1765,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: None,
+            centroid_quantization_bits: config.centroid_bits(),
         };
 
         // Step 1: Open centroid indexes
@@ -1898,6 +1905,8 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
             raw_embedding_reader,
             // === Dedup Sets ===
             balancing: DashSet::new().into(),
+            // === Stats ===
+            stats: Arc::new(Default::default()),
         })
     }
 
@@ -1962,6 +1971,7 @@ impl QuantizedSpannIndexWriter<USearchIndex> {
                 expansion_add: ef_construction,
                 expansion_search: ef_search,
                 quantization_center: None,
+                centroid_quantization_bits: self.config.centroid_bits(),
             };
 
             // Rebuild raw centroid index
@@ -2110,7 +2120,7 @@ mod tests {
             initial_lambda: None,
             num_centers_to_merge_to: None,
             max_neighbors: Some(8),
-            quantize,
+            quantize: Quantization::FourBitRabitQWithUSearch,
             centroid_bits: None,
             centroid_rerank_factor: None,
         }

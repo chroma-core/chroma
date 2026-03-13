@@ -1,0 +1,76 @@
+4bit 5M
+nohup cargo bench -p chroma-index --bench quantized_spann -- --dataset wikipedia-en --checkpoint 5 --threads 16 --data-bits 4 --centroid-bits 4 > quantized_spann_4bit_wikipedia.txt 2>&1 &
+[1] 179212
+ubuntu@ip-172-31-75-166:~/chroma$ tail -f quantized_spann_4bit_wikipedia.txt
+nohup: ignoring input
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 35.39s
+     Running benches/quantized_spann.rs (target/release/deps/quantized_spann-6be0c3ba684c8ced)
+Loading Wikipedia EN from HuggingFace Hub...
+=== QuantizedSpannIndexWriter Benchmark ===
+Dataset: wikipedia-en (41.49M vectors, 1024 dims)
+Metric: Euclidean | Checkpoints: 5 | Threads: 16 | Data bits: 4 | Centroid bits: 4
+Total vectors to index: 5.00M
+
+Checkpoint 1: 1.00M vec | load 11.77s | raw 11.53s | index 1.6m | commit 3.16s | 10485 vec/s
+  Recall: np16=0.87/0.81 np32=0.91/0.88 np64=0.94/0.92 np128=0.96/0.94 np256=0.98/0.95
+Checkpoint 2: 1.00M vec | load 8.43s | raw 10.39s | index 2.1m | commit 6.26s | 8127 vec/s
+  Recall: np16=0.85/0.81 np32=0.89/0.87 np64=0.92/0.91 np128=0.95/0.94 np256=0.97/0.95
+Checkpoint 3: 1.00M vec | load 8.57s | raw 10.44s | index 2.4m | commit 9.32s | 7075 vec/s
+  Recall: np16=0.81/0.73 np32=0.85/0.81 np64=0.88/0.86 np128=0.92/0.89 np256=0.94/0.91
+Checkpoint 4: 1.00M vec | load 8.72s | raw 10.57s | index 2.7m | commit 11.55s | 6117 vec/s
+  Recall: np16=0.82/0.76 np32=0.87/0.84 np64=0.91/0.89 np128=0.94/0.91 np256=0.95/0.93
+Checkpoint 5: 1.00M vec | load 8.65s | raw 10.45s | index 3.0m | commit 14.76s | 5608 vec/s
+  Recall: np16=0.77/0.72 np32=0.84/0.80 np64=0.88/0.86 np128=0.90/0.89 np256=0.93/0.91
+
+=== Cluster Statistics ===
+| CP | Centroids |   Min |   Max | Median |   P90 |   P99 |    Avg |    Std |
+|----|-----------|-------|-------|--------|-------|-------|--------|--------|
+|  1 |      5.7K |     0 |   512 |    385 |   490 |   511 |  366.7 |  107.6 |
+|  2 |     11.2K |     0 |   512 |    388 |   491 |   511 |  370.3 |  104.3 |
+|  3 |     16.7K |     0 |   512 |    391 |   490 |   511 |  373.0 |  101.4 |
+|  4 |     22.2K |     0 |   512 |    391 |   489 |   511 |  372.2 |  102.4 |
+|  5 |     27.6K |     0 |   512 |    390 |   489 |   511 |  372.3 |  102.1 |
+
+=== Task Counts ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |    1.00M |    3.05M |    2.19M |    11.4K |   198.4K |     5.7K |        0 |    2.08M |     5.7K |   198.4K |    11.3K |    7.21M |        0 |
+|  2 |    1.00M |    3.03M |    2.17M |    11.2K |   195.4K |     5.7K |        0 |    2.03M |     5.7K |   195.4K |    11.2K |    7.17M |        0 |
+|  3 |    1.00M |    2.98M |    2.14M |    11.0K |   191.4K |     5.6K |        3 |    1.98M |     5.6K |   191.4K |    11.1K |    7.06M |        0 |
+|  4 |    1.00M |    3.01M |    2.15M |    11.1K |   193.0K |     5.6K |       27 |    2.02M |     5.6K |   193.0K |    11.1K |    7.11M |        0 |
+|  5 |    1.00M |    2.94M |    2.11M |    11.0K |   190.8K |     5.5K |       28 |    1.94M |     5.6K |   190.8K |    11.0K |    7.01M |        0 |
+
+=== Task Total Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search | raw_pts |  raw/pt |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|---------|---------|
+|  1 | 1415.85s |  620.54s |  283.96s |   32.03s |    8.71s | 1193.12s |      0ns |  850.86s |    2.99s |   4.99ms |   1.08ms |  458.88s |      0ns |       0 |       - |
+|  2 | 1875.83s |  887.14s |  292.74s |   49.50s |   14.05s | 1646.99s |      0ns | 1129.68s |  101.76s |    1.29s |  140.97s |  466.01s |      0ns |  880.1K | 160.2µs |
+|  3 | 2123.03s | 1016.26s |  291.71s |   55.48s |   16.66s | 1844.15s |  68.40ms | 1210.58s |  179.53s |    2.25s |  249.61s |  462.06s |      0ns |   1.55M | 161.3µs |
+|  4 | 2451.96s | 1215.25s |  308.83s |   61.41s |   18.99s | 2166.38s |    2.37s | 1431.93s |  243.00s |    3.39s |  341.95s |  478.83s |      0ns |   2.06M | 166.1µs |
+|  5 | 2583.79s | 1309.61s |  304.06s |   63.41s |   21.22s | 2218.35s |    3.61s | 1442.55s |  269.02s |    4.43s |  381.57s |  472.92s |      0ns |   2.28M | 167.2µs |
+
+=== Task Avg Time ===
+| CP |      add | navigate | register |    spawn |    scrub |    split |    merge | reassign |     drop |     load | load_raw | quantize |   search |
+|----|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|----------|
+|  1 |   1.42ms |  203.6µs |  129.9µs |   2.82ms |   43.9µs | 209.47ms |        - |  409.3µs |  525.8µs |     25ns |     95ns |   63.6µs |        - |
+|  2 |   1.88ms |  292.7µs |  134.9µs |   4.40ms |   71.9µs | 290.01ms |        - |  555.7µs |  17.92ms |    6.6µs |  12.55ms |   65.0µs |        - |
+|  3 |   2.12ms |  341.0µs |  136.6µs |   5.02ms |   87.0µs | 330.55ms |  22.80ms |  611.2µs |  32.16ms |   11.8µs |  22.59ms |   65.4µs |        - |
+|  4 |   2.45ms |  403.1µs |  143.7µs |   5.52ms |   98.4µs | 386.99ms |  87.65ms |  709.7µs |  43.20ms |   17.6µs |  30.70ms |   67.3µs |        - |
+|  5 |   2.58ms |  444.7µs |  143.9µs |   5.77ms |  111.2µs | 401.29ms | 128.89ms |  742.0µs |  48.42ms |   23.2µs |  34.62ms |   67.4µs |        - |
+
+
+=== Indexing Summary ===
+Total vectors: 5.00M
+Total time: 14.3m
+Overall throughput: 5814 vec/s
+
+=== Recall Summary ===
+|  CP |  Vectors |    Index |   Commit | Queries |      nprobe=16      |      nprobe=32      |      nprobe=64      |     nprobe=128      |     nprobe=256      |
+|     |          |          |          |         |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |  R@10 R@100    Lat |
+|-----|----------|----------|----------|---------|---------------------|---------------------|---------------------|---------------------|---------------------|
+|   1 |    1.00M |     1.6m |    3.16s |     100 |  0.87  0.81   14ms |  0.91  0.88   11ms |  0.94  0.92   18ms |  0.96  0.94   32ms |  0.98  0.95   60ms |
+|   2 |    2.00M |     2.1m |    6.26s |     100 |  0.85  0.81   17ms |  0.89  0.87   15ms |  0.92  0.91   23ms |  0.95  0.94   38ms |  0.97  0.95   69ms |
+|   3 |    3.00M |     2.4m |    9.32s |     100 |  0.81  0.73   17ms |  0.85  0.81   17ms |  0.88  0.86   26ms |  0.92  0.89   41ms |  0.94  0.91   72ms |
+|   4 |    4.00M |     2.7m |   11.55s |     100 |  0.82  0.76   18ms |  0.87  0.84   19ms |  0.91  0.89   30ms |  0.94  0.91   48ms |  0.95  0.93   81ms |
+|   5 |    5.00M |     3.0m |   14.76s |     100 |  0.77  0.72   20ms |  0.84  0.80   21ms |  0.88  0.86   33ms |  0.90  0.89   51ms |  0.93  0.91   85ms |

@@ -42,6 +42,7 @@
     - [Why dq-bw/scan ties](#why-dq-bwscan-ties)
     - [Thread scaling](#thread-scaling-2)
 - [Central Index Options](#central-index-options)
+  - [Summary](#summary)
   - [Usearch 1 bit](#usearch-1-bit)
   - [Usearch 1 bit - Improved Concurrency](#usearch-1-bit---improved-concurrency)
     - [USearch only benchmark](#usearch-only-benchmark)
@@ -673,18 +674,17 @@ Overall 1.8x speedup: 10597 vec/s vs 5814 vec/s
 
 ### Reranking
 
-Centroids: 1.00M | Queries: 100 | Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128
-
-=== Rerank Sweep ===
+Dim: 1024 | Metric: L2 | Centroid bits: 1 | ef_search: 128 | Centroids: 1.00M | Queries: 200
 
 
-| -0.060,-0.050) 1317 | ▉Rerank | Fetch (k) | Recall@10 | Recall@100 | Avg lat | search  | fetch   | rerank |
-| ------------------- | ------- | --------- | --------- | ---------- | ------- | ------- | ------- |
-| 1x                  | 100     | 84.75%    | 50.88%    | 383.3µs    | 383.3µs | 0ns     | 0ns     |
-| 2x                  | 200     | 90.50%    | 68.18%    | 647.6µs    | 519.8µs | 20.2µs  | 107.6µs |
-| 4x                  | 400     | 95.70%    | 81.98%    | 1.25ms     | 1.00ms  | 39.1µs  | 209.8µs |
-| 8x                  | 800     | 98.20%    | 91.25%    | 2.39ms     | 1.90ms  | 71.3µs  | 418.1µs |
-| 16x                 | 1600    | 99.20%    | 96.07%    | 4.82ms     | 3.80ms  | 139.1µs | 880.5µs |
+=== Rerank Sweep (k=100) ===
+| Rerank | Fetch | Recall@10 | Recall@100 | Avg lat | search  | fetch   | rerank  |
+| ------ | ----- | --------- | ---------- | ------- | ------- | ------- | ------- |
+| 1x     | 100   | 84.75%    | 50.88%     | 383.3µs | 383.3µs | 0ns     | 0ns     |
+| 2x     | 200   | 90.50%    | 68.18%     | 647.6µs | 519.8µs | 20.2µs  | 107.6µs |
+| 4x     | 400   | 95.70%    | 81.98%     | 1.25ms  | 1.00ms  | 39.1µs  | 209.8µs |
+| 8x     | 800   | 98.20%    | 91.25%     | 2.39ms  | 1.90ms  | 71.3µs  | 418.1µs |
+| 16x    | 1600  | 99.20%    | 96.07%     | 4.82ms  | 3.80ms  | 139.1µs | 880.5µs |
 
 
 `cargo bench -p chroma-index --bench usearch_rerank -- --dataset wikipedia-en --centroid-bits 1 --initial-centroids 1000000`
@@ -752,11 +752,35 @@ AND+popcount over packed bit vectors is both compute-light and memory-light (128
 M1 has 4 performance + 4 efficiency cores, no hyperthreading. Ice Lake has 16 physical cores with 2-way SMT (32 vCPUs). For single-threaded benchmarks M1 wins on per-core performance, but r6i has 4x the physical core count for parallel workloads, which is what matters in production. That is why the thread scaling section only uses r6i data.
 
 # Central Index Options
-KD-Tree (bad for high dimensional vectors?)
-IVF
-IVF-HNSW
-Hierarchical SPANN
-ScaNN — Google's production ANN with tree + asymmetric quantization scoring
+
+## Summary
+
+| Index | Standalone |  Synthetic | SPANN |
+| ----- | ---------- | ---------- | ----- |
+| USearch 4 bit (baseline) | >2.75ms | 3.28ms? | 51ms |
+| USearch 1 bit | <3.16ms | X | 67ms+ (R=76%) |
+| USearch 1 bit - Improved Concurrency | <2.58ms | X | X |
+| USearch 1 bit - Reranked | 2.39ms | X | X |
+| Flat - Full Precision (5k Centroids) | X | 6.13ms | - |
+| Flat - 1 bit + rerank (10K Centroids) | ? | 4.77ms | ? |
+| Hierarchical SPANN - Full Precision | 17.07ms - 58.98ms | 102.45ms | ? |
+| Hierarchical SPANN - 1 bit | 12.62ms (R=71.01%) | 10.18ms (R=70.68% ) | ? |
+
+Legend:
+- Standalone:
+  - Navigate latency over the index alone
+  - 1M centroids
+- Synthetic: Navigate latency:
+  - Uses synthetic SPANN workload on the index without actually using the SPANN index, so intentionally produces _a tiny bit_ of thread contention
+  - 1M centroids
+- SPANN: Navigate latency: Average navigate latency of the index when used in a full SPANN index.
+  - Uses the [quantized_spann.rs](../../../benches/quantized_spann.rs) benchmark.
+  - ~5.7k centroids
+  - 4M existing data vectors, 1M new data vectors
+
+All numbers represent:
+  - \>= 90% Recall@100 at k=100, which might include implicit reranking or high nprobe counts
+  - 32 threads
 
 ## Usearch 1 bit
 

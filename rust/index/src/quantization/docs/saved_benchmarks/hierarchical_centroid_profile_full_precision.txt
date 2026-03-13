@@ -1,3 +1,70 @@
+full precision
+- no replication.
+cargo bench -p chroma-index --bench hierarchical_centroid_profile --   --dataset wikipedia-en --initial-centroids 100000 --threads 32   --data-vectors 1000 --num-queries 100 --branching-factor 100 --beam-width 10   --expansion-factor 0 --max-replicas 1 --beam-tau 1.0  --beam-max 5000
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.94s
+     Running benches/hierarchical_centroid_profile.rs (target/release/deps/hierarchical_centroid_profile-0d15ed81b7a64b8e)
+Loading Wikipedia EN from HuggingFace Hub...
+Loading 101.1K vectors from wikipedia-en (dim=1024)...
+
+=== Hierarchical Centroid Tree Profile ===
+Dim: 1024 | Metric: L2 | Centroid bits: f32 | Threads: 32
+Initial centroids: 100.0K | Data vectors: 1.0K | Queries: 100
+Branching factor: 100 | Beam: dynamic (tau=1.00, min=10, max=5000) | K-means: 10 iters
+Load profile per data vector: 3.05 navigates, 0.0114 spawns, 0.0057 drops
+
+--- Phase 1: Build tree (100.0K centroids) ---
+Built tree with 100.0K centroids in 21.42s (depth=3, 4668 vec/s)
+Cached tree to target/hierarchical_cache/tree_WikipediaEn_100000_bf100_ki10_L2_f32.bin (431 MB)
+
+--- Tree Structure ---
+  *  Level 0 : 1 internal node, 100 total children (fan-out: min=100, avg=100, max=100)
+  |
+  |  Level 1 : 100 internal nodes, 10.0K total children (fan-out: min=100, avg=100, max=100)
+  |
+  |  Level 2 : 10.0K leaves, 100.0K total vectors (size: min=1, p25=4, p50=8, p75=13, max=88)
+
+Total entries: 100.0K | Unique centroids: 100.0K | Avg replication: 1.00x
+Phase 1 wall clock: 22.60s
+
+--- Phase 2: SPANN workload (1.0K data vectors, 32 threads) ---
+Completed in 11.98s | Index size: 100003
+
+=== Phase 2: Task Counts ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|       3.1K |         11 |          8 |
+
+=== Phase 2: Task Total Time ===
+|   navigate |      spawn |       drop |       wall |
+|------------|------------|------------|------------|
+|       5.2m |     55.5µs |     17.5µs |     11.98s |
+
+=== Phase 2: Task Avg Time ===
+|   navigate |      spawn |       drop |
+|------------|------------|------------|
+|   102.45ms |      5.0µs |      2.2µs |
+
+=== Recall Summary ===
+Corpus size: 100.0K | Queries: 100 | k: 100
+Recall@10: 97.90% | Recall@100: 98.47% | Avg latency: 56.77ms
+
+=== Phase 3: Tau sweep (100 queries, min=10, max=5000) ===
+|    Tau |   Recall@10 |  Recall@100 |    Avg lat | L1 beam | L1 R@100 | L2 beam | L2 R@100 | Leaves |   Vecs |
+|--------|-------------|-------------|------------|---------|---------|---------|---------|--------|--------|
+|   0.01 |      59.50% |      33.93% |     1.17ms |      10 |   90.3% |      10 |   33.9% |     10 |    172 |
+|   0.02 |      59.50% |      33.93% |     1.13ms |      10 |   90.3% |      10 |   33.9% |     10 |    172 |
+|   0.05 |      59.50% |      34.08% |     1.09ms |      10 |   90.3% |      10 |   34.1% |     10 |    173 |
+|   0.10 |      61.40% |      35.29% |     1.14ms |      10 |   90.7% |      11 |   35.3% |     11 |    198 |
+|   0.20 |      70.60% |      44.74% |     1.88ms |      13 |   93.3% |      27 |   44.7% |     27 |    483 |
+|   0.50 |      94.00% |      84.90% |    17.07ms |      76 |   99.8% |     680 |   84.9% |    680 |  10.4K |
+|   1.00 |      97.90% |      98.47% |    58.98ms |      99 |   99.8% |    4098 |   98.5% |   4098 |  53.9K |
+|   2.00 |      98.40% |      99.81% |    72.07ms |     100 |   99.8% |    4984 |   99.8% |   4984 |  64.6K |
+Phase 3 wall clock: 45.66s
+
+
+
+
+
 
 cargo bench -p chroma-index --bench hierarchical_centroid_profile --   --dataset wikipedia-en --initial-centroids 1000000 --threads 32   --data-vectors 1000000 --num-queries 100 --branching-factor 100 --beam-width 10
    Compiling usearch v2.24.0 (/home/ubuntu/USearch)

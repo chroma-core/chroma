@@ -3,8 +3,8 @@ pub mod dbpedia;
 pub mod ground_truth;
 pub mod msmarco;
 pub mod sec;
-pub mod synthetic;
 pub mod wikipedia;
+pub mod synthetic;
 
 use std::collections::HashSet;
 use std::io;

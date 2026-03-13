@@ -86,6 +86,8 @@
 mod multi_bit;
 mod single_bit;
 
+use std::sync::Arc;
+
 use chroma_distance::DistanceFunction;
 
 pub struct Code<const BITS: u8, T = Vec<u8>>(T);

@@ -496,6 +496,7 @@ impl QuantizedSpannSegmentReader {
             expansion_add: ef_construction,
             expansion_search: ef_search,
             quantization_center: Some(center),
+            centroid_quantization_bits: spann_config.centroid_bits(),
         };
         let quantized_centroid = usearch_provider
             .open(&usearch_config, OpenMode::Open(quantized_centroid_id))

@@ -1,0 +1,156 @@
+ubuntu@ip-172-31-75-166:~/chroma$ cargo bench -p chroma-index --bench quantization_recall -- --size 1000000 --k 100
+   Compiling chroma-index v0.1.0 (/home/ubuntu/chroma/rust/index)
+    Finished `bench` profile [optimized + debuginfo] target(s) in 21.78s
+     Running benches/vector/recall.rs (target/release/deps/quantization_recall-92eadb26890a1806)
+
+=== RaBitQ Recall Benchmark ===
+  dataset=cohere_wiki, distance=euclidean, K=100, rerank_factors=[1, 2, 4, 8, 16]
+  sizes=[1000000]
+
+  Pre-processing 1000000 vectors + 100 queries ... 1.40s
+  Generating 1024×1024 random rotation P ...
+  Generated in 0.06s
+  Rotating centroid + 1000000 vectors + 100 queries ...
+  Rotated in 35.23s
+  Computing ground truth (100 queries × 1000000 vectors) ...
+  Ground truth in 5.27s
+  Quantizing 1000000 rotated vectors ...
+  Quantized in 2.8s (4bit) / 0.1s (1bit)
+  Scoring 100 queries with 4bit-code-full-query ...
+  Scoring 100 queries with 1bit-code-full-query ...
+  Scoring 100 queries with 1bit-code-4bit-query ...
+  Scoring 100 queries with 1bit-code-1bit-query ...
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+  Recall@100 on cohere_wiki  (N=1000000, distance=euclidean)
+────────────────────────────────────────────────────────────────────────────────────────────────
+  method                 rerank candidates  recall_mean   recall_min   recall_max       score_ms
+────────────────────────────────────────────────────────────────────────────────────────────────
+  4bit-code-full-query     1x        100      0.9418      0.8900      0.9900        3236.1
+  4bit-code-full-query     2x        200      1.0000      1.0000      1.0000        3236.1
+  4bit-code-full-query     4x        400      1.0000      1.0000      1.0000        3236.1
+  4bit-code-full-query     8x        800      1.0000      1.0000      1.0000        3236.1
+  4bit-code-full-query    16x       1600      1.0000      1.0000      1.0000        3236.1
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-full-query     1x        100      0.6894      0.5400      0.8700        2298.8
+  1bit-code-full-query     2x        200      0.8837      0.7600      1.0000        2298.8
+  1bit-code-full-query     4x        400      0.9708      0.8800      1.0000        2298.8
+  1bit-code-full-query     8x        800      0.9962      0.9700      1.0000        2298.8
+  1bit-code-full-query    16x       1600      0.9996      0.9900      1.0000        2298.8
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-4bit-query     1x        100      0.6859      0.5600      0.8500         468.8
+  1bit-code-4bit-query     2x        200      0.8760      0.7500      1.0000         468.8
+  1bit-code-4bit-query     4x        400      0.9665      0.8800      1.0000         468.8
+  1bit-code-4bit-query     8x        800      0.9951      0.9600      1.0000         468.8
+  1bit-code-4bit-query    16x       1600      0.9991      0.9900      1.0000         468.8
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-1bit-query     1x        100      0.5496      0.3600      0.8300         122.1
+  1bit-code-1bit-query     2x        200      0.7245      0.5100      0.9700         122.1
+  1bit-code-1bit-query     4x        400      0.8556      0.6200      1.0000         122.1
+  1bit-code-1bit-query     8x        800      0.9393      0.7500      1.0000         122.1
+  1bit-code-1bit-query    16x       1600      0.9800      0.9100      1.0000         122.1
+════════════════════════════════════════════════════════════════════════════════════════════════
+
+ubuntu@ip-172-31-75-166:~/chroma$ cargo bench -p chroma-index --bench quantization_recall -- --size 1000000 --k 100 --dataset msmarco
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.35s
+     Running benches/vector/recall.rs (target/release/deps/quantization_recall-92eadb26890a1806)
+
+=== RaBitQ Recall Benchmark ===
+  dataset=msmarco, distance=euclidean, K=100, rerank_factors=[1, 2, 4, 8, 16]
+  sizes=[1000000]
+
+  Pre-processing 1000000 vectors + 100 queries ... 1.54s
+  Generating 1024×1024 random rotation P ...
+  Generated in 0.06s
+  Rotating centroid + 1000000 vectors + 100 queries ...
+  Rotated in 35.30s
+  Computing ground truth (100 queries × 1000000 vectors) ...
+  Ground truth in 9.42s
+  Quantizing 1000000 rotated vectors ...
+  Quantized in 5.6s (4bit) / 0.3s (1bit)
+  Scoring 100 queries with 4bit-code-full-query ...
+  Scoring 100 queries with 1bit-code-full-query ...
+  Scoring 100 queries with 1bit-code-4bit-query ...
+  Scoring 100 queries with 1bit-code-1bit-query ...
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+  Recall@100 on msmarco  (N=1000000, distance=euclidean)
+────────────────────────────────────────────────────────────────────────────────────────────────
+  method                 rerank candidates  recall_mean   recall_min   recall_max       score_ms
+────────────────────────────────────────────────────────────────────────────────────────────────
+  4bit-code-full-query     1x        100      0.9535      0.9100      0.9900        5979.4
+  4bit-code-full-query     2x        200      1.0000      1.0000      1.0000        5979.4
+  4bit-code-full-query     4x        400      1.0000      1.0000      1.0000        5979.4
+  4bit-code-full-query     8x        800      1.0000      1.0000      1.0000        5979.4
+  4bit-code-full-query    16x       1600      1.0000      1.0000      1.0000        5979.4
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-full-query     1x        100      0.7630      0.5600      0.9200        4063.6
+  1bit-code-full-query     2x        200      0.9436      0.7700      1.0000        4063.6
+  1bit-code-full-query     4x        400      0.9909      0.9000      1.0000        4063.6
+  1bit-code-full-query     8x        800      0.9990      0.9700      1.0000        4063.6
+  1bit-code-full-query    16x       1600      1.0000      1.0000      1.0000        4063.6
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-4bit-query     1x        100      0.7582      0.5500      0.9200         773.2
+  1bit-code-4bit-query     2x        200      0.9375      0.7600      1.0000         773.2
+  1bit-code-4bit-query     4x        400      0.9902      0.9100      1.0000         773.2
+  1bit-code-4bit-query     8x        800      0.9989      0.9600      1.0000         773.2
+  1bit-code-4bit-query    16x       1600      1.0000      1.0000      1.0000         773.2
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-1bit-query     1x        100      0.6541      0.3600      0.8800         252.8
+  1bit-code-1bit-query     2x        200      0.8397      0.4900      1.0000         252.8
+  1bit-code-1bit-query     4x        400      0.9409      0.6700      1.0000         252.8
+  1bit-code-1bit-query     8x        800      0.9809      0.7800      1.0000         252.8
+  1bit-code-1bit-query    16x       1600      0.9955      0.9200      1.0000         252.8
+════════════════════════════════════════════════════════════════════════════════════════════════
+
+ubuntu@ip-172-31-75-166:~/chroma$ cargo bench -p chroma-index --bench quantization_recall -- --size 1000000 --k 100 --dataset beir
+    Finished `bench` profile [optimized + debuginfo] target(s) in 0.35s
+     Running benches/vector/recall.rs (target/release/deps/quantization_recall-92eadb26890a1806)
+
+=== RaBitQ Recall Benchmark ===
+  dataset=beir, distance=euclidean, K=100, rerank_factors=[1, 2, 4, 8, 16]
+  sizes=[1000000]
+
+  Pre-processing 1000000 vectors + 100 queries ... 1.52s
+  Generating 1024×1024 random rotation P ...
+  Generated in 0.06s
+  Rotating centroid + 1000000 vectors + 100 queries ...
+  Rotated in 36.67s
+  Computing ground truth (100 queries × 1000000 vectors) ...
+  Ground truth in 9.07s
+  Quantizing 1000000 rotated vectors ...
+  Quantized in 5.6s (4bit) / 0.3s (1bit)
+  Scoring 100 queries with 4bit-code-full-query ...
+  Scoring 100 queries with 1bit-code-full-query ...
+  Scoring 100 queries with 1bit-code-4bit-query ...
+  Scoring 100 queries with 1bit-code-1bit-query ...
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+  Recall@100 on beir  (N=1000000, distance=euclidean)
+────────────────────────────────────────────────────────────────────────────────────────────────
+  method                 rerank candidates  recall_mean   recall_min   recall_max       score_ms
+────────────────────────────────────────────────────────────────────────────────────────────────
+  4bit-code-full-query     1x        100      0.9538      0.9000      1.0000        5625.4
+  4bit-code-full-query     2x        200      1.0000      1.0000      1.0000        5625.4
+  4bit-code-full-query     4x        400      1.0000      1.0000      1.0000        5625.4
+  4bit-code-full-query     8x        800      1.0000      1.0000      1.0000        5625.4
+  4bit-code-full-query    16x       1600      1.0000      1.0000      1.0000        5625.4
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-full-query     1x        100      0.7756      0.6000      0.9100        3900.5
+  1bit-code-full-query     2x        200      0.9488      0.8100      1.0000        3900.5
+  1bit-code-full-query     4x        400      0.9926      0.9100      1.0000        3900.5
+  1bit-code-full-query     8x        800      0.9992      0.9700      1.0000        3900.5
+  1bit-code-full-query    16x       1600      0.9998      0.9900      1.0000        3900.5
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-4bit-query     1x        100      0.7724      0.6000      0.9100         622.1
+  1bit-code-4bit-query     2x        200      0.9453      0.7800      1.0000         622.1
+  1bit-code-4bit-query     4x        400      0.9910      0.9000      1.0000         622.1
+  1bit-code-4bit-query     8x        800      0.9989      0.9700      1.0000         622.1
+  1bit-code-4bit-query    16x       1600      0.9999      0.9900      1.0000         622.1
+────────────────────────────────────────────────────────────────────────────────────────────────
+  1bit-code-1bit-query     1x        100      0.6673      0.4100      0.8600         130.2
+  1bit-code-1bit-query     2x        200      0.8544      0.6000      1.0000         130.2
+  1bit-code-1bit-query     4x        400      0.9472      0.7700      1.0000         130.2
+  1bit-code-1bit-query     8x        800      0.9821      0.8800      1.0000         130.2
+  1bit-code-1bit-query    16x       1600      0.9949      0.9400      1.0000         130.2
+════════════════════════════════════════════════════════════════════════════════════════════════

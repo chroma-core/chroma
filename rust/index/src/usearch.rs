@@ -46,6 +46,8 @@ pub struct USearchIndexConfig {
     pub expansion_search: usize,
     /// If provided, use RaBitQ quantization with this center point.
     pub quantization_center: Option<Arc<[f32]>>,
+    /// Bit-width for centroid quantization (1 or 4).
+    pub centroid_quantization_bits: u8,
 }
 
 impl USearchIndexConfig {
@@ -271,7 +273,7 @@ impl VectorIndex for USearchIndex {
             }
 
             return if let Some(ref code) = code {
-                let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_slice());
+                let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_ref());
                 index.add(key as u64, i8_slice)
             } else {
                 index.add(key as u64, vector)
@@ -332,7 +334,7 @@ impl VectorIndex for USearchIndex {
                 1 => Code::<1>::quantize(query, center).into_inner(),
                 _ => Code::<4>::quantize(query, center).into_inner(),
             };
-            let i8_slice = bytemuck::cast_slice::<u8, i8>(code.as_slice());
+            let i8_slice = bytemuck::cast_slice::<u8, i8>(&code);
             self.index.read().search(i8_slice, count)
         } else {
             self.index.read().search(query, count)
