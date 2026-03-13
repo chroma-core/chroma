@@ -1,6 +1,5 @@
-import sqlite3
 import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from chromadb.config import Settings, System
 from chromadb.db.impl.sqlite import SqliteDB
@@ -75,34 +74,36 @@ def test_foreign_key_check_detects_violations() -> None:
     try:
         db = system.instance(SqliteDB)
 
-        # Introduce a FK violation by inserting orphaned data directly
+        # Create a FK violation by inserting orphaned data with FK enforcement off
         conn = db._conn_pool.connect()
-        # Temporarily disable FK enforcement to insert bad data
-        conn.execute("PRAGMA foreign_keys = OFF")
         try:
-            # Find a table with a foreign key constraint
-            cursor = conn.execute(
-                "SELECT sql FROM sqlite_master WHERE type='table' AND sql LIKE '%REFERENCES%'"
+            conn.execute("PRAGMA foreign_keys = OFF")
+            # Create test tables with a foreign key relationship
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS _fk_test_parent (id INTEGER PRIMARY KEY)"
             )
-            fk_tables = cursor.fetchall()
-
-            if not fk_tables:
-                # No FK constraints in schema, skip violation test
-                db._conn_pool.return_to_pool(conn)
-                return
-
-            # Re-enable FK for the check
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS _fk_test_child "
+                "(id INTEGER PRIMARY KEY, parent_id INTEGER "
+                "REFERENCES _fk_test_parent(id))"
+            )
+            # Insert orphan row (parent_id=999 doesn't exist in parent table)
+            conn.execute(
+                "INSERT INTO _fk_test_child (id, parent_id) VALUES (1, 999)"
+            )
             conn.execute("PRAGMA foreign_keys = ON")
         finally:
             db._conn_pool.return_to_pool(conn)
 
-        # The actual violation detection is tested via the telemetry capture mock
+        # Now check that _check_foreign_key_integrity detects the violation
         with patch.object(db._product_telemetry_client, "capture") as mock_capture:
             db._check_foreign_key_integrity()
-            # On a clean DB there should be no violations, so capture should not be called
-            # This validates the code path runs without error
-            if not mock_capture.called:
-                pass  # Expected: no violations on clean DB
+            assert mock_capture.called, (
+                "Telemetry capture should be called when FK violations exist"
+            )
+            event = mock_capture.call_args[0][0]
+            assert event.num_violations >= 1
+            assert "_fk_test_child" in event.tables_affected
 
     finally:
         system.stop()
