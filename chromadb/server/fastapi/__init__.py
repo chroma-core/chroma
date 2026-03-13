@@ -587,7 +587,7 @@ class FastAPI(Server):
 
             return self._api.create_database(db.name, tenant)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_database,
             tenant,
             request.headers,
@@ -663,7 +663,7 @@ class FastAPI(Server):
 
             return self._api.create_tenant(tenant.name)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_tenant,
             request,
             await request.body(),
@@ -1658,7 +1658,7 @@ class FastAPI(Server):
 
             return self._api.create_database(db.name, tenant)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_database,
             tenant,
             request.headers,
@@ -1721,7 +1721,7 @@ class FastAPI(Server):
 
             return self._api.create_tenant(tenant.name)
 
-        await to_thread.run_sync(
+        return await to_thread.run_sync(
             process_create_tenant,
             request,
             await request.body(),
