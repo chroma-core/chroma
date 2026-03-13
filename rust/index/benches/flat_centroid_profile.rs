@@ -1251,7 +1251,7 @@ fn main() {
                                 for qi in start..end {
                                     let q = scale_query_vecs[qi];
                                     let t = Instant::now();
-                                    let result = idx.search(q, scale_k, false, None);
+                                    let result = idx.search(q, scale_k, false);
                                     lat += t.elapsed();
 
                                     let predicted: HashSet<u32> = result.iter().map(|&(key, _)| key).collect();

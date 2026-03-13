@@ -219,3 +219,19 @@ pub(crate) fn rabitq_distance_code(
         DistanceFunction::InnerProduct => 1.0 - d_a_dot_d_b,
     }
 }
+
+
+impl<const BITS: u8, T: AsRef<[u8]>> Code<BITS, T> {
+    /// Correction factor `⟨g, n⟩`.
+    pub fn correction(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[0..4])
+    }
+    /// Data residual norm `‖r‖`.
+    pub fn norm(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[4..8])
+    }
+    /// Radial component `⟨r, c⟩`.
+    pub fn radial(&self) -> f32 {
+        bytemuck::pod_read_unaligned::<f32>(&self.0.as_ref()[8..12])
+    }
+}

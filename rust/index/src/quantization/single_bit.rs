@@ -38,11 +38,6 @@ impl<T: AsRef<[u8]>> Code<1, T> {
         bytemuck::pod_read_unaligned(&self.0.as_ref()[..size_of::<CodeHeader1Bit>()])
     }
 
-    /// Returns the stored norm of the original (unquantized) residual vector.
-    pub fn norm(&self) -> f32 {
-        self.header().norm
-    }
-
     /// Packed quantization codes (excluding the header).
     fn packed(&self) -> &[u8] {
         &self.0.as_ref()[size_of::<CodeHeader1Bit>()..]

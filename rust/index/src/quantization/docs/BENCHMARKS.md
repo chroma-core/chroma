@@ -49,6 +49,11 @@
       - [Specifics](#specifics)
   - [Flat / Brute Force](#flat--brute-force)
   - [Hierarchical SPANN](#hierarchical-spann)
+    - [Design](#design)
+    - [Hierarchical Tree Config vs SPANN Config](#hierarchical-tree-config-vs-spann-config)
+    - [10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)](#10k-centroid-experiments-wikipedia-en-f32-1k-data-vectors)
+    - [Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)](#balanced-k-means-100k-centroids-wikipedia-en-f32-eps10-r4)
+    - [Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)](#dynamic-beam--tau-sweep-100k-centroids-wikipedia-en-no-replication-bf100)
 
 # RaBitQ
 
@@ -855,3 +860,73 @@ results: [flat_1bit.txt](saved_benchmarks/flat_1bit.txt)
 | Total lat (4x)       | 236.3ms         | 1.23ms              | 3.88ms          | 496.0us             |
 
 ## Hierarchical SPANN
+
+### Design
+Indexing
+- hierarchical spann
+- branching factor 100 (3 levels for 100k centroids, 4 levels for 1M centroids)
+- balanced k-means clustering
+- Boundary vector Replication
+Querying
+- Dynamic beam width
+
+### Hierarchical Tree Config vs SPANN Config
+
+| Hierarchical Tree | Value | SPANN (quantized_spann.rs) | Value | Notes |
+|---|---|---|---|---|
+| `bf` (branching_factor) | 100 | N/A | N/A | SPANN uses HNSW for centroid lookup, not a tree. No branching factor. |
+| `beam_width` | 10 | `ef_search` | **128** | Both control search quality. beam_width = candidates kept per tree level. ef_search = HNSW beam width. |
+| `distance_fn` | L2 | L2 | L2 | Same |
+| `centroid_bits` | None/1 | `centroid_bits` | None/1 | Same -- controls whether centroid index uses 1-bit RaBitQ |
+| `expansion_factor` | 0.0-1.0 | `write_rng_epsilon` | **8.0** | Both control boundary replication radius. Conceptually analogous but different mechanisms -- tree expansion uses distance ratio, SPANN uses RNG rule with epsilon. |
+| `max_replicas` | 1-4 | `nreplica_count` | **2** | Max clusters a vector can be assigned to |
+| `kmeans_iters` | 10 | N/A | N/A | SPANN doesn't use k-means for the centroid index; it uses HNSW. K-means is used internally for cluster splits. |
+| N/A | | `ef_construction` | **256** | HNSW build-time parameter. No tree analog. |
+| N/A | | `max_neighbors` (M) | **24** | HNSW graph connectivity. No tree analog. |
+| N/A | | `write_nprobe` | **64** | How many centroids to probe when assigning a new vector to clusters. Analogous to how the tree's `search()` is called with k=NPROBE=64 during the workload sim. |
+| N/A | | `split_threshold` | **512** | Max posting list size before splitting. No direct tree analog. |
+| N/A | | `merge_threshold` | **128** | Min posting list size before merging. No direct tree analog. |
+| N/A | | `write_rng_factor` | **4.0** | RNG rule factor for selecting replica clusters. No tree analog. |
+
+### 10K Centroid Experiments (wikipedia-en, f32, 1K data vectors)
+
+| Test | Config | R@10 | R@100 | Nav Latency | Tree Entries | Depth |
+|------|--------|------|-------|-------------|-------------|-------|
+| Baseline | bf=100, beam=10 | 80.0% | 34.7% | 672us | 10K | 3 |
+| Test 1 | bf=1000, beam=20 | 86.2% | 63.0% | 608us | 10K | 2 |
+| Test 2 | bf=100, beam=10, eps=1, r=4 | **97.1%** | **98.4%** | 10.6ms | 40K (4x) | 2 |
+| Test 3 | bf=1000, beam=20, eps=1, r=4 | 94.4% | 85.6% | 1.9ms | 39.3K (3.9x) | 2 |
+
+### Balanced k-means (100K centroids, wikipedia-en, f32, eps=1.0, r=4)
+
+See `--balanced` flag in [hierarchical_centroid_profile.rs](../../../benches/hierarchical_centroid_profile.rs)
+
+| Metric | Unbalanced | Balanced (lambda=100) |
+|---|---|---|
+| R@10 (beam=10) | 78.7% | 66.5% |
+| R@100 (beam=10) | 62.1% | 48.7% |
+| Nav latency | 2.37ms | 1.09ms |
+| Leaf max size | 851 | 520 |
+| Leaf p50 size | 22 | 27 |
+| Avg replication | 3.94x | 3.67x |
+| Phase 2 wall clock | 338ms | 172ms |
+
+Balanced clustering produces more uniform leaf sizes (max 520 vs 851) and ~2x faster
+navigate, but loses ~12% recall at beam=10. The gap narrows at high beam widths
+(beam=1000: both ~98% R@10). At iso-recall, balanced does not win on latency because
+the wider beam needed to recover recall cancels out the per-step savings.
+
+### Dynamic beam / tau sweep (100K centroids, wikipedia-en, no replication, bf=100)
+
+Best configurations from tau sweep (tau=1.0, min=10, max=5000). No replication (eps=0, r=1).
+**f32 (full precision):**
+
+| Precision | Config | R@10 | R@100 | Avg Latency | Leaves | Vecs scanned |
+|----|--------|------|-------|-------------|--------|-------------|
+|f32| tau=1.00 | **97.9%** | **98.5%** | 59.0ms | 4098 | 53.9K |
+|1-bit| tau=1.00 | **97.6%** | **70.7%** | 17.9ms | 4153 | 54.5K |
+
+1-bit quantization gives ~3-4x latency reduction but R@100 degrades significantly
+(98.5% -> 70.7% at tau=1.0) because quantization error compounds over thousands of
+leaf vectors. R@10 is preserved (97.9% -> 97.6%) since top-10 neighbors tend to be
+well-separated.
