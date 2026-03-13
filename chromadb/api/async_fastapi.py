@@ -186,6 +186,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             f"/tenants/{tenant}/databases",
             json={"name": name},
         )
+        # Fallback for older servers that return empty body
+        if not response or not isinstance(response, dict):
+            return await self.get_database(name=name, tenant=tenant)
         return Database(
             id=response["id"], name=response["name"], tenant=response["tenant"]
         )
@@ -251,6 +254,9 @@ class AsyncFastAPI(BaseHTTPClient, AsyncServerAPI):
             "/tenants",
             json={"name": name},
         )
+        # Fallback for older servers that return empty body
+        if not resp_json or not isinstance(resp_json, dict):
+            return Tenant(name=name)
         return Tenant(name=resp_json["name"])
 
     @trace_method("AsyncFastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)

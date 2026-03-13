@@ -153,6 +153,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
             f"/tenants/{tenant}/databases",
             json={"name": name},
         )
+        # Fallback for older servers that return empty body
+        if not resp_json or not isinstance(resp_json, dict):
+            return self.get_database(name=name, tenant=tenant)
         return Database(
             id=resp_json["id"], name=resp_json["name"], tenant=resp_json["tenant"]
         )
@@ -216,6 +219,9 @@ class FastAPI(BaseHTTPClient, ServerAPI):
     @override
     def create_tenant(self, name: str) -> Tenant:
         resp_json = self._make_request("post", "/tenants", json={"name": name})
+        # Fallback for older servers that return empty body
+        if not resp_json or not isinstance(resp_json, dict):
+            return Tenant(name=name)
         return Tenant(name=resp_json["name"])
 
     @trace_method("FastAPI.get_tenant", OpenTelemetryGranularity.OPERATION)
