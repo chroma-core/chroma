@@ -365,13 +365,20 @@ mod tests {
             "Total size {} exceeds limit 250",
             total_size
         );
-        assert!(jobs.len() <= 2, "Size limit should be stricter than job limit");
+        assert!(
+            jobs.len() <= 2,
+            "Size limit should be stricter than job limit"
+        );
 
         // Now flip: size limit of 500 (fits 4+), job limit of 2
         let policy = MemoryBoundedSchedulerPolicy::new(500);
         let jobs = policy.determine(collections, 2, 0);
 
-        assert_eq!(jobs.len(), 2, "Job limit should be stricter than size limit");
+        assert_eq!(
+            jobs.len(),
+            2,
+            "Job limit should be stricter than size limit"
+        );
     }
 
     #[test]

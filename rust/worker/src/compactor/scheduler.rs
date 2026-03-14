@@ -47,7 +47,11 @@ pub(crate) struct InProgressJob {
 }
 
 impl InProgressJob {
-    fn new(job_expiry_seconds: u64, database_name: DatabaseName, collection_size_bytes: u64) -> Self {
+    fn new(
+        job_expiry_seconds: u64,
+        database_name: DatabaseName,
+        collection_size_bytes: u64,
+    ) -> Self {
         Self {
             expires_at: SystemTime::now() + Duration::from_secs(job_expiry_seconds),
             database_name,
@@ -395,7 +399,13 @@ impl Scheduler {
         let job_info: Vec<_> = self
             .job_queue
             .iter()
-            .map(|j| (j.collection_id, j.database_name.clone(), j.collection_size_bytes))
+            .map(|j| {
+                (
+                    j.collection_id,
+                    j.database_name.clone(),
+                    j.collection_size_bytes,
+                )
+            })
             .collect();
         for (collection_id, database_name, collection_size_bytes) in job_info {
             self.add_in_progress(collection_id, database_name, collection_size_bytes);
@@ -426,7 +436,11 @@ impl Scheduler {
     ) {
         self.in_progress_jobs.insert(
             collection_id.into(),
-            InProgressJob::new(self.job_expiry_seconds, database_name, collection_size_bytes),
+            InProgressJob::new(
+                self.job_expiry_seconds,
+                database_name,
+                collection_size_bytes,
+            ),
         );
     }
 
@@ -1363,7 +1377,7 @@ mod tests {
     fn schedule_internal_concurrent_jobs_and_size_both_enforced() {
         // Test that both max_concurrent_jobs and max_total_size are enforced
         let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(
-            1,   // only 1 concurrent job
+            1,    // only 1 concurrent job
             2000, // but 2000 bytes allowed
         );
 
