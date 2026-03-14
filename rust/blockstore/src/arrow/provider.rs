@@ -94,6 +94,10 @@ impl ArrowBlockfileProvider {
         }
     }
 
+    pub fn storage(&self) -> &Arc<Storage> {
+        self.block_manager.storage()
+    }
+
     pub async fn read<
         'new,
         K: Key + Into<KeyWrapper> + ArrowReadableKey<'new> + 'new,
@@ -426,6 +430,10 @@ impl BlockManager {
             block_metrics: BlockMetrics::default(),
             num_concurrent_block_flushes,
         }
+    }
+
+    pub fn storage(&self) -> &Arc<Storage> {
+        &self.storage
     }
 
     pub(super) fn create<K: ArrowWriteableKey, V: ArrowWriteableValue, D: Delta>(&self) -> D {

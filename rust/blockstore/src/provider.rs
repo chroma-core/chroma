@@ -21,6 +21,7 @@ use chroma_error::{ChromaError, ErrorCodes};
 use chroma_storage::Storage;
 use core::fmt::{self, Debug};
 use std::fmt::Formatter;
+use std::sync::Arc;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -68,6 +69,15 @@ impl<'a, T> ReadKey<'a> for T where
 impl<'a, T> ReadValue<'a> for T where T: Value + Readable<'a> + ArrowReadableValue<'a> + Sync + 'a {}
 
 impl BlockfileProvider {
+    pub fn storage(&self) -> Option<Arc<Storage>> {
+        match self {
+            BlockfileProvider::ArrowBlockfileProvider(provider) => {
+                Some(provider.storage().clone())
+            }
+            BlockfileProvider::HashMapBlockfileProvider(_) => None,
+        }
+    }
+
     pub fn new_memory() -> Self {
         BlockfileProvider::HashMapBlockfileProvider(MemoryBlockfileProvider::new())
     }
