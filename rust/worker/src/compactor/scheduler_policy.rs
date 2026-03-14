@@ -524,7 +524,7 @@ mod tests {
 
         // First collection should be selected (starvation prevention)
         // Second should be skipped due to overflow protection
-        assert!(jobs.len() >= 1, "Should handle overflow gracefully");
+        assert!(!jobs.is_empty(), "Should handle overflow gracefully");
     }
 
     // =========================================================================
