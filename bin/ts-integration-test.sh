@@ -2,7 +2,7 @@
 set -e
 
 # Install dependencies
-cd clients/new-js
+cd clients/js
 pnpm build
 
 # Generate the JS client

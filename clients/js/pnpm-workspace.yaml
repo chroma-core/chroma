@@ -1,2 +1,3 @@
 packages:
-  - packages/*
+  - 'packages/*'
+  - 'packages/ai-embeddings/*'

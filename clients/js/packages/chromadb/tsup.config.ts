@@ -1,5 +1,5 @@
 import { defineConfig, Options } from "tsup";
-import fs from "fs";
+import * as fs from "fs";
 
 export default defineConfig((options: Options) => {
   const commonOptions: Partial<Options> = {
@@ -8,8 +8,6 @@ export default defineConfig((options: Options) => {
       cli: "src/cli.ts",
     },
     sourcemap: true,
-    dts: true,
-    target: "es2020",
     external: [
       "chromadb-js-bindings-darwin-arm64",
       "chromadb-js-bindings-darwin-x64",
@@ -17,9 +15,16 @@ export default defineConfig((options: Options) => {
       "chromadb-js-bindings-linux-x64-gnu",
       "chromadb-js-bindings-win32-arm64-msvc",
       "chromadb-js-bindings-win32-x64-msvc",
+      "@chroma-core/default-embed",
+      "onnxruntime-node",
     ],
-    // Include core package and all embedding packages in the bundle for the thick client
-    noExternal: ["@internal/chromadb-core", "chromadb-default-embed"],
+    dts: {
+      compilerOptions: {
+        composite: false,
+        declaration: true,
+        emitDeclarationOnly: false,
+      },
+    },
     ...options,
   };
 
