@@ -244,15 +244,26 @@ impl GarbageCollectorOrchestrator {
     ) -> Result<HashSet<CollectionUuid>, GarbageCollectorError> {
         let soft_delete_statuses = self
             .sysdb_client
-            .batch_get_collection_soft_delete_status(all_collection_ids.clone())
+            .batch_get_collection_soft_delete_status(
+                Some(self.database_name.clone()),
+                all_collection_ids.clone(),
+            )
             .await
             .map_err(|e| GarbageCollectorError::SysDbMethodFailed(e.to_string()))?;
 
         let all_collection_ids: HashSet<CollectionUuid> = all_collection_ids.into_iter().collect();
 
+        tracing::trace!("Soft delete statuses: {:?}", soft_delete_statuses);
+
         let soft_deleted_collections_to_gc = soft_delete_statuses
             .iter()
             .filter_map(|(collection_id, status)| {
+                tracing::trace!(
+                    collection_id = %collection_id,
+                    is_soft_deleted = status,
+                    in_all_collection_ids = all_collection_ids.contains(collection_id),
+                    "Collection soft delete status"
+                );
                 if *status && all_collection_ids.contains(collection_id) {
                     Some(*collection_id)
                 } else {
@@ -265,10 +276,10 @@ impl GarbageCollectorOrchestrator {
             .sysdb_client
             .get_collections(GetCollectionsOptions {
                 collection_ids: Some(soft_deleted_collections_to_gc),
-                include_soft_deleted: true,
                 database_or_topology: Some(DatabaseOrTopology::Database(
                     self.database_name.clone(),
                 )),
+                include_soft_deleted: true,
                 ..Default::default()
             })
             .await
@@ -277,6 +288,12 @@ impl GarbageCollectorOrchestrator {
         let mut eligible_ids = HashSet::new();
         let cutoff_time: SystemTime = self.collection_soft_delete_absolute_cutoff_time.into();
         for collection in collections {
+            tracing::debug!(
+                "Collection {} was updated at {:?}, cutoff time is {:?}",
+                collection.collection_id,
+                collection.updated_at,
+                cutoff_time
+            );
             if collection.updated_at < cutoff_time {
                 eligible_ids.insert(collection.collection_id);
             } else {
