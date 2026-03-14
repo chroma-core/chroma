@@ -500,29 +500,4 @@ export class Collection {
 
     return newCollection;
   }
-
-  /**
-   * Gets the number of forks for this collection.
-   *
-   * @returns {Promise<number>} A promise that resolves to the number of forks.
-   * @throws {Error} If there is an issue getting the fork count.
-   *
-   * @example
-   * ```typescript
-   * const forkCount = await collection.forkCount();
-   * console.log(`This collection has ${forkCount} forks`);
-   * ```
-   */
-  async forkCount(): Promise<number> {
-    await this.client.init();
-
-    const resp = (await this.client.api.collectionForkCount(
-      this.client.tenant,
-      this.client.database,
-      this.id,
-      this.client.api.options,
-    )) as Api.ForkCountResponse;
-
-    return resp.count;
-  }
 }

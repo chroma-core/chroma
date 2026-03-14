@@ -1072,74 +1072,6 @@ export const ApiApiFetchParamCreator = function (
       };
     },
     /**
-     * @summary Gets the number of forks for a collection.
-     * @param {string} tenant <p>Tenant ID</p>
-     * @param {string} database <p>Database name</p>
-     * @param {string} collectionId <p>UUID of the collection</p>
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    collectionForkCount(
-      tenant: string,
-      database: string,
-      collectionId: string,
-      options: RequestInit = {},
-    ): FetchArgs {
-      // verify required parameter 'tenant' is not null or undefined
-      if (tenant === null || tenant === undefined) {
-        throw new RequiredError(
-          "tenant",
-          "Required parameter tenant was null or undefined when calling collectionForkCount.",
-        );
-      }
-      // verify required parameter 'database' is not null or undefined
-      if (database === null || database === undefined) {
-        throw new RequiredError(
-          "database",
-          "Required parameter database was null or undefined when calling collectionForkCount.",
-        );
-      }
-      // verify required parameter 'collectionId' is not null or undefined
-      if (collectionId === null || collectionId === undefined) {
-        throw new RequiredError(
-          "collectionId",
-          "Required parameter collectionId was null or undefined when calling collectionForkCount.",
-        );
-      }
-      let localVarPath =
-        `/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count`
-          .replace("{tenant}", encodeURIComponent(String(tenant)))
-          .replace("{database}", encodeURIComponent(String(database)))
-          .replace("{collection_id}", encodeURIComponent(String(collectionId)));
-      const localVarPathQueryStart = localVarPath.indexOf("?");
-      const localVarRequestOptions: RequestInit = Object.assign(
-        { method: "GET" },
-        options,
-      );
-      const localVarHeaderParameter: Headers = options.headers
-        ? new Headers(options.headers)
-        : new Headers();
-      const localVarQueryParameter = new URLSearchParams(
-        localVarPathQueryStart !== -1
-          ? localVarPath.substring(localVarPathQueryStart + 1)
-          : "",
-      );
-      if (localVarPathQueryStart !== -1) {
-        localVarPath = localVarPath.substring(0, localVarPathQueryStart);
-      }
-
-      localVarRequestOptions.headers = localVarHeaderParameter;
-
-      const localVarQueryParameterString = localVarQueryParameter.toString();
-      if (localVarQueryParameterString) {
-        localVarPath += "?" + localVarQueryParameterString;
-      }
-      return {
-        url: localVarPath,
-        options: localVarRequestOptions,
-      };
-    },
-    /**
      * @summary Retrieves a collection by ID or name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name</p>
@@ -2610,61 +2542,6 @@ export const ApiApiFp = function (configuration?: Configuration) {
       };
     },
     /**
-     * @summary Gets the number of forks for a collection.
-     * @param {string} tenant <p>Tenant ID</p>
-     * @param {string} database <p>Database name</p>
-     * @param {string} collectionId <p>UUID of the collection</p>
-     * @param {RequestInit} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    collectionForkCount(
-      tenant: string,
-      database: string,
-      collectionId: string,
-      options?: RequestInit,
-    ): (fetch?: FetchAPI, basePath?: string) => Promise<Api.ForkCountResponse> {
-      const localVarFetchArgs = ApiApiFetchParamCreator(
-        configuration,
-      ).collectionForkCount(tenant, database, collectionId, options);
-      return (fetch: FetchAPI = defaultFetch, basePath: string = BASE_PATH) => {
-        return fetch(
-          basePath + localVarFetchArgs.url,
-          localVarFetchArgs.options,
-        ).then((response) => {
-          const contentType = response.headers.get("Content-Type");
-          const mimeType = contentType
-            ? contentType.replace(/;.*/, "")
-            : undefined;
-
-          if (response.status === 200) {
-            if (mimeType === "application/json") {
-              return response.json() as any;
-            }
-            throw response;
-          }
-          if (response.status === 401) {
-            if (mimeType === "application/json") {
-              throw response;
-            }
-            throw response;
-          }
-          if (response.status === 404) {
-            if (mimeType === "application/json") {
-              throw response;
-            }
-            throw response;
-          }
-          if (response.status === 500) {
-            if (mimeType === "application/json") {
-              throw response;
-            }
-            throw response;
-          }
-          throw response;
-        });
-      };
-    },
-    /**
      * @summary Retrieves a collection by ID or name.
      * @param {string} tenant <p>Tenant ID</p>
      * @param {string} database <p>Database name</p>
@@ -3650,28 +3527,6 @@ export class ApiApi extends BaseAPI {
       database,
       collectionId,
       request,
-      options,
-    )(this.fetch, this.basePath);
-  }
-
-  /**
-   * @summary Gets the number of forks for a collection.
-   * @param {string} tenant <p>Tenant ID</p>
-   * @param {string} database <p>Database name</p>
-   * @param {string} collectionId <p>UUID of the collection</p>
-   * @param {RequestInit} [options] Override http request option.
-   * @throws {RequiredError}
-   */
-  public collectionForkCount(
-    tenant: string,
-    database: string,
-    collectionId: string,
-    options?: RequestInit,
-  ) {
-    return ApiApiFp(this.configuration).collectionForkCount(
-      tenant,
-      database,
-      collectionId,
       options,
     )(this.fetch, this.basePath);
   }

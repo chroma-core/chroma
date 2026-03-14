@@ -168,6 +168,11 @@ export interface Collection {
    */
   fork({ name }: { name: string }): Promise<Collection>;
   /**
+   * Gets the number of forks for this collection.
+   * @returns Promise resolving to the number of forks
+   */
+  forkCount(): Promise<number>;
+  /**
    * Updates existing records in the collection.
    * @param args - Record data to update
    */
@@ -1025,6 +1030,15 @@ export class CollectionImpl implements Collection {
       metadata: deserializeMetadata(data.metadata ?? undefined) ?? undefined,
       configuration: data.configuration_json,
     });
+  }
+
+  public async forkCount(): Promise<number> {
+    const { data } = await CollectionService.forkCount({
+      client: this.apiClient,
+      path: await this.path(),
+    });
+
+    return data.count;
   }
 
   public async update({

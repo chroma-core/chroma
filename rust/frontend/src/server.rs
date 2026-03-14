@@ -1809,8 +1809,11 @@ async fn fork_count(
 ) -> Result<Json<ForkCountResponse>, ServerError> {
     server.metrics.fork_count.add(1, &[]);
     tracing::info!(name: "fork_count", tenant_name = %tenant, database_name = %database, collection_id = %collection_id);
+    let database_name = DatabaseName::new(&database).ok_or_else(|| {
+        ValidationError::InvalidArgument("database name must be at least 3 characters".to_string())
+    })?;
     server
-        .authenticate_and_authorize(
+        .authenticate_and_authorize_collection(
             &headers,
             AuthzAction::CountForks,
             AuthzResource {
@@ -1818,6 +1821,8 @@ async fn fork_count(
                 database: Some(database.clone()),
                 collection: Some(collection_id.clone()),
             },
+            database_name,
+            CollectionUuid::from_str(&collection_id).map_err(|_| ValidationError::CollectionId)?,
         )
         .await?;
     let _guard = server.scorecard_request(&[

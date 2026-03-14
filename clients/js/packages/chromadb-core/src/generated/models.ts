@@ -163,15 +163,6 @@ export namespace Api {
     new_name: string;
   }
 
-  export interface ForkCountResponse {
-    /**
-     * The number of forks for this collection.
-     * @type {number}
-     * @memberof ForkCountResponse
-     */
-    count: number;
-  }
-
   export interface GetRequestPayload extends Api.RawWhereFields {
     ids?: string[] | null;
     include?: Api.Include[];

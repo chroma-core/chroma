@@ -1663,6 +1663,60 @@ export type ForkCollectionResponses = {
 
 export type ForkCollectionResponse = ForkCollectionResponses[keyof ForkCollectionResponses];
 
+export type ForkCountData = {
+    body?: never;
+    path: {
+        /**
+         * Tenant UUID
+         */
+        tenant: string;
+        /**
+         * Database name
+         */
+        database: string;
+        /**
+         * Collection UUID
+         */
+        collection_id: string;
+    };
+    query?: never;
+    url: '/api/v2/tenants/{tenant}/databases/{database}/collections/{collection_id}/fork_count';
+};
+
+export type ForkCountErrors = {
+    /**
+     * Invalid request
+     */
+    400: ChromaAPIError;
+    /**
+     * Unauthorized
+     */
+    401: ChromaAPIError;
+    /**
+     * Collection not found
+     */
+    404: ChromaAPIError;
+    /**
+     * Internal server error
+     */
+    500: ChromaAPIError;
+};
+
+export type ForkCountError = ForkCountErrors[keyof ForkCountErrors];
+
+export type ForkCountResponses = {
+    /**
+     * Fork count returned successfully
+     */
+    200: ForkCountResponse200;
+};
+
+export type ForkCountResponse200 = {
+    count: U32;
+};
+
+export type ForkCountResponse = ForkCountResponses[keyof ForkCountResponses];
+
 export type AttachFunctionData = {
     /**
      * Function attachment request
