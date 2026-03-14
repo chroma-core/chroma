@@ -1,7 +1,5 @@
 use super::scheduler::Scheduler;
-use super::scheduler_policy::{
-    LasCompactionTimeSchedulerPolicy, MemoryBoundedSchedulerPolicy, SchedulerPolicy,
-};
+use super::scheduler_policy::SchedulerPolicy;
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::{
@@ -499,14 +497,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         };
 
         let my_ip = config.my_member_id.clone();
-        let policy: Box<dyn SchedulerPolicy> =
-            if config.compactor.max_total_size_bytes_in_flight > 0 {
-                Box::new(MemoryBoundedSchedulerPolicy::new(
-                    config.compactor.max_total_size_bytes_in_flight,
-                ))
-            } else {
-                Box::new(LasCompactionTimeSchedulerPolicy {})
-            };
+        let policy: Box<dyn SchedulerPolicy> = (&config.compactor.scheduler_policy).into();
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
@@ -971,6 +962,7 @@ impl Handler<GetCollectionAssignmentMessage> for CompactionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use chroma_blockstore::arrow::config::{BlockManagerConfig, TEST_MAX_BLOCK_SIZE_BYTES};
     use chroma_cache::{new_cache_for_test, new_non_persistent_cache_for_test};
     use chroma_config::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;

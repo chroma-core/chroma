@@ -2,8 +2,50 @@ use chroma_log::CollectionRecord;
 use chroma_types::DatabaseName;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
+use serde::{Deserialize, Serialize};
 
 use crate::compactor::types::CompactionJob;
+
+/// Configuration for selecting which scheduler policy to use.
+///
+/// Serializes as snake_case strings for simple variants:
+/// - `"least_recently_compacted"` (default, for backwards compatibility)
+/// - `"random"`
+/// - `{ "memory_bounded": { "max_total_size_bytes": 1000000 } }` for memory-bounded
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum SchedulerPolicyConfig {
+    /// Select collections by least recent compaction time (default, backwards compatible).
+    LeastRecentlyCompacted,
+    /// Randomly select collections.
+    Random,
+    /// Memory-bounded random selection that limits total concurrent compaction size.
+    MemoryBounded {
+        /// Maximum total size in bytes of all collections being compacted concurrently.
+        max_total_size_bytes: u64,
+    },
+}
+
+impl Default for SchedulerPolicyConfig {
+    fn default() -> Self {
+        // Default to LeastRecentlyCompacted for backwards compatibility
+        SchedulerPolicyConfig::LeastRecentlyCompacted
+    }
+}
+
+impl From<&SchedulerPolicyConfig> for Box<dyn SchedulerPolicy> {
+    fn from(config: &SchedulerPolicyConfig) -> Self {
+        match config {
+            SchedulerPolicyConfig::LeastRecentlyCompacted => {
+                Box::new(LasCompactionTimeSchedulerPolicy {})
+            }
+            SchedulerPolicyConfig::Random => Box::new(RandomSchedulerPolicy {}),
+            SchedulerPolicyConfig::MemoryBounded {
+                max_total_size_bytes,
+            } => Box::new(MemoryBoundedSchedulerPolicy::new(*max_total_size_bytes)),
+        }
+    }
+}
 
 pub(crate) trait SchedulerPolicy: Send + Sync + SchedulerPolicyClone {
     /// Select which collections to compact from the given candidates.
@@ -59,6 +101,46 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         };
         let mut tasks = Vec::new();
         for collection in &collections[0..number_tasks as usize] {
+            let database_name = match DatabaseName::new(collection.database_name.clone()) {
+                Some(db_name) => db_name,
+                None => {
+                    tracing::warn!(
+                        "Invalid database name for collection {}: {}",
+                        collection.collection_id,
+                        collection.database_name
+                    );
+                    continue;
+                }
+            };
+            tasks.push(CompactionJob {
+                collection_id: collection.collection_id,
+                database_name,
+                collection_size_bytes: collection.collection_logical_size_bytes,
+            });
+        }
+        tasks
+    }
+}
+
+/// A scheduler policy that randomly selects collections for compaction.
+///
+/// This provides fairness across collections without any priority ordering.
+#[derive(Clone)]
+pub(crate) struct RandomSchedulerPolicy {}
+
+impl SchedulerPolicy for RandomSchedulerPolicy {
+    fn determine(
+        &self,
+        collections: Vec<CollectionRecord>,
+        number_jobs: i32,
+        _current_in_flight_size_bytes: u64,
+    ) -> Vec<CompactionJob> {
+        let mut collections = collections;
+        collections.shuffle(&mut thread_rng());
+
+        let number_tasks = number_jobs.min(collections.len() as i32) as usize;
+        let mut tasks = Vec::new();
+        for collection in &collections[..number_tasks] {
             let database_name = match DatabaseName::new(collection.database_name.clone()) {
                 Some(db_name) => db_name,
                 None => {
@@ -449,5 +531,83 @@ mod tests {
         // First collection should be selected (starvation prevention)
         // Second should be skipped due to overflow protection
         assert!(jobs.len() >= 1, "Should handle overflow gracefully");
+    }
+
+    // =========================================================================
+    // SchedulerPolicyConfig Tests
+    // =========================================================================
+
+    #[test]
+    fn test_scheduler_policy_config_default_is_least_recently_compacted() {
+        // Default should be LeastRecentlyCompacted for backwards compatibility
+        assert_eq!(
+            SchedulerPolicyConfig::default(),
+            SchedulerPolicyConfig::LeastRecentlyCompacted
+        );
+    }
+
+    #[test]
+    fn test_scheduler_policy_config_serde_least_recently_compacted() {
+        let config: SchedulerPolicyConfig =
+            serde_json::from_str("\"least_recently_compacted\"").unwrap();
+        assert_eq!(config, SchedulerPolicyConfig::LeastRecentlyCompacted);
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert_eq!(serialized, "\"least_recently_compacted\"");
+    }
+
+    #[test]
+    fn test_scheduler_policy_config_serde_random() {
+        let config: SchedulerPolicyConfig = serde_json::from_str("\"random\"").unwrap();
+        assert_eq!(config, SchedulerPolicyConfig::Random);
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert_eq!(serialized, "\"random\"");
+    }
+
+    #[test]
+    fn test_scheduler_policy_config_serde_memory_bounded() {
+        let json = r#"{"memory_bounded":{"max_total_size_bytes":1000000}}"#;
+        let config: SchedulerPolicyConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config,
+            SchedulerPolicyConfig::MemoryBounded {
+                max_total_size_bytes: 1000000
+            }
+        );
+
+        let serialized = serde_json::to_string(&config).unwrap();
+        assert_eq!(serialized, json);
+    }
+
+    #[test]
+    fn test_scheduler_policy_config_into_policy() {
+        // Test that From conversion works for each variant
+        let _: Box<dyn SchedulerPolicy> = (&SchedulerPolicyConfig::LeastRecentlyCompacted).into();
+        let _: Box<dyn SchedulerPolicy> = (&SchedulerPolicyConfig::Random).into();
+        let _: Box<dyn SchedulerPolicy> = (&SchedulerPolicyConfig::MemoryBounded {
+            max_total_size_bytes: 1000,
+        })
+            .into();
+    }
+
+    #[test]
+    fn test_random_policy_respects_job_limit() {
+        let policy = RandomSchedulerPolicy {};
+        let collections = vec![
+            make_collection("00000000-0000-0000-0000-000000000001", 100),
+            make_collection("00000000-0000-0000-0000-000000000002", 100),
+            make_collection("00000000-0000-0000-0000-000000000003", 100),
+        ];
+
+        let jobs = policy.determine(collections, 2, 0);
+        assert_eq!(jobs.len(), 2, "Should respect job count limit");
+    }
+
+    #[test]
+    fn test_random_policy_empty_input() {
+        let policy = RandomSchedulerPolicy {};
+        let jobs = policy.determine(vec![], 5, 0);
+        assert!(jobs.is_empty());
     }
 }
