@@ -1950,6 +1950,7 @@ name = "chroma-segment"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bincode",
  "bytes",
  "chroma-blockstore",
  "chroma-cache",
@@ -1963,6 +1964,7 @@ dependencies = [
  "chroma-types",
  "chrono",
  "faer",
+ "fastbloom",
  "futures",
  "opentelemetry",
  "proptest",
@@ -3338,6 +3340,20 @@ checksum = "62bf7fa928ce0c4a43bd6e7d1235318fc32ac3a3dea06a2208c44e729449471a"
 dependencies = [
  "small_ctor",
  "web-time",
+]
+
+[[package]]
+name = "fastbloom"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef975e30683b2d965054bb0a836f8973857c4ebf6acf274fe46617cd285060d8"
+dependencies = [
+ "foldhash 0.2.0",
+ "libm",
+ "portable-atomic",
+ "rand 0.9.2",
+ "serde",
+ "siphasher",
 ]
 
 [[package]]
@@ -6806,9 +6822,12 @@ dependencies = [
 
 [[package]]
 name = "portable-atomic"
-version = "1.9.0"
+version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cc9c68a3f6da06753e9335d63e27f6b9754dd1920d941135b7ea8224f141adb2"
+checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "portable-atomic-util"
@@ -8507,6 +8526,9 @@ name = "siphasher"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56199f7ddabf13fe5074ce809e7d3f42b42ae711800501b5b16ea82ad029c39d"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "sketches-ddsketch"
