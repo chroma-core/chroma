@@ -1484,4 +1484,134 @@ mod tests {
             "Should allow at least one job even if it exceeds the limit"
         );
     }
+
+    // =========================================================================
+    // One-off compaction tests with memory-bounded policy
+    // =========================================================================
+
+    #[test]
+    fn oneoff_compaction_bypasses_memory_limit() {
+        // One-off compactions are admin-initiated and should bypass memory limits
+        let (mut scheduler, uuid_1, _, _) = create_memory_bounded_scheduler(10, 100);
+
+        // Add a one-off collection that exceeds the memory limit
+        scheduler.add_oneoff_collections(vec![uuid_1]);
+
+        // Schedule with a large collection
+        let records = vec![make_collection_record(uuid_1, 500)]; // 500 > 100 limit
+        scheduler.schedule_internal(records);
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "One-off compaction should bypass memory limit"
+        );
+        assert_eq!(jobs[0].collection_id, uuid_1);
+    }
+
+    #[test]
+    fn oneoff_compaction_tracks_in_flight_size() {
+        // One-off jobs should still be tracked in in_flight_size
+        let (mut scheduler, uuid_1, _, _) = create_memory_bounded_scheduler(10, 100);
+
+        scheduler.add_oneoff_collections(vec![uuid_1]);
+
+        let records = vec![make_collection_record(uuid_1, 500)];
+        scheduler.schedule_internal(records);
+
+        // Should track the size even though it bypassed the limit
+        assert_eq!(
+            scheduler.current_in_flight_size_bytes(),
+            500,
+            "One-off job should be tracked in in_flight_size"
+        );
+    }
+
+    #[test]
+    fn scheduling_after_oneoff_respects_in_flight_size() {
+        // After a one-off job is scheduled, subsequent scheduling should
+        // respect the current in-flight size
+        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let uuid_3 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000003").unwrap();
+
+        let (mut scheduler, _, _, _) = create_memory_bounded_scheduler(10, 1000);
+
+        // First, schedule a one-off 800-byte job
+        scheduler.add_oneoff_collections(vec![uuid_1]);
+        let records = vec![make_collection_record(uuid_1, 800)];
+        scheduler.schedule_internal(records);
+
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 800);
+
+        // Now try to schedule more collections - only 200 bytes left
+        // uuid_2 at 300 bytes should not fit, uuid_3 at 150 bytes should fit
+        let records = vec![
+            make_collection_record(uuid_2, 300),
+            make_collection_record(uuid_3, 150),
+        ];
+        scheduler.schedule_internal(records);
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        // Should only schedule the 150-byte collection
+        assert_eq!(jobs.len(), 1, "Only smaller collection should fit");
+        assert_eq!(jobs[0].collection_id, uuid_3);
+    }
+
+    #[test]
+    fn oneoff_compaction_respects_max_concurrent_jobs() {
+        // One-off compactions should still respect max_concurrent_jobs
+        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(
+            1,     // only 1 concurrent job allowed
+            10000, // high memory limit
+        );
+
+        // Try to schedule two one-off compactions
+        scheduler.add_oneoff_collections(vec![uuid_1, uuid_2]);
+
+        let records = vec![
+            make_collection_record(uuid_1, 100),
+            make_collection_record(uuid_2, 100),
+        ];
+        scheduler.schedule_internal(records);
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "One-off compactions should respect max_concurrent_jobs"
+        );
+    }
+
+    #[tokio::test]
+    async fn oneoff_completion_frees_size_for_regular_jobs() {
+        // After a one-off job completes, the freed size should allow regular jobs
+        let uuid_1 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let uuid_2 = CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+
+        let (mut scheduler, _, _, _) = create_memory_bounded_scheduler(10, 500);
+
+        // Schedule a large one-off job that takes up most of the budget
+        scheduler.add_oneoff_collections(vec![uuid_1]);
+        let records = vec![make_collection_record(uuid_1, 400)];
+        scheduler.schedule_internal(records);
+
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 400);
+
+        // Complete the one-off job
+        scheduler.succeed_job(uuid_1.into());
+        assert_eq!(scheduler.current_in_flight_size_bytes(), 0);
+
+        // Now a regular 400-byte job should fit
+        let records = vec![make_collection_record(uuid_2, 400)];
+        scheduler.schedule_internal(records);
+
+        let jobs: Vec<_> = scheduler.get_jobs().collect();
+        assert_eq!(
+            jobs.len(),
+            1,
+            "Regular job should fit after one-off completes"
+        );
+    }
 }

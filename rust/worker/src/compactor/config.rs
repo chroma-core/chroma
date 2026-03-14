@@ -222,3 +222,123 @@ impl Default for CompactorConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Test that existing configs without scheduler_policy field still parse
+    /// and default to LeastRecentlyCompacted for backwards compatibility.
+    #[test]
+    fn test_config_backwards_compat_no_scheduler_policy() {
+        // Minimal config that old deployments might have
+        let json = r#"{
+            "max_concurrent_jobs": 50,
+            "compaction_interval_sec": 30
+        }"#;
+
+        let config: CompactorConfig = serde_json::from_str(json).unwrap();
+
+        // Should default to LeastRecentlyCompacted
+        assert_eq!(
+            config.scheduler_policy,
+            SchedulerPolicyConfig::LeastRecentlyCompacted
+        );
+        // Other fields should use their defaults or specified values
+        assert_eq!(config.max_concurrent_jobs, 50);
+        assert_eq!(config.compaction_interval_sec, 30);
+    }
+
+    /// Test that completely empty config works (all defaults).
+    #[test]
+    fn test_config_backwards_compat_empty_config() {
+        let json = "{}";
+
+        let config: CompactorConfig = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            config.scheduler_policy,
+            SchedulerPolicyConfig::LeastRecentlyCompacted
+        );
+        assert_eq!(config.max_concurrent_jobs, 100); // default
+    }
+
+    /// Test explicit scheduler_policy: least_recently_compacted
+    #[test]
+    fn test_config_explicit_least_recently_compacted() {
+        let json = r#"{
+            "scheduler_policy": "least_recently_compacted"
+        }"#;
+
+        let config: CompactorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.scheduler_policy,
+            SchedulerPolicyConfig::LeastRecentlyCompacted
+        );
+    }
+
+    /// Test explicit scheduler_policy: random
+    #[test]
+    fn test_config_explicit_random() {
+        let json = r#"{
+            "scheduler_policy": "random"
+        }"#;
+
+        let config: CompactorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.scheduler_policy, SchedulerPolicyConfig::Random);
+    }
+
+    /// Test explicit scheduler_policy: memory_bounded with max_total_size_bytes
+    #[test]
+    fn test_config_explicit_memory_bounded() {
+        let json = r#"{
+            "scheduler_policy": {
+                "memory_bounded": {
+                    "max_total_size_bytes": 10000000000
+                }
+            }
+        }"#;
+
+        let config: CompactorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            config.scheduler_policy,
+            SchedulerPolicyConfig::MemoryBounded {
+                max_total_size_bytes: 10_000_000_000
+            }
+        );
+    }
+
+    /// Test that memory_bounded scheduler_policy works alongside max_concurrent_jobs
+    #[test]
+    fn test_config_memory_bounded_with_max_concurrent_jobs() {
+        let json = r#"{
+            "max_concurrent_jobs": 25,
+            "scheduler_policy": {
+                "memory_bounded": {
+                    "max_total_size_bytes": 5000000000
+                }
+            }
+        }"#;
+
+        let config: CompactorConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.max_concurrent_jobs, 25);
+        assert_eq!(
+            config.scheduler_policy,
+            SchedulerPolicyConfig::MemoryBounded {
+                max_total_size_bytes: 5_000_000_000
+            }
+        );
+    }
+
+    /// Test default config via Default trait
+    #[test]
+    fn test_default_config() {
+        let config = CompactorConfig::default();
+
+        assert_eq!(
+            config.scheduler_policy,
+            SchedulerPolicyConfig::LeastRecentlyCompacted
+        );
+        assert_eq!(config.max_concurrent_jobs, 100);
+    }
+}

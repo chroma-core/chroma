@@ -12,10 +12,11 @@ use crate::compactor::types::CompactionJob;
 /// - `"least_recently_compacted"` (default, for backwards compatibility)
 /// - `"random"`
 /// - `{ "memory_bounded": { "max_total_size_bytes": 1000000 } }` for memory-bounded
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum SchedulerPolicyConfig {
     /// Select collections by least recent compaction time (default, backwards compatible).
+    #[default]
     LeastRecentlyCompacted,
     /// Randomly select collections.
     Random,
@@ -24,13 +25,6 @@ pub(crate) enum SchedulerPolicyConfig {
         /// Maximum total size in bytes of all collections being compacted concurrently.
         max_total_size_bytes: u64,
     },
-}
-
-impl Default for SchedulerPolicyConfig {
-    fn default() -> Self {
-        // Default to LeastRecentlyCompacted for backwards compatibility
-        SchedulerPolicyConfig::LeastRecentlyCompacted
-    }
 }
 
 impl From<&SchedulerPolicyConfig> for Box<dyn SchedulerPolicy> {
@@ -222,7 +216,7 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
             // If adding this collection would exceed the limit, skip it
             let would_exceed = cumulative_size
                 .checked_add(collection_size)
-                .map_or(true, |total| total > self.max_total_size_bytes);
+                .is_none_or(|total| total > self.max_total_size_bytes);
 
             if would_exceed {
                 // Save the first skipped collection for potential starvation prevention
