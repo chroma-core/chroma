@@ -633,6 +633,7 @@ impl RecordSegmentWriter {
             }
         };
 
+        // Return a flusher that can be used to flush the blockfiles
         Ok(RecordSegmentFlusher {
             id: self.id,
             user_id_to_id_flusher: flusher_user_id_to_id,
