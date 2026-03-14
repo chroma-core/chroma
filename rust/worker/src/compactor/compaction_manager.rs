@@ -536,6 +536,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 .await?;
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let max_failure_count = config.compactor.max_failure_count;
+        let max_total_size_bytes_in_flight = config.compactor.max_total_size_bytes_in_flight;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -543,6 +544,7 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             policy,
             max_concurrent_jobs,
             min_compaction_size,
+            max_total_size_bytes_in_flight,
             assignment_policy,
             disabled_collections,
             job_expiry_seconds,
@@ -1163,6 +1165,7 @@ mod tests {
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
             min_compaction_size,
+            0, // max_total_size_bytes_in_flight disabled
             assignment_policy,
             HashSet::new(),
             job_expiry_seconds,

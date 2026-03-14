@@ -115,6 +115,13 @@ pub struct CompactorConfig {
     #[serde(default = "CompactorConfig::default_max_failure_count")]
     pub max_failure_count: i32,
 
+    /// Maximum total size in bytes of collections being compacted concurrently.
+    /// This provides memory-bounded scheduling by limiting the total data
+    /// processed at any given time.
+    /// When set to 0, this limit is disabled and only max_concurrent_jobs applies.
+    #[serde(default = "CompactorConfig::default_max_total_size_bytes_in_flight")]
+    pub max_total_size_bytes_in_flight: u64,
+
     /// When true, use pointer-based fetch (ScoutLogFragments + direct storage reads)
     /// instead of gRPC PullLogs for log fetching.
     #[serde(default)]
@@ -185,6 +192,12 @@ impl CompactorConfig {
         5
     }
 
+    /// Default max total size bytes in flight.
+    /// 0 means disabled (unlimited), relying only on max_concurrent_jobs.
+    fn default_max_total_size_bytes_in_flight() -> u64 {
+        0
+    }
+
     fn default_use_fragment_fetch() -> bool {
         false
     }
@@ -209,6 +222,8 @@ impl Default for CompactorConfig {
             repair_log_offsets_timeout_seconds:
                 CompactorConfig::default_repair_log_offsets_timeout_seconds(),
             max_failure_count: CompactorConfig::default_max_failure_count(),
+            max_total_size_bytes_in_flight:
+                CompactorConfig::default_max_total_size_bytes_in_flight(),
             use_fragment_fetch: CompactorConfig::default_use_fragment_fetch(),
             collections_for_fragment_fetch: Vec::new(),
             fragment_fetcher_cache: chroma_cache::CacheConfig::default(),

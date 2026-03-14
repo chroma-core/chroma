@@ -7,6 +7,9 @@ use tokio::sync::oneshot;
 pub(crate) struct CompactionJob {
     pub(crate) collection_id: CollectionUuid,
     pub(crate) database_name: DatabaseName,
+    /// The logical size of the collection in bytes (post-compaction).
+    /// Used for memory-bounded scheduling to limit total data being compacted.
+    pub(crate) collection_size_bytes: u64,
 }
 
 #[derive(Clone, Debug)]
