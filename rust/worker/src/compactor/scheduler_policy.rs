@@ -6,8 +6,19 @@ use rand::thread_rng;
 use crate::compactor::types::CompactionJob;
 
 pub(crate) trait SchedulerPolicy: Send + Sync + SchedulerPolicyClone {
-    fn determine(&self, collections: Vec<CollectionRecord>, number_jobs: i32)
-        -> Vec<CompactionJob>;
+    /// Select which collections to compact from the given candidates.
+    ///
+    /// # Arguments
+    /// * `collections` - Candidate collections for compaction
+    /// * `number_jobs` - Maximum number of jobs to return
+    /// * `current_in_flight_size_bytes` - Total size in bytes of collections currently
+    ///   being compacted. Policies that don't enforce memory bounds may ignore this.
+    fn determine(
+        &self,
+        collections: Vec<CollectionRecord>,
+        number_jobs: i32,
+        current_in_flight_size_bytes: u64,
+    ) -> Vec<CompactionJob>;
 }
 
 pub(crate) trait SchedulerPolicyClone {
@@ -37,6 +48,7 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
         &self,
         collections: Vec<CollectionRecord>,
         number_jobs: i32,
+        _current_in_flight_size_bytes: u64,
     ) -> Vec<CompactionJob> {
         let mut collections = collections;
         collections.sort_by(|a, b| a.last_compaction_time.cmp(&b.last_compaction_time));
@@ -78,20 +90,25 @@ impl SchedulerPolicy for LasCompactionTimeSchedulerPolicy {
 /// The size limit is enforced using `collection_logical_size_bytes` as a proxy for
 /// memory usage during compaction. When both job count and size limits are set,
 /// both constraints are enforced (the stricter one wins).
+///
+/// ## Starvation prevention
+///
+/// When no collections fit within the remaining budget AND nothing is currently
+/// in-flight, the policy allows one collection through even if it exceeds the
+/// limit. This prevents a single large collection from being permanently starved
+/// when its size alone exceeds the configured limit. The memory bound's intent is
+/// to prevent *concurrent* large compactions (the OOM scenario), not to block a
+/// single collection from ever being compacted.
 #[derive(Clone)]
 pub(crate) struct MemoryBoundedSchedulerPolicy {
-    /// Maximum total size in bytes of all collections being compacted.
-    /// When 0, this limit is disabled.
+    /// Maximum total size in bytes of all collections being compacted concurrently.
     max_total_size_bytes: u64,
-    /// Current total size in bytes of collections already in-flight.
-    current_in_flight_size_bytes: u64,
 }
 
 impl MemoryBoundedSchedulerPolicy {
-    pub(crate) fn new(max_total_size_bytes: u64, current_in_flight_size_bytes: u64) -> Self {
+    pub(crate) fn new(max_total_size_bytes: u64) -> Self {
         Self {
             max_total_size_bytes,
-            current_in_flight_size_bytes,
         }
     }
 }
@@ -101,17 +118,15 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
         &self,
         collections: Vec<CollectionRecord>,
         number_jobs: i32,
+        current_in_flight_size_bytes: u64,
     ) -> Vec<CompactionJob> {
         // Shuffle collections randomly for fairness
         let mut collections = collections;
         collections.shuffle(&mut thread_rng());
 
         let mut tasks = Vec::new();
-        let mut cumulative_size = self.current_in_flight_size_bytes;
-        let size_limit_enabled = self.max_total_size_bytes > 0;
-        // Starvation prevention: allow at least one job when nothing is in-flight.
-        // We track skipped collections for starvation prevention fallback.
-        let nothing_in_flight = self.current_in_flight_size_bytes == 0;
+        let mut cumulative_size = current_in_flight_size_bytes;
+        let nothing_in_flight = current_in_flight_size_bytes == 0;
         let mut first_skipped_collection: Option<CollectionRecord> = None;
 
         for collection in collections {
@@ -122,21 +137,18 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
 
             let collection_size = collection.collection_logical_size_bytes;
 
-            // Check size limit if enabled
-            if size_limit_enabled {
-                // If adding this collection would exceed the limit, skip it
-                let would_exceed = cumulative_size
-                    .checked_add(collection_size)
-                    .map_or(true, |total| total > self.max_total_size_bytes);
+            // If adding this collection would exceed the limit, skip it
+            let would_exceed = cumulative_size
+                .checked_add(collection_size)
+                .map_or(true, |total| total > self.max_total_size_bytes);
 
-                if would_exceed {
-                    // Save the first skipped collection for potential starvation prevention
-                    if first_skipped_collection.is_none() {
-                        first_skipped_collection = Some(collection);
-                    }
-                    // Continue checking other collections in case a smaller one fits
-                    continue;
+            if would_exceed {
+                // Save the first skipped collection for potential starvation prevention
+                if first_skipped_collection.is_none() {
+                    first_skipped_collection = Some(collection);
                 }
+                // Continue checking other collections in case a smaller one fits
+                continue;
             }
 
             let database_name = match DatabaseName::new(collection.database_name.clone()) {
@@ -160,7 +172,7 @@ impl SchedulerPolicy for MemoryBoundedSchedulerPolicy {
         }
 
         // Starvation prevention: if no tasks were selected and nothing is in-flight,
-        // allow one collection even if it exceeds the limit to prevent deadlock.
+        // allow one collection even if it exceeds the limit. See struct-level docs.
         if tasks.is_empty() && nothing_in_flight {
             if let Some(collection) = first_skipped_collection {
                 if let Some(database_name) = DatabaseName::new(collection.database_name.clone()) {
@@ -225,11 +237,11 @@ mod tests {
                 collection_logical_size_bytes: 100,
             },
         ];
-        let jobs = scheduler_policy.determine(collections.clone(), 1);
+        let jobs = scheduler_policy.determine(collections.clone(), 1, 0);
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_id, collection_uuid_2);
 
-        let jobs = scheduler_policy.determine(collections.clone(), 2);
+        let jobs = scheduler_policy.determine(collections.clone(), 2, 0);
         assert_eq!(jobs.len(), 2);
         assert_eq!(jobs[0].collection_id, collection_uuid_2);
         assert_eq!(jobs[1].collection_id, collection_uuid_1);
@@ -242,7 +254,7 @@ mod tests {
             "00000000-0000-0000-0000-000000000001",
             12345,
         )];
-        let jobs = scheduler_policy.determine(collections, 1);
+        let jobs = scheduler_policy.determine(collections, 1, 0);
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].collection_size_bytes, 12345);
     }
@@ -261,8 +273,8 @@ mod tests {
         ];
 
         // With a limit of 1000 bytes and no in-flight jobs, should accept at most 2 collections
-        let policy = MemoryBoundedSchedulerPolicy::new(1000, 0);
-        let jobs = policy.determine(collections, 10);
+        let policy = MemoryBoundedSchedulerPolicy::new(1000);
+        let jobs = policy.determine(collections, 10, 0);
 
         // Due to random shuffling, we can't predict which collections are selected,
         // but we know the total size should not exceed 1000
@@ -288,8 +300,8 @@ mod tests {
         ];
 
         // Even with a high size limit, should respect job count limit
-        let policy = MemoryBoundedSchedulerPolicy::new(10000, 0);
-        let jobs = policy.determine(collections, 2);
+        let policy = MemoryBoundedSchedulerPolicy::new(10000);
+        let jobs = policy.determine(collections, 2, 0);
 
         assert_eq!(jobs.len(), 2, "Should respect job count limit of 2");
     }
@@ -303,8 +315,8 @@ mod tests {
 
         // With 800 bytes already in flight and a 1000 byte limit,
         // should only accept collections that fit within remaining 200 bytes
-        let policy = MemoryBoundedSchedulerPolicy::new(1000, 800);
-        let jobs = policy.determine(collections, 10);
+        let policy = MemoryBoundedSchedulerPolicy::new(1000);
+        let jobs = policy.determine(collections, 10, 800);
 
         // Neither 500-byte collection should fit
         assert_eq!(
@@ -323,29 +335,14 @@ mod tests {
 
         // Even if the collection exceeds the limit, allow at least one
         // to prevent starvation when nothing is in flight
-        let policy = MemoryBoundedSchedulerPolicy::new(1000, 0);
-        let jobs = policy.determine(collections, 10);
+        let policy = MemoryBoundedSchedulerPolicy::new(1000);
+        let jobs = policy.determine(collections, 10, 0);
 
         assert_eq!(
             jobs.len(),
             1,
             "Should allow at least one job to prevent starvation"
         );
-    }
-
-    #[test]
-    fn test_memory_bounded_policy_disabled_when_limit_is_zero() {
-        let collections = vec![
-            make_collection("00000000-0000-0000-0000-000000000001", 1000000),
-            make_collection("00000000-0000-0000-0000-000000000002", 1000000),
-            make_collection("00000000-0000-0000-0000-000000000003", 1000000),
-        ];
-
-        // When max_total_size_bytes is 0, size limit is disabled
-        let policy = MemoryBoundedSchedulerPolicy::new(0, 0);
-        let jobs = policy.determine(collections, 10);
-
-        assert_eq!(jobs.len(), 3, "Should accept all jobs when size limit is 0");
     }
 
     #[test]
@@ -359,8 +356,8 @@ mod tests {
         ];
 
         // Job limit of 3, size limit of 250 (fits 2 collections)
-        let policy = MemoryBoundedSchedulerPolicy::new(250, 0);
-        let jobs = policy.determine(collections.clone(), 3);
+        let policy = MemoryBoundedSchedulerPolicy::new(250);
+        let jobs = policy.determine(collections.clone(), 3, 0);
 
         let total_size: u64 = jobs.iter().map(|j| j.collection_size_bytes).sum();
         assert!(
@@ -371,8 +368,8 @@ mod tests {
         assert!(jobs.len() <= 2, "Size limit should be stricter than job limit");
 
         // Now flip: size limit of 500 (fits 4+), job limit of 2
-        let policy = MemoryBoundedSchedulerPolicy::new(500, 0);
-        let jobs = policy.determine(collections, 2);
+        let policy = MemoryBoundedSchedulerPolicy::new(500);
+        let jobs = policy.determine(collections, 2, 0);
 
         assert_eq!(jobs.len(), 2, "Job limit should be stricter than size limit");
     }
@@ -386,12 +383,12 @@ mod tests {
             make_collection("00000000-0000-0000-0000-000000000003", 100), // fits
         ];
 
-        let policy = MemoryBoundedSchedulerPolicy::new(300, 0);
+        let policy = MemoryBoundedSchedulerPolicy::new(300);
 
         // Run multiple times since shuffling is random
         let mut found_multiple = false;
         for _ in 0..50 {
-            let jobs = policy.determine(collections.clone(), 10);
+            let jobs = policy.determine(collections.clone(), 10, 0);
             // Should always respect size limit
             let total_size: u64 = jobs.iter().map(|j| j.collection_size_bytes).sum();
             assert!(
@@ -420,8 +417,8 @@ mod tests {
         ];
 
         // All collections fit within the limit
-        let policy = MemoryBoundedSchedulerPolicy::new(500, 0);
-        let jobs = policy.determine(collections, 10);
+        let policy = MemoryBoundedSchedulerPolicy::new(500);
+        let jobs = policy.determine(collections, 10, 0);
 
         assert_eq!(
             jobs.len(),
@@ -439,8 +436,8 @@ mod tests {
         ];
 
         // This would overflow if not handled properly
-        let policy = MemoryBoundedSchedulerPolicy::new(u64::MAX, 0);
-        let jobs = policy.determine(collections, 10);
+        let policy = MemoryBoundedSchedulerPolicy::new(u64::MAX);
+        let jobs = policy.determine(collections, 10, 0);
 
         // First collection should be selected (starvation prevention)
         // Second should be skipped due to overflow protection

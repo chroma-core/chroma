@@ -1,5 +1,7 @@
 use super::scheduler::Scheduler;
-use super::scheduler_policy::LasCompactionTimeSchedulerPolicy;
+use super::scheduler_policy::{
+    LasCompactionTimeSchedulerPolicy, MemoryBoundedSchedulerPolicy, SchedulerPolicy,
+};
 use super::OneOffCompactMessage;
 use super::RebuildMessage;
 use crate::compactor::types::{
@@ -497,7 +499,14 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
         };
 
         let my_ip = config.my_member_id.clone();
-        let policy = Box::new(LasCompactionTimeSchedulerPolicy {});
+        let policy: Box<dyn SchedulerPolicy> =
+            if config.compactor.max_total_size_bytes_in_flight > 0 {
+                Box::new(MemoryBoundedSchedulerPolicy::new(
+                    config.compactor.max_total_size_bytes_in_flight,
+                ))
+            } else {
+                Box::new(LasCompactionTimeSchedulerPolicy {})
+            };
         let compaction_interval_sec = config.compactor.compaction_interval_sec;
         let max_concurrent_jobs = config.compactor.max_concurrent_jobs;
         let compaction_manager_queue_size = config.compactor.compaction_manager_queue_size;
@@ -536,7 +545,6 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
                 .await?;
         let job_expiry_seconds = config.compactor.job_expiry_seconds;
         let max_failure_count = config.compactor.max_failure_count;
-        let max_total_size_bytes_in_flight = config.compactor.max_total_size_bytes_in_flight;
         let scheduler = Scheduler::new(
             my_ip,
             log.clone(),
@@ -544,7 +552,6 @@ impl Configurable<(CompactionServiceConfig, System)> for CompactionManager {
             policy,
             max_concurrent_jobs,
             min_compaction_size,
-            max_total_size_bytes_in_flight,
             assignment_policy,
             disabled_collections,
             job_expiry_seconds,
@@ -1165,7 +1172,6 @@ mod tests {
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             max_concurrent_jobs,
             min_compaction_size,
-            0, // max_total_size_bytes_in_flight disabled
             assignment_policy,
             HashSet::new(),
             job_expiry_seconds,

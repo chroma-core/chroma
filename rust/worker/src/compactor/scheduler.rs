@@ -13,7 +13,7 @@ use opentelemetry::metrics::Counter;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::compactor::scheduler_policy::{MemoryBoundedSchedulerPolicy, SchedulerPolicy};
+use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
 
 #[derive(Debug, Clone)]
@@ -68,9 +68,6 @@ pub(crate) struct Scheduler {
     job_queue: Vec<CompactionJob>,
     max_concurrent_jobs: usize,
     min_compaction_size: usize,
-    /// Maximum total size in bytes of collections being compacted concurrently.
-    /// When 0, this limit is disabled.
-    max_total_size_bytes_in_flight: u64,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
     oneoff_collections: HashSet<CollectionUuid>,
@@ -97,7 +94,6 @@ impl Scheduler {
         policy: Box<dyn SchedulerPolicy>,
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
-        max_total_size_bytes_in_flight: u64,
         assignment_policy: Box<dyn AssignmentPolicy>,
         disabled_collections: HashSet<CollectionUuid>,
         job_expiry_seconds: u64,
@@ -111,7 +107,6 @@ impl Scheduler {
             policy,
             job_queue: Vec::with_capacity(max_concurrent_jobs),
             max_concurrent_jobs,
-            max_total_size_bytes_in_flight,
             memberlist: None,
             assignment_policy,
             oneoff_collections: HashSet::new(),
@@ -386,18 +381,11 @@ impl Scheduler {
             }
         }
 
-        // Use memory-bounded policy if max_total_size_bytes_in_flight is configured
-        let jobs = if self.max_total_size_bytes_in_flight > 0 {
-            let memory_policy = MemoryBoundedSchedulerPolicy::new(
-                self.max_total_size_bytes_in_flight,
-                self.current_in_flight_size_bytes(),
-            );
-            memory_policy.determine(scheduled_collections, self.max_concurrent_jobs as i32)
-        } else {
-            self.policy
-                .determine(scheduled_collections, self.max_concurrent_jobs as i32)
-        };
-        self.job_queue.extend(jobs);
+        self.job_queue.extend(self.policy.determine(
+            scheduled_collections,
+            self.max_concurrent_jobs as i32,
+            self.current_in_flight_size_bytes(),
+        ));
         self.job_queue
             .truncate(self.max_concurrent_jobs - self.in_progress_jobs.len());
 
@@ -687,7 +675,6 @@ mod tests {
                 Box::new(LasCompactionTimeSchedulerPolicy {}),
                 1000,
                 1,
-                0, // max_total_size_bytes_in_flight disabled
                 assignment_policy,
                 HashSet::new(),
                 3600,
@@ -918,7 +905,6 @@ mod tests {
             Box::new(LasCompactionTimeSchedulerPolicy {}),
             1000,
             1,
-            0, // max_total_size_bytes_in_flight disabled
             assignment_policy,
             HashSet::new(),
             3600,
@@ -1127,7 +1113,6 @@ mod tests {
             scheduler_policy,
             max_concurrent_jobs,
             1,
-            0, // max_total_size_bytes_in_flight disabled
             assignment_policy,
             HashSet::new(),
             3600,              // job_expiry_seconds
@@ -1240,7 +1225,7 @@ mod tests {
     // Memory-Bounded Scheduling Integration Tests
     // =========================================================================
 
-    /// Create a scheduler with memory bounding enabled.
+    /// Create a scheduler with memory bounding enabled via MemoryBoundedSchedulerPolicy.
     fn create_memory_bounded_scheduler(
         max_concurrent_jobs: usize,
         max_total_size_bytes: u64,
@@ -1262,14 +1247,14 @@ mod tests {
         let collection_uuid_2 =
             CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
 
+        use crate::compactor::scheduler_policy::MemoryBoundedSchedulerPolicy;
         let scheduler = Scheduler::new(
             my_member.member_id.clone(),
             log,
             sysdb,
-            Box::new(LasCompactionTimeSchedulerPolicy {}),
+            Box::new(MemoryBoundedSchedulerPolicy::new(max_total_size_bytes)),
             max_concurrent_jobs,
             1,
-            max_total_size_bytes,
             assignment_policy,
             HashSet::new(),
             3600,
@@ -1316,22 +1301,6 @@ mod tests {
             jobs[0].collection_size_bytes, 400,
             "Selected job should have correct size"
         );
-    }
-
-    #[test]
-    fn schedule_internal_memory_limit_disabled_when_zero() {
-        let (mut scheduler, uuid_1, uuid_2, _) = create_memory_bounded_scheduler(10, 0);
-
-        // With limit disabled (0), all collections should be scheduled
-        let records = vec![
-            make_collection_record(uuid_1, 1_000_000),
-            make_collection_record(uuid_2, 1_000_000),
-        ];
-
-        scheduler.schedule_internal(records);
-        let jobs: Vec<_> = scheduler.get_jobs().collect();
-
-        assert_eq!(jobs.len(), 2, "All collections should be scheduled when memory limit is 0");
     }
 
     #[test]
