@@ -43,6 +43,7 @@ export class MorphEmbeddingFunction implements EmbeddingFunction {
   private readonly apiBase: string;
   private client: OpenAI;
 
+  constructor(args: MorphArgs | MorphEmbeddingFunctionConfig = {}) {
     // Support both camelCase (new) and snake_case (deprecated) for backwards compatibility
     const camelArgs = args as MorphArgs;
     const snakeArgs = args as MorphEmbeddingFunctionConfig;
@@ -54,7 +55,7 @@ export class MorphEmbeddingFunction implements EmbeddingFunction {
     const apiKeyEnvVar = camelArgs.apiKeyEnvVar ?? snakeArgs.api_key_env_var ?? "MORPH_API_KEY";
 
     // Get API key from config or environment
-    const resolvedApiKey = apiKey || process.env[apiKeyEnvVar];
+    const resolvedApiKey = apiKey ?? process.env[apiKeyEnvVar];
     if (!resolvedApiKey) {
       throw new Error(`API key not found. Please set ${apiKeyEnvVar} environment variable or provide apiKey in config.`);
     }
