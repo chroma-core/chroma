@@ -91,8 +91,8 @@ def test_foreign_key_check_detects_violations() -> None:
             conn.execute(
                 "INSERT INTO _fk_test_child (id, parent_id) VALUES (1, 999)"
             )
-            conn.execute("PRAGMA foreign_keys = ON")
         finally:
+            conn.execute("PRAGMA foreign_keys = ON")
             db._conn_pool.return_to_pool(conn)
 
         # Now check that _check_foreign_key_integrity detects the violation
