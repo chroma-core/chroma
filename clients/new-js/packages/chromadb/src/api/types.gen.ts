@@ -260,6 +260,16 @@ export type ForkCollectionPayload = {
     new_name: string;
 };
 
+/**
+ * Response containing the fork count for a collection.
+ */
+export type ForkCountResponse = {
+    /**
+     * The number of forks for this collection.
+     */
+    count: number;
+};
+
 export type FtsIndexConfig = {
     [key: string]: never;
 };
@@ -1702,16 +1712,12 @@ export type ForkCountError = ForkCountErrors[keyof ForkCountErrors];
 
 export type ForkCountResponses = {
     /**
-     * Fork count returned successfully
+     * Fork count retrieved successfully
      */
-    200: ForkCountResponse200;
+    200: ForkCountResponse;
 };
 
-export type ForkCountResponse200 = {
-    count: U32;
-};
-
-export type ForkCountResponse = ForkCountResponses[keyof ForkCountResponses];
+export type ForkCountResponse2 = ForkCountResponses[keyof ForkCountResponses];
 
 export type AttachFunctionData = {
     /**
