@@ -1685,21 +1685,17 @@ export type ForkCountData = {
 
 export type ForkCountErrors = {
     /**
-     * Invalid request
-     */
-    400: ChromaAPIError;
-    /**
      * Unauthorized
      */
-    401: ChromaAPIError;
+    401: ErrorResponse;
     /**
      * Collection not found
      */
-    404: ChromaAPIError;
+    404: ErrorResponse;
     /**
-     * Internal server error
+     * Server error
      */
-    500: ChromaAPIError;
+    500: ErrorResponse;
 };
 
 export type ForkCountError = ForkCountErrors[keyof ForkCountErrors];

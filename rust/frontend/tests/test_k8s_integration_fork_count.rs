@@ -23,8 +23,7 @@ const DATABASE: &str = "default_database";
 /// Check if the test is running in a K8s cluster environment.
 fn is_k8s_environment() -> bool {
     // Check for kubernetes service host or a custom env var
-    std::env::var("KUBERNETES_SERVICE_HOST").is_ok()
-        || std::env::var("CHROMA_K8S_TEST").is_ok()
+    std::env::var("KUBERNETES_SERVICE_HOST").is_ok() || std::env::var("CHROMA_K8S_TEST").is_ok()
 }
 
 /// Setup a frontend for testing.
@@ -60,10 +59,7 @@ async fn setup_local() -> Frontend {
         .expect("Failed to create frontend")
 }
 
-async fn create_test_collection(
-    frontend: &mut Frontend,
-    name: &str,
-) -> chroma_types::Collection {
+async fn create_test_collection(frontend: &mut Frontend, name: &str) -> chroma_types::Collection {
     let database_name = DatabaseName::new(DATABASE).expect("database name should be valid");
     frontend
         .create_collection(
