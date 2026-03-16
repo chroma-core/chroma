@@ -136,13 +136,14 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         Condition::Fragment(fragment4.clone()),
     ];
     assert_conditions(&fragment_publisher, &postconditions).await;
-    assert!(log
+    let gc_state = log
         .garbage_collect_phase1_compute_garbage(
             &GarbageCollectionOptions::default(),
-            Some(position2)
+            Some(position2),
         )
         .await
-        .unwrap());
+        .unwrap()
+        .expect("should have garbage");
     log.garbage_collect_phase2_update_manifest(&GarbageCollectionOptions::default())
         .await
         .unwrap();
@@ -207,7 +208,7 @@ async fn test_k8s_integration_ab_stringy_setsum_mismatch() {
         Condition::Fragment(fragment4.clone()),
     ];
     assert_conditions(&fragment_publisher, &postconditions).await;
-    log.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default())
+    log.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default(), &gc_state)
         .await
         .unwrap();
 }

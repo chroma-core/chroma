@@ -126,11 +126,12 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     // collection that appears with that warning compact min-versions-to-keep
                     // times.
                     let mut min_log_offset = Some(*minimum_log_offset_to_keep);
+                    let mut gc_state = wal3::GarbageCollectionState::empty();
                     for _ in 0..if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 { 2 } else { 1 } {
                         // See README.md in wal3 for a description of why this happens in three phases.
                         match writer.garbage_collect_phase1_compute_garbage(&GarbageCollectionOptions::default(), min_log_offset).await {
-                            Ok(true) => {},
-                            Ok(false) => return Ok(()),
+                            Ok(Some(state)) => { gc_state = state; },
+                            Ok(None) => return Ok(()),
                             Err(wal3::Error::CorruptGarbage(c)) if c.starts_with("First to keep does not overlap manifest") => {
                                 if self.enable_dangerous_option_to_ignore_min_versions_for_wal3 {
                                     tracing::event!(Level::WARN, name = "encountered enable_dangerous_option_to_ignore_min_versions_for_wal3 path", collection_id =? collection_id);
@@ -149,7 +150,7 @@ impl Operator<DeleteUnusedLogsInput, DeleteUnusedLogsOutput> for DeleteUnusedLog
                     };
                     match self.mode {
                         CleanupMode::DeleteV2 => {
-                            if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default()).await {
+                            if let Err(err) = writer.garbage_collect_phase3_delete_garbage(&GarbageCollectionOptions::default(), &gc_state).await {
                                 tracing::error!("Unable to garbage collect log for collection [{collection_id}]: {err}");
                                 return Err(DeleteUnusedLogsError::Wal3{ collection_id, err});
                             };

@@ -5148,11 +5148,12 @@ mod tests {
             &self,
             options: &GarbageCollectionOptions,
             keep_at_least: Option<LogPosition>,
-        ) -> Result<bool, Error>;
+        ) -> Result<Option<wal3::GarbageCollectionState>, Error>;
 
         async fn garbage_collect_phase3_delete_garbage(
             &self,
             options: &GarbageCollectionOptions,
+            gc_state: &wal3::GarbageCollectionState,
         ) -> Result<(), Error>;
     }
 
@@ -5167,7 +5168,7 @@ mod tests {
             &self,
             options: &GarbageCollectionOptions,
             keep_at_least: Option<LogPosition>,
-        ) -> Result<bool, Error> {
+        ) -> Result<Option<wal3::GarbageCollectionState>, Error> {
             Ok(GarbageCollector::garbage_collect_phase1_compute_garbage(
                 self,
                 options,
@@ -5179,8 +5180,12 @@ mod tests {
         async fn garbage_collect_phase3_delete_garbage(
             &self,
             options: &GarbageCollectionOptions,
+            gc_state: &wal3::GarbageCollectionState,
         ) -> Result<(), Error> {
-            Ok(GarbageCollector::garbage_collect_phase3_delete_garbage(self, options).await?)
+            Ok(
+                GarbageCollector::garbage_collect_phase3_delete_garbage(self, options, gc_state)
+                    .await?,
+            )
         }
     }
 
@@ -5297,15 +5302,16 @@ mod tests {
         'to_the_top: loop {
             let writer: Box<dyn GarbageCollectorTrait> =
                 new_garbage_collector(server, db_name, collection_id).await;
-            if let Err(err) = writer
+            let gc_state = match writer
                 .garbage_collect_phase1_compute_garbage(
                     &Default::default(),
                     Some(LogPosition::from_offset(first_log_position_to_keep)),
                 )
                 .await
             {
-                panic!("Log GC phase 1 error: {err}");
-            }
+                Ok(gc_state) => gc_state.unwrap_or_default(),
+                Err(err) => panic!("Log GC phase 1 error: {err}"),
+            };
             if let Err(err) = server
                 .garbage_collect_phase2(
                     GarbageCollectPhase2Request {
@@ -5326,7 +5332,7 @@ mod tests {
                 }
             }
             if let Err(err) = writer
-                .garbage_collect_phase3_delete_garbage(&Default::default())
+                .garbage_collect_phase3_delete_garbage(&Default::default(), &gc_state)
                 .await
             {
                 panic!("Log GC phase 3 error: {err}");

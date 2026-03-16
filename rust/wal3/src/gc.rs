@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::Add;
 use std::sync::Arc;
 
@@ -19,6 +20,45 @@ use crate::{
 };
 
 const GARBAGE_PATH: &str = "gc/GARBAGE";
+
+////////////////////////////////////// GarbageCollectionState //////////////////////////////////////
+
+/// Token produced by GC phase 1 and consumed by phase 3.
+///
+/// Carries the set of UUID-identified fragments that were affirmatively collected in phase 1.
+/// Phase 3 deletes these unconditionally, while applying a grace period to any other unlisted
+/// fragments found on storage.
+#[derive(Clone, Debug, Default)]
+pub struct GarbageCollectionState {
+    /// UUID fragments known to have been collected in phase 1.
+    collected_uuids: HashSet<FragmentUuid>,
+}
+
+impl GarbageCollectionState {
+    /// Returns an empty state for callers that do not use UUID-based fragments.
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    /// Returns the set of affirmatively collected UUIDs.
+    pub fn collected_uuids(&self) -> &HashSet<FragmentUuid> {
+        &self.collected_uuids
+    }
+
+    /// Build state from the manifest and the garbage that was just computed.
+    ///
+    /// The manifest still contains the fragments at this point (phase 2 has not run), so we
+    /// extract UUIDs whose position_limit falls within the garbage range.
+    pub fn from_manifest_and_garbage(manifest: &Manifest, garbage: &Garbage) -> Self {
+        let collected_uuids = manifest
+            .fragments
+            .iter()
+            .filter(|f| f.limit <= garbage.first_to_keep)
+            .filter_map(|f| f.seq_no.as_uuid())
+            .collect();
+        Self { collected_uuids }
+    }
+}
 
 ////////////////////////////////////////////// Garbage /////////////////////////////////////////////
 
@@ -541,7 +581,7 @@ impl<
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<GarbageCollectionState>, Error> {
         self.log
             .garbage_collect_phase1_compute_garbage(options, keep_at_least)
             .await
@@ -550,9 +590,10 @@ impl<
     pub async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
         self.log
-            .garbage_collect_phase3_delete_garbage(options)
+            .garbage_collect_phase3_delete_garbage(options, gc_state)
             .await
     }
 }

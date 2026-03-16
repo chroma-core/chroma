@@ -24,7 +24,7 @@ pub use backoff::ExponentialBackoff;
 pub use copy::copy;
 pub use cursors::{Cursor, CursorName, CursorStore, CursorWitness, INTRINSIC_CURSOR};
 pub use destroy::destroy;
-pub use gc::{Garbage, GarbageCollector};
+pub use gc::{Garbage, GarbageCollectionState, GarbageCollector};
 pub use interfaces::repl::{
     create_repl_factories, ReplicatedFragmentManagerFactory, ReplicatedFragmentOptions,
     ReplicatedManifestManagerFactory, StorageWrapper,
@@ -563,11 +563,35 @@ impl Default for CursorStoreOptions {
 ///////////////////////////////////// GarbageCollectionOptions /////////////////////////////////////
 
 /// GarbageCollectionOptions control the behavior of garbage collection.
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GarbageCollectionOptions {
     /// Default throttling options for deletes.
     #[serde(default)]
     pub throttle: ThrottleOptions,
+    /// Grace period that protects recently-created UUID fragments from deletion.
+    ///
+    /// A fragment uploaded to storage but not yet linked into the manifest looks like an orphan
+    /// to GC phase 3.  Because UUIDv7 encodes creation time, clamping the deletion limit to
+    /// (now - grace_period) ensures any in-flight fragment survives.  The value should exceed
+    /// the maximum expected latency between `assign_timestamp` (UUID generation) and
+    /// `publish_fragment` (manifest linkage), including clock skew across machines.
+    #[serde(default = "GarbageCollectionOptions::default_uuid_grace_period_secs")]
+    pub uuid_grace_period_secs: u64,
+}
+
+impl GarbageCollectionOptions {
+    fn default_uuid_grace_period_secs() -> u64 {
+        3600
+    }
+}
+
+impl Default for GarbageCollectionOptions {
+    fn default() -> Self {
+        Self {
+            throttle: ThrottleOptions::default(),
+            uuid_grace_period_secs: Self::default_uuid_grace_period_secs(),
+        }
+    }
 }
 
 /////////////////////////////////////////// FragmentSeqNo //////////////////////////////////////////
@@ -670,6 +694,24 @@ impl FragmentUuid {
         } else {
             Some(FragmentUuid(Uuid::from_u128(val + 1)))
         }
+    }
+
+    /// Returns the minimum UUIDv7 for (now - grace_period).
+    ///
+    /// Garbage collection must not delete fragments that may have been recently created but not
+    /// yet linked into the manifest.  Because UUIDv7 encodes the creation timestamp, we can
+    /// compute a safe upper bound: any fragment whose UUID is >= the returned value might still
+    /// be in-flight and must not be deleted.  The grace period should be large enough to cover
+    /// the maximum expected latency between `assign_timestamp` (UUID generation) and
+    /// `publish_fragment` (manifest linkage), including clock skew across machines.
+    pub fn cutoff_for_grace_period(grace_period: std::time::Duration) -> Self {
+        let now = std::time::SystemTime::now();
+        let cutoff = now
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock before UNIX epoch")
+            .saturating_sub(grace_period);
+        let ts = uuid::Timestamp::from_unix_time(cutoff.as_secs(), cutoff.subsec_nanos(), 0, 0);
+        FragmentUuid(Uuid::new_v7(ts))
     }
 }
 
@@ -874,11 +916,15 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     async fn reader(&self, options: LogReaderOptions) -> Option<Arc<dyn LogReaderTrait>>;
 
     /// Perform phase 1 of garbage collection: compute garbage.
+    ///
+    /// Returns `Ok(None)` when there is nothing to collect, or `Ok(Some(state))` carrying the
+    /// set of affirmatively collected UUID fragments.  The returned state must be passed to
+    /// phase 3.
     async fn garbage_collect_phase1_compute_garbage(
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error>;
+    ) -> Result<Option<GarbageCollectionState>, Error>;
 
     /// Perform phase 2 of garbage collection: update the manifest.
     async fn garbage_collect_phase2_update_manifest(
@@ -887,9 +933,14 @@ pub trait LogWriterTrait: std::fmt::Debug + Send + Sync + 'static {
     ) -> Result<(), Error>;
 
     /// Perform phase 3 of garbage collection: delete garbage files.
+    ///
+    /// The `gc_state` argument must be the token returned by phase 1.  It tells phase 3 which
+    /// UUID fragments were affirmatively collected so they can be deleted without the grace
+    /// period that protects in-flight orphans.
     async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error>;
 
     /// Perform all three phases of garbage collection in sequence.
@@ -931,7 +982,7 @@ where
         &self,
         options: &GarbageCollectionOptions,
         keep_at_least: Option<LogPosition>,
-    ) -> Result<bool, Error> {
+    ) -> Result<Option<GarbageCollectionState>, Error> {
         LogWriter::garbage_collect_phase1_compute_garbage(self, options, keep_at_least).await
     }
 
@@ -945,8 +996,9 @@ where
     async fn garbage_collect_phase3_delete_garbage(
         &self,
         options: &GarbageCollectionOptions,
+        gc_state: &GarbageCollectionState,
     ) -> Result<(), Error> {
-        LogWriter::garbage_collect_phase3_delete_garbage(self, options).await
+        LogWriter::garbage_collect_phase3_delete_garbage(self, options, gc_state).await
     }
 
     async fn garbage_collect(
@@ -1369,6 +1421,48 @@ mod tests {
         assert_eq!(
             max_uuid,
             Some(&FragmentIdentifier::Uuid(FragmentUuid::from_uuid(uuid3)))
+        );
+    }
+
+    #[test]
+    fn cutoff_for_grace_period_is_less_than_now() {
+        let cutoff = FragmentUuid::cutoff_for_grace_period(std::time::Duration::from_secs(3600));
+        let now = FragmentUuid::generate();
+        println!("cutoff_for_grace_period_is_less_than_now: cutoff={cutoff}, now={now}");
+        assert!(
+            cutoff < now,
+            "cutoff with a 1-hour grace period must be less than a freshly generated UUID"
+        );
+    }
+
+    #[test]
+    fn cutoff_for_zero_grace_period_is_close_to_now() {
+        let before = FragmentUuid::generate();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let cutoff = FragmentUuid::cutoff_for_grace_period(std::time::Duration::ZERO);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        let after = FragmentUuid::generate();
+        println!(
+            "cutoff_for_zero_grace_period_is_close_to_now: before={before}, cutoff={cutoff}, after={after}"
+        );
+        assert!(
+            cutoff >= before,
+            "zero grace period cutoff should be >= a UUID generated just before"
+        );
+        assert!(
+            cutoff <= after,
+            "zero grace period cutoff should be <= a UUID generated just after"
+        );
+    }
+
+    #[test]
+    fn cutoff_grace_period_protects_recent_fragment() {
+        let recent = FragmentUuid::generate();
+        let cutoff = FragmentUuid::cutoff_for_grace_period(std::time::Duration::from_secs(3600));
+        println!("cutoff_grace_period_protects_recent_fragment: recent={recent}, cutoff={cutoff}");
+        assert!(
+            recent >= cutoff,
+            "a fragment generated now must survive a 1-hour grace period cutoff"
         );
     }
 }
