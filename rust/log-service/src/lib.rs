@@ -2188,6 +2188,9 @@ impl LogServer {
                     )
                 })?,
         };
+        if !fragments.is_empty() && fragments[0].start.offset() > req.start_from_offset {
+            return Err(Status::not_found("Some entries have been purged"));
+        }
         let storage_prefix = collection_id.storage_prefix_for_log();
         let absolute_offsets = topology_name.is_none();
         let proto_fragments = fragments
