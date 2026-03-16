@@ -105,6 +105,8 @@ mod tests {
                 "tenant".to_string(),
                 "database".to_string(),
                 "collection".to_string(),
+                "aws-us-east-1".to_string(),
+                String::new(),
             ));
         helper().meter(metering_context_container).await;
 

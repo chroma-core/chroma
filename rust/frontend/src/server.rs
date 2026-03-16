@@ -35,9 +35,10 @@ use mdac::{Rule, Scorecard, ScorecardGuard};
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Meter};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::{str::FromStr, time::Instant};
 #[cfg(unix)]
@@ -192,6 +193,7 @@ pub(crate) struct FrontendServer {
     auth: Arc<dyn AuthenticateAndAuthorize>,
     quota_enforcer: Arc<dyn QuotaEnforcer>,
     system: System,
+    database_uuid_cache: Arc<Mutex<HashMap<(String, String), String>>>,
 }
 
 impl FrontendServer {
@@ -218,6 +220,36 @@ impl FrontendServer {
             auth,
             quota_enforcer,
             system,
+            database_uuid_cache: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    async fn get_database_uuid(&mut self, tenant: &str, database: &str) -> String {
+        // Check cache first
+        {
+            let cache = self.database_uuid_cache.lock().unwrap();
+            if let Some(uuid) = cache.get(&(tenant.to_string(), database.to_string())) {
+                return uuid.clone();
+            }
+        }
+        // Cache miss — look up from sysdb
+        let db_name = match DatabaseName::new(database) {
+            Some(name) => name,
+            None => return String::new(),
+        };
+        let request = GetDatabaseRequest::try_new(tenant.to_string(), db_name);
+        let request = match request {
+            Ok(r) => r,
+            Err(_) => return String::new(),
+        };
+        match self.frontend.get_database(request).await {
+            Ok(db) => {
+                let uuid = db.id.to_string();
+                let mut cache = self.database_uuid_cache.lock().unwrap();
+                cache.insert((tenant.to_string(), database.to_string()), uuid.clone());
+                uuid
+            }
+            Err(_) => String::new(),
         }
     }
 
@@ -1729,11 +1761,14 @@ async fn fork_collection(
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container =
         chroma_metering::create::<CollectionForkContext>(CollectionForkContext::new(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
+            server.config.region.clone(),
+            database_id,
         ));
 
     let request = chroma_types::ForkCollectionRequest::try_new(
@@ -1850,12 +1885,15 @@ async fn collection_add(
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container =
         chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Add,
+            server.config.region.clone(),
+            database_id,
         ));
 
     metering_context_container.enter();
@@ -1984,12 +2022,15 @@ async fn collection_update(
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container =
         chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Update,
+            server.config.region.clone(),
+            database_id,
         ));
 
     metering_context_container.enter();
@@ -2118,12 +2159,15 @@ async fn collection_upsert(
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container =
         chroma_metering::create::<CollectionWriteContext>(CollectionWriteContext::new(
             tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             WriteAction::Upsert,
+            server.config.region.clone(),
+            database_id,
         ));
 
     metering_context_container.enter();
@@ -2258,12 +2302,15 @@ async fn collection_delete(
 
     // Create a metering context
     // NOTE(c-gamble): This is a read context because read happens first on delete, then write.
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::GetForDelete,
+            server.config.region.clone(),
+            database_id,
         ));
 
     tracing::info!(name: "collection_delete", tenant_name = %tenant, database_name = %database, collection_id = %collection_id, num_ids = %payload.ids.as_ref().map_or(0, |ids| ids.len()), has_where = r#where.is_some());
@@ -2374,12 +2421,15 @@ async fn collection_count(
     ])?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.clone(),
             ReadAction::Count,
+            server.config.region.clone(),
+            database_id,
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2388,6 +2438,8 @@ async fn collection_count(
                 database.clone(),
                 collection_id.clone(),
                 ReadAction::Count,
+                server.config.region.clone(),
+                database_id,
             ),
         )
     };
@@ -2487,12 +2539,15 @@ async fn indexing_status(
         )
         .await?;
 
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container =
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             tenant.clone(),
             database.clone(),
             collection_id.clone(),
             ReadAction::Query,
+            server.config.region.clone(),
+            database_id,
         ));
 
     metering_context_container.enter();
@@ -2639,12 +2694,15 @@ async fn collection_get(
     };
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Get,
+            server.config.region.clone(),
+            database_id,
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2653,6 +2711,8 @@ async fn collection_get(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Get,
+                server.config.region.clone(),
+                database_id,
             ),
         )
     };
@@ -2814,12 +2874,15 @@ async fn collection_query(
     let _ = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Query,
+            server.config.region.clone(),
+            database_id,
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2828,6 +2891,8 @@ async fn collection_query(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Query,
+                server.config.region.clone(),
+                database_id,
             ),
         )
     };
@@ -2972,12 +3037,15 @@ async fn collection_search(
     let quota_override = server.quota_enforcer.enforce(&quota_payload).await?;
 
     // Create a metering context
+    let database_id = server.get_database_uuid(&tenant, &database).await;
     let metering_context_container = if requester_identity.tenant == tenant {
         chroma_metering::create::<CollectionReadContext>(CollectionReadContext::new(
             requester_identity.tenant.clone(),
             database.clone(),
             collection_id.0.to_string(),
             ReadAction::Search,
+            server.config.region.clone(),
+            database_id,
         ))
     } else {
         chroma_metering::create::<ExternalCollectionReadContext>(
@@ -2986,6 +3054,8 @@ async fn collection_search(
                 database.clone(),
                 collection_id.0.to_string(),
                 ReadAction::Search,
+                server.config.region.clone(),
+                database_id,
             ),
         )
     };

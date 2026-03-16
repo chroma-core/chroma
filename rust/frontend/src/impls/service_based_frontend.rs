@@ -1298,6 +1298,8 @@ impl ServiceBasedFrontend {
                 database_name.clone(),
                 collection_id.0.to_string(),
                 WriteAction::Delete,
+                Default::default(),
+                Default::default(),
             ));
 
         let deleted = records.len() as u32;
